@@ -6,7 +6,8 @@ from pydantic import BaseModel
 
 from evidence_judge.checks.errors import PredicateKindMismatchError
 from evidence_judge.checks.matching import url_path
-from evidence_judge.core.evidence import NetworkEvent
+from evidence_judge.core.evidence import NetworkEvent, PageState
+from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import Predicate
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 
@@ -53,3 +54,9 @@ def cite_request(event: NetworkEvent) -> Citation:
 
 def plural(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def state_id(state: PageState, index: EvidenceIndex) -> str:
+    if state is index.final or state.snapshot_id is None:
+        return FINAL_ID
+    return state.snapshot_id
