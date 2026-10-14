@@ -5,10 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from evidence_judge.core.evidence import Channel
+from evidence_judge.core.evidence import Channel, NetworkEvent, Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.ingest import (
     IngestError,
+    MismatchedEvidenceError,
     attach_har,
     load_har,
     load_playwright_trace,
@@ -117,6 +118,93 @@ def test_needs_a_source() -> None:
 def test_answer_and_answer_file_are_exclusive() -> None:
     with pytest.raises(IngestError, match="either answer or answer_file"):
         load_run(browser_use=HISTORY, answer="a", answer_file=RUNS / "loop" / "answer.txt")
+
+
+def network_run(source: str, *urls: str, method: str = "GET") -> Run:
+    return Run(
+        run_id="r",
+        source=source,
+        network=[
+            NetworkEvent(id=f"net#{i}", ts=float(i), method=method, url=url)
+            for i, url in enumerate(urls, 1)
+        ],
+        captured={Channel.NETWORK},
+    )
+
+
+def foreign_har(tmp_path: Path) -> Path:
+    entries = [
+        {
+            "startedDateTime": "2026-10-14T10:00:00.000Z",
+            "request": {"method": "GET", "url": f"https://elsewhere.test/{i}", "headers": []},
+            "response": {"status": 200, "headers": [], "content": {"mimeType": "text/plain"}},
+        }
+        for i in range(10)
+    ]
+    har = tmp_path / "foreign.har"
+    har.write_text(json.dumps({"log": {"version": "1.2", "entries": entries}}))
+    return har
+
+
+def test_ingest_errors_are_value_errors() -> None:
+    assert issubclass(IngestError, ValueError)
+    assert issubclass(MismatchedEvidenceError, IngestError)
+
+
+def test_har_from_another_run_is_rejected(tmp_path: Path) -> None:
+    d = RUNS / "honest_success"
+
+    with pytest.raises(MismatchedEvidenceError, match=r"0 of \d+ trace requests"):
+        load_run(trace=d / "trace.zip", har=foreign_har(tmp_path))
+
+
+def test_mismatched_har_can_be_allowed(tmp_path: Path) -> None:
+    d = RUNS / "honest_success"
+    trace = load_playwright_trace(d / "trace.zip")
+
+    run = load_run(trace=d / "trace.zip", har=foreign_har(tmp_path), allow_mismatch=True)
+
+    assert len(run.network) == len(trace.network) + 10
+
+
+def test_mismatch_needs_five_trace_requests() -> None:
+    trace = network_run("playwright-trace", *(f"https://a.test/{i}" for i in range(4)))
+    har = network_run("har", "https://b.test/")
+
+    assert len(attach_har(trace, har).network) == 5
+
+
+def test_half_matching_har_is_accepted() -> None:
+    urls = [f"https://a.test/{i}" for i in range(10)]
+    trace = network_run("playwright-trace", *urls)
+    har = network_run("har", *urls[:5], "https://a.test/extra")
+
+    assert len(attach_har(trace, har).network) == 11
+    with pytest.raises(MismatchedEvidenceError):
+        attach_har(trace, network_run("har", *urls[:4]))
+
+
+def test_empty_har_is_not_a_mismatch() -> None:
+    trace = network_run("playwright-trace", *(f"https://a.test/{i}" for i in range(10)))
+
+    assert len(attach_har(trace, network_run("har")).network) == 10
+
+
+def test_repeated_requests_pair_in_order() -> None:
+    url = "https://a.test/poll"
+    trace = network_run("playwright-trace", url, url, url)
+    har = Run(
+        run_id="h",
+        source="har",
+        network=[
+            NetworkEvent(id=f"net#{i}", ts=float(i), method="GET", url=url, status=200 + i)
+            for i in range(2)
+        ],
+    )
+
+    merged = attach_har(trace, har)
+
+    assert [n.status for n in merged.network] == [200, 201, None]
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)

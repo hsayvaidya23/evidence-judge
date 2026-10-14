@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 
-class IngestError(Exception):
-    """A recorded run could not be loaded."""
+class IngestError(ValueError):
+    """A recorded run could not be loaded (bad input, not a bug)."""
 
 
 class TraceFormatError(IngestError):
@@ -28,3 +28,11 @@ class HarFormatError(IngestError):
 
 class BrowserUseFormatError(IngestError):
     """A browser-use history file does not match the AgentHistoryList schema."""
+
+
+class MismatchedEvidenceError(IngestError):
+    """Two evidence sources passed for one run look like recordings of different runs."""
+
+
+class TraceTooLargeError(TraceFormatError):
+    """A Playwright trace exceeds a size limit (entry size, total size or compression ratio)."""

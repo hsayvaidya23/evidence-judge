@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict, deque
 from pathlib import Path
+from typing import Final
 
 from evidence_judge.core.evidence import Channel, NetworkEvent, Run
 from evidence_judge.ingest._json import as_float
 from evidence_judge.ingest.browser_use import load_browser_use_history
-from evidence_judge.ingest.errors import IngestError
+from evidence_judge.ingest.errors import IngestError, MismatchedEvidenceError
 from evidence_judge.ingest.har import load_har
 from evidence_judge.ingest.playwright_trace import load_playwright_trace
 
 _PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
+MIN_HAR_MATCH_RATIO: Final = 0.5
+"""Share of trace requests a HAR must also contain to count as the same run."""
+MIN_REQUESTS_TO_COMPARE: Final = 5
+"""Traces with fewer requests than this are too small to judge a HAR mismatch."""
 
 
 def load_run(
@@ -26,6 +32,7 @@ def load_run(
     task: str | None = None,
     run_id: str | None = None,
     max_body_chars: int = 20_000,
+    allow_mismatch: bool = False,
 ) -> Run:
     """Load and merge a run's evidence.
 
@@ -34,6 +41,10 @@ def load_run(
     agent's answer and reasoning. Explicit ``answer``/``answer_file``/``reasoning_file``/``task``
     override anything the sources carry. Per-source metadata is kept under
     ``metadata["sources"]``. Reasoning files hold one step per paragraph (blank-line separated).
+
+    Raises:
+        MismatchedEvidenceError: the HAR does not look like the trace's run (see
+            ``attach_har``); pass ``allow_mismatch=True`` to merge anyway.
     """
     if trace is None and har is None and browser_use is None:
         raise IngestError("load_run needs at least one of trace, har or browser_use")
@@ -47,7 +58,7 @@ def load_run(
 
     sources: list[Run] = []
     if trace_run is not None and har_run is not None:
-        sources.append(attach_har(trace_run, har_run))
+        sources.append(attach_har(trace_run, har_run, allow_mismatch=allow_mismatch))
     else:
         sources.extend(r for r in (trace_run, har_run) if r is not None)
     if agent_run is not None:
@@ -71,30 +82,56 @@ def load_run(
     )
 
 
-def attach_har(trace_run: Run, har_run: Run) -> Run:
+def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) -> Run:
     """Merge a HAR into a trace run's network evidence without duplicating requests.
 
     Requests are paired in order by method and URL. A paired trace request keeps its own
     timing and gains any body, status or headers only the HAR captured; unpaired HAR requests
     are shifted onto the trace clock and added. Network ids are reassigned chronologically.
+
+    Raises:
+        MismatchedEvidenceError: the trace has at least ``MIN_REQUESTS_TO_COMPARE`` requests,
+            the HAR has entries, and fewer than ``MIN_HAR_MATCH_RATIO`` of the trace requests
+            appear in the HAR, so the HAR is probably from another run. ``allow_mismatch=True``
+            merges anyway.
     """
     offset = _clock_offset(trace_run, har_run)
-    unmatched = list(har_run.network)
+    pending: defaultdict[tuple[str, str], deque[int]] = defaultdict(deque)
+    for index, har_event in enumerate(har_run.network):
+        pending[(har_event.method, har_event.url)].append(index)
+    paired: set[int] = set()
     network: list[NetworkEvent] = []
     for event in trace_run.network:
-        partner = next(
-            (h for h in unmatched if h.method == event.method and h.url == event.url), None
-        )
-        if partner is None:
+        queue = pending.get((event.method, event.url))
+        if not queue:
             network.append(event)
             continue
-        unmatched.remove(partner)
-        network.append(_fill_gaps(event, partner))
-    network.extend(h.model_copy(update={"ts": round(h.ts + offset, 3)}) for h in unmatched)
+        index = queue.popleft()
+        paired.add(index)
+        network.append(_fill_gaps(event, har_run.network[index]))
+    if not allow_mismatch:
+        _check_same_run(len(trace_run.network), len(har_run.network), len(paired))
+    network.extend(
+        h.model_copy(update={"ts": round(h.ts + offset, 3)})
+        for index, h in enumerate(har_run.network)
+        if index not in paired
+    )
     network.sort(key=lambda n: n.ts)
     renumbered = [n.model_copy(update={"id": f"net#{i}"}) for i, n in enumerate(network, 1)]
     return trace_run.model_copy(
         update={"network": renumbered, "captured": trace_run.captured | {Channel.NETWORK}}
+    )
+
+
+def _check_same_run(trace_requests: int, har_requests: int, paired: int) -> None:
+    if trace_requests < MIN_REQUESTS_TO_COMPARE or har_requests == 0:
+        return
+    if paired >= MIN_HAR_MATCH_RATIO * trace_requests:
+        return
+    raise MismatchedEvidenceError(
+        f"only {paired} of {trace_requests} trace requests appear in the HAR "
+        f"({har_requests} entries); the HAR looks like a recording of another run. "
+        "Pass allow_mismatch=True to merge it anyway."
     )
 
 

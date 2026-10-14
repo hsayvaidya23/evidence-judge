@@ -64,6 +64,28 @@ The CLI (`cli.py`) wires the stages together and maps the outcome to an exit cod
    LLM call and before any report is written, and it is deterministic per key so equal values
    still match across claims and evidence.
 
+## Security and limits
+
+Recordings are untrusted input. Details are in [SECURITY.md](../SECURITY.md); the parts that
+shape the pipeline:
+
+- **Ingest confines file references.** browser-use screenshot paths and HAR `_file` bodies must
+  resolve (symlinks included) inside the recording's directory; screenshots must be real images
+  (PNG, JPEG, WebP, GIF) of at most 10 MB.
+- **Ingest bounds memory.** Trace zips are checked against `TraceLimits` (200 MB per event file,
+  1 GB total, 100k entries, 200:1 compression ratio) before anything is inflated
+  (`TraceTooLargeError`). Event files are streamed, bodies are read only up to what
+  `max_body_chars` keeps, and resources over 10 MB are skipped with a warning.
+- **Screenshots load lazily.** `Run.blobs` is a `BlobStore` mapping: trace screenshots stay in
+  the zip and are read on demand by `EvidenceIndex.screenshot_bytes` and the HTML report, so the
+  trace file must stay in place until the report is written.
+- **Merging checks provenance.** `attach_har` pairs requests in linear time and raises
+  `MismatchedEvidenceError` when a HAR shares fewer than half of a trace's requests.
+- **Redaction covers text only.** Bodies, headers, URLs, snapshot text and HTML (including the
+  `value` of password, token and OTP inputs), console messages and agent text are redacted.
+  **Screenshot pixels are not**: they reach the HTML report and, for screenshot checks, the
+  vision model as recorded. Mask sensitive fields when recording or judge with `--offline`.
+
 ## Key types
 
 - `Run` (`core/evidence.py`): the normalised recording. `captured` lists the channels present.

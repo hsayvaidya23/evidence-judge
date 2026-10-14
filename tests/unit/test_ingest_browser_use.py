@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from evidence_judge.core.evidence import Channel
+from evidence_judge.core.evidence import Channel, Run
 from evidence_judge.ingest import BrowserUseFormatError, load_browser_use_history
 
 HISTORY = Path(__file__).resolve().parent.parent / "fixtures" / "browser_use" / "history.json"
@@ -78,7 +78,8 @@ def test_screenshots_load_from_relative_paths() -> None:
     ]
     assert run.blobs["browser-use/step-1.png"] == PNG
     assert run.metadata["warnings"] == [
-        "screenshot not found: /tmp/browser_use_agent_0686f0d2/screenshots/step_4.png"
+        "ignored a screenshot path outside the screenshot root: "
+        "/tmp/browser_use_agent_0686f0d2/screenshots/step_4.png"
     ]
 
 
@@ -162,3 +163,141 @@ def test_empty_history_is_valid(tmp_path: Path) -> None:
     run = load_browser_use_history(write_history(tmp_path / "empty.json"))
 
     assert run.actions == [] and run.agent_answer is None
+
+
+def screenshot_step(screenshot_path: str) -> dict[str, Any]:
+    return {
+        "model_output": {"action": [{"done": {"text": "ok", "success": True}}]},
+        "result": [{"is_done": True, "extracted_content": "ok"}],
+        "state": {"url": "https://shop.test/", "screenshot_path": screenshot_path},
+    }
+
+
+def assert_screenshot_refused(run: Run, fragment: str) -> None:
+    assert run.screenshots == [] and dict(run.blobs) == {}
+    assert Channel.SCREENSHOTS not in run.captured
+    assert any(fragment in w for w in run.metadata["warnings"])
+
+
+def test_absolute_screenshot_path_outside_history_dir_is_refused(tmp_path: Path) -> None:
+    secret = tmp_path / "elsewhere" / "secret.png"
+    secret.parent.mkdir()
+    secret.write_bytes(PNG)
+    runs = tmp_path / "runs"
+    runs.mkdir()
+
+    run = load_browser_use_history(write_history(runs / "h.json", screenshot_step(str(secret))))
+
+    assert_screenshot_refused(run, "outside")
+
+
+def test_traversal_screenshot_path_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "secret.png").write_bytes(PNG)
+    runs = tmp_path / "runs"
+    runs.mkdir()
+
+    run = load_browser_use_history(write_history(runs / "h.json", screenshot_step("../secret.png")))
+
+    assert_screenshot_refused(run, "outside")
+
+
+def test_symlink_escaping_history_dir_is_refused(tmp_path: Path) -> None:
+    secret = tmp_path / "secret.png"
+    secret.write_bytes(PNG)
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "shot.png").symlink_to(secret)
+
+    run = load_browser_use_history(write_history(runs / "h.json", screenshot_step("shot.png")))
+
+    assert_screenshot_refused(run, "outside")
+
+
+def test_absolute_screenshot_path_inside_history_dir_is_loaded(tmp_path: Path) -> None:
+    shot = tmp_path / "shots" / "s.png"
+    shot.parent.mkdir()
+    shot.write_bytes(PNG)
+
+    run = load_browser_use_history(write_history(tmp_path / "h.json", screenshot_step(str(shot))))
+
+    assert run.blobs["browser-use/step-1.png"] == PNG
+
+
+def test_screenshot_root_widens_the_allowed_directory(tmp_path: Path) -> None:
+    shot = tmp_path / "agent" / "screenshots" / "s.png"
+    shot.parent.mkdir(parents=True)
+    shot.write_bytes(PNG)
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    history = write_history(runs / "h.json", screenshot_step(str(shot)))
+
+    run = load_browser_use_history(history, screenshot_root=tmp_path / "agent")
+
+    assert run.blobs["browser-use/step-1.png"] == PNG
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"root:x:0:0:root:/root:/bin/bash\n", b"", b"\x89PN", b"RIFF\x00\x00\x00\x00AVI "],
+)
+def test_screenshot_that_is_not_an_image_is_refused(tmp_path: Path, content: bytes) -> None:
+    (tmp_path / "s.png").write_bytes(content)
+
+    run = load_browser_use_history(write_history(tmp_path / "h.json", screenshot_step("s.png")))
+
+    assert_screenshot_refused(run, "not a PNG, JPEG, WebP or GIF image")
+
+
+def test_inline_screenshot_that_is_not_an_image_is_refused(tmp_path: Path) -> None:
+    step = screenshot_step("")
+    step["state"]["screenshot"] = base64.b64encode(b"<html>hi</html>").decode()
+
+    run = load_browser_use_history(write_history(tmp_path / "h.json", step))
+
+    assert_screenshot_refused(run, "not a PNG, JPEG, WebP or GIF image")
+
+
+def test_oversized_screenshot_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "s.png").write_bytes(PNG + b"\x00" * 64)
+
+    run = load_browser_use_history(
+        write_history(tmp_path / "h.json", screenshot_step("s.png")), max_screenshot_bytes=64
+    )
+
+    assert_screenshot_refused(run, "larger than 64 bytes")
+
+
+def test_oversized_inline_screenshot_is_refused(tmp_path: Path) -> None:
+    step = screenshot_step("")
+    step["state"]["screenshot"] = base64.b64encode(PNG + b"\x00" * 64).decode()
+
+    run = load_browser_use_history(
+        write_history(tmp_path / "h.json", step), max_screenshot_bytes=64
+    )
+
+    assert_screenshot_refused(run, "larger than 64 bytes")
+
+
+def test_screenshot_path_to_a_directory_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "dir.png").mkdir()
+
+    run = load_browser_use_history(write_history(tmp_path / "h.json", screenshot_step("dir.png")))
+
+    assert_screenshot_refused(run, "not a regular file")
+
+
+@pytest.mark.parametrize(
+    ("header", "mime", "suffix"),
+    [
+        (b"GIF89a\x01\x00\x01\x00", "image/gif", ".gif"),
+        (b"RIFF\x10\x00\x00\x00WEBPVP8 ", "image/webp", ".webp"),
+        (b"\xff\xd8\xff\xe0\x00\x10JFIF", "image/jpeg", ".jpg"),
+    ],
+)
+def test_supported_image_types(tmp_path: Path, header: bytes, mime: str, suffix: str) -> None:
+    (tmp_path / "s.img").write_bytes(header + b"\x00" * 16)
+
+    run = load_browser_use_history(write_history(tmp_path / "h.json", screenshot_step("s.img")))
+
+    assert run.screenshots[0].mime_type == mime
+    assert run.screenshots[0].resource == f"browser-use/step-1{suffix}"

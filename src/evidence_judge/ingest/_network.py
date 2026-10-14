@@ -6,13 +6,24 @@ import base64
 import binascii
 import codecs
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import quote_plus
 
 from evidence_judge.core.evidence import NetworkEvent
 from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, as_str
 
-BodySource = Callable[[JsonObject], bytes | str | None]
+
+@dataclass(frozen=True, slots=True)
+class BodyPrefix:
+    """The first bytes of a body too long to keep, and the body's full size in bytes."""
+
+    data: bytes
+    total_bytes: int
+
+
+RawBody = bytes | str | BodyPrefix
+BodySource = Callable[[JsonObject], RawBody | None]
 """Returns the raw body of a HAR ``postData`` or ``content`` object, or None if absent."""
 
 _TEXT_MIME_MARKERS = (
@@ -44,6 +55,11 @@ _BINARY_MIME_TYPES = frozenset(
 def check_max_body_chars(max_body_chars: int) -> None:
     if max_body_chars < 0:
         raise ValueError(f"max_body_chars must be >= 0, got {max_body_chars}")
+
+
+def body_prefix_bytes(max_chars: int) -> int:
+    """Bytes that always decode to at least ``max_chars`` characters (4 bytes per char max)."""
+    return 4 * max_chars + 4
 
 
 def inline_body(part: JsonObject) -> bytes | str | None:
@@ -121,14 +137,20 @@ def headers_dict(raw: object) -> dict[str, str]:
     return out
 
 
-def decode_body(raw: bytes | str | None, mime_type: str | None, max_chars: int) -> str | None:
+def decode_body(raw: RawBody | None, mime_type: str | None, max_chars: int) -> str | None:
     """Text of a body, truncated to max_chars; None for absent, empty or binary bodies."""
     if raw is None:
         return None
     textual = _is_textual(mime_type)
     if textual is False:
         return None
-    text = raw if isinstance(raw, str) else _decode_bytes(raw, mime_type, strict=textual is None)
+    strict = textual is None
+    if isinstance(raw, BodyPrefix):
+        text = _decode_bytes(raw.data, mime_type, strict=strict, final=False)
+        if not text:
+            return None
+        return f"{text[:max_chars]}…[truncated; body is {raw.total_bytes} bytes]"
+    text = raw if isinstance(raw, str) else _decode_bytes(raw, mime_type, strict=strict)
     if not text:
         return None
     return truncate(text, max_chars)
@@ -176,15 +198,35 @@ def _charset(mime_type: str | None) -> str:
     return "utf-8"
 
 
-def _decode_bytes(raw: bytes, mime_type: str | None, *, strict: bool) -> str | None:
-    """Decode bytes as text. In strict mode (unknown mime type) undecodable bytes mean binary."""
-    if b"\x00" in raw[:1024]:
-        return None
+def _text_codec(mime_type: str | None) -> str:
+    """The declared charset if it names a text encoding (not e.g. ``base64``), else UTF-8."""
     try:
         codec = codecs.lookup(_charset(mime_type)).name
     except LookupError:
-        codec = "utf-8"
+        return "utf-8"
     try:
-        return raw.decode(codec, errors="strict" if strict else "replace")
+        b"a".decode(codec)
+    except LookupError:
+        return "utf-8"
     except UnicodeDecodeError:
+        pass
+    return codec
+
+
+def _decode_bytes(
+    raw: bytes, mime_type: str | None, *, strict: bool, final: bool = True
+) -> str | None:
+    """Decode bytes as text. In strict mode (unknown mime type) undecodable bytes mean binary.
+
+    With ``final=False`` the bytes are a prefix, so a character cut off at the end is dropped
+    instead of counting as undecodable.
+    """
+    if b"\x00" in raw[:1024]:
+        return None
+    decoder = codecs.getincrementaldecoder(_text_codec(mime_type))(
+        errors="strict" if strict else "replace"
+    )
+    try:
+        return decoder.decode(raw, final=final)
+    except (UnicodeDecodeError, ValueError):
         return None
