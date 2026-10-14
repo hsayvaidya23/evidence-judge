@@ -139,11 +139,32 @@ def _fail(e: CliError) -> typer.Exit:
     return typer.Exit(int(e.code))
 
 
-def _redactor(settings: Settings) -> Redactor:
+def _internal(e: Exception) -> typer.Exit:
+    _stderr().print(
+        Text.assemble(
+            ("internal error: ", "bold red"),
+            f"{type(e).__name__}: {e}",
+            ("  (re-run with --debug for a traceback)", "dim"),
+        )
+    )
+    return typer.Exit(int(ExitCode.INTERNAL))
+
+
+def _redactor(settings: Settings, *, persistent: bool = True) -> Redactor:
+    """The run's redactor. Only a ``persistent`` one (an LLM cache will be used) reads or creates
+    the key file in the cache directory; an unwritable cache falls back to a per-process key."""
+    if not persistent or settings.redaction_key is not None:
+        return Redactor.from_settings(settings)
     try:
         key = stable_redaction_key(settings)
-    except (OSError, ValueError) as e:
+    except ValueError as e:
         raise CliError(f"redaction key: {e}", ExitCode.USAGE) from e
+    except OSError as e:
+        _stderr().print(
+            Text(f"warning: redaction key unavailable ({e}); using a per-process key", "yellow"),
+            soft_wrap=True,
+        )
+        key = None
     return Redactor(key) if key is not None else Redactor.from_settings(settings)
 
 
@@ -254,8 +275,9 @@ def judge(
             screenshot_root=screenshot_root,
         )
 
+        llm = None if offline else _build_llm(settings)
         if settings.redact and not no_redact:
-            redactor = _redactor(settings)
+            redactor = _redactor(settings, persistent=llm is not None)
             run, report = redactor.redact_run(run)
             if task_spec is not None:
                 task_spec, _ = redactor.redact_model(task_spec)
@@ -266,7 +288,6 @@ def judge(
         elif not quiet:
             err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
 
-        llm = None if offline else _build_llm(settings)
         if llm is None and not offline and not quiet:
             err.print(Text("no LLM configured; judging offline", style="yellow"))
         verdict = _run_judge(
@@ -282,14 +303,7 @@ def judge(
     except Exception as e:
         if debug:
             raise
-        _stderr().print(
-            Text.assemble(
-                ("internal error: ", "bold red"),
-                f"{type(e).__name__}: {e}",
-                ("  (re-run with --debug for a traceback)", "dim"),
-            )
-        )
-        raise typer.Exit(int(ExitCode.INTERNAL)) from None
+        raise _internal(e) from None
 
     if not quiet:
         print_verdict(verdict, Console(highlight=False))
@@ -309,6 +323,7 @@ def inspect(
     ] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable JSON")] = False,
     no_redact: Annotated[bool, typer.Option("--no-redact", help="Show raw URLs")] = False,
+    debug: Annotated[bool, typer.Option(help="Show tracebacks for internal errors")] = False,
 ) -> None:
     """Summarise the evidence in a trace, HAR or browser-use run without judging it."""
     if not (trace or har or browser_use):
@@ -318,11 +333,15 @@ def inspect(
         run = _load_run(
             trace=trace, har=har, browser_use=browser_use, max_body_chars=settings.max_body_chars
         )
+        if settings.redact and not no_redact:
+            run, _ = _redactor(settings, persistent=False).redact_run(run)
+        summary = summarize_evidence(run)
     except CliError as e:
         raise _fail(e) from None
-    if settings.redact and not no_redact:
-        run, _ = _redactor(settings).redact_run(run)
-    summary = summarize_evidence(run)
+    except Exception as e:
+        if debug:
+            raise
+        raise _internal(e) from None
     if as_json:
         typer.echo(json.dumps(summary.to_dict(), indent=2, ensure_ascii=False))
     else:
