@@ -41,6 +41,10 @@ class CheckerRegistry:
     def is_deterministic(self, predicate: Predicate) -> bool:
         return self.get(predicate.kind).deterministic
 
+    def model_kinds(self) -> frozenset[str]:
+        """Kinds whose checkers call a model (non-deterministic)."""
+        return frozenset(k for k, c in self._checkers.items() if not c.deterministic)
+
     async def evaluate(self, predicate: Predicate, ctx: CheckContext) -> PredicateResult:
         checker = self.get(predicate.kind)
         try:
