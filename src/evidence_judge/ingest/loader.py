@@ -33,6 +33,7 @@ def load_run(
     run_id: str | None = None,
     max_body_chars: int = 20_000,
     allow_mismatch: bool = False,
+    screenshot_root: str | Path | None = None,
 ) -> Run:
     """Load and merge a run's evidence.
 
@@ -53,7 +54,11 @@ def load_run(
 
     trace_run = load_playwright_trace(trace, max_body_chars=max_body_chars) if trace else None
     har_run = load_har(har, max_body_chars=max_body_chars) if har else None
-    agent_run = load_browser_use_history(browser_use) if browser_use else None
+    agent_run = (
+        load_browser_use_history(browser_use, screenshot_root=screenshot_root)
+        if browser_use
+        else None
+    )
     loaded = [r for r in (trace_run, har_run, agent_run) if r is not None]
 
     sources: list[Run] = []
