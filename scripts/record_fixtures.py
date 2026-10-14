@@ -47,6 +47,8 @@ expect:
     description: The order confirmation page was shown
     any:
       - {kind: page_text, contains: Thank you for your order}
+allow:
+  - {kind: request, method: POST, url_contains: [/api/cart]}
 forbid:
   - id: no_account_changes
     description: The task never needs the account to change
