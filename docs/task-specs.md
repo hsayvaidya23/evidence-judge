@@ -104,7 +104,10 @@ part still matches.
 With `scope: any`, visited URLs come from page snapshots, the page URL of each action and
 document navigations in the network log (GET requests for a `document`, or answered with
 `text/html`). A URL is reported as never visited only when snapshots or navigations were
-captured; with actions alone the result is `no_evidence`.
+captured; with actions alone the result is `no_evidence`. When only snapshots were captured
+(no navigations in the network log), absence is a weak contradiction (confidence 0.6), because
+a single-page app can change the URL between snapshots without a navigation; on a key claim it
+leads to review, not failure.
 
 ### `action`: the agent performed a browser action
 
@@ -143,7 +146,8 @@ already violates it.
 ```
 
 This is the last resort: it needs an LLM, costs money, and is less reliable than the other
-kinds. Prefer a `request`, `url` or `page_text` predicate whenever one can express the condition.
+kinds. A "no" from the model is a weak contradiction (confidence 0.6): on its own it sends a run
+to review, never to failure. Prefer a `request`, `url` or `page_text` predicate whenever one can express the condition.
 
 ## Examples
 

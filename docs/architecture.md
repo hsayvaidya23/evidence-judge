@@ -55,11 +55,20 @@ The CLI (`cli.py`) wires the stages together and maps the outcome to an exit cod
    cannot talk its way into a pass.
 5. **Abstain over guessing.** Low-confidence or uncheckable key claims lead to `needs_review`,
    not to a confident wrong verdict. Low claim coverage (below
-   `EVJ_REVIEW_COVERAGE_THRESHOLD`) also triggers review. Snapshots are point-in-time, so text
-   missing from every snapshot (`scope: any`) contradicts a claim only with confidence 0.6; a
-   key claim refuted below `CONFIDENT_CONTRADICTION` (0.7, `checks/outcome.py`) fails the run
-   only when another claim is also contradicted or a spec check fails, and otherwise needs
-   review. The final page state is authoritative and refutes with full confidence.
+   `EVJ_REVIEW_COVERAGE_THRESHOLD`) also triggers review. Only a key claim contradicted at or
+   above `CONFIDENT_CONTRADICTION` (0.7, `checks/_common.py`) fails a run. Weak contradictions
+   (`WEAK_CONTRADICTION_CONFIDENCE`, 0.6) only ever lead to review, however many there are; a
+   failed spec check still fails the run on its own. Weak contradictions are:
+   - text or a URL (`scope: any`) missing from every snapshot when no page navigations were
+     captured, because snapshots are point-in-time;
+   - a vision model answering "no" to a screenshot question;
+   - conflicting evidence, where one predicate supports a claim and a predicate of another
+     kind confidently contradicts it (page text says "Thank you" but no order request was
+     sent). Predicates of the same kind are alternatives, so a supported `POST /order` is not
+     in conflict with a missing `POST /checkout`.
+
+   The final page state is authoritative and refutes with full confidence, and so does URL
+   absence when document navigations were captured in the network log.
 6. **Redact before anything leaves the process.** Redaction runs before extraction, before any
    LLM call and before any report is written, and it is deterministic per key so equal values
    still match across claims and evidence.

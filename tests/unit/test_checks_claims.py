@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from evidence_judge.checks._common import WEAK_CONTRADICTION_CONFIDENCE
 from evidence_judge.checks.claims import NO_PREDICATE_REASON, judge_claim
 from evidence_judge.checks.registry import default_registry
 from evidence_judge.core.claims import Claim, ClaimKind
@@ -15,10 +16,13 @@ from evidence_judge.core.verdict import Support
 from tests.unit.conftest import (
     FakeVisionLLM,
     ctx,
+    final,
     forged_run,
     honest_run,
     make_run,
+    net,
     shot,
+    snap,
     uncaptured_network_run,
 )
 
@@ -85,13 +89,32 @@ async def test_uncaptured_channel_keeps_claim_unverified() -> None:
 
 
 async def test_one_supported_predicate_is_enough() -> None:
+    unseen = PageTextPredicate(contains="Gift wrap added", scope=Scope.ANY)
     verdict = await judge_claim(
-        order_claim(RequestPredicate(url_contains=["/nope"]), THANKS),
-        ctx(honest_run()),
-        default_registry(),
+        order_claim(unseen, ORDER_SENT), ctx(honest_run()), default_registry()
     )
     assert verdict.status is Support.SUPPORTED
-    assert verdict.checker == "page_text"
+    assert verdict.checker == "request"
+
+
+async def test_support_against_a_confident_contradiction_is_a_weak_conflict() -> None:
+    no_order = make_run(
+        network=[net(1, "GET", "/")],
+        snapshots=[snap(1, "/", "Thank you for visiting our shop")],
+        final_state=final("/", "Thank you for visiting our shop"),
+    )
+    verdict = await judge_claim(
+        order_claim(ORDER_SENT, PageTextPredicate(contains="Thank you", scope=Scope.ANY)),
+        ctx(no_order),
+        default_registry(),
+    )
+    assert verdict.status is Support.CONTRADICTED
+    assert verdict.confidence == WEAK_CONTRADICTION_CONFIDENCE
+    assert verdict.reason.startswith("conflicting evidence: ")
+    assert "'Thank you' appears on" in verdict.reason
+    assert "No POST request whose URL contains '/api/orders'" in verdict.reason
+    assert {c.evidence_id for c in verdict.citations} >= {"snap#1", "net#1"}
+    assert verdict.checker == "page_text+request"
 
 
 async def test_no_predicates() -> None:
@@ -133,5 +156,5 @@ async def test_screenshot_only_claim() -> None:
         order_claim(LOOKS_CONFIRMED), ctx(forged_run(), llm), default_registry()
     )
     assert verdict.status is Support.CONTRADICTED
-    assert verdict.confidence == 0.7
+    assert verdict.confidence == WEAK_CONTRADICTION_CONFIDENCE
     assert [c.evidence_id for c in verdict.citations] == ["shot#4"]
