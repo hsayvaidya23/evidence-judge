@@ -5,7 +5,8 @@ Values are read from JSON (or form-encoded) bodies via `json_path` - from the re
 on the most recent page state that matches. Every observation must satisfy the comparison: one
 violating observation makes the predicate CONTRADICTED, which is what a guardrail needs. A
 candidate whose body ingest truncated before the path keeps the predicate from being SUPPORTED:
-the unread part could hold a violating value, so the result is NO_EVIDENCE.
+the unread part could hold a violating value, so the result is NO_EVIDENCE. So is an ordering
+comparison (<, <=, >, >=) on a value that does not parse as a number: text is never ordered.
 """
 
 from __future__ import annotations
@@ -144,7 +145,9 @@ def check_value(predicate: ValuePredicate, index: EvidenceIndex) -> PredicateRes
     expected = f"{predicate.op} {as_text(predicate.value)}"
     if not observations:
         return result(Support.NO_EVIDENCE, f"{gaps}, so {quoted(field)} could not be read", KIND)
-    violations = [o for o in observations if not compare(o.value, predicate.op, predicate.value)]
+    verdicts = [(o, compare(o.value, predicate.op, predicate.value)) for o in observations]
+    violations = [o for o, holds in verdicts if holds is False]
+    incomparable = [o for o, holds in verdicts if holds is None]
     if violations:
         worst = violations[-1]
         satisfied = len(observations) - len(violations)
@@ -154,6 +157,15 @@ def check_value(predicate: ValuePredicate, index: EvidenceIndex) -> PredicateRes
             f"{field} was {format_value(worst.value)} in {worst.where}, expected {expected}{tail}",
             KIND,
             _cite(violations),
+        )
+    if incomparable:
+        odd = incomparable[-1]
+        return result(
+            Support.NO_EVIDENCE,
+            f"{field} was {format_value(odd.value)} in {odd.where}: cannot compare "
+            f"{format_value(odd.value)} numerically with {expected}",
+            KIND,
+            _cite(incomparable),
         )
     latest = observations[-1]
     if unread is not None:

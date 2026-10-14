@@ -64,6 +64,36 @@ def test_excerpt_centres_on_match() -> None:
         (45, 45.0),
         (45.5, 45.5),
         ("2m", 2_000_000.0),
+        ("1 500", 1500.0),
+        (f"1{chr(0x2009)}500", 1500.0),
+        (f"1{chr(0x202F)}500,50 €", 1500.5),
+        ("1'500", 1500.0),
+        (f"1{chr(0x2019)}500.25", 1500.25),
+        ("1.500,00 €", 1500.0),
+        ("€1.500,00", 1500.0),
+        ("24,5", 24.5),
+        ("24,00 EUR", 24.0),
+        ("1500 EUR", 1500.0),
+        ("USD 1,500.00", 1500.0),
+        ("1,500.00 USD", 1500.0),
+        ("Rs. 1500", 1500.0),
+        ("1500.00 zł", 1500.0),
+        ("$1.5K", 1500.0),
+        ("+12", 12.0),
+        (f"{chr(0x2212)}$24", -24.0),
+        ("0.125", 0.125),
+        ("1,234,567", 1234567.0),
+        ("1.500", None),
+        ("0,125", None),
+        ("1,50,000", None),
+        ("1 50", None),
+        ("1,500 000", None),
+        ("1.500.000,5,0", None),
+        ("+-3", None),
+        ("1e5", None),
+        ("-", None),
+        ("N/A", None),
+        ("", None),
         ("abc", None),
         ("12 apples", None),
         (True, None),
@@ -90,12 +120,33 @@ def test_parse_number(raw: object, expected: float | None) -> None:
         ("Red Kettle", "!=", "blue kettle", True),
         ("Red Kettle", "contains", "KETTLE", True),
         (["a", "b"], "contains", "b", True),
-        ("apple", "<", "banana", True),
         (None, "==", "null", True),
+        ("1 500", "<=", 1000, False),
+        ("1.500,00 €", ">=", 1000, True),
+        ("1'500", ">", 1000, True),
+        ("N/A", "!=", 30, True),
     ],
 )
 def test_compare(observed: object, op: str, expected: object, result: bool) -> None:
     assert compare(observed, op, expected) is result  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("observed", "op", "expected"),
+    [
+        ("apple", "<", "banana"),
+        ("-", "<=", 1000),
+        ("N/A", ">=", 1000),
+        ("", "<", 1000),
+        ("1.500", "<=", 1000),
+        (30, "<", "thirty"),
+        (None, ">", 0),
+    ],
+)
+def test_ordering_on_non_numbers_is_undecidable(
+    observed: object, op: str, expected: object
+) -> None:
+    assert compare(observed, op, expected) is None  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

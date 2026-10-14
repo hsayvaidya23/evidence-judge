@@ -24,17 +24,19 @@ MISSING: Final = _Missing.MISSING
 
 _NUMBER = re.compile(
     r"""
-    ^(?:[a-z]{3}\s*)?
-    [$€£¥₹]?\s*
+    ^(?:(?:[a-z]{3}|rs\.?)\s*)?
     (?P<sign>[+-])?\s*
     [$€£¥₹]?\s*
-    (?P<int>\d{1,3}(?:,\d{3})+|\d+)
-    (?P<frac>\.\d+)?
+    (?P<sign2>[+-])?\s*
+    (?P<core>\d(?:[\d.,' ]*\d)?)
     \s*(?P<suffix>[kmb])?
-    \s*(?:[a-z]{3})?$
+    \s*[$€£¥₹]?
+    \s*(?:[a-z]{3}|zł)?$
     """,
     re.VERBOSE,
 )
+_GROUP_SEPARATORS: Final = ",. '"
+_DECIMAL_SEPARATORS: Final = ".,"
 _SUFFIX_SCALE: Final = {"k": 1e3, "m": 1e6, "b": 1e9}
 _STATUS_CLASS = re.compile(r"^([1-5])xx$")
 _STATUS_EXACT = re.compile(r"^[1-5]\d\d$")
@@ -66,7 +68,14 @@ def excerpt(text: str, needle: str, width: int = 80) -> str:
 
 
 def parse_number(value: object) -> float | None:
-    """Parse '$24.00', '24,000.50', '1.2k', 'USD 30' or a JSON number; None if not numeric."""
+    """Parse a number as written in prices and totals, or None if it is not one (or ambiguous).
+
+    Accepts currency symbols and codes ('$24.00', 'USD 30', '1500 EUR', 'Rs. 1500'), a sign,
+    a k/m/b suffix ('1.2k'), and thousands grouped with commas, dots, spaces (including thin
+    spaces) or apostrophes ('24,000.50', '1 500', "1'500", '1.500,00 €'). A comma followed by
+    one or two digits is a decimal comma ('24,5'). Ambiguous forms such as '1.500' (1.5 or
+    1500) and malformed grouping ('1,50,000') are rejected.
+    """
     if isinstance(value, bool):
         return None
     if isinstance(value, int | float):
@@ -74,12 +83,50 @@ def parse_number(value: object) -> float | None:
     if not isinstance(value, str):
         return None
     match = _NUMBER.match(normalize(value))
-    if match is None:
+    if match is None or (match["sign"] and match["sign2"]):
         return None
-    number = float(match["int"].replace(",", "") + (match["frac"] or ""))
+    number = _parse_digits(match["core"])
+    if number is None:
+        return None
     if match["suffix"]:
         number *= _SUFFIX_SCALE[match["suffix"]]
-    return -number if match["sign"] == "-" else number
+    return -number if "-" in (match["sign"], match["sign2"]) else number
+
+
+def _grouped(digits: str, separator: str) -> str | None:
+    """'1,234,567' -> '1234567' when every group after the first has exactly three digits."""
+    head, *groups = digits.split(separator)
+    if not (1 <= len(head) <= 3 and head.isdigit() and head[0] != "0"):
+        return None
+    if not groups or any(len(g) != 3 or not g.isdigit() for g in groups):
+        return None
+    return head + "".join(groups)
+
+
+def _parse_digits(core: str) -> float | None:
+    separators = {c for c in core if not c.isdigit()}
+    if not separators:
+        return float(core)
+    position = max(core.rfind(c) for c in separators)
+    last = core[position]
+    head, tail = core[:position], core[position + 1 :]
+    if len(separators) == 1:
+        if core.count(last) > 1 or last not in _DECIMAL_SEPARATORS:
+            grouped = _grouped(core, last)
+            return None if grouped is None else float(grouped)
+        if len(tail) == 3:
+            if last == ",":
+                grouped = _grouped(core, last)
+                return None if grouped is None else float(grouped)
+            return float(core) if head == "0" or len(head) > 3 else None
+        if last == "," and len(tail) > 2:
+            return None
+        return float(f"{head}.{tail}")
+    if last not in _DECIMAL_SEPARATORS or len(separators) != 2:
+        return None
+    (group,) = separators - {last}
+    grouped = _grouped(head, group)
+    return None if grouped is None else float(f"{grouped}.{tail}")
 
 
 def as_text(value: object) -> str:
@@ -90,13 +137,20 @@ def as_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def compare(observed: object, op: Op, expected: object) -> bool:
-    """Compare numerically when both sides parse as numbers, else as normalised strings."""
+def compare(observed: object, op: Op, expected: object) -> bool | None:
+    """Compare numerically when both sides parse as numbers.
+
+    `==` and `!=` fall back to normalised strings; `contains` is a normalised substring test.
+    The ordering operators never compare strings: if either side is not a number the result is
+    None (undecidable), because '1 500' < '30' as text says nothing about the amounts.
+    """
     if op == "contains":
         return normalize(as_text(expected)) in normalize(as_text(observed))
     left, right = parse_number(observed), parse_number(expected)
     if left is not None and right is not None:
         return _ordered(left, op, right)
+    if op not in ("==", "!="):
+        return None
     return _ordered(normalize(as_text(observed)), op, normalize(as_text(expected)))
 
 

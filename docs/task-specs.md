@@ -153,6 +153,14 @@ Instead of `json_path`, `page_regex` extracts the value from page text with one 
 - {kind: value, field: total, page_regex: 'Total:\s*\$([0-9.]+)', op: "<=", value: 30}
 ```
 
+Numbers are read from JSON numbers and from strings as prices are usually written: currency
+symbols or codes (`$24.00`, `1500 EUR`), thousands grouped with commas, dots, spaces or
+apostrophes (`24,000.50`, `1 500`, `1'500`, `1.500,00 €`), a decimal comma before one or two
+digits (`24,5`) and a `k`/`m`/`b` suffix. Ambiguous strings such as `1.500` are not numbers.
+`<`, `<=`, `>` and `>=` need numbers on both sides; if either side is not one, the predicate is
+`no_evidence` ("cannot compare ... numerically"), never a text comparison. `==` and `!=` fall
+back to comparing normalised text.
+
 Without `in_request`, the value is looked up in any state-changing request.
 If a candidate request's body was truncated before `json_path`, the value cannot be shown to
 hold for every observation, so the predicate is `no_evidence` unless a recorded observation
