@@ -145,7 +145,6 @@ def test_format_value() -> None:
 @pytest.mark.parametrize(
     "pred",
     [
-        ValuePredicate(field="x", value=1),
         ValuePredicate(field="x", page_regex=r"(a)(b)", value=1),
         ValuePredicate(field="x", page_regex=r"(", value=1),
     ],

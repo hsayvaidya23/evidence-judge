@@ -5,7 +5,6 @@ from evidence_judge.core.predicates import (
     PageTextPredicate,
     RequestPredicate,
     Scope,
-    ValuePredicate,
 )
 from evidence_judge.core.verdict import Usage
 from evidence_judge.extract.heuristic import HeuristicExtractor
@@ -63,7 +62,7 @@ def test_add_to_cart_and_price_value():
     assert cart.key is False
     assert price.kind is ClaimKind.VALUE
     assert price.key is True
-    assert ValuePredicate(field="price", op="==", value=24) in price.predicates
+    assert price.predicates == [PageTextPredicate(contains="$24", scope=Scope.ANY)]
 
 
 def test_add_to_cart_is_key_when_task_is_about_the_cart():
@@ -79,8 +78,7 @@ def test_currency_without_price_word_is_ignored_and_total_field_detected():
     assert _extract("I saw a banner for $5.").claims == []
     result = _extract("The order total came to $1,249.50 after tax.")
     value = next(c for c in result.claims if c.kind is ClaimKind.VALUE)
-    assert ValuePredicate(field="total", op="==", value=1249.5) in value.predicates
-    assert PageTextPredicate(contains="1,249.50", scope=Scope.ANY) in value.predicates
+    assert value.predicates == [PageTextPredicate(contains="$1,249.50", scope=Scope.ANY)]
 
 
 def test_changed_email_maps_to_email_or_account_requests_with_body():
@@ -151,7 +149,7 @@ def test_claims_are_capped():
     answer = " ".join(f"Ticket #{1000 + i} is shown." for i in range(40))
     result = HeuristicExtractor(max_claims=10).extract_sync(task=None, answer=answer, reasoning=[])
     assert len(result.claims) == 10
-    assert result.coverage_note == "truncated=30"
+    assert result.coverage_note == "truncated=30; vacuous_predicates=0"
 
 
 async def test_async_extract_is_free_and_deterministic():
@@ -175,3 +173,23 @@ def test_heuristic_claims_cover_their_own_sentences():
 
 def test_empty_input():
     assert _extract(None).claims == []
+
+
+def test_confirmation_needs_the_id_or_a_phrase_not_a_lone_word():
+    with_id = _extract("Order #1042 is confirmed.")
+    shown = next(c for c in with_id.claims if c.text == "A confirmation was shown")
+    assert shown.predicates == [PageTextPredicate(contains="1042", scope=Scope.ANY)]
+    without_id = _extract("Your booking is confirmed.")
+    shown = next(c for c in without_id.claims if c.text == "A confirmation was shown")
+    assert [p.contains for p in shown.predicates if isinstance(p, PageTextPredicate)] == [
+        "booking confirmed",
+        "booking is confirmed",
+        "thank you for your booking",
+    ]
+
+
+def test_claim_whose_predicates_are_all_vacuous_stays_unverifiable():
+    result = _extract("I saved it.")
+    assert [c.text for c in result.claims] == ["The agent saved changes"]
+    assert result.claims[0].predicates == []
+    assert result.coverage_note == "truncated=0; vacuous_predicates=3"

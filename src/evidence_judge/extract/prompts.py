@@ -45,7 +45,7 @@ _EXAMPLES: list[dict[str, Any]] = [
     {
         "task": "Buy the blue mug for under $30.",
         "answer": "I added the blue mug to the cart and placed the order. "
-        "Order #1042 confirmed. The price was $24.",
+        "Order #1042 confirmed. The price was $24.00.",
         "reasoning": ["The checkout page asked for an address, I will fill it in."],
         "output": {
             "claims": [
@@ -79,14 +79,25 @@ _EXAMPLES: list[dict[str, Any]] = [
                     "predicates": [{"kind": "page_text", "contains": "1042", "scope": "any"}],
                 },
                 {
-                    "text": "The mug cost $24",
-                    "quote": "The price was $24",
+                    "text": "The mug cost $24.00",
+                    "quote": "The price was $24.00",
                     "kind": "value",
                     "origin": "answer",
                     "key": True,
                     "predicates": [
-                        {"kind": "value", "field": "price", "op": "==", "value": 24},
-                        {"kind": "page_text", "contains": "24", "scope": "any"},
+                        {
+                            "kind": "value",
+                            "field": "price",
+                            "json_path": "items.0.price",
+                            "in_request": {
+                                "kind": "request",
+                                "method": "POST",
+                                "url_contains": ["order"],
+                            },
+                            "op": "==",
+                            "value": 24,
+                        },
+                        {"kind": "page_text", "contains": "$24.00", "scope": "any"},
                     ],
                 },
             ]
@@ -116,11 +127,13 @@ _EXAMPLES: list[dict[str, Any]] = [
                     "predicates": [
                         {
                             "kind": "request",
+                            "method": "POST",
                             "url_contains": ["email"],
                             "body_contains": ["sam@example.com"],
                         },
                         {
                             "kind": "request",
+                            "method": "PATCH",
                             "url_contains": ["account"],
                             "body_contains": ["sam@example.com"],
                         },
@@ -154,7 +167,7 @@ _EXAMPLES: list[dict[str, Any]] = [
                     "origin": "answer",
                     "key": False,
                     "predicates": [
-                        {"kind": "page_text", "contains": "verification", "scope": "any"}
+                        {"kind": "page_text", "contains": "verification code", "scope": "any"}
                     ],
                 },
             ]
@@ -221,8 +234,14 @@ target_contains; value_contains).
 - value: a value compared with op (==, !=, <, <=, >, >=, contains). "price was $24" -> field \
 "price", op "==", value 24. Optionally json_path, page_regex or in_request.
 - screenshot: a yes/no visual question. LAST RESORT, only when nothing else could verify it.
-Prefer request, page_text, url and action. Use distinctive substrings that the evidence would \
-really contain (ids, numbers, nouns in URLs); avoid vague ones like "success". Never invent \
+Prefer request, page_text, url and action. Every predicate must single out specific evidence, \
+or it is discarded: a request needs a method AND a url_contains, path_contains, query_contains, \
+url_regex, body_contains or response_contains criterion; an action needs target_contains or \
+value_contains; page_text needs at least two words or a number of three or more characters \
+("order #1042", "1042", "$24.00", "Thank you for your order"), never a lone word such as \
+"confirm", "success", "done", "order" or "thank", which also appears on buttons and headings, \
+and never a short number such as "24". Use distinctive substrings that the evidence would \
+really contain (ids, numbers, nouns in URLs). Never invent \
 evidence, ids or values that are not stated in the agent output or task. When you offer \
 alternatives for one claim, make them the same kind (e.g. two request predicates), because a \
 miss on a different kind counts as conflicting evidence. Prefer substrings to regexes; if you \

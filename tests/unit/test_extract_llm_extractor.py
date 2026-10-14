@@ -125,7 +125,7 @@ async def test_claims_capped_at_thirty_preferring_key_claims():
 
 
 async def test_predicates_capped_at_three_per_claim():
-    predicates = [{"kind": "page_text", "contains": str(n)} for n in range(5)]
+    predicates = [{"kind": "page_text", "contains": f"order {n}"} for n in range(5)]
     llm = _llm(_claim("Placed order", "placed the order", predicates=predicates))
     claim_set, _ = await LLMClaimExtractor(llm).extract(task=None, answer=ANSWER, reasoning=[])
     assert len(claim_set.claims[0].predicates) == 3
@@ -173,3 +173,39 @@ async def test_llm_errors_propagate(error: Exception):
     llm.queue(ClaimExtraction, error)
     with pytest.raises(type(error)):
         await LLMClaimExtractor(llm).extract(task=None, answer=ANSWER, reasoning=[])
+
+
+async def test_vacuous_predicates_are_dropped_and_counted_not_fatal():
+    llm = _llm(
+        _claim(
+            "Placed the order",
+            "placed the order",
+            key=True,
+            predicates=[
+                {"kind": "request"},
+                {"kind": "request", "method": "POST"},
+                {"kind": "page_text", "contains": "24"},
+                {"kind": "page_text", "contains": "confirm"},
+                {"kind": "request", "method": "POST", "url_contains": ["order"]},
+            ],
+        ),
+        _claim(
+            "Order 1042 confirmed",
+            "Order #1042 confirmed",
+            kind="state",
+            predicates=[{"kind": "page_text", "contains": " "}],
+        ),
+    )
+    claim_set, _ = await LLMClaimExtractor(llm).extract(task=None, answer=ANSWER, reasoning=[])
+    first, second = claim_set.claims
+    assert first.predicates == [RequestPredicate(method="POST", url_contains=["order"])]
+    assert second.predicates == []
+    assert "vacuous_predicates=5" in (claim_set.coverage_note or "")
+
+
+def test_few_shot_examples_only_teach_specific_predicates():
+    from evidence_judge.extract.prompts import _EXAMPLES  # pyright: ignore[reportPrivateUsage]
+
+    for example in _EXAMPLES:
+        parsed = ClaimExtraction.model_validate(example["output"])
+        assert all(c.dropped_predicates == 0 for c in parsed.claims), example["task"]

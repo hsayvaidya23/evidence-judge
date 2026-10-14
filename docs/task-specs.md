@@ -80,6 +80,28 @@ allow:
 
 Every predicate has a `kind`.
 
+Predicates that every run would satisfy are rejected when the spec or claims file is loaded,
+with a message naming the field. Strings are stripped; substrings (`url_contains`,
+`path_contains`, `query_contains`, `body_contains`, `response_contains`, a url `contains`, an
+action's `target_contains`, and a value compared with `contains`) need at least 2 characters;
+page text needs at least 3 characters including a letter or digit (so `"24"` or `"!!!"` is
+refused); a request needs a method or a URL, path, query, regex or body criterion; a url
+predicate needs `contains`, `query_contains` or `regex`; an action needs a name, target or
+value; a value predicate needs `json_path` or `page_regex`.
+
+Inside `expect`, a request predicate needs both a `method` and at least one of `url_contains`,
+`path_contains`, `query_contains`, `url_regex`, `body_contains` or `response_contains`, because
+"some POST succeeded" proves nothing. `forbid` and `allow` may stay broad, as in the read-only
+example below.
+
+Claims (pre-extracted or produced by an extractor) are held to a stricter bar, because the agent
+controls what they say: besides the request rule above, an action needs a target or value, and
+page text needs two words or a number (`"1042"`, `"$24.00"`, `"Thank you for your order"`), since
+a lone word such as `confirm` also labels buttons on pages that prove nothing. A claims file that
+breaks these rules is refused; the extractors drop such predicates and count them as
+`vacuous_predicates` in the claim set's coverage note, and a key claim left without predicates
+is `no_evidence`, so the run goes to review.
+
 ### `request`: a network request was observed
 
 | Field | Default | Meaning |

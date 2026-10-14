@@ -22,7 +22,7 @@ def test_default_registry_covers_every_predicate_kind() -> None:
     registry = default_registry()
     for kind in ("request", "page_text", "url", "action", "value", "screenshot"):
         assert registry.get(kind).kind == kind
-    assert registry.is_deterministic(RequestPredicate())
+    assert registry.is_deterministic(RequestPredicate(method="POST"))
     assert not registry.is_deterministic(ScreenshotPredicate(question="?"))
 
 
@@ -35,9 +35,9 @@ async def test_evaluate_dispatches_by_kind() -> None:
 
 
 async def test_invalid_predicate_becomes_no_evidence() -> None:
-    res = await default_registry().evaluate(UrlPredicate(), ctx(honest_run()))
+    res = await default_registry().evaluate(UrlPredicate(regex="(oops"), ctx(honest_run()))
     assert res.status is Support.NO_EVIDENCE
-    assert res.reason.startswith("Predicate cannot be checked: url predicate needs")
+    assert res.reason.startswith("Predicate cannot be checked: invalid regex")
 
 
 def test_unknown_kind_and_duplicates() -> None:

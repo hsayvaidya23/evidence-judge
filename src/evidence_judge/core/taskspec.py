@@ -65,6 +65,20 @@ class TaskSpec(BaseModel):
         default_factory=list[str], description="Mutations to other hosts count as side effects"
     )
 
+    @model_validator(mode="after")
+    def _specific_expectations(self) -> TaskSpec:
+        for expectation in self.expect:
+            for predicate in [*expectation.all, *expectation.any]:
+                if isinstance(predicate, RequestPredicate) and (
+                    predicate.method is None or not predicate.locates
+                ):
+                    raise ValueError(
+                        f"expect {expectation.id!r}: a request predicate needs a method and a "
+                        "url_contains, path_contains, query_contains, url_regex, body_contains "
+                        "or response_contains criterion; one without them is met by any request"
+                    )
+        return self
+
     @classmethod
     def load(cls, path: str | Path) -> TaskSpec:
         data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))

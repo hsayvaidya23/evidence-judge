@@ -23,11 +23,13 @@ class ExtractionStats:
     hallucinated_quotes: int
     duplicates: int
     truncated: int
+    vacuous_predicates: int = 0
 
     def note(self) -> str:
         return (
             f"proposed={self.proposed}; hallucinated_quotes={self.hallucinated_quotes}; "
-            f"duplicates={self.duplicates}; truncated={self.truncated}"
+            f"duplicates={self.duplicates}; truncated={self.truncated}; "
+            f"vacuous_predicates={self.vacuous_predicates}"
         )
 
 
@@ -86,6 +88,7 @@ class LLMClaimExtractor:
             hallucinated_quotes=hallucinated,
             duplicates=duplicates,
             truncated=truncated,
+            vacuous_predicates=sum(c.dropped_predicates for c in output.claims),
         )
         claim_set = ClaimSet(
             claims=renumber(capped), extractor=self.name, coverage_note=stats.note()

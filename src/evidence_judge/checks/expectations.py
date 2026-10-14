@@ -27,7 +27,7 @@ EXPECT: Final = "expect"
 FORBID: Final = "forbid"
 CONSTRAINT: Final = "constraint"
 
-_DEFAULT_STATUS: Final = RequestPredicate().status
+_DEFAULT_STATUS: Final = RequestPredicate.model_fields["status"].default
 _TRUTH: Final = {Support.SUPPORTED: True, Support.CONTRADICTED: False, Support.NO_EVIDENCE: None}
 
 

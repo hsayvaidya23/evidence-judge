@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from evidence_judge.checks.action import ActionChecker, canonical_action
-from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.core.evidence import Channel
 from evidence_judge.core.predicates import ActionPredicate
 from evidence_judge.core.verdict import Support
@@ -56,6 +56,6 @@ def test_canonical_action() -> None:
     assert canonical_action("CLICK") == "click"
 
 
-async def test_action_predicate_needs_a_criterion() -> None:
-    with pytest.raises(InvalidPredicateError):
-        await ActionChecker().evaluate(ActionPredicate(), ctx(honest_run()))
+def test_action_predicate_needs_a_criterion() -> None:
+    with pytest.raises(ValidationError, match="action predicate needs"):
+        ActionPredicate()

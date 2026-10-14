@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from evidence_judge.checks._common import CONFIDENT_CONTRADICTION, WEAK_CONTRADICTION_CONFIDENCE
-from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.url import UrlChecker
 from evidence_judge.core.evidence import Channel, NetworkEvent
 from evidence_judge.core.predicates import Scope, UrlPredicate
@@ -134,9 +134,9 @@ async def test_any_url_absent_with_captured_navigations_stays_confident() -> Non
     assert res.confidence == 1.0
 
 
-async def test_url_predicate_needs_a_criterion() -> None:
-    with pytest.raises(InvalidPredicateError):
-        await UrlChecker().evaluate(UrlPredicate(), ctx(honest_run()))
+def test_url_predicate_needs_a_criterion() -> None:
+    with pytest.raises(ValidationError, match="url predicate needs"):
+        UrlPredicate()
 
 
 async def test_contains_ignores_the_query_string() -> None:

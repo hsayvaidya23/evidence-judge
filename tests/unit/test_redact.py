@@ -299,7 +299,10 @@ def test_redact_claims_and_spec_match_redacted_evidence(r: Redactor) -> None:
                 id="e1",
                 any=[
                     RequestPredicate(
-                        url_contains=["/api"], url_regex=r"a@b\.c", body_contains=[EMAIL]
+                        method="POST",
+                        url_contains=["/api"],
+                        url_regex=r"a@b\.c",
+                        body_contains=[EMAIL],
                     )
                 ],
             )
@@ -423,7 +426,7 @@ def test_card_seen_with_context_is_redacted_everywhere_in_the_run(r: Redactor) -
                 text="charged 4111111111111111",
                 quote="Charged 4111111111111111",
                 kind=ClaimKind.ACTION,
-                predicates=[RequestPredicate(body_contains=["4111111111111111"])],
+                predicates=[RequestPredicate(method="POST", body_contains=["4111111111111111"])],
             )
         ]
     )
