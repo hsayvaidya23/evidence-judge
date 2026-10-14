@@ -1,0 +1,189 @@
+site_name: Evidence Judge
+site_description: >-
+  Grade browser and computer-use agent runs by checking every claim against recorded evidence:
+  network requests, page state, screenshots and the final page.
+site_author: Yash Vaidya
+site_url: https://hsayvaidya23.github.io/evidence-judge/
+repo_url: https://github.com/hsayvaidya23/evidence-judge
+repo_name: hsayvaidya23/evidence-judge
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; Yash Vaidya &middot; MIT License
+
+strict: true
+
+validation:
+  omitted_files: warn
+  absolute_links: info
+  unrecognized_links: warn
+  anchors: warn
+
+exclude_docs: |
+  overrides/
+  includes/
+
+hooks:
+  - docs/overrides/hooks.py
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  language: en
+  icon:
+    logo: material/scale-balance
+    repo: fontawesome/brands/github
+    edit: material/pencil-outline
+    view: material/eye-outline
+    admonition:
+      note: octicons/note-16
+      tip: octicons/light-bulb-16
+      warning: octicons/alert-16
+      danger: octicons/zap-16
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to system preference
+  features:
+    - announce.dismiss
+    - content.action.edit
+    - content.action.view
+    - content.code.annotate
+    - content.code.copy
+    - content.tabs.link
+    - content.tooltips
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - navigation.path
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+
+plugins:
+  - search
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/hsayvaidya23/evidence-judge
+      name: Evidence Judge on GitHub
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/terminal.js
+  - javascripts/pipeline.js
+  - javascripts/playground.js
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: Link to this section
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.critic
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+      auto_append:
+        - docs/includes/abbreviations.md
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+        - name: pipeline
+          class: ej-pipeline
+          format: !!python/name:pymdownx.superfences.fence_div_format
+  - pymdownx.tabbed:
+      alternate_style: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - getting-started/index.md
+      - Install: getting-started/install.md
+      - Record a run: getting-started/record-a-run.md
+      - Your first judgement: getting-started/first-judge.md
+      - Read the report: getting-started/read-the-report.md
+  - Concepts:
+      - concepts/index.md
+      - Claims & predicates: concepts/claims-and-predicates.md
+      - Evidence channels: concepts/evidence-channels.md
+      - Task specs: task-specs.md
+      - Dimensions: concepts/dimensions.md
+      - Outcomes & rules: concepts/outcomes.md
+      - Redaction & privacy: concepts/redaction.md
+      - LLM vs offline: concepts/llm-vs-offline.md
+      - Architecture: architecture.md
+  - Playground: playground.md
+  - Guides:
+      - guides/index.md
+      - Spec cookbook: guides/spec-cookbook.md
+      - CI with the GitHub Action: guides/github-action.md
+      - Docker: guides/docker.md
+      - Integrations: integrations.md
+      - Benchmark your own agent: guides/benchmark-your-agent.md
+      - Recording recipes: guides/recording-recipes.md
+  - Reference:
+      - reference/index.md
+      - CLI: cli.md
+      - Configuration: reference/configuration.md
+      - Verdict JSON schema: reference/verdict-schema.md
+      - Python API: reference/python-api.md
+  - Benchmark: benchmark.md
+  - More:
+      - Security: security.md
+      - FAQ: faq.md
+      - Changelog: changelog.md
+      - Contributing: contributing.md
