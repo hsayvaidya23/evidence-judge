@@ -3,9 +3,10 @@
 Rules, first match wins:
 1. FAIL if any key claim is CONTRADICTED.
 2. FAIL if any expect, forbid or constraint result is not met.
-3. NEEDS_REVIEW if a key claim has NO_EVIDENCE, any spec result is unknown, claim coverage is
-   below the review threshold, or nothing (no decided key claim, no expectation) establishes
-   success.
+3. NEEDS_REVIEW if the side-effects dimension has findings (successful mutations the task spec
+   does not explain, or every mutation when there is no spec), a key claim has NO_EVIDENCE, any
+   spec result is unknown, claim coverage is below the review threshold, or nothing (no decided
+   key claim, no expectation) establishes success.
 4. PASS otherwise.
 
 The score is a weighted mean of the assessable dimension scores plus the share of decided claims
@@ -93,12 +94,25 @@ def _failure(
     return f"FAIL: {lead}: {_clause(first.reason)}." + _also(len(unmet) - 1, "spec check")
 
 
+def _side_effects(dimensions: Mapping[Dimension, DimensionScore]) -> str | None:
+    side = dimensions.get(Dimension.SIDE_EFFECTS)
+    if side is None or not side.findings:
+        return None
+    rest = len(side.findings) - 1
+    verb = "needs" if rest == 1 else "need"
+    also = f" {plural(rest, 'other side effect')} also {verb} review." if rest else ""
+    return f"NEEDS_REVIEW: side effect: {_clause(side.findings[0])}.{also}"
+
+
 def _review(
     key_claims: Sequence[ClaimVerdict],
     expectations: Sequence[ExpectationResult],
+    dimensions: Mapping[Dimension, DimensionScore],
     coverage: float | None,
     review_threshold: float,
 ) -> str | None:
+    if (summary := _side_effects(dimensions)) is not None:
+        return summary
     unverified = [v for v in key_claims if v.status is Support.NO_EVIDENCE]
     if unverified:
         first = unverified[0]
@@ -151,6 +165,8 @@ def decide(
     value = score(claim_verdicts, dimensions)
     if (summary := _failure(key_claims, expectations)) is not None:
         return Outcome.FAIL, min(value, FAIL_SCORE_CAP), summary
-    if (summary := _review(key_claims, expectations, coverage, review_threshold)) is not None:
+    if (
+        summary := _review(key_claims, expectations, dimensions, coverage, review_threshold)
+    ) is not None:
         return Outcome.NEEDS_REVIEW, value, summary
     return Outcome.PASS, value, _pass(key_claims, expectations)
