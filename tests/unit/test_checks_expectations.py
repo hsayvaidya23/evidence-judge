@@ -60,7 +60,7 @@ async def test_side_effect_breaks_forbid() -> None:
     results = await judge(side_effect_run())
     forbid = results["no_account_changes"]
     assert forbid.met is False
-    assert forbid.reason.startswith("Forbidden behaviour observed: POST /api/account/email")
+    assert forbid.reason.startswith("POST /api/account/email → 200 matched")
     assert forbid.citations[0].evidence_id == "net#8"
 
 

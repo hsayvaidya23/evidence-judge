@@ -79,18 +79,12 @@ async def evaluate_expectation(
     any_results = await _evaluate(expectation.any, ctx, registry)
     happened = holds(all_results, any_results)
     deciders = _explaining(happened, all_results, any_results)
-    reason = join_reasons(deciders)
-    if kind == FORBID:
-        met = None if happened is None else not happened
-        if met is False:
-            reason = f"Forbidden behaviour observed: {reason}"
-    else:
-        met = happened
+    met = happened if kind != FORBID or happened is None else not happened
     return ExpectationResult(
         expectation_id=expectation.id,
         kind=kind,
         met=met,
-        reason=reason,
+        reason=join_reasons(deciders),
         citations=merge_citations(deciders),
     )
 
