@@ -167,11 +167,85 @@ def test_mismatched_har_can_be_allowed(tmp_path: Path) -> None:
     assert len(run.network) == len(trace.network) + 10
 
 
-def test_mismatch_needs_five_trace_requests() -> None:
+def test_small_trace_needs_at_least_one_shared_request() -> None:
     trace = network_run("playwright-trace", *(f"https://a.test/{i}" for i in range(4)))
-    har = network_run("har", "https://b.test/")
 
-    assert len(attach_har(trace, har).network) == 5
+    with pytest.raises(MismatchedEvidenceError, match=r"none of the 4 trace requests"):
+        attach_har(trace, network_run("har", "https://b.test/"))
+    assert (
+        len(attach_har(trace, network_run("har", "https://b.test/"), allow_mismatch=True).network)
+        == 5
+    )
+    assert (
+        len(attach_har(trace, network_run("har", "https://a.test/0", "https://b.test/")).network)
+        == 5
+    )
+
+
+def test_har_alone_fills_a_trace_without_network() -> None:
+    trace = network_run("playwright-trace")
+
+    merged = attach_har(trace, network_run("har", "https://b.test/"))
+
+    assert [n.url for n in merged.network] == ["https://b.test/"]
+
+
+def test_har_only_requests_are_marked() -> None:
+    trace = network_run("playwright-trace", "https://a.test/0", "https://a.test/1")
+    har = network_run("har", "https://a.test/1", "https://a.test/extra")
+
+    merged = attach_har(trace, har)
+
+    extra = next(n for n in merged.network if n.url.endswith("/extra"))
+    assert merged.metadata["har_only_requests"] == [extra.id]
+
+
+def test_load_run_keeps_har_only_marks(tmp_path: Path) -> None:
+    d = RUNS / "honest_success"
+    har_data = json.loads((d / "run.har").read_text())
+    entries = har_data["log"]["entries"]
+    extra = json.loads(json.dumps(entries[-1]))
+    extra["request"]["url"] = "https://shop.test/api/unseen"
+    entries.append(extra)
+    har = tmp_path / "run.har"
+    har.write_text(json.dumps(har_data))
+
+    run = load_run(trace=d / "trace.zip", har=har)
+
+    unseen = next(n for n in run.network if n.url.endswith("/api/unseen"))
+    assert run.metadata["har_only_requests"] == [unseen.id]
+
+
+def _timed(run: Run, start_wall_ms: float) -> Run:
+    return run.model_copy(update={"metadata": {"start_wall_time_ms": start_wall_ms}})
+
+
+def test_har_only_requests_far_outside_the_trace_window_are_dropped() -> None:
+    trace = _timed(network_run("playwright-trace", "https://a.test/0", "https://a.test/1"), 0.0)
+    minutes = 60_000.0
+    har = _timed(
+        Run(
+            run_id="h",
+            source="har",
+            network=[
+                NetworkEvent(id="net#1", ts=1.0, method="GET", url="https://a.test/0"),
+                NetworkEvent(id="net#2", ts=5 * minutes, method="GET", url="https://a.test/near"),
+                NetworkEvent(id="net#3", ts=30 * minutes, method="POST", url="https://a.test/late"),
+                NetworkEvent(
+                    id="net#4", ts=-20 * minutes, method="POST", url="https://a.test/early"
+                ),
+            ],
+            captured={Channel.NETWORK},
+        ),
+        0.0,
+    )
+
+    merged = attach_har(trace, har)
+
+    urls = {n.url for n in merged.network}
+    assert "https://a.test/near" in urls
+    assert not urls & {"https://a.test/late", "https://a.test/early"}
+    assert any("2 HAR requests" in w for w in merged.metadata["merge_warnings"])
 
 
 def test_half_matching_har_is_accepted() -> None:

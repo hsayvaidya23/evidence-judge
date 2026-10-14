@@ -18,7 +18,10 @@ _PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
 MIN_HAR_MATCH_RATIO: Final = 0.5
 """Share of trace requests a HAR must also contain to count as the same run."""
 MIN_REQUESTS_TO_COMPARE: Final = 5
-"""Traces with fewer requests than this are too small to judge a HAR mismatch."""
+"""Traces with at least this many requests must share ``MIN_HAR_MATCH_RATIO`` of them with a HAR;
+smaller traces with any request must share at least one."""
+MAX_HAR_CLOCK_GAP_MS: Final = 10 * 60 * 1000
+"""HAR-only requests starting further than this outside the trace's time window are dropped."""
 
 
 def load_run(
@@ -62,8 +65,15 @@ def load_run(
     loaded = [r for r in (trace_run, har_run, agent_run) if r is not None]
 
     sources: list[Run] = []
+    merge_metadata: dict[str, object] = {}
     if trace_run is not None and har_run is not None:
-        sources.append(attach_har(trace_run, har_run, allow_mismatch=allow_mismatch))
+        attached = attach_har(trace_run, har_run, allow_mismatch=allow_mismatch)
+        merge_metadata = {
+            k: v
+            for k, v in attached.metadata.items()
+            if k in ("har_only_requests", "merge_warnings")
+        }
+        sources.append(attached)
     else:
         sources.extend(r for r in (trace_run, har_run) if r is not None)
     if agent_run is not None:
@@ -82,7 +92,7 @@ def load_run(
             "task": task or merged.task,
             "agent_answer": explicit_answer if explicit_answer is not None else merged.agent_answer,
             "agent_reasoning": reasoning,
-            "metadata": {"sources": {r.source: r.metadata for r in loaded}},
+            "metadata": {"sources": {r.source: r.metadata for r in loaded}, **merge_metadata},
         }
     )
 
@@ -94,11 +104,16 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
     timing and gains any body, status or headers only the HAR captured; unpaired HAR requests
     are shifted onto the trace clock and added. Network ids are reassigned chronologically.
 
+    The trace did not see the unpaired HAR requests, so their new ids are listed in
+    ``metadata["har_only_requests"]``. When both clocks are known, unpaired HAR requests starting
+    more than ``MAX_HAR_CLOCK_GAP_MS`` outside the trace's time window are dropped, with a note in
+    ``metadata["merge_warnings"]`` (unless ``allow_mismatch``).
+
     Raises:
-        MismatchedEvidenceError: the trace has at least ``MIN_REQUESTS_TO_COMPARE`` requests,
-            the HAR has entries, and fewer than ``MIN_HAR_MATCH_RATIO`` of the trace requests
-            appear in the HAR, so the HAR is probably from another run. ``allow_mismatch=True``
-            merges anyway.
+        MismatchedEvidenceError: the HAR has entries and the trace has requests, but the HAR
+            shares none of them, or (for traces of ``MIN_REQUESTS_TO_COMPARE`` or more requests)
+            fewer than ``MIN_HAR_MATCH_RATIO`` of them, so it is probably from another run.
+            ``allow_mismatch=True`` merges anyway.
     """
     offset = _clock_offset(trace_run, har_run)
     pending: defaultdict[tuple[str, str], deque[int]] = defaultdict(deque)
@@ -116,21 +131,55 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
         network.append(_fill_gaps(event, har_run.network[index]))
     if not allow_mismatch:
         _check_same_run(len(trace_run.network), len(har_run.network), len(paired))
-    network.extend(
-        h.model_copy(update={"ts": round(h.ts + offset, 3)})
-        for index, h in enumerate(har_run.network)
-        if index not in paired
-    )
+    timed = not allow_mismatch and _clocks_known(trace_run, har_run)
+    window = _trace_window(trace_run) if timed else None
+    har_only: list[NetworkEvent] = []
+    dropped = 0
+    for index, h in enumerate(har_run.network):
+        if index in paired:
+            continue
+        ts = round(h.ts + offset, 3)
+        if window is not None and not window[0] - MAX_HAR_CLOCK_GAP_MS <= ts <= window[1] + (
+            MAX_HAR_CLOCK_GAP_MS
+        ):
+            dropped += 1
+            continue
+        har_only.append(h.model_copy(update={"ts": ts}))
+    marker = {id(h) for h in har_only}
+    network.extend(har_only)
     network.sort(key=lambda n: n.ts)
     renumbered = [n.model_copy(update={"id": f"net#{i}"}) for i, n in enumerate(network, 1)]
+    metadata = {
+        **trace_run.metadata,
+        "har_only_requests": [
+            r.id for r, n in zip(renumbered, network, strict=True) if id(n) in marker
+        ],
+    }
+    if dropped:
+        metadata["merge_warnings"] = [
+            f"dropped {dropped} HAR requests that started more than "
+            f"{MAX_HAR_CLOCK_GAP_MS // 60_000} minutes outside the trace"
+        ]
     return trace_run.model_copy(
-        update={"network": renumbered, "captured": trace_run.captured | {Channel.NETWORK}}
+        update={
+            "network": renumbered,
+            "captured": trace_run.captured | {Channel.NETWORK},
+            "metadata": metadata,
+        }
     )
 
 
 def _check_same_run(trace_requests: int, har_requests: int, paired: int) -> None:
-    if trace_requests < MIN_REQUESTS_TO_COMPARE or har_requests == 0:
+    if trace_requests == 0 or har_requests == 0:
         return
+    if trace_requests < MIN_REQUESTS_TO_COMPARE:
+        if paired:
+            return
+        raise MismatchedEvidenceError(
+            f"the HAR ({har_requests} entries) shares none of the {trace_requests} trace "
+            "requests; it looks like a recording of another run. "
+            "Pass allow_mismatch=True to merge it anyway."
+        )
     if paired >= MIN_HAR_MATCH_RATIO * trace_requests:
         return
     raise MismatchedEvidenceError(
@@ -138,6 +187,23 @@ def _check_same_run(trace_requests: int, har_requests: int, paired: int) -> None
         f"({har_requests} entries); the HAR looks like a recording of another run. "
         "Pass allow_mismatch=True to merge it anyway."
     )
+
+
+def _clocks_known(trace_run: Run, har_run: Run) -> bool:
+    return all(
+        as_float(r.metadata.get("start_wall_time_ms")) is not None for r in (trace_run, har_run)
+    )
+
+
+def _trace_window(run: Run) -> tuple[float, float] | None:
+    times = [
+        *(n.ts for n in run.network),
+        *(a.ts for a in run.actions),
+        *(s.ts for s in run.snapshots),
+        *(s.ts for s in run.screenshots),
+        *(c.ts for c in run.console),
+    ]
+    return (min(0.0, *times), max(times)) if times else None
 
 
 def _clock_offset(trace_run: Run, har_run: Run) -> float:
