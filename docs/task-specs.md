@@ -185,14 +185,13 @@ to review, never to failure. Prefer a `request`, `url` or `page_text` predicate 
 ### Regular expressions
 
 `url_regex`, `regex` and `page_regex` come from specs or from an LLM, so they are treated as
-untrusted. They are matched case-insensitively with Python's `re`, and a pattern is rejected
-(the predicate becomes `no_evidence` with the reason "unsafe regex") when it:
-
-- is longer than 300 characters, or
-- repeats a group whose body itself repeats or alternates, such as `(a+)+`, `(a*)*`,
-  `(a|aa)+`, `(\w+\s?)*` or `(.*a){20}`. These can backtrack catastrophically. The check is
-  conservative and also rejects a few safe patterns like `([\w-]+\.)+`; write them without
-  the outer repetition, for example `[\w.-]+`.
+untrusted. They are matched case-insensitively with the [`regex`](https://pypi.org/project/regex/)
+engine, which accepts Python `re` syntax (lookarounds and backreferences included) and supports
+a per-match timeout. A pattern longer than 300 characters is rejected (the predicate becomes
+`no_evidence` with the reason "unsafe regex"). Every other valid pattern runs, but each search
+stops after 50 ms: a pattern that backtracks catastrophically on the evidence, such as `(a+)+$`
+on a long run of `a`, makes the predicate `no_evidence` with the reason "regex timed out", and a
+spec `allow` entry whose regex times out explains no mutation.
 
 A regex reads at most the first and the last 10,000 characters of a URL or a page's text.
 

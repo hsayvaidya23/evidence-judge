@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import math
 import re
-from dataclasses import dataclass
 from enum import Enum
 from typing import Final, Literal, cast
 from urllib.parse import parse_qsl, unquote, unquote_plus, urlsplit
 
-from evidence_judge.checks.errors import InvalidPredicateError
+import regex
+
+from evidence_judge.checks.errors import InvalidPredicateError, RegexTimeoutError
 from evidence_judge.textnorm import normalize
 
 Op = Literal["==", "!=", "<", "<=", ">", ">=", "contains"]
@@ -284,105 +285,37 @@ def host_allowed(host: str | None, allowed: list[str]) -> bool:
 
 MAX_REGEX_LENGTH: Final = 300
 MAX_REGEX_INPUT: Final = 10_000
-_BRACE_QUANTIFIER = re.compile(r"\{(\d*)(,(\d*))?\}")
+REGEX_TIMEOUT_SECONDS: Final = 0.05
 
 
-@dataclass(slots=True)
-class _Group:
-    repeats: bool = False
-    alternates: bool = False
+def compile_regex(pattern: str) -> regex.Pattern[str]:
+    """Compile an untrusted (spec or LLM) regex with the `regex` engine, case-insensitively.
 
-
-def _quantifier_at(pattern: str, at: int) -> tuple[int, bool] | None:
-    """(length, repeats) of a quantifier starting at `at`; repeats means it allows more than one."""
-    if at >= len(pattern):
-        return None
-    char = pattern[at]
-    if char in "*+":
-        return 1, True
-    if char == "?":
-        return 1, False
-    if char != "{":
-        return None
-    brace = _BRACE_QUANTIFIER.match(pattern, at)
-    if brace is None or (not brace[1] and brace[2] is None):
-        return None
-    upper = brace[1] if brace[2] is None else brace[3]
-    return len(brace[0]), not upper or int(upper) > 1
-
-
-def _class_end(pattern: str, at: int) -> int:
-    """Index just past the character class opening at `at`."""
-    i = at + 1
-    if i < len(pattern) and pattern[i] == "^":
-        i += 1
-    if i < len(pattern) and pattern[i] == "]":
-        i += 1
-    while i < len(pattern) and pattern[i] != "]":
-        i += 2 if pattern[i] == "\\" else 1
-    return i + 1
-
-
-def _skip_quantifier(pattern: str, at: int, stack: list[_Group]) -> int:
-    quantifier = _quantifier_at(pattern, at)
-    if quantifier is None:
-        return at
-    length, repeats = quantifier
-    stack[-1].repeats |= repeats
-    end = at + length
-    return end + 1 if end < len(pattern) and pattern[end] in "?+" else end
-
-
-def unsafe_regex_reason(pattern: str) -> str | None:
-    """Why `pattern` risks catastrophic backtracking, or None.
-
-    Conservative: any repeated group whose body repeats or alternates is rejected, e.g.
-    `(a+)+`, `(a*)*`, `(a|aa)+`, `(.*a){20}`.
+    Patterns over MAX_REGEX_LENGTH characters are rejected. Backtracking is bounded at match
+    time instead (regex_search), so any valid pattern is accepted.
     """
-    stack = [_Group()]
-    i = 0
-    while i < len(pattern):
-        char = pattern[i]
-        if char == "\\":
-            i = _skip_quantifier(pattern, i + 2, stack)
-        elif char == "[":
-            i = _skip_quantifier(pattern, _class_end(pattern, i), stack)
-        elif char == "(":
-            stack.append(_Group())
-            i += 2 if pattern.startswith("(?", i) else 1
-        elif char == ")" and len(stack) > 1:
-            group = stack.pop()
-            quantifier = _quantifier_at(pattern, i + 1)
-            if quantifier and quantifier[1] and (group.repeats or group.alternates):
-                inner = "a repeated or alternating body"
-                return f"a repeated group with {inner} can backtrack catastrophically"
-            stack[-1].repeats |= group.repeats
-            stack[-1].alternates |= group.alternates
-            i = _skip_quantifier(pattern, i + 1, stack)
-        elif char == "|":
-            stack[-1].alternates = True
-            i += 1
-        else:
-            i = _skip_quantifier(pattern, i + 1, stack)
-    return None
-
-
-def compile_regex(pattern: str) -> re.Pattern[str]:
-    """Compile an untrusted (spec or LLM) regex; reject long or backtracking-prone patterns."""
     if len(pattern) > MAX_REGEX_LENGTH:
         raise InvalidPredicateError(
             f"unsafe regex: pattern is longer than {MAX_REGEX_LENGTH} characters"
         )
-    if (reason := unsafe_regex_reason(pattern)) is not None:
-        raise InvalidPredicateError(f"unsafe regex {pattern!r}: {reason}")
     try:
-        return re.compile(pattern, re.IGNORECASE)
-    except re.error as exc:
+        return regex.compile(pattern, regex.IGNORECASE | regex.VERSION0)
+    except (regex.error, ValueError) as exc:
         raise InvalidPredicateError(f"invalid regex {pattern!r}: {exc}") from exc
 
 
-def regex_search(regex: re.Pattern[str], text: str) -> re.Match[str] | None:
-    """Search at most the first and last MAX_REGEX_INPUT characters of `text`."""
-    if len(text) <= 2 * MAX_REGEX_INPUT:
-        return regex.search(text)
-    return regex.search(text, 0, MAX_REGEX_INPUT) or regex.search(text, len(text) - MAX_REGEX_INPUT)
+def regex_search(compiled: regex.Pattern[str], text: str) -> regex.Match[str] | None:
+    """Search at most the first and last MAX_REGEX_INPUT characters of `text`.
+
+    Each search may run for REGEX_TIMEOUT_SECONDS; past that it raises RegexTimeoutError, which
+    checkers turn into NO_EVIDENCE.
+    """
+    try:
+        if len(text) <= 2 * MAX_REGEX_INPUT:
+            return compiled.search(text, timeout=REGEX_TIMEOUT_SECONDS)
+        return compiled.search(
+            text, 0, MAX_REGEX_INPUT, timeout=REGEX_TIMEOUT_SECONDS
+        ) or compiled.search(text, len(text) - MAX_REGEX_INPUT, timeout=REGEX_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        budget = round(REGEX_TIMEOUT_SECONDS * 1000)
+        raise RegexTimeoutError(f"regex timed out after {budget} ms: /{compiled.pattern}/") from exc

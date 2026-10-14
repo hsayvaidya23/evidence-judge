@@ -9,6 +9,10 @@ class InvalidPredicateError(CheckError):
     """The predicate cannot be evaluated as written (bad regex, malformed status, no criteria)."""
 
 
+class RegexTimeoutError(InvalidPredicateError):
+    """An untrusted regex ran past its time budget on the evidence."""
+
+
 class UnknownPredicateKindError(CheckError):
     def __init__(self, kind: str) -> None:
         super().__init__(f"no checker registered for predicate kind {kind!r}")

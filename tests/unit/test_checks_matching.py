@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import time
 
 import pytest
 
-from evidence_judge.checks.errors import InvalidPredicateError
+from evidence_judge.checks.errors import InvalidPredicateError, RegexTimeoutError
 from evidence_judge.checks.matching import (
     MAX_REGEX_INPUT,
     MAX_REGEX_LENGTH,
@@ -235,25 +236,28 @@ def test_compile_regex_raises_typed_error() -> None:
 
 
 @pytest.mark.parametrize(
-    "pattern",
+    ("pattern", "text"),
     [
-        r"(a+)+$",
-        r"(a*)*b",
-        r"(a|a)*$",
-        r"(a|aa)+$",
-        r"(?:\w+\s?)*!",
-        r"(.*a){20}",
-        r"((ab)*c)+",
-        r"(x+x+)+y",
-        r"((a|b))+c",
-        r"(a+){2,}",
+        (r"(a+)+$", "a" * 9000 + "!"),
+        (r"(\w|\d)+$", "a" * 9000 + "!"),
+        (r"(x+x+)+y", "x" * 9000),
     ],
+    ids=["nested-plus", "alternation", "adjacent-plus"],
 )
-def test_compile_regex_rejects_nested_quantifiers_fast(pattern: str) -> None:
+def test_backtracking_regex_times_out_with_a_typed_error(pattern: str, text: str) -> None:
     start = time.perf_counter()
-    with pytest.raises(InvalidPredicateError, match="unsafe regex"):
-        compile_regex(pattern)
-    assert time.perf_counter() - start < 0.05
+    with pytest.raises(RegexTimeoutError, match="regex timed out"):
+        regex_search(compile_regex(pattern), text)
+    assert time.perf_counter() - start < 0.2
+
+
+def test_quadratic_patterns_on_long_input_finish_fast() -> None:
+    text = "a" * 9000 + "!"
+    start = time.perf_counter()
+    for pattern in (r".*.*.*=", r"a*a*a*a*b", r"\w*\w*\w*\w*!x", r"[a-z]*[a-z]*[a-z]*1"):
+        with contextlib.suppress(RegexTimeoutError):
+            assert regex_search(compile_regex(pattern), text) is None
+    assert time.perf_counter() - start < 0.2
 
 
 def test_compile_regex_rejects_long_patterns() -> None:
@@ -274,6 +278,9 @@ def test_compile_regex_rejects_long_patterns() -> None:
         (r"(?P<id>\d+)/items", "/orders/42/items"),
         (r"a{2}b{1,3}", "aabbb"),
         (r"(ab){2}", "abab"),
+        (r"(?:a|b)*c", "ababc"),
+        (r"([\w-]+\.)+com", "shop.example.com"),
+        (r"(?<=order )\d+", "order 42"),
     ],
 )
 def test_compile_regex_accepts_ordinary_patterns(pattern: str, text: str) -> None:

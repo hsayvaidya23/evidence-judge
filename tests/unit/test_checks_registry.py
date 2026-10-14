@@ -15,7 +15,7 @@ from evidence_judge.core.predicates import (
     UrlPredicate,
 )
 from evidence_judge.core.verdict import Support
-from tests.unit.conftest import ctx, honest_run
+from tests.unit.conftest import ctx, final, honest_run, make_run, snap
 
 
 def test_default_registry_covers_every_predicate_kind() -> None:
@@ -50,9 +50,9 @@ def test_unknown_kind_and_duplicates() -> None:
 
 async def test_catastrophic_regex_is_no_evidence_without_hanging() -> None:
     start = time.perf_counter()
-    res = await default_registry().evaluate(
-        UrlPredicate(regex="(a+)+$", scope=Scope.ANY), ctx(honest_run())
-    )
+    long_page = "/" + "a" * 9000 + "!"
+    run = make_run(snapshots=[snap(1, long_page, "x")], final_state=final(long_page, "x"))
+    res = await default_registry().evaluate(UrlPredicate(regex="(a+)+$", scope=Scope.ANY), ctx(run))
     assert time.perf_counter() - start < 0.5
     assert res.status is Support.NO_EVIDENCE
-    assert "unsafe regex" in res.reason
+    assert "regex timed out" in res.reason

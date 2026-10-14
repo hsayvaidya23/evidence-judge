@@ -115,9 +115,12 @@ shape the pipeline:
 - **Screenshots load lazily.** `Run.blobs` is a `BlobStore` mapping: trace screenshots stay in
   the zip and are read on demand by `EvidenceIndex.screenshot_bytes` and the HTML report, so the
   trace file must stay in place until the report is written.
-- **Regexes are bounded.** Spec and LLM regexes over 300 characters or with a repeated group
-  that repeats or alternates inside are rejected (`checks/matching.py`, `compile_regex`), and
-  every regex reads at most the first and last 10,000 characters of its input.
+- **Regexes are bounded.** Spec and LLM regexes over 300 characters are rejected
+  (`checks/matching.py`, `compile_regex`). The rest run on the `regex` engine with a 50 ms
+  timeout per search (`regex_search`); a timeout makes the predicate `no_evidence` ("regex timed
+  out"). Every regex reads at most the first and last 10,000 characters of its input. The
+  `regex` package was chosen over RE2 because it keeps Python `re` syntax (lookarounds,
+  backreferences) for existing specs while still bounding every match.
 - **Merging checks provenance.** `attach_har` pairs requests in linear time and raises
   `MismatchedEvidenceError` when a HAR shares fewer than half of a trace's requests.
 - **Redaction covers text only.** Bodies, headers, URLs, snapshot text and HTML (including the
