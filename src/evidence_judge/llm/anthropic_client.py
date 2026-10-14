@@ -1,10 +1,18 @@
 """LLMClient backed by the official Anthropic SDK (optional extra `anthropic`).
 
-Structured output is obtained by offering exactly one tool whose input schema is the pydantic
-schema, then validating the tool input with pydantic. Current models (Opus 5.5, Sonnet 5.5,
-Fable 5.1) reject a forced `tool_choice`, and Haiku 5.5 runs with thinking on by default, which
-is incompatible with forcing; for those the tool is offered with `auto` plus an explicit
-instruction, and a missing call is treated like a validation failure (retried once).
+Models that support structured outputs get `output_config.format` with a strict JSON schema
+derived from the pydantic model, so the API constrains the reply to schema-valid JSON. The reply
+is still validated with pydantic (string and number constraints the API cannot enforce are checked
+client-side) and an invalid reply is retried once with the error appended. Older models get one
+forced tool whose input schema is the pydantic schema.
+
+Thinking: Haiku 5.5, Sonnet 5.5 and Opus 5.5 think by default and thinking tokens count toward
+`max_tokens`; callers bound it with `LLMRequest.effort` (sent as `output_config.effort` to models
+that accept it) and a `max_output_tokens` with room for thinking. A reply cut off at `max_tokens`
+raises instead of being retried with the same limit.
+
+Transient errors (408/409/429/5xx, connection errors, timeouts) are retried by the SDK itself
+with exponential backoff and jitter, honouring `retry-after`; see `Settings.max_retries`.
 """
 
 from __future__ import annotations
@@ -15,9 +23,9 @@ import logging
 import math
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from evidence_judge.config import Settings
 from evidence_judge.core.verdict import Usage
@@ -31,8 +39,8 @@ if TYPE_CHECKING:
         ContentBlockParam,
         ImageBlockParam,
         Message,
+        OutputConfigParam,
         TextBlockParam,
-        ToolChoiceParam,
         ToolParam,
     )
 
@@ -43,13 +51,36 @@ _MAX_ERROR_CHARS = 2_000
 _CHARS_PER_TOKEN_ESTIMATE = 3.0
 _IMAGE_TOKEN_ESTIMATE = 1_600
 _IMAGE_MEDIA_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
-_AUTO_TOOL_CHOICE_MODELS = frozenset(
+_STRUCTURED_OUTPUT_MODELS = frozenset(
     {
-        "claude-opus-5-5",
-        "claude-sonnet-5-5",
-        "claude-haiku-5-5",
         "claude-fable-5-1",
         "claude-mythos-5-1",
+        "claude-fable-5",
+        "claude-mythos-5",
+        "claude-opus-5-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-sonnet-5-5",
+        "claude-sonnet-5",
+        "claude-haiku-5-5",
+        "claude-haiku-4-5",
+    }
+)
+_EFFORT_MODELS = frozenset(
+    {
+        "claude-fable-5-1",
+        "claude-mythos-5-1",
+        "claude-fable-5",
+        "claude-mythos-5",
+        "claude-opus-5-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-5-5",
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+        "claude-haiku-5-5",
     }
 )
 
@@ -96,12 +127,10 @@ class AnthropicClient:
         budget: Budget | None = None,
         prices: PriceTable = DEFAULT_PRICES,
         sdk_client: AsyncAnthropic | None = None,
-        force_tool_choice: bool | None = None,
     ) -> None:
         self._settings = settings
         self._budget = budget
         self._prices = prices
-        self._force_tool_choice = force_tool_choice
         self._client = sdk_client if sdk_client is not None else _load_sdk_client(settings)
         self.totals = TokenTotals()
 
@@ -111,14 +140,17 @@ class AnthropicClient:
     async def generate(self, request: LLMRequest, schema: type[T]) -> tuple[T, Usage]:
         model = self.model_for(request.tier)
         price = price_for(model, self._prices)
-        input_schema = schema.model_json_schema()
+        structured = model in _STRUCTURED_OUTPUT_MODELS
+        json_schema = strict_json_schema(schema) if structured else schema.model_json_schema()
         usage = Usage()
         error: str | None = None
         for _attempt in range(2):
-            message, call_usage = await self._call(model, price, request, input_schema, error)
+            message, call_usage = await self._call(
+                model, price, request, json_schema, error, structured=structured
+            )
             usage.add(call_usage)
             try:
-                return self._parse(message, schema), usage
+                return self._parse(message, schema, request, structured=structured), usage
             except _InvalidOutputError as exc:
                 error = str(exc)[:_MAX_ERROR_CHARS]
                 logger.debug("structured output invalid for %s, retrying once", schema.__name__)
@@ -129,8 +161,10 @@ class AnthropicClient:
         model: str,
         price: ModelPrice,
         request: LLMRequest,
-        input_schema: dict[str, Any],
+        json_schema: dict[str, Any],
         previous_error: str | None,
+        *,
+        structured: bool,
     ) -> tuple[Message, Usage]:
         from anthropic import (
             AnthropicError,
@@ -138,6 +172,7 @@ class AnthropicClient:
             APIStatusError,
             APITimeoutError,
             RateLimitError,
+            omit,
         )
 
         prompt = (
@@ -147,16 +182,26 @@ class AnthropicClient:
         )
         reserved = 0.0
         if self._budget is not None:
-            reserved = self._budget.reserve(self._estimate(price, request, prompt, input_schema))
+            reserved = self._budget.reserve(self._estimate(price, request, prompt, json_schema))
+        output_config: OutputConfigParam = {}
+        if structured:
+            output_config["format"] = {"type": "json_schema", "schema": json_schema}
+        if request.effort is not None and model in _EFFORT_MODELS:
+            output_config["effort"] = request.effort
         started = time.perf_counter()
         try:
             message = await self._client.messages.create(
                 model=model,
                 max_tokens=request.max_output_tokens,
-                system=self._system(request.system),
+                system=self._system(request.system, structured=structured),
                 messages=[{"role": "user", "content": self._content(prompt, request.images)}],
-                tools=[self._tool(input_schema)],
-                tool_choice=self._tool_choice(model),
+                output_config=output_config or omit,
+                tools=omit if structured else [self._tool(json_schema)],
+                tool_choice=(
+                    omit
+                    if structured
+                    else {"type": "tool", "name": TOOL_NAME, "disable_parallel_tool_use": True}
+                ),
             )
         except APITimeoutError as exc:
             self._release(reserved)
@@ -220,9 +265,18 @@ class AnthropicClient:
             latency_ms=latency_ms,
         )
 
-    def _parse(self, message: Message, schema: type[T]) -> T:
+    def _parse(
+        self, message: Message, schema: type[T], request: LLMRequest, *, structured: bool
+    ) -> T:
         if message.stop_reason == "refusal":
             raise LLMError("The model declined the request (stop_reason=refusal)")
+        if message.stop_reason == "max_tokens":
+            raise LLMError(
+                f"Model output was cut off at max_tokens={request.max_output_tokens} "
+                "(thinking counts toward it); raise max_output_tokens or lower effort"
+            )
+        if structured:
+            return _parse_json(message, schema)
         for block in message.content:
             if block.type == "tool_use" and block.name == TOOL_NAME:
                 try:
@@ -235,28 +289,22 @@ class AnthropicClient:
         )
 
     def _estimate(
-        self, price: ModelPrice, request: LLMRequest, prompt: str, input_schema: dict[str, Any]
+        self, price: ModelPrice, request: LLMRequest, prompt: str, json_schema: dict[str, Any]
     ) -> float:
-        chars = len(request.system) + len(prompt) + len(json.dumps(input_schema))
+        chars = len(request.system) + len(prompt) + len(json.dumps(json_schema))
         input_tokens = math.ceil(chars / _CHARS_PER_TOKEN_ESTIMATE)
         input_tokens += _IMAGE_TOKEN_ESTIMATE * len(request.images)
         return price.cost(input_tokens=input_tokens, output_tokens=request.max_output_tokens)
 
-    def _uses_forced_tool_choice(self, model: str) -> bool:
-        if self._force_tool_choice is not None:
-            return self._force_tool_choice
-        return model not in _AUTO_TOOL_CHOICE_MODELS
-
-    def _tool_choice(self, model: str) -> ToolChoiceParam:
-        if self._uses_forced_tool_choice(model):
-            return {"type": "tool", "name": TOOL_NAME, "disable_parallel_tool_use": True}
-        return {"type": "auto", "disable_parallel_tool_use": True}
-
     @staticmethod
-    def _system(system: str) -> list[TextBlockParam]:
+    def _system(system: str, *, structured: bool) -> list[TextBlockParam]:
         text = (
-            f"{system}\n\nReturn your answer only by calling the `{TOOL_NAME}` tool exactly once, "
-            "with input that satisfies its JSON schema. Do not answer in plain text."
+            system
+            if structured
+            else (
+                f"{system}\n\nReturn your answer only by calling the `{TOOL_NAME}` tool exactly "
+                "once, with input that satisfies its JSON schema. Do not answer in plain text."
+            )
         )
         return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
 
@@ -276,6 +324,43 @@ class AnthropicClient:
         return blocks
 
 
+def strict_json_schema(schema: type[BaseModel]) -> dict[str, Any]:
+    """The JSON schema sent as `output_config.format`.
+
+    Every object is closed with `additionalProperties: false`, `const` discriminators become
+    required single-value enums, and keywords the API does not support (string lengths, numeric
+    bounds, pydantic's `discriminator` mapping) are moved into descriptions by the SDK's
+    `transform_schema`; pydantic validation enforces them afterwards.
+    """
+    from anthropic import transform_schema
+
+    pinned = cast("dict[str, Any]", _pin_constants(schema.model_json_schema()))
+    return transform_schema(pinned)
+
+
+def _pin_constants(node: Any) -> Any:
+    if isinstance(node, list):
+        return [_pin_constants(item) for item in cast("list[Any]", node)]
+    if not isinstance(node, dict):
+        return node
+    source = cast("dict[str, Any]", node)
+    out: dict[str, Any] = {
+        key: _pin_constants(value) for key, value in source.items() if key != "discriminator"
+    }
+    if "const" in out and "enum" not in out:
+        out["enum"] = [out.pop("const")]
+    properties = source.get("properties")
+    if isinstance(properties, dict):
+        props = cast("dict[str, Any]", properties)
+        constant = [
+            name for name, prop in props.items() if isinstance(prop, dict) and "const" in prop
+        ]
+        required = [*cast("list[str]", out.get("required", [])), *constant]
+        if required:
+            out["required"] = list(dict.fromkeys(required))
+    return out
+
+
 def _image_block(image: Image) -> ImageBlockParam:
     if image.mime_type not in _IMAGE_MEDIA_TYPES:
         raise LLMError(f"Unsupported image type {image.mime_type!r}")
@@ -292,9 +377,21 @@ def _image_block(image: Image) -> ImageBlockParam:
 def _with_error(prompt: str, error: str) -> str:
     return (
         f"{prompt}\n\n<previous_attempt_error>\n{error}\n</previous_attempt_error>\n"
-        f"Your previous attempt was rejected for the reason above. "
-        f"Call `{TOOL_NAME}` again with corrected input."
+        "Your previous attempt was rejected for the reason above. "
+        "Answer again with corrected output."
     )
+
+
+def _parse_json(message: Message, schema: type[T]) -> T:
+    text = "".join(block.text for block in message.content if block.type == "text").strip()
+    if not text:
+        raise _InvalidOutputError(
+            f"No JSON output in the response (stop_reason={message.stop_reason})"
+        )
+    try:
+        return schema.model_validate_json(text)
+    except ValidationError as exc:
+        raise _InvalidOutputError(_format_validation_error(exc)) from exc
 
 
 def _format_validation_error(exc: ValidationError) -> str:

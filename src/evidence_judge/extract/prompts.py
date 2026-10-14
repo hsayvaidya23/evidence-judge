@@ -201,7 +201,7 @@ quotes short (the minimal span that states the claim).
 - Extract at most 30 claims; prefer key claims if there are more.
 
 # Predicates (1-3 per claim; any single one satisfied proves the claim)
-Use ONLY these kinds and fields from the tool schema, with concrete values:
+Use ONLY these kinds and fields from the output schema, with concrete values:
 - request: an HTTP request happened. method (e.g. POST), url_contains (substrings, all must \
 appear), body_contains, response_contains, status ("2xx" default). Best for side effects: \
 "placed the order" -> method POST, url_contains ["order"].
@@ -220,8 +220,8 @@ evidence, ids or values that are not stated in the agent output or task.
 # Examples
 {chr(10).join(_render_example(example) for example in _EXAMPLES)}
 
-Submit the claims for the real input with the provided tool. If there are no checkable claims, \
-submit an empty list."""
+Submit the claims for the real input in the required output format. If there are no checkable \
+claims, submit an empty list."""
 
 
 def build_extraction_prompt(*, task: str | None, answer: str | None, reasoning: list[str]) -> str:

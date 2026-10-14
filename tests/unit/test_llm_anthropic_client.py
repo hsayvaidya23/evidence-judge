@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import base64
-from typing import Any
+import json
+from typing import Any, Literal
 
 import anthropic
 import httpx2
@@ -10,7 +11,8 @@ from anthropic.types import Message
 from pydantic import BaseModel, SecretStr
 
 from evidence_judge.config import Settings
-from evidence_judge.llm.anthropic_client import TOOL_NAME, AnthropicClient
+from evidence_judge.extract.schema import ClaimExtraction
+from evidence_judge.llm.anthropic_client import TOOL_NAME, AnthropicClient, strict_json_schema
 from evidence_judge.llm.base import BudgetExceededError, Image, LLMError, LLMRequest, Tier
 from evidence_judge.llm.budget import Budget
 
@@ -32,7 +34,7 @@ def _settings(**overrides: Any) -> Settings:
 
 
 def _message(
-    content: list[dict[str, Any]], *, stop_reason: str = "tool_use", **usage: int
+    content: list[dict[str, Any]], *, stop_reason: str = "end_turn", **usage: int
 ) -> Message:
     return Message.model_validate(
         {
@@ -53,6 +55,13 @@ def _message(
     )
 
 
+_THINKING = {"type": "thinking", "thinking": "", "signature": "sig"}
+
+
+def _json(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    return [_THINKING, {"type": "text", "text": json.dumps(payload)}]
+
+
 def _tool_use(payload: dict[str, Any], name: str = TOOL_NAME) -> dict[str, Any]:
     return {"type": "tool_use", "id": "toolu_1", "name": name, "input": payload}
 
@@ -63,7 +72,7 @@ class _Messages:
         self.calls: list[dict[str, Any]] = []
 
     async def create(self, **kwargs: Any) -> Message:
-        self.calls.append(kwargs)
+        self.calls.append({k: v for k, v in kwargs.items() if not isinstance(v, anthropic.Omit)})
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -75,14 +84,14 @@ class FakeSDK:
         self.messages = _Messages(list(outcomes))
 
 
-def _client(sdk: FakeSDK, **kwargs: Any) -> AnthropicClient:
-    return AnthropicClient(_settings(), sdk_client=sdk, **kwargs)  # type: ignore[arg-type]
+def _client(sdk: FakeSDK, settings: Settings | None = None, **kwargs: Any) -> AnthropicClient:
+    return AnthropicClient(settings or _settings(), sdk_client=sdk, **kwargs)  # type: ignore[arg-type]
 
 
 async def test_returns_validated_model_and_usage_with_cache_tokens():
     sdk = FakeSDK(
         _message(
-            [_tool_use({"label": "ok", "score": 3})],
+            _json({"label": "ok", "score": 3}),
             input_tokens=1_000,
             output_tokens=200,
             cache_write=500,
@@ -101,8 +110,8 @@ async def test_returns_validated_model_and_usage_with_cache_tokens():
     assert client.totals.cache_write_tokens == 500
 
 
-async def test_request_shape_tool_schema_system_cache_and_tier_model():
-    sdk = FakeSDK(_message([_tool_use({"label": "a", "score": 1})]))
+async def test_request_uses_structured_output_format_not_tools():
+    sdk = FakeSDK(_message(_json({"label": "a", "score": 1})))
     client = _client(sdk)
     image = Image(data=b"\x89PNG", mime_type="image/png")
     await client.generate(
@@ -110,11 +119,15 @@ async def test_request_shape_tool_schema_system_cache_and_tier_model():
     )
     call = sdk.messages.calls[0]
     assert call["model"] == "claude-sonnet-5-5"
-    assert call["tools"][0]["name"] == TOOL_NAME
-    assert call["tools"][0]["input_schema"] == Verdict.model_json_schema()
-    assert call["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert call["system"][0]["text"].startswith("judge")
-    assert call["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
+    assert "tools" not in call
+    assert "tool_choice" not in call
+    assert call["output_config"] == {
+        "format": {"type": "json_schema", "schema": strict_json_schema(Verdict)}
+    }
+    assert call["max_tokens"] == 4096
+    assert call["system"] == [
+        {"type": "text", "text": "judge", "cache_control": {"type": "ephemeral"}}
+    ]
     image_block, text_block = call["messages"][0]["content"]
     assert image_block["source"] == {
         "type": "base64",
@@ -124,18 +137,37 @@ async def test_request_shape_tool_schema_system_cache_and_tier_model():
     assert text_block == {"type": "text", "text": "look"}
 
 
-async def test_forced_tool_choice_for_models_that_support_it():
-    sdk = FakeSDK(_message([_tool_use({"label": "a", "score": 1})]))
-    client = AnthropicClient(_settings(model_fast="claude-haiku-4-5"), sdk_client=sdk)  # type: ignore[arg-type]
-    await client.generate(LLMRequest(system="s", prompt="p"), Verdict)
-    assert sdk.messages.calls[0]["tool_choice"]["type"] == "tool"
-    assert sdk.messages.calls[0]["tool_choice"]["name"] == TOOL_NAME
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [("claude-sonnet-5-5", "low"), ("claude-haiku-5-5", "low"), ("claude-haiku-4-5", None)],
+)
+async def test_effort_is_sent_only_to_models_that_accept_it(model: str, expected: str | None):
+    sdk = FakeSDK(_message(_json({"label": "a", "score": 1})))
+    client = _client(sdk, _settings(model_fast=model))
+    await client.generate(LLMRequest(system="s", prompt="p", effort="low"), Verdict)
+    assert sdk.messages.calls[0]["output_config"].get("effort") == expected
+
+
+async def test_legacy_models_use_a_forced_tool():
+    sdk = FakeSDK(_message([_tool_use({"label": "a", "score": 1})], stop_reason="tool_use"))
+    client = _client(sdk, _settings(model_fast="claude-sonnet-4-6"))
+    result, _ = await client.generate(LLMRequest(system="s", prompt="p"), Verdict)
+    call = sdk.messages.calls[0]
+    assert result.score == 1
+    assert "output_config" not in call
+    assert call["tool_choice"] == {
+        "type": "tool",
+        "name": TOOL_NAME,
+        "disable_parallel_tool_use": True,
+    }
+    assert call["tools"][0]["input_schema"] == Verdict.model_json_schema()
+    assert TOOL_NAME in call["system"][0]["text"]
 
 
 async def test_validation_failure_retries_once_with_error_appended():
     sdk = FakeSDK(
-        _message([_tool_use({"label": "a", "score": "many"})]),
-        _message([_tool_use({"label": "a", "score": 2})]),
+        _message(_json({"label": "a", "score": "many"})),
+        _message(_json({"label": "a", "score": 2})),
     )
     client = _client(sdk)
     result, usage = await client.generate(LLMRequest(system="s", prompt="p"), Verdict)
@@ -147,12 +179,20 @@ async def test_validation_failure_retries_once_with_error_appended():
     assert "score" in retry_text
 
 
-async def test_missing_tool_call_is_retried_then_raises():
-    text_only = _message([{"type": "text", "text": "PASS"}], stop_reason="end_turn")
+async def test_non_json_output_is_retried_then_raises():
+    text_only = _message([{"type": "text", "text": "PASS"}])
     sdk = FakeSDK(text_only, text_only)
     with pytest.raises(LLMError, match="after a retry"):
         await _client(sdk).generate(LLMRequest(system="s", prompt="p"), Verdict)
     assert len(sdk.messages.calls) == 2
+
+
+async def test_max_tokens_truncation_raises_without_retry():
+    truncated = _message([_THINKING], stop_reason="max_tokens")
+    sdk = FakeSDK(truncated)
+    with pytest.raises(LLMError, match="max_tokens"):
+        await _client(sdk).generate(LLMRequest(system="s", prompt="p"), Verdict)
+    assert len(sdk.messages.calls) == 1
 
 
 async def test_refusal_raises_without_retry():
@@ -160,6 +200,37 @@ async def test_refusal_raises_without_retry():
     with pytest.raises(LLMError, match="declined"):
         await _client(sdk).generate(LLMRequest(system="s", prompt="p"), Verdict)
     assert len(sdk.messages.calls) == 1
+
+
+def _walk(node: Any) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    if isinstance(node, dict):
+        found.append(node)  # pyright: ignore[reportUnknownArgumentType]
+        for value in node.values():  # pyright: ignore[reportUnknownVariableType]
+            found.extend(_walk(value))
+    elif isinstance(node, list):
+        for value in node:  # pyright: ignore[reportUnknownVariableType]
+            found.extend(_walk(value))
+    return found
+
+
+class Tagged(BaseModel):
+    kind: Literal["tagged"] = "tagged"
+    note: str | None = None
+
+
+def test_strict_schema_closes_objects_and_keeps_discriminators():
+    schema = strict_json_schema(ClaimExtraction)
+    nodes = _walk(schema)
+    objects = [n for n in nodes if n.get("type") == "object"]
+    assert objects
+    assert all(n["additionalProperties"] is False for n in objects)
+    assert not any("const" in n or "discriminator" in n for n in nodes)
+    assert not any("minLength" in n for n in nodes)
+    tagged = strict_json_schema(Tagged)
+    assert tagged["properties"]["kind"]["enum"] == ["tagged"]
+    assert "kind" in tagged["required"]
+    Tagged.model_validate({"kind": "tagged"})
 
 
 def _request() -> httpx2.Request:
@@ -197,7 +268,7 @@ async def test_sdk_errors_map_to_llm_error_and_release_budget(error: Exception, 
 
 
 async def test_budget_blocks_call_before_sending():
-    sdk = FakeSDK(_message([_tool_use({"label": "a", "score": 1})]))
+    sdk = FakeSDK(_message(_json({"label": "a", "score": 1})))
     client = _client(sdk, budget=Budget(1e-9))
     with pytest.raises(BudgetExceededError):
         await client.generate(LLMRequest(system="s", prompt="p"), Verdict)
@@ -205,9 +276,7 @@ async def test_budget_blocks_call_before_sending():
 
 
 async def test_budget_settles_actual_cost():
-    sdk = FakeSDK(
-        _message([_tool_use({"label": "a", "score": 1})], input_tokens=10, output_tokens=10)
-    )
+    sdk = FakeSDK(_message(_json({"label": "a", "score": 1}), input_tokens=10, output_tokens=10))
     budget = Budget(1.0)
     _, usage = await _client(sdk, budget=budget).generate(
         LLMRequest(system="s", prompt="p"), Verdict

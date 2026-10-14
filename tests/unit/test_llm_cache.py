@@ -46,7 +46,7 @@ async def test_cache_survives_new_client_instance(tmp_path: Path):
     assert inner.calls == []
 
 
-async def test_key_changes_with_prompt_image_tier_and_schema(tmp_path: Path):
+async def test_key_changes_with_prompt_image_tier_effort_and_schema(tmp_path: Path):
     base = LLMRequest(system="s", prompt="p")
     keys = {
         cache_key("m", base, "Answer", "{}"),
@@ -57,8 +57,10 @@ async def test_key_changes_with_prompt_image_tier_and_schema(tmp_path: Path):
         cache_key("m", base, "Other", "{}"),
         cache_key("m", base, "Answer", '{"x": 1}'),
         cache_key("m", LLMRequest(system="t", prompt="p"), "Answer", "{}"),
+        cache_key("m", LLMRequest(system="s", prompt="p", effort="low"), "Answer", "{}"),
+        cache_key("m", LLMRequest(system="s", prompt="p", max_output_tokens=99), "Answer", "{}"),
     }
-    assert len(keys) == 8
+    assert len(keys) == 10
 
     inner = _fake(1, 2)
     client = CachedClient(inner, tmp_path, model_for=lambda tier: f"model-{tier}")

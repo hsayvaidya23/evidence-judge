@@ -84,3 +84,8 @@ def test_injection_example_does_not_extract_the_injection():
     example = prompts._EXAMPLES[1]
     quotes = " ".join(c["quote"] for c in example["output"]["claims"])
     assert "IGNORE" not in quotes
+
+
+def test_system_prompt_does_not_assume_a_tool_call():
+    assert "tool" not in EXTRACTION_SYSTEM_PROMPT.lower()
+    assert "output schema" in EXTRACTION_SYSTEM_PROMPT
