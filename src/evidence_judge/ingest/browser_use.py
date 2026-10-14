@@ -95,6 +95,8 @@ def _read_history(path: Path) -> list[JsonObject]:
         raise BrowserUseFormatError(f"{path}: not valid JSON ({exc})") from exc
     except UnicodeDecodeError as exc:
         raise BrowserUseFormatError(f"{path}: not UTF-8 text") from exc
+    except RecursionError as exc:
+        raise BrowserUseFormatError(f"{path}: JSON nests too deeply") from exc
     history = as_object(data).get("history")
     steps = as_list(history)
     if not steps and history != []:
