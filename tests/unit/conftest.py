@@ -6,6 +6,9 @@ Every run is a small, hand-built Run for a "buy a red kettle under $30" task on 
 from __future__ import annotations
 
 import json
+from typing import Literal
+
+from pydantic import BaseModel
 
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.core.evidence import (
@@ -19,7 +22,8 @@ from evidence_judge.core.evidence import (
 )
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.taskspec import TaskSpec
-from evidence_judge.llm.base import LLMClient
+from evidence_judge.core.verdict import Usage
+from evidence_judge.llm.base import LLMClient, LLMRequest
 
 HOST = "https://shop.test"
 ALL_CHANNELS = frozenset(Channel)
@@ -256,3 +260,25 @@ def shop_spec(*, allowed_hosts: list[str] | None = None) -> TaskSpec:
             "allowed_hosts": allowed_hosts or [],
         }
     )
+
+
+class FakeVisionLLM:
+    """Stand-in vision model: answers every question with a fixed yes/no/unclear."""
+
+    name = "fake-vision"
+
+    def __init__(
+        self, answer: Literal["yes", "no", "unclear"] = "yes", error: Exception | None = None
+    ) -> None:
+        self.answer = answer
+        self.error = error
+        self.requests: list[LLMRequest] = []
+
+    async def generate[T: BaseModel](self, request: LLMRequest, schema: type[T]) -> tuple[T, Usage]:
+        self.requests.append(request)
+        if self.error:
+            raise self.error
+        parsed = schema.model_validate(
+            {"answer": self.answer, "reason": f"model said {self.answer}"}
+        )
+        return parsed, Usage(llm_calls=1, input_tokens=900, output_tokens=20, cost_usd=0.002)

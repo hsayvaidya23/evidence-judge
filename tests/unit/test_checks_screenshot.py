@@ -3,35 +3,14 @@ from __future__ import annotations
 from typing import Literal
 
 import pytest
-from pydantic import BaseModel
 
 from evidence_judge.checks.screenshot import ScreenshotAnswer, ScreenshotChecker
 from evidence_judge.core.predicates import Scope, ScreenshotPredicate
-from evidence_judge.core.verdict import Support, Usage
-from evidence_judge.llm.base import BudgetExceededError, LLMRequest, Tier
-from tests.unit.conftest import ctx, honest_run, make_run
+from evidence_judge.core.verdict import Support
+from evidence_judge.llm.base import BudgetExceededError, Tier
+from tests.unit.conftest import FakeVisionLLM, ctx, honest_run, make_run
 
 QUESTION = ScreenshotPredicate(question="Does the page show an order confirmation?")
-
-
-class FakeVisionLLM:
-    name = "fake-vision"
-
-    def __init__(
-        self, answer: Literal["yes", "no", "unclear"] = "yes", error: Exception | None = None
-    ) -> None:
-        self.answer = answer
-        self.error = error
-        self.requests: list[LLMRequest] = []
-
-    async def generate[T: BaseModel](self, request: LLMRequest, schema: type[T]) -> tuple[T, Usage]:
-        self.requests.append(request)
-        if self.error:
-            raise self.error
-        parsed = schema.model_validate(
-            {"answer": self.answer, "reason": f"model said {self.answer}"}
-        )
-        return parsed, Usage(llm_calls=1, input_tokens=900, output_tokens=20, cost_usd=0.002)
 
 
 @pytest.mark.parametrize(
