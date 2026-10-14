@@ -67,6 +67,8 @@ def _case(seed: int) -> _Case:
     card = rng.choice(_CARDS)
     card_text = _format_card(rng, card) if rng.random() < 0.5 else card
     api_key = _token(rng)
+    order_ref = rng.choice(("A1", "6011000990139424", "4111111111111111"))
+    charge = rng.choice((f"paid with card {card_text}", f"was charged {card}"))
     base = honest_run()
     order = net(
         6,
@@ -79,21 +81,24 @@ def _case(seed: int) -> _Case:
             "card_number": card_text,
             "api_key": api_key,
         },
-        response={"order_id": "A1", "contact": _vary_case(rng, email)},
+        response={"order_id": order_ref, "contact": _vary_case(rng, email)},
     )
     keep_order = rng.random() < 0.8
     network = [
         order if n.id == "net#6" else n for n in base.network if keep_order or n.id != "net#6"
     ]
-    page = f"{CONFIRMATION_TEXT}. Receipt sent to {_vary_case(rng, email)}. Card {card_text}."
+    page = (
+        f"{CONFIRMATION_TEXT}. Ref {order_ref}. Receipt sent to {_vary_case(rng, email)}. "
+        f"Card {card_text}."
+    )
     run = base.model_copy(
         update={
             "network": network,
             "snapshots": [*base.snapshots, snap(9, "/order/A1", page)],
             "final_state": final("/order/A1", page, "shot#7"),
             "agent_answer": (
-                f"I placed the order. The receipt went to {_vary_case(rng, email)} and I paid "
-                f"with card {card_text} using key {api_key}."
+                f"I placed the order, ref {order_ref}. The receipt went to "
+                f"{_vary_case(rng, email)} and I {charge} using key {api_key}."
             ),
         }
     )
@@ -133,8 +138,8 @@ def _case(seed: int) -> _Case:
         ),
         Claim(
             id="c3",
-            text=f"paid with {card_text}",
-            quote=f"paid with card {card_text}",
+            text=charge,
+            quote=f"I {charge}",
             kind=ClaimKind.ACTION,
             predicates=[RequestPredicate(method="POST", body_contains=[card_text])],
         ),
@@ -156,6 +161,15 @@ def _case(seed: int) -> _Case:
     ]
     if rng.random() < 0.6:
         claims.pop()
+    claims.append(
+        Claim(
+            id="c6",
+            text=f"order ref {order_ref}",
+            quote=f"ref {order_ref}",
+            kind=ClaimKind.VALUE,
+            predicates=[PageTextPredicate(contains=f"Ref {order_ref}")],
+        )
+    )
     rng.shuffle(claims)
     return _Case(run, spec, ClaimSet(claims=claims))
 

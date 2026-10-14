@@ -357,3 +357,78 @@ def test_redaction_tokens_are_lowercase_hex_and_case_stable(r: Redactor) -> None
     assert token is not None
     assert token.group(0).split(":")[2][:-1] == token.group(0).split(":")[2][:-1].lower()
     assert red(r, out.casefold()) == out.casefold()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Order 4111111111111111 confirmed",
+        "tracking 6011000990139424 shipped",
+        '{"order_id": "4111111111111111", "status": "ok"}',
+        "order_id=4111111111111111&tracking=6011000990139424",
+        '{"payment": "visa", "order_id": "4111111111111111"}',
+        "shipment ref 5555555555554444",
+    ],
+)
+def test_bare_luhn_valid_ids_are_not_cards(r: Redactor, text: str) -> None:
+    assert red(r, text) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "4111 1111 1111 1111",
+        "4111-1111-1111-1111",
+        "3782 822463 10005",
+        "card 4111111111111111",
+        "Paid with Visa 4111111111111111.",
+        "cc: 4111111111111111",
+        '{"card_number": "4111111111111111"}',
+        '{"pan":"4111111111111111"}',
+        "ccnum=4111111111111111",
+        '{"card": {"number": "4111111111111111"}}',
+        "4111111111111111 (mastercard ending 1111)",
+    ],
+)
+def test_cards_need_card_formatting_or_card_context(r: Redactor, text: str) -> None:
+    out = red(r, text)
+    assert "4111111111111111" not in out and "1111 1111" not in out and "822463" not in out
+    assert "[REDACTED:card:" in out
+
+
+def test_card_seen_with_context_is_redacted_everywhere_in_the_run(r: Redactor) -> None:
+    run = Run(
+        run_id="r",
+        source="t",
+        agent_answer="Charged 4111111111111111 successfully.",
+        network=[
+            NetworkEvent(
+                id="net#1",
+                ts=1,
+                method="POST",
+                url="https://shop.test/api/pay",
+                request_body='{"card_number": "4111111111111111"}',
+            )
+        ],
+        captured={Channel.NETWORK},
+    )
+    redacted, _ = r.redact_run(run)
+    token = f"[REDACTED:card:{r.fingerprint(CARD_DIGITS)}]"
+    assert redacted.agent_answer == f"Charged {token} successfully."
+    claims = ClaimSet(
+        claims=[
+            Claim(
+                id="c",
+                text="charged 4111111111111111",
+                quote="Charged 4111111111111111",
+                kind=ClaimKind.ACTION,
+                predicates=[RequestPredicate(body_contains=["4111111111111111"])],
+            )
+        ]
+    )
+    red_claims, _ = r.redact_model(claims)
+    pred = red_claims.claims[0].predicates[0]
+    assert isinstance(pred, RequestPredicate)
+    assert pred.body_contains == [token]
+    assert red(Redactor(KEY), "Charged 4111111111111111") == "Charged 4111111111111111"
+
