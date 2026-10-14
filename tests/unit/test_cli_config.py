@@ -225,3 +225,13 @@ def test_no_screenshot_notice_by_default(
     monkeypatch.delenv("EVJ_SCREENSHOTS_TO_LLM", raising=False)
     result = runner.invoke(app, ["judge", "--har", str(evidence)])
     assert "unredacted" not in result.output
+
+
+def test_offline_bench_does_not_create_a_redaction_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, no_env_key: None
+) -> None:
+    monkeypatch.setenv("EVJ_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    result = runner.invoke(app, ["bench", str(GOLDEN.parent), "--seeds", "1", "-q"])
+    assert result.exit_code == ExitCode.PASS, result.output
+    assert not (tmp_path / "cache" / REDACTION_KEY_FILE).exists()

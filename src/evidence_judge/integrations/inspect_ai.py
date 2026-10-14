@@ -105,8 +105,10 @@ def _load(
     return run, spec
 
 
-def _redact(settings: Settings, run: Run, spec: TaskSpec | None) -> tuple[Run, TaskSpec | None]:
-    key = stable_redaction_key(settings)
+def _redact(
+    settings: Settings, run: Run, spec: TaskSpec | None, *, persistent: bool
+) -> tuple[Run, TaskSpec | None]:
+    key = stable_redaction_key(settings) if persistent else None
     redactor = Redactor(key) if key is not None else Redactor.from_settings(settings)
     run, _ = redactor.redact_run(run)
     if spec is not None:
@@ -162,7 +164,7 @@ def evidence_judge_scorer(
             _load, state.metadata, state.input_text, state.output.completion, root, active_settings
         )
         if redact and active_settings.redact:
-            run, spec = _redact(active_settings, run, spec)
+            run, spec = _redact(active_settings, run, spec, persistent=not offline)
         verdict = await active_judge.judge(run, JudgeOptions(offline=offline, spec=spec))
         return to_score(verdict, run, value=value, needs_review=needs_review)
 

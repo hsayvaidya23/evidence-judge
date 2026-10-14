@@ -203,15 +203,13 @@ def _check_same_run(trace_requests: int, har_requests: int, paired: int) -> None
             return
         raise MismatchedEvidenceError(
             f"the HAR ({har_requests} entries) shares none of the {trace_requests} trace "
-            "requests; it looks like a recording of another run. "
-            "Pass allow_mismatch=True to merge it anyway."
+            "requests; it looks like a recording of another run."
         )
     if paired >= MIN_HAR_MATCH_RATIO * trace_requests:
         return
     raise MismatchedEvidenceError(
         f"only {paired} of {trace_requests} trace requests appear in the HAR "
-        f"({har_requests} entries); the HAR looks like a recording of another run. "
-        "Pass allow_mismatch=True to merge it anyway."
+        f"({har_requests} entries); the HAR looks like a recording of another run."
     )
 
 
@@ -224,7 +222,7 @@ def _check_time_window(shifted: list[float], paired: set[int], window: tuple[flo
             f"the HAR's time window ({min(shifted) / 1000:+.1f}s to {max(shifted) / 1000:+.1f}s "
             "from the trace start) does not overlap the trace's "
             f"({window[0] / 1000:+.1f}s to {window[1] / 1000:+.1f}s); it looks like a recording "
-            "of another run. Pass allow_mismatch=True to merge it anyway."
+            "of another run."
         )
     _check_har_share(len(shifted), len(paired | inside), len(inside), timed=True)
 
@@ -237,10 +235,7 @@ def _check_har_share(har_requests: int, accounted: int, inside: int, *, timed: b
         if timed
         else f"only {accounted} of {har_requests} HAR entries pair with a trace request"
     )
-    raise MismatchedEvidenceError(
-        f"{reason}; the HAR looks like a recording of another run. "
-        "Pass allow_mismatch=True to merge it anyway."
-    )
+    raise MismatchedEvidenceError(f"{reason}; the HAR looks like a recording of another run.")
 
 
 def _near(ts: float, window: tuple[float, float], slack: float) -> bool:
