@@ -15,9 +15,17 @@ PUNCT_MAP: dict[int, str] = {
     0x00A0: " ",
 }
 _WS = re.compile(r"\s+")
+_PUNCT_PAIRS = tuple((chr(code), ascii_) for code, ascii_ in PUNCT_MAP.items())
+
+
+def _ascii_punctuation(text: str) -> str:
+    for char, ascii_ in _PUNCT_PAIRS:
+        if char in text:
+            text = text.replace(char, ascii_)
+    return text
 
 
 def normalize(text: str) -> str:
     """NFKC fold, ASCII punctuation, case-fold and collapse whitespace."""
-    folded = unicodedata.normalize("NFKC", text).translate(PUNCT_MAP).casefold()
+    folded = _ascii_punctuation(unicodedata.normalize("NFKC", text)).casefold()
     return _WS.sub(" ", folded).strip()
