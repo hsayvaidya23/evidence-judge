@@ -13,6 +13,9 @@ from evidence_judge.core.evidence import (
     Run,
     Screenshot,
 )
+from evidence_judge.textnorm import normalize
+
+FINAL_KEY = "final"
 
 
 class EvidenceIndex:
@@ -20,6 +23,7 @@ class EvidenceIndex:
 
     def __init__(self, run: Run) -> None:
         self.run = run
+        self._normalized: dict[str, str] = {}
 
     def has(self, channel: Channel) -> bool:
         return channel in self.run.captured
@@ -71,7 +75,11 @@ class EvidenceIndex:
         return self.run.blobs.get(shot.resource)
 
     def page_states(self) -> list[PageState]:
-        """Every page state seen, in order, ending with the final state."""
+        """Every page state seen, in order, ending with the final state. Built once per index."""
+        return self._page_states
+
+    @cached_property
+    def _page_states(self) -> list[PageState]:
         states = [
             PageState(url=s.url, title=s.title, text=s.text, snapshot_id=s.id)
             for s in self.run.snapshots
@@ -79,3 +87,13 @@ class EvidenceIndex:
         if self.final:
             states.append(self.final)
         return states
+
+    def normalized_text(self, state: PageState) -> str:
+        """`normalize(state.text)`, computed once per snapshot and once for the final state."""
+        key = FINAL_KEY if state is self.final else state.snapshot_id
+        if key is None:
+            return normalize(state.text)
+        cached = self._normalized.get(key)
+        if cached is None:
+            cached = self._normalized[key] = normalize(state.text)
+        return cached
