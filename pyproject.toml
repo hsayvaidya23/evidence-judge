@@ -26,6 +26,11 @@ dependencies = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.69"]
+otel = ["opentelemetry-api>=1.27", "opentelemetry-sdk>=1.27"]
+langfuse = ["langfuse>=3.0"]
+phoenix = ["arize-phoenix-client>=1.0"]
+inspect = ["inspect-ai>=0.3.100"]
+all = ["evidence-judge[anthropic,otel,langfuse,phoenix,inspect]"]
 
 [project.scripts]
 evidence-judge = "evidence_judge.cli:app"
@@ -45,6 +50,11 @@ dev = [
   "uvicorn>=0.32",
   "httpx>=0.28",
   "anthropic>=0.69",
+  "opentelemetry-api>=1.27",
+  "opentelemetry-sdk>=1.27",
+  "langfuse>=3.0",
+  "arize-phoenix-client>=1.0",
+  "inspect-ai>=0.3.100",
 ]
 
 [build-system]
