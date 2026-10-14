@@ -19,7 +19,9 @@ DOCUMENTED_COMMANDS = ("judge", "inspect", "bench")
 
 
 def _section(text: str, heading: str) -> str:
-    match = re.search(rf"^##+ {re.escape(heading)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
+    match = re.search(
+        rf"^##+ (?:[^\w\s`]+\s*)?{re.escape(heading)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S
+    )
     assert match is not None, f"missing section {heading!r}"
     return match.group(1)
 
