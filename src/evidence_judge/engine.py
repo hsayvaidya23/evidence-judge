@@ -23,6 +23,7 @@ from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import ClaimVerdict, RunVerdict, Usage
 from evidence_judge.extract import ClaimExtractor, HeuristicExtractor, LLMClaimExtractor, coverage
 from evidence_judge.llm.base import BudgetExceededError, LLMClient, LLMError
+from evidence_judge.llm.budget import Budget, run_budget
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +65,12 @@ class Judge:
         self._extractor = extractor
 
     async def judge(self, run: Run, options: JudgeOptions | None = None) -> RunVerdict:
-        opts = options or JudgeOptions()
+        """Judge one run. Every LLM call made for it shares one fresh `settings.max_cost_usd`
+        budget, so a Judge reused across runs, or judging runs concurrently, caps each run."""
+        with run_budget(Budget(self._settings.max_cost_usd)):
+            return await self._judge(run, options or JudgeOptions())
+
+    async def _judge(self, run: Run, opts: JudgeOptions) -> RunVerdict:
         llm = None if opts.offline else self._llm
         task = run.task or (opts.spec.task if opts.spec else None)
 

@@ -359,3 +359,77 @@ async def test_vision_only_no_on_a_key_claim_needs_review(settings: Settings) ->
     )
     assert verdict.claims[0].status is Support.CONTRADICTED
     assert verdict.outcome is Outcome.NEEDS_REVIEW
+
+
+class _ExtractionSDK:
+    def __init__(self, *, in_tokens: int = 6_000, out_tokens: int = 1_500) -> None:
+        self.messages = self
+        self.calls = 0
+        self._usage = {"input_tokens": in_tokens, "output_tokens": out_tokens}
+
+    async def create(self, **kwargs: object) -> object:
+        from anthropic.types import Message
+
+        self.calls += 1
+        await _yield()
+        return Message.model_validate(
+            {
+                "id": "msg",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-haiku-5-5",
+                "content": [{"type": "text", "text": '{"claims": []}'}],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": self._usage,
+            }
+        )
+
+
+async def _yield() -> None:
+    import asyncio
+
+    await asyncio.sleep(0)
+
+
+def _api_settings(**overrides: object) -> Settings:
+    from pydantic import SecretStr
+
+    return Settings.model_validate(
+        {"anthropic_api_key": SecretStr("sk-test-not-real"), "cache_dir": None, **overrides}
+    )
+
+
+async def test_llm_budget_is_per_judged_run_not_per_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sdk = _ExtractionSDK()
+    from evidence_judge.llm import anthropic_client, build_llm
+
+    monkeypatch.setattr(anthropic_client, "_load_sdk_client", lambda _settings: sdk)
+    settings = _api_settings()
+    judge = Judge(settings, build_llm(settings))
+    run = make_run().model_copy(update={"agent_answer": "I did it."})
+
+    for _ in range(500):
+        verdict = await judge.judge(run)
+        assert "extraction failed" not in " ".join(verdict.warnings)
+    assert sdk.calls == 500
+
+
+async def test_concurrent_judge_calls_get_their_own_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sdk = _ExtractionSDK(in_tokens=10_000, out_tokens=200_000)
+    from evidence_judge.llm import anthropic_client, build_llm
+
+    monkeypatch.setattr(anthropic_client, "_load_sdk_client", lambda _settings: sdk)
+    settings = _api_settings(max_cost_usd=0.25)
+    judge = Judge(settings, build_llm(settings))
+    run = make_run().model_copy(update={"agent_answer": "I did it."})
+
+    import asyncio
+
+    verdicts = await asyncio.gather(*(judge.judge(run) for _ in range(8)))
+
+    assert all("extraction failed" not in " ".join(v.warnings) for v in verdicts)

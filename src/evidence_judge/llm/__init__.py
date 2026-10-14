@@ -7,7 +7,7 @@ from evidence_judge.llm.base import (
     LLMRequest,
     Tier,
 )
-from evidence_judge.llm.budget import Budget
+from evidence_judge.llm.budget import Budget, current_budget, run_budget
 from evidence_judge.llm.cache import CachedClient
 from evidence_judge.llm.concurrency import ConcurrencyLimitedClient
 from evidence_judge.llm.factory import build_llm
@@ -31,5 +31,7 @@ __all__ = [
     "Tier",
     "TokenTotals",
     "build_llm",
+    "current_budget",
     "is_known_model",
+    "run_budget",
 ]
