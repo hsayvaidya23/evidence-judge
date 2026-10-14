@@ -32,6 +32,7 @@ from evidence_judge.checks.matching import (
     json_path_get,
     parse_body,
     parse_number,
+    regex_search,
     url_path,
 )
 from evidence_judge.checks.request import RequestMatcher, matching_requests
@@ -103,7 +104,7 @@ def _from_pages(regex_source: str, index: EvidenceIndex) -> Observation | None:
     if regex.groups > 1:
         raise InvalidPredicateError(f"page_regex /{regex_source}/ must have at most one group")
     for state in reversed(index.page_states()):
-        match = regex.search(state.text)
+        match = regex_search(regex, state.text)
         if match:
             value = match.group(1) if regex.groups else match.group(0)
             return Observation(value, state_id(state, index), f"the page {url_path(state.url)}")

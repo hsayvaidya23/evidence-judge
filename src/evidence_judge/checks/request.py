@@ -16,6 +16,7 @@ from evidence_judge.checks.matching import (
     compile_regex,
     contains,
     is_truncated,
+    regex_search,
     status_matches,
     url_contains,
     validate_status_spec,
@@ -82,7 +83,7 @@ class RequestMatcher:
         out.extend(
             Miss(f"URL lacks {quoted(u)}") for u in p.url_contains if not url_contains(event.url, u)
         )
-        if self._regex and not self._regex.search(event.url):
+        if self._regex and not regex_search(self._regex, event.url):
             out.append(Miss(f"URL does not match /{p.url_regex}/"))
         if not status_matches(event.status, p.status):
             got = "no response" if event.status is None else str(event.status)

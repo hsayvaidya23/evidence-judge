@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from evidence_judge.checks.errors import DuplicateCheckerError, UnknownPredicateKindError
@@ -8,6 +10,7 @@ from evidence_judge.checks.request import RequestChecker
 from evidence_judge.core.predicates import (
     PageTextPredicate,
     RequestPredicate,
+    Scope,
     ScreenshotPredicate,
     UrlPredicate,
 )
@@ -43,3 +46,13 @@ def test_unknown_kind_and_duplicates() -> None:
         registry.get("page_text")
     with pytest.raises(DuplicateCheckerError):
         registry.register(RequestChecker())
+
+
+async def test_catastrophic_regex_is_no_evidence_without_hanging() -> None:
+    start = time.perf_counter()
+    res = await default_registry().evaluate(
+        UrlPredicate(regex="(a+)+$", scope=Scope.ANY), ctx(honest_run())
+    )
+    assert time.perf_counter() - start < 0.5
+    assert res.status is Support.NO_EVIDENCE
+    assert "unsafe regex" in res.reason

@@ -12,7 +12,7 @@ from evidence_judge.checks._common import (
 )
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.errors import InvalidPredicateError
-from evidence_judge.checks.matching import compile_regex, url_contains, url_path
+from evidence_judge.checks.matching import compile_regex, regex_search, url_contains, url_path
 from evidence_judge.core.evidence import Channel, NetworkEvent
 from evidence_judge.core.index import EvidenceIndex, is_document_navigation
 from evidence_judge.core.predicates import Predicate, Scope, UrlPredicate
@@ -40,7 +40,7 @@ class UrlMatcher:
         p = self.predicate
         if p.contains is not None and not url_contains(url, p.contains):
             return False
-        return self._regex is None or self._regex.search(url) is not None
+        return self._regex is None or regex_search(self._regex, url) is not None
 
 
 def check_url(predicate: UrlPredicate, index: EvidenceIndex) -> PredicateResult:

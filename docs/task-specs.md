@@ -161,6 +161,20 @@ This is the last resort: it needs an LLM, costs money, and is less reliable than
 kinds. A "no" from the model is a weak contradiction (confidence 0.6): on its own it sends a run
 to review, never to failure. Prefer a `request`, `url` or `page_text` predicate whenever one can express the condition.
 
+### Regular expressions
+
+`url_regex`, `regex` and `page_regex` come from specs or from an LLM, so they are treated as
+untrusted. They are matched case-insensitively with Python's `re`, and a pattern is rejected
+(the predicate becomes `no_evidence` with the reason "unsafe regex") when it:
+
+- is longer than 300 characters, or
+- repeats a group whose body itself repeats or alternates, such as `(a+)+`, `(a*)*`,
+  `(a|aa)+`, `(\w+\s?)*` or `(.*a){20}`. These can backtrack catastrophically. The check is
+  conservative and also rejects a few safe patterns like `([\w-]+\.)+`; write them without
+  the outer repetition, for example `[\w.-]+`.
+
+A regex reads at most the first and the last 10,000 characters of a URL or a page's text.
+
 ## Examples
 
 ### E-commerce purchase
