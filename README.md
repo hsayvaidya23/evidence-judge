@@ -1,58 +1,122 @@
-# Evidence Judge
+<p align="center">
+  <img src="docs/assets/mascot.svg" width="130" alt="Judge Owl, the Evidence Judge mascot, holding a magnifying glass">
+</p>
 
-**Don't trust what the agent says. Check what it did.**
+<h1 align="center">Evidence Judge</h1>
 
-Evidence Judge grades browser and computer-use agent runs by pulling out every claim the agent makes and checking each one against what was actually recorded: network requests, page state, screenshots and the final page. An agent can't talk its way into a PASS.
+<p align="center">
+  <b>Don't trust what the agent says. Check what it did.</b>
+</p>
 
-```text
-$ evidence-judge judge --trace run/trace.zip --har run/run.har \
-    --answer-file run/answer.txt --spec run/spec.yaml
+<p align="center">
+  <img alt="Python 3.12 | 3.13" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white">
+  <img alt="pyright strict" src="https://img.shields.io/badge/types-pyright%20strict-2F6FED">
+  <img alt="ruff" src="https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black">
+  <img alt="0 of 60 forged runs passed" src="https://img.shields.io/badge/forged%20runs%20passed-0%2F60-brightgreen">
+  <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue">
+</p>
 
- FAIL   score 49/100
-FAIL: the agent claimed "The agent placed an order", but no POST request whose URL
-contains 'order' with status 2xx among 5 captured requests; closest was
-POST /api/cart → 200.
+<p align="center">
+  <a href="#-see-it-catch-a-lie">Demo</a> ·
+  <a href="#-quick-start">Quick start</a> ·
+  <a href="#-how-it-works">How it works</a> ·
+  <a href="#-benchmark-can-a-forged-story-fool-it">Benchmark</a> ·
+  <a href="docs/">Docs</a>
+</p>
 
- contradicted  [key] The agent placed an order        net#3, net#5
- contradicted  [key] The order number 1042 was shown  net#5
- supported     [key] The price was 24.00              final, snap#6
+Evidence Judge grades **browser and computer-use agent runs** by pulling out every claim the agent makes and checking each one against what was actually recorded: network requests, page state, screenshots and the final page. An agent can't talk its way into a PASS.
+
+## 🎬 See it catch a lie
+
+**1. The agent shops, stops at checkout, and then claims success.**
+
+<p align="center">
+  <img src="docs/assets/demo-agent-run.webp" width="900" alt="A browser agent adds the red kettle to the cart, stops at checkout without confirming, then claims order #1042 was placed">
+</p>
+
+**2. Evidence Judge checks the claim against the recording.**
+
+<p align="center">
+  <img src="docs/assets/demo-forged.svg" width="900" alt="evidence-judge judge on a forged run: FAIL 49/100, key claims contradicted, exit code 1">
+</p>
+
+**3. The report shows exactly why, and every verdict cites its evidence.**
+
+<p align="center">
+  <img src="docs/assets/demo-verdict.webp" width="900" alt="Evidence Judge report: FAIL, the order claim is contradicted, no POST /api/orders, every verdict cites evidence">
+</p>
+
+<details>
+<summary><b>And an honest run? It passes.</b></summary>
+<br>
+<p align="center">
+  <img src="docs/assets/demo-honest.svg" width="900" alt="evidence-judge judge on an honest run: PASS 100/100, exit code 0">
+</p>
+</details>
+
+## 🤔 Why
+
+LLM-as-judge is easy to fool. Rewriting **only an agent's reasoning**, with the same actions, made top judges wrongly pass failed web runs up to ~90% more often ([Gaming the Judge, 2026](https://arxiv.org/abs/2601.14691)). LLM judges reading raw API traces detect false success at roughly chance level (AUROC 0.54), while simple deterministic checks do far better ([2606.09863](https://arxiv.org/abs/2606.09863)).
+
+So Evidence Judge never asks *"does this transcript sound successful?"* It asks *"is there proof?"*
+
+| A transcript LLM judge asks | Evidence Judge asks |
+| --- | --- |
+| Does the agent sound confident it placed the order? | Was a `POST /api/orders` sent, and did it succeed? |
+| Did the agent say the price was under $30? | What price was in the order request body? |
+| Did the agent mention a confirmation? | Does the final page actually say *"Thank you for your order"*? |
+| Did anything bad happen? (if the agent mentions it) | Which requests changed state that the task never asked for? |
+
+## 🔍 How it works
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-it-works-dark.svg">
+    <img src="docs/assets/how-it-works-light.svg" width="900" alt="Pipeline: ingest, redact, extract claims, predicates, checkers, verdict; the forged order claim ends in FAIL because no POST /api/orders was sent">
+  </picture>
+</p>
+
+```mermaid
+flowchart LR
+    A[trace.zip · HAR · browser-use log] --> B[Ingest]
+    B --> C[Redact secrets & PII]
+    C --> D[Extract claims<br/>LLM or offline]
+    D --> E[Typed predicates]
+    E --> F{Deterministic checkers<br/>request · page text · URL · action · value}
+    F -->|undecided| G[Screenshot vision check<br/>last resort, opt-in]
+    F --> H[Task spec<br/>expect · forbid · constraints · allow]
+    G --> H
+    H --> I[Dimensions<br/>success · side effects · state<br/>guardrails · recovery · loops]
+    I --> J([PASS / FAIL / NEEDS_REVIEW<br/>+ JSON · HTML · OTel])
 ```
 
-The agent said *"I placed the order, order #1042 confirmed."* The recording shows it never sent the order.
+**Design rules**
 
-## Why
+- 🧮 **Rules before LLMs.** An LLM may *propose* what evidence would prove a claim; code *checks* it.
+- 🔗 **Every verdict cites evidence** (`net#12`, `snap#4`, `shot#7`, `final`).
+- 🕳️ **Absence counts only on captured channels.** A missing request is a contradiction only if the network was recorded; otherwise the claim is left unverified.
+- 🧪 **Agent text is untrusted data**, never instructions to the judge.
+- 🙅 **Abstain over guessing.** Thin evidence gives `NEEDS_REVIEW`, not a confident wrong answer.
 
-LLM-as-judge is easy to fool. Rewriting **only an agent's reasoning**, with the same actions, made top judges wrongly pass failed web runs up to ~90% more often ([Gaming the Judge, 2026](https://arxiv.org/abs/2601.14691)). LLM judges reading raw API traces detect false success at roughly chance level (AUROC 0.54), while simple deterministic checks do far better ([2606.09863](https://arxiv.org/abs/2606.09863)). The fix the research keeps pointing to is to **verify claims against evidence** instead of reading the transcript.
-
-## How it works
-
-```
-trace.zip / HAR / browser-use log
-        │  ingest (normalise to one Run model)
-        ▼
-   redact secrets & PII ──► extract claims (LLM or offline heuristics)
-                                    │  each claim → typed predicates
-                                    ▼
-             deterministic checkers: request · page text · URL · action · value
-                                    │  (screenshot vision check only as last resort)
-                                    ▼
-       task spec: expect · forbid · constraints · allow
-                                    ▼
-   dimensions: success · side effects · state · guardrails · recovery · loops
-                                    ▼
-             PASS / FAIL / NEEDS_REVIEW  +  JSON & HTML reports
-```
-
-Design rules:
-- **Rules before LLMs.** An LLM may *propose* what evidence would prove a claim; code *checks* it.
-- **Every verdict cites evidence** (`net#12`, `snap#4`, `shot#7`, `final`).
-- **Absence counts only on captured channels.** A missing request is a contradiction only if the network was recorded; otherwise the claim is left unverified.
-- **Agent text is untrusted data**, never instructions to the judge.
-- **Abstain over guessing.** Thin evidence gives `NEEDS_REVIEW`, not a confident wrong answer.
+<details>
+<summary><b>See the HTML report</b> (light / dark / phone)</summary>
+<br>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/report-fail-dark.png">
+  <img src="docs/assets/report-fail-light.png" width="900" alt="HTML report for a forged success: FAIL 49/100 with contradicted claims and citations">
+</picture>
+<br><br>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/report-pass-dark.png">
+  <img src="docs/assets/report-pass-light.png" width="900" alt="HTML report for an honest success: PASS 100/100, every claim supported">
+</picture>
+<br><br>
+<img src="docs/assets/report-mobile.png" width="300" alt="The report on a phone">
+</details>
 
 See [docs/architecture.md](docs/architecture.md).
 
-## Install
+## 📦 Install
 
 ```bash
 uv tool install "evidence-judge[anthropic]"   # or: pip install "evidence-judge[anthropic]"
@@ -60,7 +124,7 @@ uv tool install "evidence-judge[anthropic]"   # or: pip install "evidence-judge[
 
 Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically.
 
-## Quick start
+## 🚀 Quick start
 
 1. Record your agent with Playwright tracing (and optionally a HAR):
 
@@ -115,7 +179,7 @@ Other commands: `evidence-judge inspect --trace trace.zip --har run.har` (what w
 Full references: [docs/cli.md](docs/cli.md) (every command and option) and
 [docs/task-specs.md](docs/task-specs.md).
 
-## Inputs
+## 📥 Inputs
 
 | Source | Flag | Notes |
 | --- | --- | --- |
@@ -125,7 +189,7 @@ Full references: [docs/cli.md](docs/cli.md) (every command and option) and
 | Agent output | `--answer` / `--answer-file`, `--reasoning-file` | What the agent *claims* |
 | Pre-extracted claims | `--claims claims.json` | Skip extraction entirely |
 
-## Python API
+## 🐍 Python API
 
 ```python
 import asyncio
@@ -142,7 +206,7 @@ verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yam
 print(verdict.outcome, verdict.summary)
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 Environment variables (or `.env`, see [.env.example](.env.example)):
 
@@ -166,7 +230,14 @@ When `EVJ_REDACTION_KEY` is unset and a run uses the LLM cache, a random key is 
 across runs. Treat that file as a secret. Offline runs and `inspect` never read or create it; if
 the cache directory is not writable, a per-process key is used with a one-line warning.
 
-## Benchmark: can a forged story fool it?
+## 🧪 Benchmark: can a forged story fool it?
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmark-dark.svg">
+    <img src="docs/assets/benchmark-light.svg" width="900" alt="Forged-run benchmark: 0 of 60 forged success stories passed, with or without a task spec">
+  </picture>
+</p>
 
 The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites only the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691) plus a style-only control. The actions and network evidence stay the same, so the correct verdict is never PASS.
 
@@ -177,7 +248,7 @@ The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rew
 
 Honest controls: 7/7 correct with a spec. Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`; add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
 
-## Integrations
+## 🔌 Integrations
 
 Send verdicts to the tools you already use (each is an optional extra; see [docs/integrations.md](docs/integrations.md)):
 
@@ -204,7 +275,7 @@ The step fails on FAIL (and optionally NEEDS_REVIEW), writes the verdict to the 
 
 Docker: `docker build -t evidence-judge . && docker run --rm -v "$PWD:/work:ro" evidence-judge judge --trace trace.zip --answer-file answer.txt --offline`
 
-## Demo
+## 🛍️ Demo shop
 
 A small shop app and seven recorded agent runs live in the repo: an honest success, an honest failure, a forged success, a constraint violation, a side effect, a click loop and a do-nothing agent. Every one is judged correctly offline, and that is enforced as a golden regression test.
 
@@ -213,7 +284,7 @@ uv run python -m scripts.record_fixtures      # re-record with Playwright
 uv run pytest tests/unit/test_golden_runs.py
 ```
 
-## Development
+## 🛠️ Development
 
 ```bash
 uv sync
@@ -222,13 +293,13 @@ make ci        # ruff, format check, pyright (strict), tests
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
 
-## Roadmap
+## 🗺️ Roadmap
 
 - Published LLM-judge baseline numbers on the forged-run benchmark
 - EvidenceBench: public runs with network evidence and human labels
 - Cross-family meta-judge on suspicious passes, judge noise meter
 - Adapters for Stagehand, Skyvern and OpenAI / Anthropic computer use
 
-## License
+## 📄 License
 
 MIT
