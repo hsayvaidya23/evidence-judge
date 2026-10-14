@@ -54,8 +54,7 @@ class UrlChecker:
     kind = "url"
     deterministic = True
 
-    async def evaluate(self, predicate: Predicate, ctx: CheckContext) -> PredicateResult:
-        ...
+    async def evaluate(self, predicate: Predicate, ctx: CheckContext) -> PredicateResult: ...
 ```
 
 1. If you need a new predicate kind, add a model to `core/predicates.py` and include it in the
