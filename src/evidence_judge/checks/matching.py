@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Final, Literal, cast
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, unquote_plus, urlsplit
 
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.textnorm import normalize
@@ -188,6 +188,21 @@ def parse_body(body: str | None) -> object:
 
 def url_contains(url: str, needle: str) -> bool:
     return needle.casefold() in unquote(url).casefold()
+
+
+def url_location_contains(url: str, needle: str) -> bool:
+    """Substring of the scheme, host and path; the query and fragment are ignored."""
+    parts = urlsplit(url)
+    location = f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.netloc else parts.path
+    return url_contains(location, needle)
+
+
+def url_path_contains(url: str, needle: str) -> bool:
+    return url_contains(urlsplit(url).path, needle)
+
+
+def url_query_contains(url: str, needle: str) -> bool:
+    return needle.casefold() in unquote_plus(urlsplit(url).query).casefold()
 
 
 def url_path(url: str) -> str:

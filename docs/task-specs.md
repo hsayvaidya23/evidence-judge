@@ -83,15 +83,22 @@ Every predicate has a `kind`.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `method` | any | HTTP method, e.g. `POST` |
-| `url_contains` | `[]` | every substring must appear in the URL |
-| `url_regex` | none | regular expression the URL must match |
+| `url_contains` | `[]` | every substring must appear in the scheme, host or path (the query string and fragment are ignored) |
+| `path_contains` | `[]` | every substring must appear in the URL path |
+| `query_contains` | `[]` | every substring must appear in the decoded query string |
+| `url_regex` | none | regular expression the full URL (query included) must match |
 | `status` | `"2xx"` | exact code (`"201"`), class (`"2xx"`), or `null` for any |
 | `body_contains` | `[]` | every substring must appear in the request body (case-insensitive) |
 | `response_contains` | `[]` | every substring must appear in the response body |
 
 ```yaml
 - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
+- {kind: request, method: GET, path_contains: [/search], query_contains: [q=red kettle]}
 ```
+
+`url_contains` ignores the query string so that `POST /api/log?next=/api/orders` cannot pass for
+an order request. Use `query_contains` to match query parameters, or `url_regex` for the whole
+URL.
 
 Ingest keeps bodies only up to a size limit and marks a cut body with `…[truncated ...]`. A
 `body_contains` or `response_contains` phrase missing from a truncated body is treated as not

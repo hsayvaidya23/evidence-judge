@@ -179,3 +179,43 @@ async def test_truncation_does_not_excuse_other_misses() -> None:
     )
     res = await RequestChecker().evaluate(pred, ctx(make_run(network=[event])))
     assert res.status is Support.CONTRADICTED
+
+
+async def test_url_contains_ignores_the_query_string() -> None:
+    laundered = net(1, "POST", "/api/log?next=/api/orders", 200)
+    res = await RequestChecker().evaluate(ORDER, ctx(make_run(network=[laundered])))
+    assert res.status is Support.CONTRADICTED
+    assert "URL lacks '/api/orders'" in res.reason
+
+
+async def test_url_contains_matches_scheme_host_and_path() -> None:
+    run = make_run(network=[net(1, "POST", "/api/orders?coupon=X#top", 201)])
+    pred = RequestPredicate(method="POST", url_contains=["https://shop.test/api/orders"])
+    assert (await RequestChecker().evaluate(pred, ctx(run))).status is Support.SUPPORTED
+
+
+async def test_path_and_query_contains() -> None:
+    run = make_run(network=[net(1, "GET", "/api/search?q=red%20kettle&page=2")])
+    hit = RequestPredicate(method="GET", path_contains=["/search"], query_contains=["red kettle"])
+    assert (await RequestChecker().evaluate(hit, ctx(run))).status is Support.SUPPORTED
+    in_query = RequestPredicate(method="GET", path_contains=["kettle"])
+    res = await RequestChecker().evaluate(in_query, ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert "path lacks 'kettle'" in res.reason
+    wrong = RequestPredicate(method="GET", query_contains=["page=3"])
+    res = await RequestChecker().evaluate(wrong, ctx(run))
+    assert "query lacks 'page=3'" in res.reason
+
+
+def test_describe_names_path_and_query() -> None:
+    matcher = RequestMatcher(RequestPredicate(path_contains=["/a"], query_contains=["b=1"]))
+    assert matcher.describe() == (
+        "request whose path contains '/a' whose query contains 'b=1' with status 2xx"
+    )
+    assert matcher.criteria_count == 3
+
+
+async def test_url_regex_still_sees_the_full_url() -> None:
+    run = make_run(network=[net(1, "GET", "/api/search?q=kettle")])
+    pred = RequestPredicate(url_regex=r"\?q=kettle$")
+    assert (await RequestChecker().evaluate(pred, ctx(run))).status is Support.SUPPORTED
