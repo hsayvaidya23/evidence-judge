@@ -12,19 +12,25 @@ import re
 from typing import Any
 
 UNTRUSTED_TAG = "untrusted_agent_output"
+UNTRUSTED_CLAIM_TAG = "untrusted_agent_claim"
 
 _OPENERS = "<" + chr(0xFF1C) + chr(0xFE64) + chr(0x2039) + chr(0x3008)
 _INVISIBLE = "".join(chr(c) for c in (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF))
 _SEP = rf"[\s_\-.{_INVISIBLE}]*"
 _TAG_LOOKALIKE = re.compile(
-    rf"[{re.escape(_OPENERS)}]{_SEP}/?{_SEP}untrusted{_SEP}agent{_SEP}output",
+    rf"[{re.escape(_OPENERS)}]{_SEP}/?{_SEP}untrusted{_SEP}agent{_SEP}(?:output|claim)",
     re.IGNORECASE,
 )
 
 
 def neutralize(text: str) -> str:
-    """Defang anything resembling our wrapper tag so agent text cannot close or reopen it."""
+    """Defang anything resembling our wrapper tags so agent text cannot close or reopen them."""
     return _TAG_LOOKALIKE.sub(lambda m: "[" + m.group(0)[1:], text)
+
+
+def wrap_untrusted_claim(text: str) -> str:
+    """Wrap agent-derived claim text (or a question derived from it) as neutralised data."""
+    return f"<{UNTRUSTED_CLAIM_TAG}>\n{neutralize(text)}\n</{UNTRUSTED_CLAIM_TAG}>"
 
 
 def _join_steps(reasoning: list[str]) -> str:
