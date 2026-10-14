@@ -53,7 +53,7 @@ class CheckerRegistry:
             return result(Support.NO_EVIDENCE, f"Predicate cannot be checked: {exc}", checker.kind)
 
 
-def default_registry() -> CheckerRegistry:
+def default_registry(*, screenshots_enabled: bool = True) -> CheckerRegistry:
     return CheckerRegistry(
         [
             RequestChecker(),
@@ -61,6 +61,6 @@ def default_registry() -> CheckerRegistry:
             UrlChecker(),
             ActionChecker(),
             ValueChecker(),
-            ScreenshotChecker(),
+            ScreenshotChecker(enabled=screenshots_enabled),
         ]
     )

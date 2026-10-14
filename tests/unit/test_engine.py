@@ -263,3 +263,27 @@ async def test_llm_extracted_claims_are_judged(settings: Settings) -> None:
     verdict = await Judge(settings, llm).judge(_with_answer(forged_run(), FORGED_ANSWER))
     assert verdict.outcome is Outcome.FAIL
     assert verdict.claims[0].status is Support.CONTRADICTED
+
+
+async def test_screenshots_disabled_by_settings_never_call_vision() -> None:
+    claims = ClaimSet.model_validate(
+        {
+            "extractor": "manual",
+            "claims": [
+                {
+                    "id": "c1",
+                    "text": "confirmation visible",
+                    "quote": "confirmation visible",
+                    "kind": "state",
+                    "key": True,
+                    "predicates": [{"kind": "screenshot", "question": "Is a confirmation shown?"}],
+                }
+            ],
+        }
+    )
+    llm = FakeLLM()
+    settings = Settings(anthropic_api_key=None, cache_dir=None, screenshots_to_llm=False)
+    verdict = await Judge(settings, llm).judge(honest_run(), JudgeOptions(claims=claims))
+    assert not llm.calls
+    assert verdict.claims[0].status is Support.NO_EVIDENCE
+    assert "disabled" in verdict.claims[0].reason

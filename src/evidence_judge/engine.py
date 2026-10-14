@@ -58,7 +58,9 @@ class Judge:
     ) -> None:
         self._settings = settings
         self._llm = llm
-        self._registry = registry or default_registry()
+        self._registry = registry or default_registry(
+            screenshots_enabled=settings.screenshots_to_llm
+        )
         self._extractor = extractor
 
     async def judge(self, run: Run, options: JudgeOptions | None = None) -> RunVerdict:
