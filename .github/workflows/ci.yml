@@ -100,3 +100,36 @@ jobs:
           code=$?
           set -e
           test "$code" -eq 1
+
+  action:
+    name: reusable action (uses ./)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+      - name: Judge an honest run with the action
+        id: honest
+        uses: ./
+        with:
+          trace: tests/fixtures/runs/honest_success/trace.zip
+          har: tests/fixtures/runs/honest_success/run.har
+          answer-file: tests/fixtures/runs/honest_success/answer.txt
+          spec: tests/fixtures/runs/honest_success/spec.yaml
+      - name: Judge a forged run with the action (expected to fail the step)
+        id: forged
+        continue-on-error: true
+        uses: ./
+        with:
+          trace: tests/fixtures/runs/forged_success/trace.zip
+          har: tests/fixtures/runs/forged_success/run.har
+          answer-file: tests/fixtures/runs/forged_success/answer.txt
+          spec: tests/fixtures/runs/forged_success/spec.yaml
+      - name: Check the action outputs
+        env:
+          HONEST: ${{ steps.honest.outputs.outcome }}
+          FORGED: ${{ steps.forged.outputs.outcome }}
+          FORGED_STEP: ${{ steps.forged.outcome }}
+        run: |
+          test "$HONEST" = pass
+          test "$FORGED" = fail
+          test "$FORGED_STEP" = failure

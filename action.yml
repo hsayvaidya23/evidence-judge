@@ -1,0 +1,126 @@
+name: Evidence Judge
+description: Grade a recorded browser-agent run by checking every claim against the evidence; fail the job on FAIL.
+author: Yash Vaidya
+branding:
+  icon: check-square
+  color: green
+
+inputs:
+  trace:
+    description: Path to the Playwright trace.zip
+    required: false
+  har:
+    description: Path to a HAR recorded alongside the trace
+    required: false
+  browser-use:
+    description: Path to a browser-use history JSON (or its run directory)
+    required: false
+  answer-file:
+    description: File with the agent's final answer
+    required: false
+  reasoning-file:
+    description: File with the agent's reasoning, one step per line
+    required: false
+  spec:
+    description: Task spec YAML (required for write tasks to PASS)
+    required: false
+  offline:
+    description: "true: no LLM calls (heuristic claim extraction)"
+    required: false
+    default: "true"
+  fail-on-review:
+    description: "true: also fail the job when the verdict is NEEDS_REVIEW"
+    required: false
+    default: "false"
+  version:
+    description: "evidence-judge version to install; empty installs this action's own source"
+    required: false
+    default: ""
+  python-version:
+    description: Python version to run with
+    required: false
+    default: "3.13"
+
+outputs:
+  outcome:
+    description: pass, fail or needs_review
+    value: ${{ steps.judge.outputs.outcome }}
+  score:
+    description: Score between 0 and 1
+    value: ${{ steps.judge.outputs.score }}
+  report:
+    description: Path to the HTML report
+    value: ${{ steps.judge.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v10.3.0
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install evidence-judge
+      shell: bash
+      env:
+        EJ_VERSION: ${{ inputs.version }}
+        EJ_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        if [ -n "$EJ_VERSION" ]; then
+          uv tool install "evidence-judge[anthropic]==$EJ_VERSION"
+        else
+          uv tool install "$EJ_ACTION_PATH[anthropic]"
+        fi
+    - name: Judge the run
+      id: judge
+      shell: bash
+      env:
+        EJ_TRACE: ${{ inputs.trace }}
+        EJ_HAR: ${{ inputs.har }}
+        EJ_BROWSER_USE: ${{ inputs.browser-use }}
+        EJ_ANSWER_FILE: ${{ inputs.answer-file }}
+        EJ_REASONING_FILE: ${{ inputs.reasoning-file }}
+        EJ_SPEC: ${{ inputs.spec }}
+        EJ_OFFLINE: ${{ inputs.offline }}
+        EJ_FAIL_ON_REVIEW: ${{ inputs.fail-on-review }}
+      run: |
+        out="$RUNNER_TEMP/evidence-judge"
+        mkdir -p "$out"
+        args=(judge --out "$out/verdict.json" --html "$out/report.html")
+        [ -n "$EJ_TRACE" ] && args+=(--trace "$EJ_TRACE")
+        [ -n "$EJ_HAR" ] && args+=(--har "$EJ_HAR")
+        [ -n "$EJ_BROWSER_USE" ] && args+=(--browser-use "$EJ_BROWSER_USE")
+        [ -n "$EJ_ANSWER_FILE" ] && args+=(--answer-file "$EJ_ANSWER_FILE")
+        [ -n "$EJ_REASONING_FILE" ] && args+=(--reasoning-file "$EJ_REASONING_FILE")
+        [ -n "$EJ_SPEC" ] && args+=(--spec "$EJ_SPEC")
+        [ "$EJ_OFFLINE" = "true" ] && args+=(--offline)
+        # Agent text is untrusted: stop workflow-command processing while it can reach the log.
+        stop_token="ej-$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+        echo "::stop-commands::$stop_token"
+        set +e
+        evidence-judge "${args[@]}"
+        code=$?
+        set -e
+        echo "::$stop_token::"
+        if [ ! -f "$out/verdict.json" ]; then
+          echo "::error::evidence-judge exited $code without a verdict"
+          exit "$code"
+        fi
+        outcome=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['outcome'])" "$out/verdict.json")
+        score=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['score'])" "$out/verdict.json")
+        summary=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['summary'])" "$out/verdict.json")
+        {
+          echo "outcome=$outcome"
+          echo "score=$score"
+          echo "report=$out/report.html"
+        } >> "$GITHUB_OUTPUT"
+        {
+          echo "### Evidence Judge: ${outcome^^}"
+          echo
+          echo "Score: $score"
+          echo
+          echo "$summary"
+        } >> "$GITHUB_STEP_SUMMARY"
+        case "$outcome" in
+          pass) exit 0 ;;
+          needs_review) [ "$EJ_FAIL_ON_REVIEW" = "true" ] && exit 2 || exit 0 ;;
+          *) exit 1 ;;
+        esac
