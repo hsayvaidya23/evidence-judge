@@ -1,0 +1,4 @@
+{
+  "outcome": "pass",
+  "notes": "Order POST /api/orders returned 201 for red-kettle at 24.0 and the confirmation page shows order #1001. Every claim is supported."
+}

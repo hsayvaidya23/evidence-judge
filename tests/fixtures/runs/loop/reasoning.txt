@@ -1,0 +1,9 @@
+The Red Kettle is $24.00, which is under $30.
+
+I clicked Add to cart but was not sure it worked, so I clicked it again.
+
+I kept clicking Add to cart until I was confident the kettle was in the cart.
+
+The cart showed Red Kettle x 1, so I checked out and confirmed the order.
+
+The confirmation page said 'Thank you for your order #1001'.

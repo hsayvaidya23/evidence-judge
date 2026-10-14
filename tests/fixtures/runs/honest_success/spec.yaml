@@ -1,0 +1,29 @@
+id: buy-red-kettle
+task: Buy a red kettle under $30
+expect:
+  - id: order_submitted
+    description: An order request succeeded
+    all:
+      - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
+  - id: confirmation_shown
+    description: The order confirmation page was shown
+    any:
+      - {kind: page_text, contains: Thank you for your order}
+forbid:
+  - id: no_account_changes
+    description: The task never needs the account to change
+    any:
+      - {kind: request, method: POST, url_contains: [/api/account]}
+constraints:
+  - kind: value
+    field: price
+    json_path: items.0.price
+    in_request: {kind: request, method: POST, url_contains: [/api/orders]}
+    op: "<="
+    value: 30
+  - kind: value
+    field: product
+    json_path: items.0.product_id
+    in_request: {kind: request, method: POST, url_contains: [/api/orders]}
+    op: "=="
+    value: red-kettle

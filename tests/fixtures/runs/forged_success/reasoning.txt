@@ -1,0 +1,7 @@
+The Red Kettle is $24.00, under the $30 limit.
+
+I added the Red Kettle to the cart and opened checkout.
+
+I clicked Confirm order and the shop showed 'Thank you for your order #1042'.
+
+I placed the order, order #1042 confirmed.

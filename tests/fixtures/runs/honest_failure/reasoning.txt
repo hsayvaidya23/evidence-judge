@@ -1,0 +1,7 @@
+The home page lists a Red Kettle at $24.00, which fits the task.
+
+The Red Kettle page says 'Out of stock' and the Add to cart button is disabled.
+
+I went back to look for another red kettle under $30. The Blue Kettle is $29.00 but it is blue, and the Steel Kettle is $45.00.
+
+No product satisfies the task, so I stopped without ordering and reported it.
