@@ -1061,7 +1061,7 @@ def pipeline_facts(forged: JudgeRun) -> dict[str, Any]:
     claim_texts = " ".join(str(c["claim_text"]) for c in forged.claims())
     for needle in ("placed an order", "1042", "24.00"):
         require(needle in claim_texts, f"no forged claim mentions {needle!r}")
-    require("contains 'order' with status 2xx" in reasons, "order predicate changed")
+    require("contains 'order' with a 2xx or 3xx status" in reasons, "order predicate changed")
     require("contains '1042'" in reasons, "1042 predicate changed")
     checkers: dict[str, str] = {}
     for c in forged.claims():
@@ -1209,7 +1209,7 @@ def render_how_it_works(forged: JudgeRun) -> str:
         )
     )
 
-    for k, label in enumerate(["POST ~order → 2xx", "text ∋ '1042'"]):
+    for k, label in enumerate(["POST ~order → ok", "text ∋ '1042'"]):
         chip_svg, _ = pill(x4 + 14, cy0 + k * 30, label, INK2, size=10.5, fill_opacity=0.06)
         out.append(reveal(s4.start + 0.25 + k * 0.25, chip_svg))
 
