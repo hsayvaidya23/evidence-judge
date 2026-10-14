@@ -29,7 +29,15 @@ from pydantic import BaseModel, ValidationError
 
 from evidence_judge.config import Settings
 from evidence_judge.core.verdict import Usage
-from evidence_judge.llm.base import Image, LLMError, LLMRequest, T, Tier
+from evidence_judge.llm.base import (
+    Image,
+    LLMAuthError,
+    LLMConfigError,
+    LLMError,
+    LLMRequest,
+    T,
+    Tier,
+)
 from evidence_judge.llm.budget import Budget, current_budget
 from evidence_judge.llm.pricing import DEFAULT_PRICES, ModelPrice, PriceTable, price_for
 
@@ -105,11 +113,11 @@ def _load_sdk_client(settings: Settings) -> AsyncAnthropic:
     try:
         from anthropic import AsyncAnthropic
     except ImportError as exc:
-        raise LLMError(
+        raise LLMConfigError(
             "The Anthropic SDK is not installed; install with `pip install evidence-judge[anthropic]`"
         ) from exc
     if settings.anthropic_api_key is None:
-        raise LLMError("ANTHROPIC_API_KEY is not set")
+        raise LLMConfigError("ANTHROPIC_API_KEY is not set")
     return AsyncAnthropic(
         api_key=settings.anthropic_api_key.get_secret_value(),
         timeout=settings.request_timeout_s,
@@ -171,6 +179,9 @@ class AnthropicClient:
             APIConnectionError,
             APIStatusError,
             APITimeoutError,
+            AuthenticationError,
+            NotFoundError,
+            PermissionDeniedError,
             RateLimitError,
             omit,
         )
@@ -211,6 +222,21 @@ class AnthropicClient:
                 raise LLMError("Could not connect to the Anthropic API") from exc
             except RateLimitError as exc:
                 raise LLMError(f"Anthropic rate limit hit (request_id={exc.request_id})") from exc
+            except AuthenticationError as exc:
+                raise LLMAuthError(
+                    "ANTHROPIC_API_KEY rejected by the Anthropic API "
+                    f"(401, request_id={exc.request_id}); check the key"
+                ) from exc
+            except PermissionDeniedError as exc:
+                raise LLMAuthError(
+                    f"ANTHROPIC_API_KEY is not allowed to use {model!r} "
+                    f"(403, request_id={exc.request_id})"
+                ) from exc
+            except NotFoundError as exc:
+                raise LLMConfigError(
+                    f"model {model!r} not found (404, request_id={exc.request_id}); "
+                    "check EVJ_MODEL_FAST / EVJ_MODEL_STRONG"
+                ) from exc
             except APIStatusError as exc:
                 raise LLMError(
                     f"Anthropic API error {exc.status_code} (request_id={exc.request_id})"

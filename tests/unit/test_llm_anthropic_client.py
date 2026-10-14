@@ -358,3 +358,26 @@ async def test_run_budget_and_client_budget_are_both_enforced():
     with run_budget(Budget(1e-9)), pytest.raises(BudgetExceededError):
         await client.generate(LLMRequest(system="s", prompt="p"), Verdict)
     assert client_budget.remaining_usd == pytest.approx(1.0 - usage.cost_usd)
+
+
+@pytest.mark.parametrize(
+    ("error_type", "status", "expected", "match"),
+    [
+        (anthropic.AuthenticationError, 401, "LLMAuthError", "ANTHROPIC_API_KEY rejected"),
+        (anthropic.PermissionDeniedError, 403, "LLMAuthError", "ANTHROPIC_API_KEY"),
+        (anthropic.NotFoundError, 404, "LLMConfigError", "claude-haiku-5-5"),
+    ],
+)
+async def test_auth_and_config_errors_are_typed_and_release_budget(
+    error_type: type[anthropic.APIStatusError], status: int, expected: str, match: str
+):
+    from evidence_judge.llm import base
+
+    error = error_type("nope", response=httpx2.Response(status, request=_request()), body=None)
+    budget = Budget(1.0)
+    client = _client(FakeSDK(error), budget=budget)
+    with pytest.raises(getattr(base, expected), match=match) as info:
+        await client.generate(LLMRequest(system="s", prompt="p"), Verdict)
+    assert isinstance(info.value, base.LLMConfigError)
+    assert "sk-test-not-real" not in str(info.value)
+    assert budget.remaining_usd == pytest.approx(1.0)

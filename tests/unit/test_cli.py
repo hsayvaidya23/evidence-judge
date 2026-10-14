@@ -380,3 +380,18 @@ def test_passes_ingest_safety_options(
     assert calls.load_kwargs is not None
     assert calls.load_kwargs["allow_mismatch"] is True
     assert calls.load_kwargs["screenshot_root"] == tmp_path
+
+
+def test_rejected_api_key_exits_4_with_a_clear_message(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path
+) -> None:
+    from evidence_judge.llm.base import LLMAuthError
+
+    install(
+        monkeypatch,
+        calls,
+        judge_error=LLMAuthError("ANTHROPIC_API_KEY rejected by the Anthropic API (401)"),
+    )
+    result = runner.invoke(app, ["judge", "--har", str(evidence)])
+    assert result.exit_code == ExitCode.INTERNAL
+    assert "ANTHROPIC_API_KEY rejected" in result.output

@@ -24,7 +24,7 @@ from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
 from evidence_judge.integrations import exporters
 from evidence_judge.llm import factory
-from evidence_judge.llm.base import LLMClient, LLMError
+from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import (
     print_evidence_summary,
@@ -127,6 +127,8 @@ def _run_judge(
     options = engine.JudgeOptions(offline=offline, spec=spec, claims=claims)
     try:
         return asyncio.run(engine.Judge(settings, llm).judge(run, options))
+    except LLMConfigError as e:
+        raise CliError(f"{e} (use --offline to judge without a model)", ExitCode.INTERNAL) from e
     except LLMError as e:
         raise CliError(f"LLM error: {e}", ExitCode.INTERNAL) from e
 
