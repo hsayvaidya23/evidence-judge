@@ -6,7 +6,7 @@ import json
 import math
 import re
 from enum import Enum
-from typing import Final, Literal
+from typing import Final, Literal, cast
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 from evidence_judge.checks.errors import InvalidPredicateError
@@ -153,10 +153,12 @@ def json_path_get(obj: object, path: str) -> object:
 
 def _step(current: object, segment: str) -> object:
     if isinstance(current, dict):
-        return current.get(segment, MISSING)  # pyright: ignore[reportUnknownVariableType]
+        mapping = cast(dict[str, object], current)
+        return mapping.get(segment, MISSING)
     if isinstance(current, list):
+        items = cast(list[object], current)
         try:
-            return current[int(segment)]  # pyright: ignore[reportUnknownVariableType]
+            return items[int(segment)]
         except (ValueError, IndexError):
             return MISSING
     return MISSING
