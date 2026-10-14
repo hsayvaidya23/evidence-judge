@@ -94,3 +94,8 @@ def test_coverage_includes_reasoning_and_partial_quotes():
     claims = [_claim("Clicked buy", "clicked the buy now button")]
     assert coverage(claims, None, reasoning) == 1.0
     assert coverage([], None, reasoning) == 0.0
+
+
+def test_dedupe_never_merges_claims_with_different_numbers():
+    kept, dropped = dedupe_claims([_claim("Order 1042 shown"), _claim("Order 10423 shown")])
+    assert (len(kept), dropped) == (2, 0)

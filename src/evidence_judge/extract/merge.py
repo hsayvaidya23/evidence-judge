@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 from difflib import SequenceMatcher
 
@@ -13,6 +14,7 @@ from evidence_judge.extract.text import is_claim_like, normalize, sentences
 _NEAR_DUPLICATE_RATIO = 0.9
 _COVERAGE_WORD_OVERLAP = 0.6
 _MERGED_MAX_PREDICATES = 6
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 
 
 def _same_claim(a: Claim, b: Claim) -> bool:
@@ -21,6 +23,8 @@ def _same_claim(a: Claim, b: Claim) -> bool:
     text_a, text_b = normalize(a.text), normalize(b.text)
     if text_a == text_b:
         return True
+    if set(_NUMBER.findall(text_a)) != set(_NUMBER.findall(text_b)):
+        return False
     if normalize(a.quote) == normalize(b.quote) and _predicate_keys(a) == _predicate_keys(b):
         return True
     return SequenceMatcher(None, text_a, text_b).ratio() >= _NEAR_DUPLICATE_RATIO
