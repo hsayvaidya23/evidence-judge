@@ -51,7 +51,14 @@ async def grade(
     verdicts = [await judge_claim(ORDER_CLAIM, context, registry)]
     expectations = await evaluate_spec(spec, context, registry) if spec else []
     dims = assess_dimensions(run, context.index, verdicts, expectations, spec)
-    return decide(verdicts, expectations, dims, coverage=coverage, review_threshold=0.6)
+    return decide(
+        verdicts,
+        expectations,
+        dims,
+        coverage=coverage,
+        review_threshold=0.6,
+        has_spec=spec is not None,
+    )
 
 
 async def test_honest_run_passes() -> None:
@@ -96,8 +103,8 @@ async def test_side_effect_without_spec_needs_review() -> None:
     outcome, _, summary = await grade(side_effect_run())
     assert outcome is Outcome.NEEDS_REVIEW
     assert summary == (
-        "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec "
-        "covers it. 2 other side effects also need review."
+        "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes "
+        "are expected; add a spec with expect/allow to grade it."
     )
 
 

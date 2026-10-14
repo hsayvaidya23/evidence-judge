@@ -55,7 +55,19 @@ the cart before checking out. List them under `allow` (request predicates) so th
 dimension does not flag them. Any other successful mutation that no met expectation,
 constraint or allow entry explains is reported as a side effect. The agent's own claims never
 explain a mutation: "I also changed your email" is still a side effect, even though the claim is
-true. Without a spec, every successful mutation is reported, and the run needs review at best.
+true. Telemetry (pings, beacons, CSP reports) is never a side effect; see
+[architecture.md](architecture.md#side-effects-and-telemetry) for the exact rule.
+
+Without a spec, nothing says which changes are expected, so a run that changed state is
+review-only by design. Every successful mutation is reported and the summary reads:
+
+```
+NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are
+expected; add a spec with expect/allow to grade it.
+```
+
+Add a spec whose `expect` entries cover the goal and whose `allow` entries cover the expected
+intermediate writes to let such a run pass.
 
 ```yaml
 allow:

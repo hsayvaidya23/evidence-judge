@@ -296,6 +296,17 @@ async def test_screenshots_disabled_by_settings_never_call_vision() -> None:
     assert "disabled" in verdict.claims[0].reason
 
 
+async def test_spec_less_state_change_explains_what_to_add(settings: Settings) -> None:
+    verdict = await Judge(settings).judge(
+        _with_answer(honest_run(), HONEST_ANSWER), JudgeOptions(offline=True)
+    )
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert verdict.summary == (
+        "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes "
+        "are expected; add a spec with expect/allow to grade it."
+    )
+
+
 async def test_conflicting_evidence_on_a_key_claim_needs_review(settings: Settings) -> None:
     run = make_run(
         network=[net(1, "GET", "/")],

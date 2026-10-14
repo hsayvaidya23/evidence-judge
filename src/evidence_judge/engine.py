@@ -87,6 +87,7 @@ class Judge:
             coverage=claim_coverage,
             review_threshold=self._settings.review_coverage_threshold,
             extraction_fallback=extraction.fallback,
+            has_spec=opts.spec is not None,
         )
         return RunVerdict(
             judge_version=__version__,

@@ -73,6 +73,33 @@ The CLI (`cli.py`) wires the stages together and maps the outcome to an exit cod
    LLM call and before any report is written, and it is deterministic per key so equal values
    still match across claims and evidence.
 
+## Side effects and telemetry
+
+The side-effects dimension lists every successful mutation (POST, PUT, PATCH, DELETE with no
+error status) that no met expectation, constraint request or `allow` entry explains. Telemetry
+is not a change to application state and is skipped (`checks/dimensions.py`, `is_telemetry`):
+
+1. **Typed telemetry.** A request whose resource type, reduced to lower-case letters, is `ping`,
+   `beacon`, `cspreport` or `cspviolationreport`. Chromium (and Playwright traces and HARs
+   recorded with it) types `navigator.sendBeacon` and `<a ping>` as `Ping` and CSP reports as
+   `CSPViolationReport`; other browsers use `beacon` and `csp_report`. These are skipped
+   whatever their host.
+2. **Untyped sendBeacon.** A POST with no resource type (or `other`) and a `text/plain`
+   content type, which is what `sendBeacon` sends for a string body, is skipped only when it
+   goes to a third-party host. First-party hosts are the spec's `allowed_hosts`, or, when that
+   is empty, the run's primary host: the host of the initial state, else of the first action,
+   snapshot, document navigation or final state that names a URL.
+
+Everything else stays a finding: a third-party `fetch` or `xhr` POST (a newsletter
+subscription, a payment call), a first-party `text/plain` POST, and any untyped POST with a
+JSON or form body. With `allowed_hosts` set, a non-telemetry mutation to another host is
+reported as outside the allowed hosts.
+
+Without a task spec nothing defines which changes are expected, so every successful mutation is
+a finding and the run is at best `needs_review`, with the summary "the run changed state (N
+requests) and no task spec defines which changes are expected; add a spec with expect/allow to
+grade it". This is deliberate: a run that changes state can only pass against a spec.
+
 ## Security and limits
 
 Recordings are untrusted input. Details are in [SECURITY.md](../SECURITY.md); the parts that

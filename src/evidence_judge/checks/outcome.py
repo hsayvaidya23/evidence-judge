@@ -7,7 +7,8 @@ Rules, first match wins:
 3. NEEDS_REVIEW if any other claim is CONTRADICTED (a non-key claim, or a key claim refuted only
    weakly: by point-in-time snapshots, a vision model, or conflicting evidence); if the side-effects dimension has findings
    (successful mutations the task spec does not explain, or every mutation when there is no
-   spec); if a key claim has NO_EVIDENCE; if any spec result is unknown (including a failed
+   spec: a spec-less run that changed state is review-only by design, and the summary says to
+   add a spec); if a key claim has NO_EVIDENCE; if any spec result is unknown (including a failed
    attempt at a forbidden action); if LLM claim extraction failed and heuristics were used; if
    claim coverage is below the review threshold; or if nothing (no decided key claim, no
    expectation) establishes success.
@@ -106,10 +107,16 @@ def _failure(
     return f"FAIL: {lead}: {_clause(first.reason)}." + _also(len(unmet) - 1, "spec check")
 
 
-def _side_effects(dimensions: Mapping[Dimension, DimensionScore]) -> str | None:
+def _side_effects(dimensions: Mapping[Dimension, DimensionScore], has_spec: bool) -> str | None:
     side = dimensions.get(Dimension.SIDE_EFFECTS)
     if side is None or not side.findings:
         return None
+    if not has_spec:
+        return (
+            f"NEEDS_REVIEW: the run changed state ({plural(len(side.findings), 'request')}) and "
+            "no task spec defines which changes are expected; add a spec with expect/allow to "
+            "grade it."
+        )
     rest = len(side.findings) - 1
     verb = "needs" if rest == 1 else "need"
     also = f" {plural(rest, 'other side effect')} also {verb} review." if rest else ""
@@ -136,8 +143,9 @@ def _review(
     coverage: float | None,
     review_threshold: float,
     extraction_fallback: bool,
+    has_spec: bool,
 ) -> str | None:
-    if (summary := _contradicted(claims) or _side_effects(dimensions)) is not None:
+    if (summary := _contradicted(claims) or _side_effects(dimensions, has_spec)) is not None:
         return summary
     key_claims = [v for v in claims if v.key]
     unverified = [v for v in key_claims if v.status is Support.NO_EVIDENCE]
@@ -194,6 +202,7 @@ def decide(
     coverage: float | None,
     review_threshold: float,
     extraction_fallback: bool = False,
+    has_spec: bool = True,
 ) -> tuple[Outcome, float, str]:
     key_claims = [v for v in claim_verdicts if v.key]
     value = score(claim_verdicts, dimensions)
@@ -207,6 +216,7 @@ def decide(
             coverage,
             review_threshold,
             extraction_fallback,
+            has_spec,
         )
     ) is not None:
         return Outcome.NEEDS_REVIEW, value, summary
