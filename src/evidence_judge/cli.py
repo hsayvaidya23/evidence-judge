@@ -22,6 +22,7 @@ from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
+from evidence_judge.integrations import exporters
 from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMError
 from evidence_judge.redact import RedactionReport, Redactor
@@ -228,6 +229,15 @@ def judge(
     ] = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: Annotated[bool, typer.Option(help="Show tracebacks for internal errors")] = False,
+    otel: Annotated[
+        bool,
+        typer.Option(
+            "--otel", help="Emit gen_ai.evaluation.result events via OpenTelemetry (OTEL_* env)"
+        ),
+    ] = False,
+    langfuse_trace_id: Annotated[
+        str | None, typer.Option(help="Push scores to this Langfuse trace (LANGFUSE_* env)")
+    ] = None,
 ) -> None:
     """Judge one agent run. Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
     if not (trace or har or browser_use):
@@ -237,6 +247,10 @@ def judge(
 
     err = _stderr()
     try:
+        try:
+            exporters.check(otel=otel, langfuse_trace_id=langfuse_trace_id)
+        except (ImportError, ValueError) as e:
+            raise CliError(str(e), ExitCode.USAGE) from e
         settings = _settings()
         task_spec = _load_spec(spec) if spec else None
         claim_set = _load_claims(claims) if claims else None
@@ -277,6 +291,7 @@ def judge(
             write_json(verdict, out)
         if html:
             write_html(verdict, run, html)
+        export_warnings = exporters.export(verdict, otel=otel, langfuse_trace_id=langfuse_trace_id)
     except CliError as e:
         raise _fail(e) from None
     except Exception as e:
@@ -296,6 +311,8 @@ def judge(
         for label, path in (("json", out), ("html", html)):
             if path:
                 err.print(Text.assemble((f"wrote {label} ", "dim"), str(path)))
+        for warning in export_warnings:
+            err.print(Text(warning, style="yellow"))
     raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
 
 
