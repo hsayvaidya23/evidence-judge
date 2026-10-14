@@ -77,7 +77,11 @@ def test_form_actions_and_snapshot_decoding(tmp_path: Path) -> None:
         context = browser.new_context(viewport={"width": 800, "height": 600})
         context.tracing.start(screenshots=True, snapshots=True)
         page = context.new_page()
-        page.set_content(FORM_PAGE)
+        page.route(
+            "https://form.test/",
+            lambda route: route.fulfill(content_type="text/html", body=FORM_PAGE),
+        )
+        page.goto("https://form.test/")
         page.fill("#name", "Sam")
         page.press("#name", "Enter")
         page.locator("#name").press_sequentially("!")
@@ -94,6 +98,7 @@ def test_form_actions_and_snapshot_decoding(tmp_path: Path) -> None:
     run = load_playwright_trace(trace)
 
     assert [(a.name, a.selector, a.value) for a in run.actions] == [
+        ("goto", None, "https://form.test/"),
         ("fill", "#name", "Sam"),
         ("press", "#name", "Enter"),
         ("type", "#name", "!"),
@@ -115,3 +120,40 @@ def test_form_actions_and_snapshot_decoding(tmp_path: Path) -> None:
     assert "Small" not in final.text
     assert "Do not show" not in final.text
     assert "inside the frame" not in final.text
+
+
+def test_final_state_stays_on_the_main_tab(tmp_path: Path) -> None:
+    from playwright.sync_api import sync_playwright
+
+    pages = {
+        "https://shop.test/": "<title>Shop</title><a id='go' href='/cart'>Cart</a>",
+        "https://shop.test/cart": "<title>Cart</title><p>Order #1042 pending</p>",
+        "https://ads.test/": "<title>Ad</title><p>Order #1042 confirmed</p>",
+    }
+    trace = tmp_path / "trace.zip"
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        context = browser.new_context()
+        context.route(
+            "https://*.test/**",
+            lambda route: route.fulfill(content_type="text/html", body=pages[route.request.url]),
+        )
+        context.tracing.start(screenshots=True, snapshots=True)
+        page = context.new_page()
+        page.goto("https://shop.test/")
+        page.click("#go")
+        page.wait_for_url("https://shop.test/cart")
+        with context.expect_page() as popup:
+            page.evaluate("window.open('https://ads.test/')")
+        popup.value.wait_for_load_state()
+        popup.value.evaluate("document.title")
+        context.tracing.stop(path=trace)
+        context.close()
+        browser.close()
+
+    run = load_playwright_trace(trace)
+
+    assert run.snapshots[-1].url == "https://ads.test/"
+    final = run.final_state
+    assert final is not None
+    assert (final.url, final.text) == ("https://shop.test/cart", "Order #1042 pending")

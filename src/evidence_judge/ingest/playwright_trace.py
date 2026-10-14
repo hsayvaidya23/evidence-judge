@@ -49,6 +49,7 @@ from evidence_judge.ingest._network import (
     body_prefix_bytes,
     check_max_body_chars,
     inline_body,
+    is_web_page_url,
     network_event,
     wall_ms,
 )
@@ -161,6 +162,14 @@ def load_playwright_trace(
     can keep, and screenshots stay in the zip: ``Run.blobs`` reads each one on demand, so the
     trace file must stay in place while the run is judged and reported.
 
+    ``final_state`` is the last snapshot of the main page that shows a page a site served:
+    snapshots of ``about:``, ``data:``, ``blob:``, ``devtools:`` and other browser-internal URLs
+    (``NON_WEB_SCHEMES``) never count. The main page is the page (``pageId``) of the agent's last
+    action that has such a snapshot, so a tab opened after that action (a popup, an ad, a page
+    the agent never acted on) is ignored, and a tab the agent did act in last is followed. With
+    no such action, it is the first page opened. Its screenshot is the last screencast frame of
+    the same page. With no web-page snapshot at all, there is no final state.
+
     Raises:
         TraceFormatError: the file is not a readable trace (bad zip, no ``.trace`` entry,
             missing ``context-options``, corrupt events).
@@ -262,6 +271,7 @@ class _RawShot:
     file: str
     width: int | None
     height: int | None
+    page_id: str | None
 
 
 @dataclass(slots=True)
@@ -287,6 +297,8 @@ class _TraceReader:
     context_index: int = 0
     actions: dict[_CallKey, _RawAction] = field(default_factory=dict[_CallKey, _RawAction])
     action_urls: dict[_CallKey, str] = field(default_factory=dict[_CallKey, str])
+    action_pages: dict[_CallKey, str] = field(default_factory=dict[_CallKey, str])
+    page_opened: dict[str, float] = field(default_factory=dict[str, float])
     snapshots: list[_RawSnapshot] = field(default_factory=list[_RawSnapshot])
     shots: list[_RawShot] = field(default_factory=list[_RawShot])
     console: list[_RawConsole] = field(default_factory=list[_RawConsole])
@@ -387,6 +399,11 @@ class _TraceReader:
                 self._on_console(event)
             case "event" if event.get("method") == "pageError":
                 self._on_page_error(event)
+            case "event" if event.get("method") == "page":
+                page_id = as_str(as_object(event.get("params")).get("pageId"))
+                time = as_float(event.get("time"))
+                if page_id is not None and time is not None:
+                    self._page_seen(page_id, time)
             case "error":
                 self._add_console(event.get("time"), "error", as_str(event.get("message")))
             case "resource-snapshot":
@@ -402,9 +419,16 @@ class _TraceReader:
             return
         params = as_object(event.get("params"))
         self.actions[self._key(call_id)] = _RawAction(call_id, start, method, params)
+        page_id = as_str(event.get("pageId"))
+        if page_id is not None:
+            self.action_pages[self._key(call_id)] = page_id
 
     def _key(self, call_id: str) -> _CallKey:
         return (self.context_index, call_id)
+
+    def _page_seen(self, page_id: str, time: float) -> None:
+        if time < self.page_opened.get(page_id, float("inf")):
+            self.page_opened[page_id] = time
 
     def _on_after(self, event: JsonObject) -> None:
         action = self.actions.get(self._key(as_str(event.get("callId")) or ""))
@@ -423,18 +447,20 @@ class _TraceReader:
             return
         url = as_str(snapshot.get("frameUrl")) or ""
         call_id = as_str(snapshot.get("callId"))
+        page_id = as_str(snapshot.get("pageId")) or frame_id
         if call_id is not None:
             self.action_urls.setdefault(self._key(call_id), url)
+            self.action_pages.setdefault(self._key(call_id), page_id)
         time = as_float(snapshot.get("timestamp"))
         if time is None:
             return
+        self._page_seen(page_id, time)
         try:
             page = self.store.render(frame_id, index)
         except SnapshotDecodeError as exc:
             self.warnings.append(f"snapshot of {url} skipped: {exc}")
             return
         self.form_values += page.form_values
-        page_id = as_str(snapshot.get("pageId")) or frame_id
         self.snapshots.append(_RawSnapshot(time, page_id, url, page.title, page.text, call_id))
 
     def _on_image(self, event: JsonObject, time: float | None) -> None:
@@ -445,7 +471,7 @@ class _TraceReader:
         if file is None or time is None:
             return
         width, height = as_int(event.get("width")), as_int(event.get("height"))
-        self.shots.append(_RawShot(time, file, width, height))
+        self.shots.append(_RawShot(time, file, width, height, as_str(event.get("pageId"))))
 
     def _on_console(self, event: JsonObject) -> None:
         level = as_str(event.get("messageType")) or "log"
@@ -463,9 +489,9 @@ class _TraceReader:
 
     def build(self, run_id: str, blob_source: _ZipBlobs) -> Run:
         assert self.origin is not None
-        snapshots = self._build_snapshots()
-        screenshots, loaders = self._build_screenshots(blob_source)
-        final_state = _final_state(snapshots, screenshots)
+        snapshots, snapshot_pages = self._build_snapshots()
+        screenshots, shot_pages, loaders = self._build_screenshots(blob_source)
+        final_state = self._final_state(snapshots, snapshot_pages, screenshots, shot_pages)
         initial = snapshots[0] if snapshots else None
         captured = {Channel.ACTIONS, Channel.CONSOLE}
         if self.has_network_file:
@@ -583,14 +609,16 @@ class _TraceReader:
             return None
         return info
 
-    def _build_snapshots(self) -> list[PageSnapshot]:
+    def _build_snapshots(self) -> tuple[list[PageSnapshot], list[str]]:
         out: list[PageSnapshot] = []
+        pages: list[str] = []
         last_by_page: dict[str, tuple[str, str | None, str]] = {}
         for raw in sorted(self.snapshots, key=lambda s: s.time):
             key = (raw.url, raw.title, raw.text)
             if last_by_page.get(raw.page_id) == key:
                 continue
             last_by_page[raw.page_id] = key
+            pages.append(raw.page_id)
             out.append(
                 PageSnapshot(
                     id=f"snap#{len(out) + 1}",
@@ -601,17 +629,19 @@ class _TraceReader:
                     call_id=raw.call_id,
                 )
             )
-        return out
+        return out, pages
 
     def _build_screenshots(
         self, blob_source: _ZipBlobs
-    ) -> tuple[list[Screenshot], dict[str, BlobLoader]]:
+    ) -> tuple[list[Screenshot], list[str | None], dict[str, BlobLoader]]:
         shots: list[Screenshot] = []
+        pages: list[str | None] = []
         loaders: dict[str, BlobLoader] = {}
         for raw in sorted(self.shots, key=lambda s: s.time):
             if self._resource(raw.file, "screenshot") is None:
                 continue
             loaders[raw.file] = partial(blob_source.read, raw.file)
+            pages.append(raw.page_id)
             shots.append(
                 Screenshot(
                     id=f"shot#{len(shots) + 1}",
@@ -624,7 +654,45 @@ class _TraceReader:
                     resource=raw.file,
                 )
             )
-        return shots, loaders
+        return shots, pages, loaders
+
+    def _final_state(
+        self,
+        snapshots: list[PageSnapshot],
+        snapshot_pages: list[str],
+        shots: list[Screenshot],
+        shot_pages: list[str | None],
+    ) -> PageState | None:
+        """The last web-page snapshot of the main page; see ``load_playwright_trace``."""
+        web = [i for i, s in enumerate(snapshots) if is_web_page_url(s.url)]
+        main = self._main_page({snapshot_pages[i] for i in web})
+        if main is None:
+            return None
+        last = snapshots[max(i for i in web if snapshot_pages[i] == main)]
+        shot = next(
+            (
+                s
+                for s, p in zip(reversed(shots), reversed(shot_pages), strict=True)
+                if p in (None, main)
+            ),
+            None,
+        )
+        return PageState(
+            url=last.url,
+            title=last.title,
+            text=last.text,
+            snapshot_id=last.id,
+            screenshot_id=shot.id if shot else None,
+        )
+
+    def _main_page(self, candidates: set[str]) -> str | None:
+        if not candidates:
+            return None
+        for key, _ in sorted(self.actions.items(), key=lambda item: item[1].time, reverse=True):
+            page = self.action_pages.get(key)
+            if page in candidates:
+                return page
+        return min(candidates, key=lambda p: (self.page_opened.get(p, float("inf")), p))
 
     def _build_console(self) -> list[ConsoleEvent]:
         ordered = sorted(self.console, key=lambda c: c.time)
@@ -718,16 +786,3 @@ def _option_label(option: JsonObject) -> str | None:
 def _joined(values: Iterable[str | None]) -> str | None:
     present = [v for v in values if v]
     return ", ".join(present) if present else None
-
-
-def _final_state(snapshots: list[PageSnapshot], shots: list[Screenshot]) -> PageState | None:
-    if not snapshots:
-        return None
-    last = snapshots[-1]
-    return PageState(
-        url=last.url,
-        title=last.title,
-        text=last.text,
-        snapshot_id=last.id,
-        screenshot_id=shots[-1].id if shots else None,
-    )

@@ -456,3 +456,161 @@ def test_missing_blobs_are_skipped_with_warnings(tmp_path: Path) -> None:
             f"screenshot {dropped_shot} missing from trace",
         ]
     )
+
+
+class _TabTrace:
+    """A synthetic multi-page trace: pages, actions, main-frame snapshots and screencast frames."""
+
+    def __init__(self) -> None:
+        self.events: list[Event] = [
+            {"type": "context-options", "version": 10, "monotonicTime": 0, "wallTime": 1}
+        ]
+        self.files: dict[str, bytes] = {}
+        self.time = 0.0
+        self.calls = 0
+
+    def page(self, page_id: str) -> None:
+        self.time += 1
+        self.events.append(
+            {
+                "type": "event",
+                "time": self.time,
+                "class": "BrowserContext",
+                "method": "page",
+                "params": {"pageId": page_id},
+            }
+        )
+
+    def action(self, page_id: str, url: str, text: str, method: str = "click") -> None:
+        self.calls += 1
+        call_id = f"call@{self.calls}"
+        self.time += 1
+        params = {"url": url} if method == "goto" else {"selector": "#x"}
+        self.events.append(
+            {
+                "type": "before",
+                "callId": call_id,
+                "startTime": self.time,
+                "class": "Frame",
+                "method": method,
+                "params": params,
+            }
+        )
+        self.snapshot(page_id, url, text, call_id=call_id)
+
+    def snapshot(self, page_id: str, url: str, text: str, call_id: str | None = None) -> None:
+        self.time += 1
+        snapshot: Event = {
+            "pageId": page_id,
+            "frameId": f"frame-{page_id}",
+            "frameUrl": url,
+            "isMainFrame": True,
+            "timestamp": self.time,
+            "html": ["HTML", {}, ["BODY", {}, ["P", {}, text]]],
+        }
+        if call_id is not None:
+            snapshot["callId"] = call_id
+        self.events.append({"type": "frame-snapshot", "snapshot": snapshot})
+        file = f"screencast/{page_id}-{self.time}.jpeg"
+        self.files[file] = b"\xff\xd8\xff" + page_id.encode()
+        self.events.append(
+            {"type": "screencast-frame", "pageId": page_id, "file": file, "timestamp": self.time}
+        )
+
+    def load(self, tmp_path: Path) -> Run:
+        archive = tmp_path / "tabs.zip"
+        with zipfile.ZipFile(archive, "w") as zout:
+            zout.writestr("trace.trace", "".join(json.dumps(e) + "\n" for e in self.events))
+            for name, data in self.files.items():
+                zout.writestr(name, data)
+        return load_playwright_trace(archive)
+
+
+def _final(run: Run) -> tuple[str, str, bytes | None]:
+    final = run.final_state
+    assert final is not None and final.snapshot_id is not None
+    snapshot = next(s for s in run.snapshots if s.id == final.snapshot_id)
+    assert (snapshot.url, snapshot.text) == (final.url, final.text)
+    shot = next((s for s in run.screenshots if s.id == final.screenshot_id), None)
+    return final.url, final.text, run.blobs[shot.resource] if shot else None
+
+
+def test_final_state_ignores_a_tab_opened_after_the_last_action(tmp_path: Path) -> None:
+    trace = _TabTrace()
+    trace.page("page@main")
+    trace.snapshot("page@main", "about:blank", "")
+    trace.action("page@main", "https://shop.test/", "Shop", method="goto")
+    trace.action("page@main", "https://shop.test/orders/1042", "Order #1042 pending")
+    trace.page("page@popup")
+    trace.snapshot("page@popup", "https://ads.test/", "Order #1042 confirmed")
+
+    run = trace.load(tmp_path)
+    url, text, shot = _final(run)
+
+    assert (url, text) == ("https://shop.test/orders/1042", "Order #1042 pending")
+    assert shot == b"\xff\xd8\xffpage@main"
+    assert Channel.FINAL_STATE in run.captured
+
+
+def test_final_state_follows_the_last_action_into_another_tab(tmp_path: Path) -> None:
+    trace = _TabTrace()
+    trace.page("page@main")
+    trace.action("page@main", "https://shop.test/", "Shop", method="goto")
+    trace.page("page@popup")
+    trace.action("page@popup", "https://pay.test/", "Payment accepted")
+    trace.snapshot("page@main", "https://shop.test/", "Shop refreshed")
+
+    url, text, shot = _final(trace.load(tmp_path))
+
+    assert (url, text) == ("https://pay.test/", "Payment accepted")
+    assert shot == b"\xff\xd8\xffpage@popup"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "data:text/html,<p>Order confirmed</p>",
+        "about:blank",
+        "about:srcdoc",
+        "blob:https://shop.test/5a1f",
+        "devtools://devtools/bundled/inspector.html",
+        "chrome://newtab/",
+    ],
+)
+def test_final_state_never_comes_from_a_non_web_page(tmp_path: Path, url: str) -> None:
+    trace = _TabTrace()
+    trace.page("page@main")
+    trace.action("page@main", "https://shop.test/cart", "Cart: 1 item", method="goto")
+    trace.action("page@main", url, "Order confirmed", method="goto")
+    trace.page("page@tools")
+    trace.action("page@tools", url, "Order confirmed")
+
+    url_, text, shot = _final(trace.load(tmp_path))
+
+    assert (url_, text) == ("https://shop.test/cart", "Cart: 1 item")
+    assert shot == b"\xff\xd8\xffpage@main"
+
+
+def test_final_state_without_actions_uses_the_first_page(tmp_path: Path) -> None:
+    trace = _TabTrace()
+    trace.page("page@main")
+    trace.snapshot("page@main", "https://shop.test/", "Shop")
+    trace.page("page@second")
+    trace.snapshot("page@second", "https://other.test/", "Other")
+
+    url, _, _ = _final(trace.load(tmp_path))
+
+    assert url == "https://shop.test/"
+
+
+def test_no_final_state_when_no_page_ever_loaded(tmp_path: Path) -> None:
+    trace = _TabTrace()
+    trace.page("page@main")
+    trace.action("page@main", "about:blank", "", method="goto")
+    trace.action("page@main", "data:text/html,Order confirmed", "Order confirmed", method="goto")
+
+    run = trace.load(tmp_path)
+
+    assert run.final_state is None
+    assert Channel.FINAL_STATE not in run.captured
+    assert Channel.SNAPSHOTS in run.captured

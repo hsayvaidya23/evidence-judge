@@ -25,6 +25,7 @@ from evidence_judge.ingest._json import (
     as_str,
     read_capped,
 )
+from evidence_judge.ingest._network import is_web_page_url
 from evidence_judge.ingest.errors import BrowserUseFormatError
 
 SOURCE: Final = "browser-use"
@@ -161,7 +162,7 @@ class _HistoryBuilder:
         for result in results:
             if result.get("is_done") is True:
                 self._set_answer(done_params, result)
-        if state:
+        if is_web_page_url(as_str(state.get("url")) or ""):
             self.last_state = state
             self.last_state_screenshot = shot_id
 
