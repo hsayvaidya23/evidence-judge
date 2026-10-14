@@ -56,10 +56,7 @@ def test_visible_text_and_title() -> None:
     title, text = render(PAGE)
 
     assert title == "Kettle Co."
-    assert text == (
-        "Your cart Red Kettle Blue Kettle sam@example.com Save typed note Large "
-        "shadow content Total: $24.00 USD"
-    )
+    assert text == "Your cart Red Kettle Blue Kettle Save Large shadow content Total: $24.00 USD"
 
 
 @pytest.mark.parametrize(
@@ -71,8 +68,10 @@ def test_visible_text_and_title() -> None:
         "template text",
         "enable js",
         "closed dialog",
+        "sam@example.com",
         "hunter2",
         "csrf-token",
+        "typed note",
         "default note",
         "Small",
         "console.log",
@@ -81,6 +80,36 @@ def test_visible_text_and_title() -> None:
 )
 def test_hidden_content_is_stripped(hidden: str) -> None:
     assert hidden not in render(PAGE)[1]
+
+
+def test_typed_form_values_are_not_page_text() -> None:
+    store = FrameSnapshotStore()
+    store.add(
+        "frame@1",
+        [
+            "HTML",
+            {},
+            [
+                "BODY",
+                {},
+                ["LABEL", {"for": "q"}, "Search orders"],
+                [
+                    "INPUT",
+                    {"id": "q", "type": "search", "__playwright_value_": "Order #1042 confirmed"},
+                ],
+                ["INPUT", {"type": "text", "value": "default typed"}],
+                ["INPUT", {"type": "text"}],
+                ["TEXTAREA", {"__playwright_value_": "Thank you for your order"}, "note"],
+                ["TEXTAREA", {}, "prefilled"],
+                ["INPUT", {"type": "submit", "value": "Find"}],
+            ],
+        ],
+    )
+
+    page = store.render("frame@1", 0)
+
+    assert page.text == "Search orders Find"
+    assert page.form_values == 4
 
 
 def test_inline_elements_do_not_split_words() -> None:

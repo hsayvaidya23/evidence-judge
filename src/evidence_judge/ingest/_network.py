@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 import binascii
 import codecs
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Final
 from urllib.parse import quote_plus
 
 from evidence_judge.core.evidence import NetworkEvent
@@ -20,6 +22,32 @@ class BodyPrefix:
 
     data: bytes
     total_bytes: int
+
+
+_SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*):")
+NON_WEB_SCHEMES: Final = frozenset(
+    {
+        "about",
+        "blob",
+        "chrome",
+        "chrome-error",
+        "chrome-extension",
+        "chrome-untrusted",
+        "data",
+        "devtools",
+        "edge",
+        "javascript",
+        "moz-extension",
+        "view-source",
+    }
+)
+"""URL schemes of blank, inline, generated or browser-internal pages, never a site's page."""
+
+
+def is_web_page_url(url: str) -> bool:
+    """Whether ``url`` is a page a site served (not ``about:blank``, ``data:``, ``blob:``...)."""
+    match = _SCHEME.match(url)
+    return match is not None and match.group(1).lower() not in NON_WEB_SCHEMES
 
 
 RawBody = bytes | str | BodyPrefix

@@ -133,7 +133,29 @@ def test_legacy_current_state_and_inline_screenshot(tmp_path: Path) -> None:
     ]
     assert run.agent_answer is None
     assert run.blobs["browser-use/step-1.png"] == PNG
-    assert run.final_state is not None and run.final_state.screenshot_id == "shot#1"
+    assert run.final_state is None
+
+
+def test_final_state_skips_blank_and_inline_pages(tmp_path: Path) -> None:
+    def step(url: str) -> dict[str, Any]:
+        return {
+            "model_output": {"action": []},
+            "result": [],
+            "state": {"url": url, "title": url, "screenshot": base64.b64encode(PNG).decode()},
+        }
+
+    history = write_history(
+        tmp_path / "h.json",
+        step("about:blank"),
+        step("https://shop.test/cart"),
+        step("data:text/html,<h1>Order confirmed</h1>"),
+        step("about:blank"),
+    )
+
+    run = load_browser_use_history(history)
+    final = run.final_state
+    assert final is not None
+    assert (final.url, final.screenshot_id) == ("https://shop.test/cart", "shot#2")
 
 
 def test_step_without_model_output(tmp_path: Path) -> None:

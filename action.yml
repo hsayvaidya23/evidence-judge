@@ -19,7 +19,7 @@ inputs:
     description: File with the agent's final answer
     required: false
   reasoning-file:
-    description: File with the agent's reasoning, one step per line
+    description: File with the agent's reasoning, one step per paragraph (steps separated by a blank line)
     required: false
   spec:
     description: Task spec YAML (required for write tasks to PASS)
@@ -33,7 +33,7 @@ inputs:
     required: false
     default: "false"
   version:
-    description: "evidence-judge version to install; empty installs this action's own source"
+    description: "Git tag, branch or commit SHA of github.com/hsayvaidya23/evidence-judge to install; empty installs this action's own source"
     required: false
     default: ""
   python-version:
@@ -55,7 +55,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: astral-sh/setup-uv@v10.3.0
+    - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       with:
         python-version: ${{ inputs.python-version }}
     - name: Install evidence-judge
@@ -65,7 +65,7 @@ runs:
         EJ_ACTION_PATH: ${{ github.action_path }}
       run: |
         if [ -n "$EJ_VERSION" ]; then
-          uv tool install "evidence-judge[anthropic]==$EJ_VERSION"
+          uv tool install "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge@$EJ_VERSION"
         else
           uv tool install "$EJ_ACTION_PATH[anthropic]"
         fi
@@ -104,21 +104,9 @@ runs:
           echo "::error::evidence-judge exited $code without a verdict"
           exit "$code"
         fi
-        outcome=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['outcome'])" "$out/verdict.json")
-        score=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['score'])" "$out/verdict.json")
-        summary=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['summary'])" "$out/verdict.json")
-        {
-          echo "outcome=$outcome"
-          echo "score=$score"
-          echo "report=$out/report.html"
-        } >> "$GITHUB_OUTPUT"
-        {
-          echo "### Evidence Judge: ${outcome^^}"
-          echo
-          echo "Score: $score"
-          echo
-          echo "$summary"
-        } >> "$GITHUB_STEP_SUMMARY"
+        # Agent text in the summary is escaped so the job summary cannot render it as markup.
+        outcome=$("$(uv tool dir)/evidence-judge/bin/python" -m evidence_judge.ci_summary \
+          "$out/verdict.json" --report "$out/report.html")
         case "$outcome" in
           pass) exit 0 ;;
           needs_review) [ "$EJ_FAIL_ON_REVIEW" = "true" ] && exit 2 || exit 0 ;;
