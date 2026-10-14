@@ -1,0 +1,46 @@
+name: Bug report
+description: Something produced a wrong verdict, crashed, or behaved unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Never attach unredacted traces or HAR files**: they can contain
+        cookies, tokens and personal data. Share `evidence-judge inspect --json` output or a
+        minimal, redacted reproduction instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the command you ran and its exit code.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: verdict
+    attributes:
+      label: Verdict JSON (redacted)
+      description: The relevant part of the `--out` file, if any.
+      render: json
+  - type: input
+    id: version
+    attributes:
+      label: evidence-judge version
+      description: Output of `evidence-judge version`
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Evidence source
+      multiple: true
+      options: [Playwright trace, HAR, browser-use, Other]
+  - type: input
+    id: env
+    attributes:
+      label: Python version and OS
