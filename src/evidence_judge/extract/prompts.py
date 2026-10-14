@@ -214,7 +214,8 @@ string), body_contains, response_contains, status ("2xx" default). Best for side
 "placed the order" -> method POST, url_contains ["order"].
 - page_text: visible page text contains a phrase. "order #1042 confirmed" -> contains "1042". \
 Use scope "any" if it may have appeared before the final page.
-- url: the page URL contained a substring or matched a regex.
+- url: the page URL matched. contains (substring of the scheme, host and path), \
+query_contains (substring of the decoded query string) or regex (full URL).
 - action: the agent performed a browser action (name: click, fill, goto, press, select; \
 target_contains; value_contains).
 - value: a value compared with op (==, !=, <, <=, >, >=, contains). "price was $24" -> field \

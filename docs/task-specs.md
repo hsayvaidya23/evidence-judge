@@ -117,8 +117,14 @@ part still matches.
 
 ```yaml
 - {kind: url, contains: /order/confirmation}
+- {kind: url, contains: /search, query_contains: q=red kettle}
 - {kind: url, regex: '/orders/\d+$', scope: any}
 ```
+
+`contains` matches the scheme, host and path only, like a request's `url_contains`, so a final
+URL of `/login?next=/order/confirmation` does not count as reaching `/order/confirmation`.
+`query_contains` matches the decoded query string, and `regex` the full URL. When several are
+given, all must hold.
 
 With `scope: any`, visited URLs come from page snapshots, the page URL of each action and
 document navigations in the network log (GET requests for a `document`, or answered with

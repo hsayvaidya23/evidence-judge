@@ -60,8 +60,13 @@ class UrlPredicate(_Pred):
     """The page URL matched."""
 
     kind: Literal["url"] = "url"
-    contains: str | None = None
-    regex: str | None = None
+    contains: str | None = Field(
+        default=None, description="Substring of the scheme, host and path (not the query)"
+    )
+    query_contains: str | None = Field(
+        default=None, description="Substring of the decoded query string"
+    )
+    regex: str | None = Field(default=None, description="Matched against the full URL")
     scope: Scope = Scope.FINAL
 
 

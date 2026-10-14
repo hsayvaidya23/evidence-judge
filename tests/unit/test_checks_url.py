@@ -137,3 +137,34 @@ async def test_any_url_absent_with_captured_navigations_stays_confident() -> Non
 async def test_url_predicate_needs_a_criterion() -> None:
     with pytest.raises(InvalidPredicateError):
         await UrlChecker().evaluate(UrlPredicate(), ctx(honest_run()))
+
+
+async def test_contains_ignores_the_query_string() -> None:
+    run = make_run(final_state=final("/login?next=/order/confirmation", "Please sign in"))
+    res = await UrlChecker().evaluate(UrlPredicate(contains="/order/confirmation"), ctx(run))
+    assert res.status is Support.CONTRADICTED
+
+
+async def test_any_scope_contains_ignores_the_query_string() -> None:
+    run = make_run(
+        snapshots=[snap(1, "/login?next=/order/confirmation", "Please sign in")],
+        final_state=final("/login?next=/order/confirmation", "Please sign in"),
+    )
+    pred = UrlPredicate(contains="/order/confirmation", scope=Scope.ANY)
+    assert (await UrlChecker().evaluate(pred, ctx(run))).status is Support.CONTRADICTED
+
+
+async def test_query_contains_matches_the_decoded_query() -> None:
+    run = make_run(final_state=final("/search?q=red+kettle&page=2", "Results"))
+    hit = UrlPredicate(contains="/search", query_contains="q=red kettle")
+    res = await UrlChecker().evaluate(hit, ctx(run))
+    assert res.status is Support.SUPPORTED
+    assert "query containing 'q=red kettle'" in res.reason
+    miss = UrlPredicate(query_contains="q=blue")
+    assert (await UrlChecker().evaluate(miss, ctx(run))).status is Support.CONTRADICTED
+
+
+async def test_regex_still_sees_the_full_url() -> None:
+    run = make_run(final_state=final("/login?next=/order/confirmation", "Please sign in"))
+    pred = UrlPredicate(regex=r"next=/order/")
+    assert (await UrlChecker().evaluate(pred, ctx(run))).status is Support.SUPPORTED
