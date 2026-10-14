@@ -42,24 +42,18 @@ theme:
     text: Inter
     code: JetBrains Mono
   palette:
-    - media: "(prefers-color-scheme)"
+    - scheme: slate
+      primary: custom
+      accent: custom
       toggle:
-        icon: material/brightness-auto
+        icon: material/weather-night
         name: Switch to light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
+    - scheme: default
       primary: custom
       accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/weather-night
-        name: Switch to system preference
   features:
     - announce.dismiss
     - content.action.edit
