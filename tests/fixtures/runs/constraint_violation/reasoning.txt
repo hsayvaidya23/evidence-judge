@@ -1,0 +1,5 @@
+The Steel Kettle looks like a good kettle and it was under $30.
+
+I added it to the cart and confirmed the order at checkout.
+
+The confirmation page said 'Thank you for your order #1001'.

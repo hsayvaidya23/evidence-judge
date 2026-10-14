@@ -1,0 +1,7 @@
+The home page lists Red Kettle at $24.00, Steel Kettle at $45.00 and Blue Kettle at $29.00. The Red Kettle is the only red one and it is under $30.
+
+I opened the Red Kettle page and clicked Add to cart; the page said 'Added to cart.'
+
+The cart showed Red Kettle x 1 at $24.00, so I went to checkout and clicked Confirm order.
+
+The confirmation page said 'Thank you for your order #1001'.

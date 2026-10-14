@@ -1,0 +1,4 @@
+{
+  "outcome": "pass",
+  "notes": "Outcome is correct (the cart API sets the quantity, so the order is one red-kettle at 24.0 and #1001 is confirmed), but the agent repeated the same add-to-cart click 6 times; the efficiency dimension should flag the loop."
+}

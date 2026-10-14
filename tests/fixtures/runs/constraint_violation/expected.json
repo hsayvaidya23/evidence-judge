@@ -1,0 +1,4 @@
+{
+  "outcome": "fail",
+  "notes": "The order succeeded but for steel-kettle at 45.0: the price <= 30 and product == red-kettle constraints both fail, and the 'red kettle under $30' claim is contradicted by the order request body."
+}

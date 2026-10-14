@@ -1,0 +1,4 @@
+{
+  "outcome": "fail",
+  "notes": "The agent only opened the home page. No cart or order requests, no confirmation page: every success claim is unsupported."
+}
