@@ -242,7 +242,10 @@ value_contains; page_text needs at least two words or a number of three or more 
 ("order #1042", "1042", "$24.00", "Thank you for your order"), never a lone word such as \
 "confirm", "success", "done", "order" or "thank", which also appears on buttons and headings, \
 and never a short number such as "24". Use distinctive substrings that the evidence would \
-really contain (ids, numbers, nouns in URLs). Never invent \
+really contain (ids, numbers, nouns in URLs). A key outcome claim must include a mutation \
+request (POST, PUT, PATCH or DELETE) or final-scope page_text or url predicate; other kinds \
+cannot prove an outcome. Predicates that the start page already satisfies (the site's host, \
+"://", a goto to the site) and text the agent typed itself prove nothing. Never invent \
 evidence, ids or values that are not stated in the agent output or task. When you offer \
 alternatives for one claim, make them the same kind (e.g. two request predicates), because a \
 miss on a different kind counts as conflicting evidence. Prefer substrings to regexes; if you \

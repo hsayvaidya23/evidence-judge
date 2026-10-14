@@ -144,7 +144,10 @@ page text needs two words or a number (`"1042"`, `"$24.00"`, `"Thank you for you
 a lone word such as `confirm` also labels buttons on pages that prove nothing. A claims file that
 breaks these rules is refused; the extractors drop such predicates and count them as
 `vacuous_predicates` in the claim set's coverage note, and a key claim left without predicates
-is `no_evidence`, so the run goes to review.
+is `no_evidence`, so the run goes to review. When a run is judged, a claim predicate that the
+run already met before the agent acted, that only echoes text the agent typed, or (for a key
+outcome claim) that is neither a mutation request nor the final page cannot support the claim
+either; see [evidence that proves nothing](concepts/claims-and-predicates.md#evidence-that-proves-nothing).
 
 ### `request`: a network request was observed
 

@@ -69,6 +69,10 @@ class CheckContext:
         """The same context, sharing its usage, with another scope."""
         return dataclasses.replace(self, scope=scope)
 
+    def at_start(self) -> CheckContext:
+        """The same context over the evidence before the agent acted (EvidenceIndex.baseline)."""
+        return dataclasses.replace(self, index=self.index.baseline, llm=None)
+
 
 class PredicateChecker(Protocol):
     """Evaluates one predicate kind. `deterministic` checkers never call an LLM."""

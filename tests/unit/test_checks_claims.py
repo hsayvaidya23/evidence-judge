@@ -15,6 +15,7 @@ from evidence_judge.core.predicates import (
 from evidence_judge.core.verdict import Support
 from tests.unit.conftest import (
     FakeVisionLLM,
+    act,
     ctx,
     final,
     forged_run,
@@ -99,21 +100,22 @@ async def test_one_supported_predicate_is_enough() -> None:
 
 async def test_support_against_a_confident_contradiction_is_a_weak_conflict() -> None:
     no_order = make_run(
+        actions=[act(1, "click", "#newsletter")],
         network=[net(1, "GET", "/")],
         snapshots=[snap(1, "/", "Thank you for visiting our shop")],
         final_state=final("/", "Thank you for visiting our shop"),
     )
     verdict = await judge_claim(
-        order_claim(ORDER_SENT, PageTextPredicate(contains="Thank you", scope=Scope.ANY)),
+        order_claim(ORDER_SENT, PageTextPredicate(contains="Thank you", scope=Scope.FINAL)),
         ctx(no_order),
         default_registry(),
     )
     assert verdict.status is Support.CONTRADICTED
     assert verdict.confidence == WEAK_CONTRADICTION_CONFIDENCE
     assert verdict.reason.startswith("conflicting evidence: ")
-    assert "'Thank you' appears on" in verdict.reason
+    assert "Final page (/) contains 'Thank you'" in verdict.reason
     assert "No POST request whose URL contains '/api/orders'" in verdict.reason
-    assert {c.evidence_id for c in verdict.citations} >= {"snap#1", "net#1"}
+    assert {c.evidence_id for c in verdict.citations} >= {"final", "net#1"}
     assert verdict.checker == "page_text+request"
 
 

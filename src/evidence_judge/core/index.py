@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import bisect
+import math
 from collections.abc import Iterable
 from functools import cached_property
 from urllib.parse import urlsplit
@@ -17,6 +18,8 @@ from evidence_judge.core.evidence import (
 from evidence_judge.textnorm import normalize
 
 FINAL_KEY = "final"
+NAVIGATIONS = frozenset({"goto", "navigate", "visit", "open", "go_to_url", "open_tab"})
+"""Action names that only open a page; the first other action starts the agent's work."""
 
 
 class EvidenceIndex:
@@ -68,6 +71,47 @@ class EvidenceIndex:
             if host:
                 return host.casefold()
         return None
+
+    @cached_property
+    def baseline(self) -> EvidenceIndex:
+        """The evidence as it stood before the agent acted: what every run of the task has.
+
+        The cut is the agent's first action that is not a navigation (opening the start page is
+        set-up); a run whose actions are all navigations is all baseline. Without recorded actions
+        the cut is the first mutation or the second page load (no page load: empty baseline). The
+        baseline keeps the actions, requests and snapshots before the cut; its final state is the
+        last snapshot before the cut, else the initial state (the run's final state when the
+        whole run is baseline).
+        """
+        cut = self._baseline_cut()
+        snapshots = [s for s in self.run.snapshots if s.ts < cut]
+        last = snapshots[-1] if snapshots else None
+        if cut == math.inf:
+            start = self.run.final_state
+        elif last is not None:
+            start = PageState(url=last.url, title=last.title, text=last.text, snapshot_id=last.id)
+        else:
+            start = self.run.initial_state
+        run = self.run.model_copy(
+            update={
+                "actions": [a for a in self.run.actions if a.ts < cut],
+                "network": [n for n in self.run.network if n.ts < cut],
+                "snapshots": snapshots,
+                "screenshots": [],
+                "final_state": start,
+            }
+        )
+        return EvidenceIndex(run)
+
+    def _baseline_cut(self) -> float:
+        if self.run.actions:
+            acted = [a.ts for a in self.run.actions if a.name.casefold() not in NAVIGATIONS]
+            return min(acted, default=math.inf)
+        loads = [n.ts for n in self.run.network if is_document_navigation(n)]
+        marks = [n.ts for n in self.run.network if n.is_mutation] + loads[1:2]
+        if marks:
+            return min(marks)
+        return math.nextafter(loads[0], math.inf) if loads else -math.inf
 
     def mutations(self) -> list[NetworkEvent]:
         return [n for n in self.run.network if n.is_mutation]
