@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Final
 
 from evidence_judge.core.evidence import Channel, NetworkEvent, Run
 from evidence_judge.ingest._json import JsonObject, as_list, as_object, as_str
 from evidence_judge.ingest._network import (
+    BodyPrefix,
+    RawBody,
+    body_prefix_bytes,
     check_max_body_chars,
     inline_body,
     network_event,
@@ -39,7 +43,7 @@ def load_har(
         wall_ms(as_str(as_object(p).get("startedDateTime"))) for p in as_list(log.get("pages"))
     ]
     origin = min([*started, *(s for s in page_starts if s is not None)], default=0.0)
-    body_source = _BodySource(har_path.parent)
+    body_source = _BodySource(har_path.parent, body_prefix_bytes(max_body_chars))
     network: list[NetworkEvent] = []
     for start, entry in sorted(zip(started, entries, strict=True), key=lambda pair: pair[0]):
         event = network_event(
@@ -68,6 +72,8 @@ def _read_log(path: Path) -> JsonObject:
         raise HarFormatError(f"{path}: not valid JSON ({exc})") from exc
     except UnicodeDecodeError as exc:
         raise HarFormatError(f"{path}: not UTF-8 text") from exc
+    except RecursionError as exc:
+        raise HarFormatError(f"{path}: JSON nests too deeply") from exc
     log = as_object(as_object(data).get("log"))
     if not isinstance(log.get("entries"), list):
         raise HarFormatError(f"{path}: missing log.entries; not a HAR file")
@@ -84,23 +90,39 @@ def _entry_start(entry: JsonObject, number: int) -> float:
 class _BodySource:
     """Inline HAR bodies plus Playwright's ``_file`` attachments stored next to the HAR."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, max_bytes: int) -> None:
         self._root = root.resolve()
+        self._max_bytes = max_bytes
         self.warnings: list[str] = []
 
-    def __call__(self, part: JsonObject) -> bytes | str | None:
+    def __call__(self, part: JsonObject) -> RawBody | None:
         name = as_str(part.get("_file"))
         if name is None:
             return inline_body(part)
-        target = (self._root / name).resolve()
+        try:
+            target = (self._root / name).resolve()
+        except (OSError, RuntimeError, ValueError):
+            self.warnings.append(f"ignored an unresolvable body file: {name}")
+            return None
         if not target.is_relative_to(self._root):
             self.warnings.append(f"ignored body file outside the HAR directory: {name}")
             return None
-        try:
-            return target.read_bytes()
-        except OSError:
+        if not target.exists():
             self.warnings.append(f"body file {name} not found next to the HAR")
             return None
+        if not target.is_file():
+            self.warnings.append(f"body file {name} is not a regular file")
+            return None
+        try:
+            with target.open("rb") as handle:
+                data = handle.read(self._max_bytes + 1)
+                total = os.fstat(handle.fileno()).st_size
+        except OSError:
+            self.warnings.append(f"body file {name} is not readable")
+            return None
+        if len(data) > self._max_bytes:
+            return BodyPrefix(data[: self._max_bytes], total)
+        return data
 
 
 def _metadata(log: JsonObject, origin: float | None, warnings: list[str]) -> JsonObject:

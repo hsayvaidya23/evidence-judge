@@ -9,7 +9,7 @@ import pytest
 
 from evidence_judge.core.evidence import Channel
 from evidence_judge.ingest import HarFormatError, load_har
-from evidence_judge.ingest._network import decode_body, headers_dict
+from evidence_judge.ingest._network import BodyPrefix, decode_body, headers_dict
 
 RUNS = Path(__file__).resolve().parent.parent / "fixtures" / "runs"
 
@@ -219,6 +219,48 @@ def test_decode_body(raw: bytes | str | None, mime: str | None, expected: str | 
 
 def test_decode_body_truncates() -> None:
     assert decode_body("abcdefghij", "text/plain", 4) == "abcd…[truncated 6 chars]"
+
+
+def test_decode_body_of_a_prefix_drops_a_cut_character() -> None:
+    prefix = BodyPrefix("abcé".encode()[:-1], total_bytes=1000)
+
+    assert decode_body(prefix, None, 2) == "ab…[truncated; body is 1000 bytes]"
+    assert decode_body(prefix, "font/woff2", 2) is None
+
+
+def test_decode_body_ignores_non_text_charsets() -> None:
+    assert decode_body(b"aGk=", "text/plain; charset=base64", 100) == "aGk="
+
+
+def test_large_body_files_are_read_as_a_prefix(tmp_path: Path) -> None:
+    (tmp_path / "big.json").write_text('{"items": "' + "x" * 100_000 + '"}')
+    har = write_har(
+        tmp_path / "x.har", entry(content={"mimeType": "application/json", "_file": "big.json"})
+    )
+
+    body = load_har(har, max_body_chars=20).network[0].response_body
+
+    assert body == '{"items": "xxxxxxxxx…[truncated; body is 100013 bytes]'
+
+
+def test_body_files_that_are_not_regular_files_are_skipped(tmp_path: Path) -> None:
+    (tmp_path / "dir.json").mkdir()
+    har = write_har(
+        tmp_path / "x.har", entry(content={"mimeType": "application/json", "_file": "dir.json"})
+    )
+
+    run = load_har(har)
+
+    assert run.network[0].response_body is None
+    assert run.metadata["warnings"] == ["body file dir.json is not a regular file"]
+
+
+def test_deeply_nested_har_is_a_format_error(tmp_path: Path) -> None:
+    har = tmp_path / "deep.har"
+    har.write_text("[" * 100_000 + "]" * 100_000)
+
+    with pytest.raises(HarFormatError, match="nests too deeply"):
+        load_har(har)
 
 
 def test_headers_dict_lowercases_and_joins_duplicates() -> None:

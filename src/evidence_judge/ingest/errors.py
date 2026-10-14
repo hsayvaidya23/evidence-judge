@@ -28,3 +28,7 @@ class HarFormatError(IngestError):
 
 class BrowserUseFormatError(IngestError):
     """A browser-use history file does not match the AgentHistoryList schema."""
+
+
+class TraceTooLargeError(TraceFormatError):
+    """A Playwright trace exceeds a size limit (entry size, total size or compression ratio)."""

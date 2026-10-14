@@ -11,16 +11,22 @@ from __future__ import annotations
 
 import bisect
 import json
+import lzma
 import re
+import threading
+import weakref
 import zipfile
 import zlib
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path, PurePosixPath
-from typing import Final, cast
+from typing import IO, Final, cast
 
 from evidence_judge.core.evidence import (
     ActionEvent,
+    BlobLoader,
+    BlobStore,
     Channel,
     ConsoleEvent,
     NetworkEvent,
@@ -39,12 +45,19 @@ from evidence_judge.ingest._json import (
     as_str,
 )
 from evidence_judge.ingest._network import (
+    BodyPrefix,
+    RawBody,
+    body_prefix_bytes,
     check_max_body_chars,
     inline_body,
     network_event,
     wall_ms,
 )
-from evidence_judge.ingest.errors import TraceFormatError, UnsupportedTraceVersionError
+from evidence_judge.ingest.errors import (
+    TraceFormatError,
+    TraceTooLargeError,
+    UnsupportedTraceVersionError,
+)
 
 SUPPORTED_TRACE_VERSIONS: Final = frozenset({7, 8, 9, 10})
 """Trace format versions (``context-options.version``) whose event layout this parser reads.
@@ -55,6 +68,43 @@ Playwright 1.5x-1.6x.
 """
 
 SOURCE: Final = "playwright-trace"
+
+_MIB: Final = 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class TraceLimits:
+    """Size limits checked against the archive's declared sizes before anything is inflated.
+
+    ``zipfile`` never inflates an entry past its declared size (and fails its CRC check if the
+    data disagrees), so these bound the memory and time spent on a hostile or runaway trace.
+    """
+
+    max_entry_bytes: int = 200 * _MIB
+    """Largest ``.trace`` or ``.network`` event file; larger ones fail the load."""
+    max_resource_bytes: int = 10 * _MIB
+    """Largest screenshot or body resource; larger ones are skipped with a warning."""
+    max_total_bytes: int = 1024 * _MIB
+    """Largest sum of uncompressed entry sizes; larger archives fail the load."""
+    max_compression_ratio: float = 200.0
+    """Largest uncompressed/compressed ratio for an entry over 1 MiB (zip bomb guard)."""
+    max_entries: int = 100_000
+    """Most entries an archive may hold."""
+
+
+DEFAULT_TRACE_LIMITS: Final = TraceLimits()
+_RATIO_EXEMPT_BYTES: Final = _MIB
+_ZIP_ERRORS: Final = (
+    zipfile.BadZipFile,
+    zlib.error,
+    lzma.LZMAError,
+    EOFError,
+    OSError,
+    RuntimeError,
+    NotImplementedError,
+    ValueError,
+)
+"""What reading a damaged, encrypted or unsupported zip entry can raise."""
 
 _ACTION_NAMES: Final[dict[str, str]] = {
     "goto": "goto",
@@ -104,12 +154,18 @@ def load_playwright_trace(
     *,
     run_id: str | None = None,
     max_body_chars: int = 20_000,
+    limits: TraceLimits = DEFAULT_TRACE_LIMITS,
 ) -> Run:
     """Parse a Playwright trace zip.
+
+    Event files are streamed line by line, bodies are read only up to what ``max_body_chars``
+    can keep, and screenshots stay in the zip: ``Run.blobs`` reads each one on demand, so the
+    trace file must stay in place while the run is judged and reported.
 
     Raises:
         TraceFormatError: the file is not a readable trace (bad zip, no ``.trace`` entry,
             missing ``context-options``, corrupt events).
+        TraceTooLargeError: the archive exceeds ``limits``.
         UnsupportedTraceVersionError: the trace format version is not in
             ``SUPPORTED_TRACE_VERSIONS``.
     """
@@ -119,12 +175,73 @@ def load_playwright_trace(
         raise FileNotFoundError(f"trace not found: {trace_path}")
     try:
         archive = zipfile.ZipFile(trace_path)
-    except (zipfile.BadZipFile, OSError) as exc:
+    except (*_ZIP_ERRORS, KeyError) as exc:
         raise TraceFormatError(f"{trace_path}: not a readable trace zip ({exc})") from exc
     with archive:
-        reader = _TraceReader(archive, max_body_chars)
+        _check_limits(archive, limits)
+        reader = _TraceReader(archive, max_body_chars, limits)
         reader.read_all()
-        return reader.build(run_id or trace_path.stem)
+        blobs = _ZipBlobs(trace_path.resolve(), limits.max_resource_bytes)
+        return reader.build(run_id or trace_path.stem, blobs)
+
+
+def _check_limits(archive: zipfile.ZipFile, limits: TraceLimits) -> None:
+    infos = archive.infolist()
+    if len(infos) > limits.max_entries:
+        raise TraceTooLargeError(
+            f"{archive.filename}: {len(infos)} entries exceed the limit of {limits.max_entries}"
+        )
+    total = 0
+    for info in infos:
+        total += info.file_size
+        if _is_event_file(info.filename) and info.file_size > limits.max_entry_bytes:
+            raise TraceTooLargeError(
+                f"{info.filename}: {info.file_size} bytes uncompressed exceed the limit of "
+                f"{limits.max_entry_bytes}"
+            )
+        ratio = info.file_size / max(info.compress_size, 1)
+        if info.file_size > _RATIO_EXEMPT_BYTES and ratio > limits.max_compression_ratio:
+            raise TraceTooLargeError(
+                f"{info.filename}: compression ratio {ratio:.0f}x exceeds "
+                f"{limits.max_compression_ratio:.0f}x; refusing a possible zip bomb"
+            )
+    if total > limits.max_total_bytes:
+        raise TraceTooLargeError(
+            f"{archive.filename}: {total} bytes uncompressed exceed the limit of "
+            f"{limits.max_total_bytes}"
+        )
+
+
+def _is_event_file(name: str) -> bool:
+    return name.endswith((".trace", ".network"))
+
+
+class _ZipBlobs:
+    """Reads blobs from the trace zip on demand through one shared, lazily opened handle."""
+
+    def __init__(self, path: Path, max_bytes: int) -> None:
+        self._path = path
+        self._max_bytes = max_bytes
+        self._archive: zipfile.ZipFile | None = None
+        self._lock = threading.Lock()
+
+    def read(self, name: str) -> bytes | None:
+        with self._lock:
+            try:
+                archive = self._open()
+                info = archive.getinfo(name)
+                if info.file_size > self._max_bytes:
+                    return None
+                with archive.open(info) as stream:
+                    return stream.read()
+            except (*_ZIP_ERRORS, KeyError):
+                return None
+
+    def _open(self) -> zipfile.ZipFile:
+        if self._archive is None:
+            self._archive = zipfile.ZipFile(self._path)
+            weakref.finalize(self, self._archive.close)
+        return self._archive
 
 
 _CallKey = tuple[int, str]
@@ -174,6 +291,7 @@ class _Origin:
 class _TraceReader:
     archive: zipfile.ZipFile
     max_body_chars: int
+    limits: TraceLimits
     origin: _Origin | None = None
     context: JsonObject = field(default_factory=JsonObject)
     context_index: int = 0
@@ -237,25 +355,25 @@ class _TraceReader:
             self.context = options
 
     def _events(self, name: str) -> Iterator[JsonObject]:
+        """Stream one NDJSON entry. A final line that is not valid JSON was cut off mid-write."""
         try:
-            raw = self.archive.read(name)
-        except (KeyError, zipfile.BadZipFile, zlib.error, OSError) as exc:
+            stream = self.archive.open(name)
+        except (*_ZIP_ERRORS, KeyError) as exc:
             raise TraceFormatError(f"{name}: cannot read from trace archive ({exc})") from exc
-        lines = raw.decode("utf-8", errors="replace").splitlines()
-        last = max((i for i, line in enumerate(lines) if line.strip()), default=-1)
-        for number, line in enumerate(lines):
-            if not line.strip():
-                continue
+        with stream:
+            pending: tuple[int, bytes] | None = None
+            for numbered in _lines(name, stream):
+                if pending is not None:
+                    yield _parse_event(name, *pending)
+                pending = numbered
+            if pending is None:
+                return
             try:
-                event = json.loads(line)
-            except json.JSONDecodeError as exc:
-                if number == last:
-                    self.warnings.append(f"{name}: ignored truncated final event")
-                    return
-                raise TraceFormatError(f"{name}:{number + 1}: invalid JSON event ({exc})") from exc
-            if not isinstance(event, dict):
-                raise TraceFormatError(f"{name}:{number + 1}: event is not a JSON object")
-            yield cast(JsonObject, event)
+                event = _parse_event(name, *pending)
+            except _TruncatedEventError:
+                self.warnings.append(f"{name}: ignored truncated final event")
+                return
+            yield event
 
     def _on_event(self, event: JsonObject) -> None:
         match event.get("type"):
@@ -346,10 +464,10 @@ class _TraceReader:
         if when is not None and text is not None:
             self.console.append(_RawConsole(when, level, text))
 
-    def build(self, run_id: str) -> Run:
+    def build(self, run_id: str, blob_source: _ZipBlobs) -> Run:
         assert self.origin is not None
         snapshots = self._build_snapshots()
-        screenshots, blobs = self._build_screenshots()
+        screenshots, loaders = self._build_screenshots(blob_source)
         final_state = _final_state(snapshots, screenshots)
         initial = snapshots[0] if snapshots else None
         captured = {Channel.ACTIONS, Channel.CONSOLE}
@@ -376,7 +494,7 @@ class _TraceReader:
             else None,
             final_state=final_state,
             captured=captured,
-            blobs=blobs,
+            blobs=BlobStore(loaders=loaders),
             metadata=self._metadata(),
         )
 
@@ -435,23 +553,38 @@ class _TraceReader:
             return self.origin.monotonic + (started - self.origin.wall)
         return self.origin.monotonic
 
-    def _body(self, part: JsonObject) -> bytes | str | None:
+    def _body(self, part: JsonObject) -> RawBody | None:
         file = as_str(part.get("_file"))
         sha1 = as_str(part.get("_sha1"))
         name = file or (f"resources/{sha1}" if sha1 else None)
         if name is None:
             return inline_body(part)
-        data = self._read_blob(name, "body resource")
-        return data if data is not None else inline_body(part)
-
-    def _read_blob(self, name: str, kind: str) -> bytes | None:
+        info = self._resource(name, "body resource")
+        if info is None:
+            return inline_body(part)
+        limit = body_prefix_bytes(self.max_body_chars)
         try:
-            return self.archive.read(name)
+            with self.archive.open(info) as stream:
+                data = stream.read(limit + 1)
+        except _ZIP_ERRORS as exc:
+            self.warnings.append(f"body resource {name} is corrupt: {exc}")
+            return inline_body(part)
+        if len(data) > limit:
+            return BodyPrefix(data[:limit], info.file_size)
+        return data
+
+    def _resource(self, name: str, kind: str) -> zipfile.ZipInfo | None:
+        try:
+            info = self.archive.getinfo(name)
         except KeyError:
             self.warnings.append(f"{kind} {name} missing from trace")
-        except (zipfile.BadZipFile, zlib.error, OSError) as exc:
-            self.warnings.append(f"{kind} {name} is corrupt: {exc}")
-        return None
+            return None
+        if info.file_size > self.limits.max_resource_bytes:
+            self.warnings.append(
+                f"{kind} {name} is larger than {self.limits.max_resource_bytes} bytes"
+            )
+            return None
+        return info
 
     def _build_snapshots(self) -> list[PageSnapshot]:
         out: list[PageSnapshot] = []
@@ -473,14 +606,15 @@ class _TraceReader:
             )
         return out
 
-    def _build_screenshots(self) -> tuple[list[Screenshot], dict[str, bytes]]:
+    def _build_screenshots(
+        self, blob_source: _ZipBlobs
+    ) -> tuple[list[Screenshot], dict[str, BlobLoader]]:
         shots: list[Screenshot] = []
-        blobs: dict[str, bytes] = {}
+        loaders: dict[str, BlobLoader] = {}
         for raw in sorted(self.shots, key=lambda s: s.time):
-            data = self._read_blob(raw.file, "screenshot")
-            if data is None:
+            if self._resource(raw.file, "screenshot") is None:
                 continue
-            blobs[raw.file] = data
+            loaders[raw.file] = partial(blob_source.read, raw.file)
             shots.append(
                 Screenshot(
                     id=f"shot#{len(shots) + 1}",
@@ -493,7 +627,7 @@ class _TraceReader:
                     resource=raw.file,
                 )
             )
-        return shots, blobs
+        return shots, loaders
 
     def _build_console(self) -> list[ConsoleEvent]:
         ordered = sorted(self.console, key=lambda c: c.time)
@@ -516,6 +650,31 @@ class _TraceReader:
         if self.warnings:
             metadata["warnings"] = list(self.warnings)
         return metadata
+
+
+class _TruncatedEventError(TraceFormatError):
+    pass
+
+
+def _lines(name: str, stream: IO[bytes]) -> Iterator[tuple[int, bytes]]:
+    try:
+        for number, line in enumerate(stream, 1):
+            if line.strip():
+                yield number, line
+    except _ZIP_ERRORS as exc:
+        raise TraceFormatError(f"{name}: cannot read from trace archive ({exc})") from exc
+
+
+def _parse_event(name: str, number: int, line: bytes) -> JsonObject:
+    try:
+        event = json.loads(line.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError as exc:
+        raise _TruncatedEventError(f"{name}:{number}: invalid JSON event ({exc})") from exc
+    except RecursionError as exc:
+        raise TraceFormatError(f"{name}:{number}: event nests too deeply") from exc
+    if not isinstance(event, dict):
+        raise TraceFormatError(f"{name}:{number}: event is not a JSON object")
+    return cast(JsonObject, event)
 
 
 def _trace_prefixes(archive: zipfile.ZipFile) -> list[str]:
