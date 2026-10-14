@@ -19,7 +19,7 @@ from evidence_judge.llm.base import LLMClient, LLMRequest, T, Tier
 
 logger = logging.getLogger(__name__)
 
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 
 
 def cache_key(model: str, request: LLMRequest, schema_name: str, schema_json: str) -> str:
@@ -32,6 +32,7 @@ def cache_key(model: str, request: LLMRequest, schema_name: str, schema_json: st
             [image.mime_type, hashlib.sha256(image.data).hexdigest()] for image in request.images
         ],
         "max_output_tokens": request.max_output_tokens,
+        "effort": request.effort,
         "schema_name": schema_name,
         "schema": schema_json,
     }

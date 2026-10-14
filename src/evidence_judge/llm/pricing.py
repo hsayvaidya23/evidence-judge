@@ -4,15 +4,20 @@ All prices are USD per million tokens and are configurable assumptions taken fro
 published first-party rate card (October 2026). They are not fetched at runtime: pass a custom
 `PriceTable` to `AnthropicClient` when your contract, platform (Bedrock, Vertex) or the public
 price list differs. Unknown models fall back to `DEFAULT_PRICE`, deliberately priced at the most
-expensive listed tier so budgets fail safe rather than under-count.
+expensive listed tier so budgets fail safe rather than under-count; a warning is logged once per
+unknown model so a typo or an unlisted model does not silently inflate reported costs.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+logger = logging.getLogger(__name__)
+
 _MILLION = 1_000_000
+_warned_unknown: set[str] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,5 +72,21 @@ DEFAULT_PRICES: PriceTable = {
 DEFAULT_PRICE = ModelPrice(input=10.00, output=50.00, cache_write=12.50, cache_read=1.00)
 
 
+def is_known_model(model: str, table: PriceTable = DEFAULT_PRICES) -> bool:
+    return model in table
+
+
 def price_for(model: str, table: PriceTable = DEFAULT_PRICES) -> ModelPrice:
-    return table.get(model, DEFAULT_PRICE)
+    price = table.get(model)
+    if price is not None:
+        return price
+    if model not in _warned_unknown:
+        _warned_unknown.add(model)
+        logger.warning(
+            "No price listed for model %r; costing it at the fail-safe default "
+            "(input $%.2f / output $%.2f per MTok). Pass a PriceTable to price it correctly.",
+            model,
+            DEFAULT_PRICE.input,
+            DEFAULT_PRICE.output,
+        )
+    return DEFAULT_PRICE

@@ -12,19 +12,25 @@ import re
 from typing import Any
 
 UNTRUSTED_TAG = "untrusted_agent_output"
+UNTRUSTED_CLAIM_TAG = "untrusted_agent_claim"
 
 _OPENERS = "<" + chr(0xFF1C) + chr(0xFE64) + chr(0x2039) + chr(0x3008)
 _INVISIBLE = "".join(chr(c) for c in (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF))
 _SEP = rf"[\s_\-.{_INVISIBLE}]*"
 _TAG_LOOKALIKE = re.compile(
-    rf"[{re.escape(_OPENERS)}]{_SEP}/?{_SEP}untrusted{_SEP}agent{_SEP}output",
+    rf"[{re.escape(_OPENERS)}]{_SEP}/?{_SEP}untrusted{_SEP}agent{_SEP}(?:output|claim)",
     re.IGNORECASE,
 )
 
 
 def neutralize(text: str) -> str:
-    """Defang anything resembling our wrapper tag so agent text cannot close or reopen it."""
+    """Defang anything resembling our wrapper tags so agent text cannot close or reopen them."""
     return _TAG_LOOKALIKE.sub(lambda m: "[" + m.group(0)[1:], text)
+
+
+def wrap_untrusted_claim(text: str) -> str:
+    """Wrap agent-derived claim text (or a question derived from it) as neutralised data."""
+    return f"<{UNTRUSTED_CLAIM_TAG}>\n{neutralize(text)}\n</{UNTRUSTED_CLAIM_TAG}>"
 
 
 def _join_steps(reasoning: list[str]) -> str:
@@ -201,7 +207,7 @@ quotes short (the minimal span that states the claim).
 - Extract at most 30 claims; prefer key claims if there are more.
 
 # Predicates (1-3 per claim; any single one satisfied proves the claim)
-Use ONLY these kinds and fields from the tool schema, with concrete values:
+Use ONLY these kinds and fields from the output schema, with concrete values:
 - request: an HTTP request happened. method (e.g. POST), url_contains (substrings, all must \
 appear), body_contains, response_contains, status ("2xx" default). Best for side effects: \
 "placed the order" -> method POST, url_contains ["order"].
@@ -220,8 +226,8 @@ evidence, ids or values that are not stated in the agent output or task.
 # Examples
 {chr(10).join(_render_example(example) for example in _EXAMPLES)}
 
-Submit the claims for the real input with the provided tool. If there are no checkable claims, \
-submit an empty list."""
+Submit the claims for the real input in the required output format. If there are no checkable \
+claims, submit an empty list."""
 
 
 def build_extraction_prompt(*, task: str | None, answer: str | None, reasoning: list[str]) -> str:

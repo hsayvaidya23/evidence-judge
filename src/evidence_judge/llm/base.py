@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol, TypeVar
+from typing import Literal, Protocol, TypeVar
 
 from pydantic import BaseModel
 
 from evidence_judge.core.verdict import Usage
 
 T = TypeVar("T", bound=BaseModel)
+
+Effort = Literal["low", "medium", "high"]
 
 
 class Tier(StrEnum):
@@ -28,7 +30,8 @@ class LLMRequest:
     prompt: str
     tier: Tier = Tier.FAST
     images: list[Image] = field(default_factory=list[Image])
-    max_output_tokens: int = 2048
+    max_output_tokens: int = 4096
+    effort: Effort | None = None
 
 
 class LLMError(RuntimeError):
