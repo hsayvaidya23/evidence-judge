@@ -14,7 +14,7 @@ from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.matching import compile_regex, url_contains, url_path
 from evidence_judge.core.evidence import Channel, NetworkEvent
-from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.index import EvidenceIndex, is_document_navigation
 from evidence_judge.core.predicates import Predicate, Scope, UrlPredicate
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 
@@ -74,15 +74,6 @@ def _check_final(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
     )
 
 
-def _is_navigation(event: NetworkEvent) -> bool:
-    """A page load: a GET for a document, or one answered with HTML when the type is unknown."""
-    if event.method.upper() != "GET":
-        return False
-    if event.resource_type:
-        return event.resource_type.lower() == "document"
-    return (event.mime_type or "").split(";", 1)[0].strip().lower() == "text/html"
-
-
 def _visited(index: EvidenceIndex, navigations: list[NetworkEvent]) -> list[tuple[str, str]]:
     states = [(state_id(s, index), s.url) for s in index.page_states()]
     actions = [(a.id, a.url) for a in index.run.actions if a.url]
@@ -91,7 +82,7 @@ def _visited(index: EvidenceIndex, navigations: list[NetworkEvent]) -> list[tupl
 
 
 def _check_any(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
-    navigations = [n for n in index.requests("GET") if _is_navigation(n)]
+    navigations = [n for n in index.requests("GET") if is_document_navigation(n)]
     visited = _visited(index, navigations)
     hits = [(eid, url) for eid, url in visited if matcher.matches(url)]
     if hits:

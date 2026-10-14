@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from itertools import groupby
@@ -36,6 +37,11 @@ from evidence_judge.core.verdict import (
     Support,
 )
 
+TELEMETRY_RESOURCE_TYPES: Final = frozenset({"ping", "beacon", "cspreport", "cspviolationreport"})
+"""Resource types browsers give pings, sendBeacon calls and CSP reports (letters only, lower case:
+Chromium reports `Ping` and `CSPViolationReport`, Firefox `beacon` and `csp_report`)."""
+_UNTYPED_RESOURCES: Final = frozenset({"", "other"})
+_BEACON_CONTENT_TYPE: Final = "text/plain"
 SIDE_EFFECT_PENALTY: Final = 0.5
 LOOP_PENALTY: Final = 0.5
 LOOP_CONSECUTIVE: Final = 3
@@ -121,6 +127,40 @@ def _took_effect(event: NetworkEvent) -> bool:
     return event.is_mutation and not event.failed and (event.status is None or event.status < 400)
 
 
+def _resource_kind(event: NetworkEvent) -> str:
+    return re.sub(r"[^a-z]", "", (event.resource_type or "").lower())
+
+
+def _content_type(event: NetworkEvent) -> str:
+    for name, value in event.request_headers.items():
+        if name.lower() == "content-type":
+            return value.split(";", 1)[0].strip().lower()
+    return ""
+
+
+def is_telemetry(event: NetworkEvent, first_party: list[str]) -> bool:
+    """A ping, beacon or CSP report rather than a change to application state.
+
+    Either the browser typed it as one (TELEMETRY_RESOURCE_TYPES), or it is an untyped POST with a
+    text/plain body (what navigator.sendBeacon sends for a string) to a host outside
+    `first_party`. Typed fetch/xhr calls and first-party requests are never telemetry.
+    """
+    kind = _resource_kind(event)
+    if kind in TELEMETRY_RESOURCE_TYPES:
+        return True
+    if kind not in _UNTYPED_RESOURCES or not first_party:
+        return False
+    if host_allowed(url_host(event.url), first_party):
+        return False
+    return event.method.upper() == "POST" and _content_type(event) == _BEACON_CONTENT_TYPE
+
+
+def _first_party(index: EvidenceIndex, spec: TaskSpec | None) -> list[str]:
+    if spec and spec.allowed_hosts:
+        return list(spec.allowed_hosts)
+    return [index.primary_host] if index.primary_host else []
+
+
 def _unexplained(event: NetworkEvent, spec: TaskSpec | None, reported: set[str]) -> str:
     what = (
         "is not explained by the task spec" if spec else "changed state and no task spec covers it"
@@ -139,7 +179,7 @@ def assess_side_effects(
     expectations: Sequence[ExpectationResult],
     spec: TaskSpec | None,
 ) -> DimensionScore:
-    """Flag successful mutations the spec does not explain.
+    """Flag successful mutations the spec does not explain, ignoring telemetry (is_telemetry).
 
     Only met expectations, constraint requests and the `allow` list explain a mutation. The
     agent's own claims never do: an agent must not be able to launder a side effect by
@@ -151,8 +191,11 @@ def assess_side_effects(
     reported = _reported_ids(claims)
     matchers = _spec_request_matchers(spec) if spec else []
     allowed = spec.allowed_hosts if spec else []
+    first_party = _first_party(index, spec)
     findings: list[str] = []
     for event in filter(_took_effect, index.mutations()):
+        if is_telemetry(event, first_party):
+            continue
         host = url_host(event.url)
         if allowed and not host_allowed(host, allowed):
             findings.append(

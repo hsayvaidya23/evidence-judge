@@ -3,6 +3,7 @@ from __future__ import annotations
 import bisect
 from collections.abc import Iterable
 from functools import cached_property
+from urllib.parse import urlsplit
 
 from evidence_judge.core.evidence import (
     ActionEvent,
@@ -49,6 +50,24 @@ class EvidenceIndex:
             return list(self.run.network)
         m = method.upper()
         return [n for n in self.run.network if n.method.upper() == m]
+
+    @cached_property
+    def primary_host(self) -> str | None:
+        """Host of the first page the run was on: the initial state, else the first action,
+        snapshot, document navigation or final state that names a URL."""
+        initial = self.run.initial_state
+        candidates = [
+            initial.url if initial else None,
+            *(a.url for a in self.run.actions),
+            *(s.url for s in self.run.snapshots),
+            *(n.url for n in self.run.network if is_document_navigation(n)),
+            self.final.url if self.final else None,
+        ]
+        for url in candidates:
+            host = urlsplit(url).hostname if url else None
+            if host:
+                return host.casefold()
+        return None
 
     def mutations(self) -> list[NetworkEvent]:
         return [n for n in self.run.network if n.is_mutation]
@@ -97,3 +116,12 @@ class EvidenceIndex:
         if cached is None:
             cached = self._normalized[key] = normalize(state.text)
         return cached
+
+
+def is_document_navigation(event: NetworkEvent) -> bool:
+    """A page load: a GET for a document, or one answered with HTML when the type is unknown."""
+    if event.method.upper() != "GET":
+        return False
+    if event.resource_type:
+        return event.resource_type.lower() == "document"
+    return (event.mime_type or "").split(";", 1)[0].strip().lower() == "text/html"
