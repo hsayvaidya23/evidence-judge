@@ -139,7 +139,7 @@ id: buy-red-kettle
 task: Buy a red kettle under $30
 expect:
   - id: order_submitted
-    all: [{kind: request, method: POST, url_contains: [/api/orders], status: 2xx}]
+    all: [{kind: request, method: POST, url_contains: [/api/orders]}]   # status defaults to ok (2xx or 3xx)
   - id: confirmation_shown
     any: [{kind: page_text, contains: Thank you for your order}]
 allow:
