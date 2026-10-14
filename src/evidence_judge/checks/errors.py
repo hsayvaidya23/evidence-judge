@@ -20,3 +20,9 @@ class PredicateKindMismatchError(CheckError):
         super().__init__(f"{checker} checker cannot evaluate a {got!r} predicate")
         self.checker = checker
         self.got = got
+
+
+class DuplicateCheckerError(CheckError):
+    def __init__(self, kind: str) -> None:
+        super().__init__(f"a checker for predicate kind {kind!r} is already registered")
+        self.kind = kind
