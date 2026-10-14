@@ -22,6 +22,7 @@ All notable changes to this project are documented here. The format follows
 - `evidence-judge bench`: false-PASS rates with Wilson intervals for Evidence Judge (with and without a spec) and a transcript LLM-judge baseline.
 - Integrations: OpenTelemetry `gen_ai.evaluation.result` events, Langfuse scores, Arize Phoenix span annotations and an Inspect AI scorer (optional extras).
 - Docker image (non-root, multi-stage) built and smoke-tested in CI.
+- Reusable GitHub Action (`uses: hsayvaidya23/evidence-judge@main`) with job-summary output and a guard against workflow-command injection from agent text.
 
 ### Security
 - Confined browser-use screenshot paths, zip-bomb and size limits for traces, HAR mismatch detection, redaction of secret `<input>` values in snapshots.
