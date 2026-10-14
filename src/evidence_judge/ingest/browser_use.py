@@ -17,10 +17,18 @@ from pathlib import Path
 from typing import Final
 
 from evidence_judge.core.evidence import ActionEvent, Channel, PageState, Run, Screenshot
-from evidence_judge.ingest._json import JsonObject, as_float, as_list, as_object, as_str
+from evidence_judge.ingest._json import (
+    JsonObject,
+    as_float,
+    as_list,
+    as_object,
+    as_str,
+    read_capped,
+)
 from evidence_judge.ingest.errors import BrowserUseFormatError
 
 SOURCE: Final = "browser-use"
+HISTORY_FILE: Final = "history.json"
 
 _ACTION_NAMES: Final[dict[str, str]] = {
     "navigate": "goto",
@@ -49,6 +57,8 @@ _IMAGE_KINDS: Final = "a PNG, JPEG, WebP or GIF image"
 
 MAX_SCREENSHOT_BYTES: Final = 10 * 1024 * 1024
 """Default cap on one screenshot; larger ones are skipped with a warning."""
+MAX_HISTORY_BYTES: Final = 50 * 1024 * 1024
+"""Default cap on the history file's size; larger files fail with ``TooLargeError``."""
 
 
 def load_browser_use_history(
@@ -57,8 +67,9 @@ def load_browser_use_history(
     run_id: str | None = None,
     screenshot_root: str | Path | None = None,
     max_screenshot_bytes: int = MAX_SCREENSHOT_BYTES,
+    max_file_bytes: int = MAX_HISTORY_BYTES,
 ) -> Run:
-    """Parse a browser-use history file.
+    """Parse a browser-use history file, or the ``history.json`` in a run directory.
 
     Only actions that produced an ActionResult are recorded: browser-use skips the rest of a
     step's actions once the page changes. Screenshots are loaded from ``state.screenshot_path``
@@ -71,9 +82,14 @@ def load_browser_use_history(
 
     Raises:
         BrowserUseFormatError: the file is not JSON or has no ``history`` list.
+        TooLargeError: the file is larger than ``max_file_bytes``.
     """
     history_path = Path(path)
-    steps = _read_history(history_path)
+    if history_path.is_dir():
+        history_path = history_path / HISTORY_FILE
+        if not history_path.is_file():
+            raise BrowserUseFormatError(f"{path}: run directory has no {HISTORY_FILE}")
+    steps = _read_history(history_path, max_file_bytes)
     root = Path(screenshot_root) if screenshot_root is not None else history_path.parent
     builder = _HistoryBuilder(root.resolve(), max_screenshot_bytes)
     origin = _step_start(steps[0]) if steps else None
@@ -88,9 +104,10 @@ def load_browser_use_history(
     return builder.build(run_id or history_path.stem)
 
 
-def _read_history(path: Path) -> list[JsonObject]:
+def _read_history(path: Path, max_bytes: int) -> list[JsonObject]:
+    raw = read_capped(path, max_bytes)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(raw.decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise BrowserUseFormatError(f"{path}: not valid JSON ({exc})") from exc
     except UnicodeDecodeError as exc:

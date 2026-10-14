@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 import pytest
 from pydantic import SecretStr
@@ -320,3 +321,155 @@ def test_redact_claims_and_spec_match_redacted_evidence(r: Redactor) -> None:
     run, _ = r.redact_run(_run())
     assert run.network[0].request_body is not None
     assert token in run.network[0].request_body
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "Jane.Doe@Example.com",
+        "jane.doe@example.com",
+        "JANE.DOE@EXAMPLE.COM",
+        "jAnE.dOe@eXaMpLe.CoM",
+    ],
+)
+def test_email_fingerprint_ignores_case(r: Redactor, variant: str) -> None:
+    assert (
+        red(r, f"to {variant}.") == f"to [REDACTED:email:{r.fingerprint('jane.doe@example.com')}]."
+    )
+
+
+def test_card_fingerprint_ignores_formatting(r: Redactor) -> None:
+    assert (
+        red(r, "card 4111-1111-1111-1111")
+        == red(r, f"card {CARD}")
+        == red(r, f"card {CARD_DIGITS}")
+    )
+
+
+def test_token_fingerprint_stays_case_sensitive(r: Redactor) -> None:
+    upper = red(r, "token=AbCdEf123")
+    lower = red(r, "token=abcdef123")
+    assert upper != lower
+
+
+def test_redaction_tokens_are_lowercase_hex_and_case_stable(r: Redactor) -> None:
+    out = red(r, "mail Jane.Doe@Example.com")
+    token = TOKEN_RE.search(out)
+    assert token is not None
+    assert token.group(0).split(":")[2][:-1] == token.group(0).split(":")[2][:-1].lower()
+    assert red(r, out.casefold()) == out.casefold()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Order 4111111111111111 confirmed",
+        "tracking 6011000990139424 shipped",
+        '{"order_id": "4111111111111111", "status": "ok"}',
+        "order_id=4111111111111111&tracking=6011000990139424",
+        '{"payment": "visa", "order_id": "4111111111111111"}',
+        "shipment ref 5555555555554444",
+    ],
+)
+def test_bare_luhn_valid_ids_are_not_cards(r: Redactor, text: str) -> None:
+    assert red(r, text) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "4111 1111 1111 1111",
+        "4111-1111-1111-1111",
+        "3782 822463 10005",
+        "card 4111111111111111",
+        "Paid with Visa 4111111111111111.",
+        "cc: 4111111111111111",
+        '{"card_number": "4111111111111111"}',
+        '{"pan":"4111111111111111"}',
+        "ccnum=4111111111111111",
+        '{"card": {"number": "4111111111111111"}}',
+        "4111111111111111 (mastercard ending 1111)",
+    ],
+)
+def test_cards_need_card_formatting_or_card_context(r: Redactor, text: str) -> None:
+    out = red(r, text)
+    assert "4111111111111111" not in out and "1111 1111" not in out and "822463" not in out
+    assert "[REDACTED:card:" in out
+
+
+def test_card_seen_with_context_is_redacted_everywhere_in_the_run(r: Redactor) -> None:
+    run = Run(
+        run_id="r",
+        source="t",
+        agent_answer="Charged 4111111111111111 successfully.",
+        network=[
+            NetworkEvent(
+                id="net#1",
+                ts=1,
+                method="POST",
+                url="https://shop.test/api/pay",
+                request_body='{"card_number": "4111111111111111"}',
+            )
+        ],
+        captured={Channel.NETWORK},
+    )
+    redacted, _ = r.redact_run(run)
+    token = f"[REDACTED:card:{r.fingerprint(CARD_DIGITS)}]"
+    assert redacted.agent_answer == f"Charged {token} successfully."
+    claims = ClaimSet(
+        claims=[
+            Claim(
+                id="c",
+                text="charged 4111111111111111",
+                quote="Charged 4111111111111111",
+                kind=ClaimKind.ACTION,
+                predicates=[RequestPredicate(body_contains=["4111111111111111"])],
+            )
+        ]
+    )
+    red_claims, _ = r.redact_model(claims)
+    pred = red_claims.claims[0].predicates[0]
+    assert isinstance(pred, RequestPredicate)
+    assert pred.body_contains == [token]
+    assert red(Redactor(KEY), "Charged 4111111111111111") == "Charged 4111111111111111"
+
+
+def test_percent_encoded_email_in_form_body(r: Redactor) -> None:
+    out = red(r, "email=jane.doe%40example.com&name=Jane+Doe&card=4242424242424242")
+    token = f"[REDACTED:email:{r.fingerprint('jane.doe@example.com')}]"
+    assert out.startswith(f"email={token}&name=Jane+Doe&card=[REDACTED:card:")
+    assert "%40" not in out and "jane" not in out
+
+
+def test_percent_encoded_email_with_plus_in_form_body(r: Redactor) -> None:
+    out = red(r, "to=Jane+Doe+%3Cjane%40example.com%3E&x=1")
+    assert "jane" not in out
+    assert f"[REDACTED:email:{r.fingerprint('jane@example.com')}]" in out
+    assert out.endswith("&x=1")
+
+
+def test_percent_encoded_email_in_url_path_and_query(r: Redactor) -> None:
+    out, report = r.redact_url(
+        "https://shop.test/users/Jane.Doe%40Example.com/orders?to=jane.doe%2540example.com#x"
+    )
+    token = f"[REDACTED:email:{r.fingerprint('jane.doe@example.com')}]"
+    assert out == f"https://shop.test/users/{token}/orders?to={token}#x"
+    assert report.counts == {"email": 2}
+
+
+def test_percent_encoded_email_in_free_text(r: Redactor) -> None:
+    out = red(r, "redirect to /u/jane.doe%40example.com/profile now")
+    token = f"[REDACTED:email:{r.fingerprint('jane.doe@example.com')}]"
+    assert out == f"redirect to /u/{token}/profile now"
+
+
+@pytest.mark.parametrize("text", ["50%25 off", "a%20b%20c", "/p/red%20kettle?q=a%2Fb"])
+def test_percent_encoding_without_pii_is_left_alone(r: Redactor, text: str) -> None:
+    assert red(r, text) == text
+
+
+def test_percent_scan_is_linear_on_long_unescaped_runs(r: Redactor) -> None:
+    text = "a" * 200_000 + "%zz"
+    started = time.perf_counter()
+    assert red(r, text) == text
+    assert time.perf_counter() - started < 1.0

@@ -20,6 +20,7 @@ from evidence_judge.core.verdict import (
 
 MAX_TIMELINE_ROWS = 500
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
+_ANCHOR_UNSAFE = re.compile(r"[^A-Za-z0-9]")
 _IMAGE_MIME = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 
 _OUTCOME = {
@@ -117,7 +118,9 @@ class _Ctx:
 
 
 def anchor_for(evidence_id: str) -> str:
-    return "ev-" + re.sub(r"[^A-Za-z0-9_-]", "-", evidence_id)
+    """A collision-free HTML id: letters and digits stay, any other character becomes
+    ``-<hex code point>-`` (``net#1`` -> ``ev-net-23-1``, ``net-1`` -> ``ev-net-2d-1``)."""
+    return "ev-" + _ANCHOR_UNSAFE.sub(lambda m: f"-{ord(m.group(0)):x}-", evidence_id)
 
 
 def _pct(value: float | None) -> str:

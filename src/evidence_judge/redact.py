@@ -1,9 +1,10 @@
 """Secret and PII redaction for recorded evidence and agent output.
 
 Every sensitive value is replaced by ``[REDACTED:<category>:<fingerprint>]`` where the fingerprint
-is the first 8 hex characters of an HMAC-SHA256 of the value. Equal values therefore produce equal
-tokens, so a claim that quotes a redacted value still matches the redacted evidence, while the
-value itself never leaves the process. Redacting already-redacted data is a no-op.
+is the first 8 lowercase hex characters of an HMAC-SHA256 of the value's canonical form (emails
+case-folded, card numbers digits only). Equal values therefore produce equal tokens, so a claim
+that quotes a redacted value still matches the redacted evidence, while the value itself never
+leaves the process. Redacting already-redacted data is a no-op.
 """
 
 from __future__ import annotations
@@ -13,9 +14,9 @@ import hmac
 import re
 import secrets
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
-from urllib.parse import quote, unquote_plus, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, unquote_plus, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -144,7 +145,37 @@ _EMAIL_RE = re.compile(
 )
 _CARD_RE = re.compile(r"(?<![0-9])(?:[0-9][ -]?){12,18}[0-9](?![0-9])")
 _CARD_PREFIX_RE = re.compile(r"^(?:4|5[1-5]|2[2-7]|3[0478]|6)")
-_USERINFO_RE = re.compile(r"(?<=://)([^/@\s:]+):([^/@\s]+)@")
+_CARD_FORMATTED_RE = re.compile(
+    r"[0-9]{4}([ -])[0-9]{4}\1[0-9]{4}\1[0-9]{4}(?:\1[0-9]{1,3})?|[0-9]{4}([ -])[0-9]{6}\2[0-9]{4,5}"
+)
+_FIELD_BEFORE_RE = re.compile(r"""([A-Za-z_][A-Za-z0-9_.\-]{0,63})["']?\s*[:=]\s*["']?$""")
+_CARD_FIELD_WORDS = frozenset(
+    {"cc", "ccnum", "ccnumber", "ccno", "pan", "cardnumber", "cardnum", "creditcard", "debitcard"}
+)
+_ID_FIELD_WORDS = frozenset(
+    {
+        "id",
+        "order",
+        "tracking",
+        "ref",
+        "reference",
+        "invoice",
+        "sku",
+        "shipment",
+        "transaction",
+        "txn",
+        "confirmation",
+        "booking",
+    }
+)
+_CARD_CONTEXT_RE = re.compile(
+    r"card|payment|visa|master ?card|amex|american express|credit|debit|(?<![a-z])(?:cc|pan)(?![a-z])"
+)
+_CARD_CONTEXT_CHARS = 30
+_FIELD_LOOKBACK_CHARS = 80
+_PCT_RUN_RE = re.compile(r"[A-Za-z0-9._~!$'()*,;:@+%-]+")
+_FORM_RE = re.compile(r"[^\s=&]+=[^\s&]*(?:&[^\s=&]*(?:=[^\s&]*)?)*")
+_PCT_SAFE = "[]:"
 
 _MODEL_SKIP_KEYS = frozenset(
     {
@@ -186,6 +217,53 @@ def _luhn_ok(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _digits(value: str) -> str:
+    return "".join(ch for ch in value if ch.isdigit())
+
+
+_FINGERPRINT_NORMALISERS: dict[str, Callable[[str], str]] = {
+    "email": lambda v: v.strip().casefold(),
+    "card": _digits,
+}
+"""Canonical form per category, so values that evidence matching treats as equal (matching is
+case-insensitive; card numbers are compared without separators) get equal tokens. Credentials
+stay case-sensitive: two tokens differing only in case are different secrets."""
+
+
+def _field_words(name: str) -> list[str]:
+    return [w.lower() for w in _FIELD_WORD_RE.findall(name)]
+
+
+def _card_by_field(name: str) -> bool | None:
+    """True for a card-number field name, False for an order/tracking/reference id, else None."""
+    words = _field_words(name)
+    if any(w.startswith("card") or w in _CARD_FIELD_WORDS for w in words):
+        return True
+    if any(w in _ID_FIELD_WORDS for w in words):
+        return False
+    return None
+
+
+def _looks_like_card(text: str, start: int, end: int, digits: str) -> bool:
+    """Whether a Luhn-valid number at ``text[start:end]`` is a payment card, not an order id.
+
+    A number written in card groups (``4111 1111 1111 1111``) is a card. A bare run of digits is
+    a card only when its field name says so (``card_number``, ``pan``, ``cc``) or card words
+    (card, payment, visa, cc, ...) appear within a few characters of it; a field named like an
+    order, tracking or reference id never makes it one.
+    """
+    if len(digits) >= 15 and _CARD_FORMATTED_RE.fullmatch(text, start, end):
+        return True
+    field = _FIELD_BEFORE_RE.search(text, max(0, start - _FIELD_LOOKBACK_CHARS), start)
+    if field is not None:
+        verdict = _card_by_field(field.group(1))
+        if verdict is not None:
+            return verdict
+    before = text[max(0, start - _CARD_CONTEXT_CHARS) : start]
+    after = text[end : end + _CARD_CONTEXT_CHARS]
+    return _CARD_CONTEXT_RE.search(f"{before} {after}".lower()) is not None
+
+
 def _norm_param(name: str) -> str:
     return name.lower().replace("-", "_").strip("[]")
 
@@ -218,12 +296,18 @@ def _is_secret_header(name: str) -> bool:
 
 
 class Redactor:
-    """Produces redacted copies of runs, text and models. Thread-safe and side-effect free."""
+    """Produces redacted copies of runs, text and models.
+
+    A redactor remembers the card numbers it has identified, so a bare repeat of one (an answer
+    saying "charged 4111111111111111" after the request sent it as ``card_number``) is redacted
+    too. Redact a run before the specs and claims that go with it. Inputs are never modified.
+    """
 
     def __init__(self, key: bytes) -> None:
         if not key:
             raise ValueError("redaction key must not be empty")
         self._key = key
+        self._known_cards: set[str] = set()
 
     @classmethod
     def from_settings(cls, settings: Settings) -> Redactor:
@@ -238,7 +322,9 @@ class Redactor:
         if TOKEN_RE.fullmatch(value):
             return value
         counts[category] += 1
-        return f"[REDACTED:{category}:{self.fingerprint(value)}]"
+        normalise = _FINGERPRINT_NORMALISERS.get(category)
+        canonical = normalise(value) if normalise else value
+        return f"[REDACTED:{category}:{self.fingerprint(canonical)}]"
 
     def redact_text(self, text: str) -> tuple[str, RedactionReport]:
         counts: Counter[str] = Counter()
@@ -256,6 +342,8 @@ class Redactor:
         return out, RedactionReport(counts=dict(counts))
 
     def redact_run(self, run: Run) -> tuple[Run, RedactionReport]:
+        for text in _run_texts(run):
+            self._learn_cards(text)
         counts: Counter[str] = Counter()
         t = self._opt_text_fn(counts)
         redacted = run.model_copy(
@@ -314,9 +402,39 @@ class Redactor:
         parts.append(fn(text[pos:]))
         return "".join(parts)
 
+    def _card_digits(self, m: re.Match[str]) -> str | None:
+        digits = re.sub(r"[ -]", "", m.group(0))
+        if not (13 <= len(digits) <= 19 and _CARD_PREFIX_RE.match(digits) and _luhn_ok(digits)):
+            return None
+        if digits in self._known_cards or _looks_like_card(m.string, m.start(), m.end(), digits):
+            self._known_cards.add(digits)
+            return digits
+        return None
+
+    def _learn_cards(self, text: str) -> None:
+        for m in _CARD_RE.finditer(text):
+            self._card_digits(m)
+
+    def _percent_runs(self, text: str, counts: Counter[str], *, form: bool) -> str:
+        """Redact PII hidden by percent-encoding (``jane%40example.com``) and re-encode it."""
+        decode = unquote_plus if form else unquote
+
+        def repl(m: re.Match[str]) -> str:
+            raw = m.group(0)
+            if "%" not in raw:
+                return raw
+            decoded = decode(raw)
+            if decoded == raw:
+                return raw
+            redacted = self._text(decoded, counts)
+            return raw if redacted == decoded else quote(redacted, safe=_PCT_SAFE)
+
+        return _PCT_RUN_RE.sub(repl, text)
+
     def _text(self, text: str, counts: Counter[str]) -> str:
         if not text:
             return text
+        form = "=" in text and _FORM_RE.fullmatch(text) is not None
 
         def html_input(m: re.Match[str]) -> str:
             return self._input_tag(m.group(0), counts)
@@ -348,10 +466,8 @@ class Redactor:
             return self._token("email", m.group(0), counts)
 
         def card(m: re.Match[str]) -> str:
-            digits = re.sub(r"[ -]", "", m.group(0))
-            if 13 <= len(digits) <= 19 and _CARD_PREFIX_RE.match(digits) and _luhn_ok(digits):
-                return self._token("card", digits, counts)
-            return m.group(0)
+            digits = self._card_digits(m)
+            return m.group(0) if digits is None else self._token("card", digits, counts)
 
         steps: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
             (_INPUT_TAG_RE, html_input),
@@ -365,6 +481,8 @@ class Redactor:
         ]
         for pattern, repl in steps:
             text = self._outside_tokens(text, lambda s, p=pattern, r=repl: p.sub(r, s))
+        if "%" in text:
+            text = self._outside_tokens(text, lambda s: self._percent_runs(s, counts, form=form))
         return text
 
     def _input_tag(self, tag: str, counts: Counter[str]) -> str:
@@ -516,3 +634,22 @@ class Redactor:
                 "text": self._text(state.text, counts),
             }
         )
+
+
+def _run_texts(run: Run) -> Iterator[str]:
+    """Every free-text field of a run, for the card pre-scan in ``Redactor.redact_run``."""
+    yield from (t for t in (run.task, run.agent_answer) if t)
+    yield from run.agent_reasoning
+    for a in run.actions:
+        yield from (t for t in (a.selector, a.value, a.url) if t)
+    for n in run.network:
+        yield n.url
+        yield from (t for t in (n.request_body, n.response_body) if t)
+        yield from n.request_headers.values()
+        yield from n.response_headers.values()
+    for snap in run.snapshots:
+        yield from (t for t in (snap.url, snap.title, snap.text, snap.html) if t)
+    yield from (c.text for c in run.console)
+    for state in (run.initial_state, run.final_state):
+        if state is not None:
+            yield from (t for t in (state.url, state.title, state.text) if t)

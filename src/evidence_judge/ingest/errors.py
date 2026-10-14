@@ -34,5 +34,9 @@ class MismatchedEvidenceError(IngestError):
     """Two evidence sources passed for one run look like recordings of different runs."""
 
 
-class TraceTooLargeError(TraceFormatError):
+class TooLargeError(IngestError):
+    """An input file exceeds a size limit and was not read."""
+
+
+class TraceTooLargeError(TraceFormatError, TooLargeError):
     """A Playwright trace exceeds a size limit (entry size, total size or compression ratio)."""

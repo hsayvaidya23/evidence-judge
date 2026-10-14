@@ -10,14 +10,13 @@ snapshot-resource and screencast blobs live in the archive under ``resources/`` 
 from __future__ import annotations
 
 import bisect
+import contextlib
 import json
 import lzma
 import re
-import threading
-import weakref
 import zipfile
 import zlib
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path, PurePosixPath
@@ -217,31 +216,22 @@ def _is_event_file(name: str) -> bool:
 
 
 class _ZipBlobs:
-    """Reads blobs from the trace zip on demand through one shared, lazily opened handle."""
+    """Reads blobs from the trace zip on demand; the zip is opened per read, never held open."""
 
     def __init__(self, path: Path, max_bytes: int) -> None:
         self._path = path
         self._max_bytes = max_bytes
-        self._archive: zipfile.ZipFile | None = None
-        self._lock = threading.Lock()
 
     def read(self, name: str) -> bytes | None:
-        with self._lock:
-            try:
-                archive = self._open()
+        try:
+            with zipfile.ZipFile(self._path) as archive:
                 info = archive.getinfo(name)
                 if info.file_size > self._max_bytes:
                     return None
                 with archive.open(info) as stream:
                     return stream.read()
-            except (*_ZIP_ERRORS, KeyError):
-                return None
-
-    def _open(self) -> zipfile.ZipFile:
-        if self._archive is None:
-            self._archive = zipfile.ZipFile(self._path)
-            weakref.finalize(self, self._archive.close)
-        return self._archive
+        except (*_ZIP_ERRORS, KeyError):
+            return None
 
 
 _CallKey = tuple[int, str]
@@ -319,7 +309,16 @@ class _TraceReader:
             )
 
     def _read_context(self, prefix: str) -> None:
-        events = self._events(f"{prefix}.trace")
+        with contextlib.closing(self._events(f"{prefix}.trace")) as events:
+            browser = self._read_context_events(prefix, events)
+        network_name = f"{prefix}.network"
+        if browser and network_name in self.archive.namelist():
+            self.has_network_file = True
+            with contextlib.closing(self._events(network_name)) as events:
+                for event in events:
+                    self._on_event(event)
+
+    def _read_context_events(self, prefix: str, events: Iterator[JsonObject]) -> bool:
         first = next(events, None)
         if first is None or first.get("type") != "context-options":
             got = "no events" if first is None else f"a {first.get('type')!r} event"
@@ -335,16 +334,12 @@ class _TraceReader:
         ):
             raise UnsupportedTraceVersionError(version, SUPPORTED_TRACE_VERSIONS)
         if first.get("origin") == "testRunner":
-            return
+            return False
         self._set_origin(first)
         self.context_index += 1
         for event in events:
             self._on_event(event)
-        network_name = f"{prefix}.network"
-        if network_name in self.archive.namelist():
-            self.has_network_file = True
-            for event in self._events(network_name):
-                self._on_event(event)
+        return True
 
     def _set_origin(self, options: JsonObject) -> None:
         monotonic = as_float(options.get("monotonicTime"))
@@ -354,7 +349,7 @@ class _TraceReader:
             self.origin = _Origin(monotonic, as_float(options.get("wallTime")))
             self.context = options
 
-    def _events(self, name: str) -> Iterator[JsonObject]:
+    def _events(self, name: str) -> Generator[JsonObject]:
         """Stream one NDJSON entry. A final line that is not valid JSON was cut off mid-write."""
         try:
             stream = self.archive.open(name)

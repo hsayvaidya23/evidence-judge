@@ -133,9 +133,10 @@ async def test_disabled_checker_never_sends_screenshots() -> None:
     assert context.usage.llm_calls == 0
 
 
-def test_screenshots_to_llm_setting_defaults_on_and_reads_env(
+def test_screenshots_to_llm_setting_defaults_off_and_reads_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert Settings.model_validate({}).screenshots_to_llm is True
-    monkeypatch.setenv("EVJ_SCREENSHOTS_TO_LLM", "false")
-    assert Settings().screenshots_to_llm is False
+    monkeypatch.delenv("EVJ_SCREENSHOTS_TO_LLM", raising=False)
+    assert Settings.model_validate({}).screenshots_to_llm is False
+    monkeypatch.setenv("EVJ_SCREENSHOTS_TO_LLM", "true")
+    assert Settings().screenshots_to_llm is True

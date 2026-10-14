@@ -8,7 +8,7 @@ import pytest
 
 from evidence_judge.core.evidence import Run, Screenshot
 from evidence_judge.core.verdict import Outcome
-from evidence_judge.report.html_report import MAX_TIMELINE_ROWS, render_html, write_html
+from evidence_judge.report.html_report import MAX_TIMELINE_ROWS, anchor_for, render_html, write_html
 from tests.unit.test_report_fixtures import EVIL, PNG_1PX, make_run, make_verdict
 
 
@@ -51,7 +51,7 @@ def test_embeds_cited_and_final_screenshots() -> None:
     html = render_html(make_verdict(), make_run())
     b64 = base64.b64encode(PNG_1PX).decode()
     assert html.count(f"data:image/png;base64,{b64}") == 2
-    assert 'id="ev-shot-1"' in html and 'id="ev-shot-2"' in html
+    assert 'id="ev-shot-23-1"' in html and 'id="ev-shot-23-2"' in html
     assert "Final · shot#2" in html
 
 
@@ -74,8 +74,8 @@ def test_claim_cards_and_citations_link_to_timeline() -> None:
     html = render_html(make_verdict(), make_run())
     assert "<blockquote>I placed the order!</blockquote>" in html
     assert "<blockquote>applied a coupon</blockquote>" in html
-    assert '<a class="cite" href="#ev-net-2" title="500 Internal Server Error">net#2</a>' in html
-    assert 'id="ev-net-2"' in html
+    assert '<a class="cite" href="#ev-net-23-2" title="500 Internal Server Error">net#2</a>' in html
+    assert 'id="ev-net-23-2"' in html
     assert "Contradicted" in html and "Supported" in html and "No evidence" in html
     assert ">Key<" in html
 
@@ -83,9 +83,9 @@ def test_claim_cards_and_citations_link_to_timeline() -> None:
 def test_timeline_has_actions_and_mutations_only() -> None:
     html = render_html(make_verdict(), make_run())
     assert "POST /api/orders" in html
-    assert 'id="ev-net-1"' not in html
-    assert 'id="ev-act-2"' in html and "Timeout 5000ms" in html
-    assert re.search(r'id="ev-net-2" class="t-bad cited"', html)
+    assert 'id="ev-net-23-1"' not in html
+    assert 'id="ev-act-23-2"' in html and "Timeout 5000ms" in html
+    assert re.search(r'id="ev-net-23-2" class="t-bad cited"', html)
 
 
 def test_timeline_truncates() -> None:
@@ -124,3 +124,13 @@ def test_empty_run_renders() -> None:
 def test_write_html(tmp_path: Path) -> None:
     out = write_html(make_verdict(), make_run(), tmp_path / "a" / "report.html")
     assert out.read_text(encoding="utf-8").startswith("<!doctype html>")
+
+
+@pytest.mark.parametrize(
+    "ids",
+    [("net#1", "net-1"), ("net#1", "net--1"), ("a b", "a-b"), ("x#", "x-"), ("ev", "ev-")],
+)
+def test_anchors_never_collide(ids: tuple[str, str]) -> None:
+    first, second = (anchor_for(i) for i in ids)
+    assert first != second
+    assert re.fullmatch(r"ev-[A-Za-z0-9-]+", first) and re.fullmatch(r"ev-[A-Za-z0-9-]+", second)

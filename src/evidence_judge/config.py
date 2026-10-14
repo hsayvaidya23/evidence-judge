@@ -4,6 +4,7 @@ import contextlib
 import logging
 import os
 import secrets
+import sys
 import tempfile
 from pathlib import Path
 
@@ -14,6 +15,23 @@ logger = logging.getLogger(__name__)
 
 REDACTION_KEY_FILE = "redaction.key"
 _REDACTION_KEY_BYTES = 32
+APP_DIR_NAME = "evidence-judge"
+
+
+def default_cache_dir() -> Path:
+    """The per-user cache directory: ``$XDG_CACHE_HOME/evidence-judge`` when set (absolute),
+    else ``~/Library/Caches/evidence-judge`` on macOS, ``%LOCALAPPDATA%\\evidence-judge`` on
+    Windows and ``~/.cache/evidence-judge`` elsewhere. Never relative to the working directory."""
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+        return base / APP_DIR_NAME
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg and Path(xdg).is_absolute():
+        return Path(xdg) / APP_DIR_NAME
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / APP_DIR_NAME
+    return Path.home() / ".cache" / APP_DIR_NAME
 
 
 class Settings(BaseSettings):
@@ -34,7 +52,10 @@ class Settings(BaseSettings):
     max_concurrent_llm_calls: int = Field(
         default=4, ge=1, description="Upper bound on LLM API requests in flight at once"
     )
-    cache_dir: Path | None = Field(default=Path(".evidence-judge/cache"))
+    cache_dir: Path | None = Field(
+        default_factory=default_cache_dir,
+        description=f"LLM response cache; also holds the {REDACTION_KEY_FILE} file",
+    )
     redact: bool = True
     redaction_key: SecretStr | None = Field(
         default=None,
@@ -46,9 +67,9 @@ class Settings(BaseSettings):
         ),
     )
     screenshots_to_llm: bool = Field(
-        default=True,
-        description="Send recorded screenshots to the vision model; false makes screenshot checks "
-        "report no evidence instead",
+        default=False,
+        description="Send recorded screenshots, which are never redacted, to the vision model; "
+        "while false, screenshot checks report no evidence",
     )
     max_body_chars: int = 20_000
     review_coverage_threshold: float = Field(default=0.6, ge=0, le=1)
