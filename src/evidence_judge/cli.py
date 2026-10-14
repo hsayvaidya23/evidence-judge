@@ -22,9 +22,10 @@ from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
+from evidence_judge.ingest import MismatchedEvidenceError
 from evidence_judge.integrations import exporters
 from evidence_judge.llm import factory
-from evidence_judge.llm.base import LLMClient, LLMError
+from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import (
     print_evidence_summary,
@@ -104,6 +105,11 @@ app = typer.Typer(
 def _load_run(**kwargs: Any) -> Run:
     try:
         return ingest.load_run(**kwargs)
+    except MismatchedEvidenceError as e:
+        raise CliError(
+            f"could not load evidence: {e.reason} Pass --allow-mismatch to merge it anyway.",
+            ExitCode.USAGE,
+        ) from e
     except _INPUT_ERRORS as e:
         raise CliError(f"could not load evidence: {e}", ExitCode.USAGE) from e
 
@@ -127,6 +133,8 @@ def _run_judge(
     options = engine.JudgeOptions(offline=offline, spec=spec, claims=claims)
     try:
         return asyncio.run(engine.Judge(settings, llm).judge(run, options))
+    except LLMConfigError as e:
+        raise CliError(f"{e} (use --offline to judge without a model)", ExitCode.INTERNAL) from e
     except LLMError as e:
         raise CliError(f"LLM error: {e}", ExitCode.INTERNAL) from e
 
@@ -184,10 +192,21 @@ def _load_spec(path: Path) -> TaskSpec:
 
 
 def _load_claims(path: Path) -> ClaimSet:
+    """Load a ClaimSet. Errors name the field and error type but never echo the file's content,
+    which is not redacted yet."""
     try:
-        return ClaimSet.model_validate_json(path.read_bytes())
-    except (OSError, ValueError) as e:
-        raise CliError(f"invalid claims file {path}: {e}", ExitCode.USAGE) from e
+        data = path.read_bytes()
+    except OSError as e:
+        reason = e.strerror or type(e).__name__
+        raise CliError(f"cannot read claims file {path}: {reason}", ExitCode.USAGE) from e
+    try:
+        return ClaimSet.model_validate_json(data)
+    except ValidationError as e:
+        problems = "; ".join(
+            f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['type']}"
+            for err in e.errors(include_url=False, include_input=False, include_context=False)
+        )
+        raise CliError(f"invalid claims file {path}: {problems}", ExitCode.USAGE) from e
 
 
 def _describe(report: RedactionReport) -> str:
@@ -478,7 +497,11 @@ def bench(
                 if with_llm_baseline and llm is not None
                 else None
             ),
-            redactor=_redactor(settings) if settings.redact and not no_redact else None,
+            redactor=(
+                _redactor(settings, persistent=llm is not None)
+                if settings.redact and not no_redact
+                else None
+            ),
         )
         result = asyncio.run(runner.run(scenarios))
         if out:

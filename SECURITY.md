@@ -29,7 +29,9 @@ claim extraction, before any LLM call and before any report is written. It cover
 | `cookie` | Every value in `Cookie` / `Set-Cookie` (cookie names are kept) |
 | `secret_header` | `X-API-Key`, `X-Auth-Token` and headers whose names contain token, secret, session, auth, password, api-key |
 | `api_key` | Common key formats: `sk-...`, `ghp_...`, `github_pat_...`, `AKIA...`, `xox[bp]-...`, `AIza...`, Stripe keys, GitLab tokens |
-| `secret_param` | Secret-looking URL query, fragment, form and JSON fields (`token`, `password`, `secret`, `api_key`, `client_secret`, ...; in URLs also `key`, `code`, `session`, `sig`) |
+| `secret_param` | The value of a URL query, fragment, path (`;jsessionid=`), form or JSON field (string or number) whose name is a credential, session id or payment/identity secret: `password`, `passwd`, `pwd`, `pass`, `pw`, `passcode`, `passphrase`, `secret`, `token` (and names ending in `token`, `secret`, `password`), `api_key`, `apikey`, `client_secret`, `access_token`, `refresh_token`, `id_token`, `session_id`, `sessionid`, `jsessionid`, `phpsessid`, `aspsessionid`, `csrf`, `xsrf`, `otp`, `otp_code`, `totp`, `mfa`, `pin`, `cvv`, `cvv2`, `cvc`, `cvc2`, `csc`, `security_code`, `verification_code`, `one_time_code`, `ssn`, `social_security_number`, AWS signature fields; names are split into words, so `card[cvc]`, `cardCvv` and `payment.pin` count, but `shipping` or `passenger` do not. In URLs also `key`, `code`, `session`, `sig`, `signature`, `auth`, `sid` |
+| `phone` | Phone numbers (7 to 15 digits, with `+ ( ) - .` and spaces) in a JSON, form or query field named for one: `phone`, `phone_number`, `mobile`, `tel`, `telephone`, `cell`, `msisdn`, `fax`. Phone-shaped numbers anywhere else are left alone |
+| `ssn` | US Social Security numbers written `###-##-####` (valid area, group and serial) when `SSN` or `social security` appears just before them or the field is named for one |
 | `url_password` | Passwords in `user:password@host` URLs |
 | `secret_input` | Values typed into fields whose selector suggests a password, OTP, PIN or card security code |
 | `html_secret` | The `value` of an `<input>` in page or body HTML that is `type="password"`, has a password or one-time-code `autocomplete`, or whose `name`/`id` contains a password, token, secret, OTP, PIN, CVV or CSRF word (hidden CSRF/auth tokens included) |
@@ -44,7 +46,7 @@ predicates still match.
 
 Each value becomes `[REDACTED:<category>:<fingerprint>]`, where the fingerprint is the first
 8 lowercase hex characters of an HMAC-SHA256 of the value's canonical form: emails are
-case-folded and card numbers reduced to their digits, because evidence matching ignores case and
+case-folded and card and phone numbers reduced to their digits, because evidence matching ignores case and
 card formatting; credentials are fingerprinted exactly. Equal values get equal tokens, so a claim
 that quotes an email still matches the request that sent it, without the email ever being shown,
 and redaction never changes a verdict (this is tested). Set `EVJ_REDACTION_KEY` to keep
@@ -70,8 +72,9 @@ by guessing.
     a hosted model or the report will be shared.
   - Use `--offline` to judge without any model call, so no screenshot leaves the machine, and
     treat HTML reports from real sessions as sensitive.
-- Redaction is pattern-based. Secrets in unusual formats (custom tokens, names, addresses,
-  phone numbers) may pass through. Review reports before sharing them.
+- Redaction is pattern-based. Secrets in unusual formats (custom tokens, secrets in fields
+  with unrecognised names), names, postal addresses, dates of birth, non-US national ids and
+  phone numbers outside phone-named fields pass through. Review reports before sharing them.
 - `--no-redact` (or `EVJ_REDACT=false`) disables all of the above. Use it only on synthetic data.
 
 ## Untrusted recordings
@@ -95,13 +98,17 @@ compromised agent:
   `TooLargeError` too.
 - **Memory stays bounded.** Event files are streamed line by line, only the part of a body that
   `max_body_chars` keeps is read, and trace screenshots are read from the zip on demand.
-- **Mismatched evidence is refused.** When a HAR shares none of a trace's requests, or fewer
-  than half of them for a trace with 5 or more requests, loading fails with
-  `MismatchedEvidenceError` instead of merging another run's traffic into the evidence. Requests
-  only the HAR saw are listed in `metadata["har_only_requests"]`, and HAR-only requests starting
-  more than 10 minutes outside the trace's time window are dropped with a note in
-  `metadata["merge_warnings"]`. `allow_mismatch=True` (CLI `--allow-mismatch`) overrides all of
-  this.
+- **Mismatched evidence is refused.** Loading a trace with a HAR fails with
+  `MismatchedEvidenceError` instead of merging another run's traffic into the evidence when the
+  HAR shares none of a small trace's requests (fewer than 5), or fewer than half of a larger
+  trace's; when fewer than half of the HAR's entries pair with a trace request or, if both
+  recordings carry wall-clock times, start within 2 seconds of the trace's time window; or when
+  the two time windows do not overlap at all. Requests only the HAR saw are listed in
+  `metadata["har_only_requests"]`. HAR-only `POST`/`PUT`/`PATCH`/`DELETE` requests are dropped,
+  so a side effect the trace never recorded cannot satisfy an expectation on the HAR's word
+  alone, and HAR-only requests starting more than 10 minutes outside the trace's time window are
+  dropped too; both are noted in `metadata["merge_warnings"]`. `allow_mismatch=True` (CLI
+  `--allow-mismatch`) overrides all of this.
 - Every ingest failure is an `IngestError` (a `ValueError`), reported by the CLI as bad input
   (exit code 3).
 

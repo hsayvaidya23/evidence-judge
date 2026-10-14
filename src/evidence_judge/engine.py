@@ -22,7 +22,15 @@ from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import ClaimVerdict, RunVerdict, Usage
 from evidence_judge.extract import ClaimExtractor, HeuristicExtractor, LLMClaimExtractor, coverage
-from evidence_judge.llm.base import BudgetExceededError, LLMClient, LLMError
+from evidence_judge.llm.base import (
+    BudgetExceededError,
+    LLMClient,
+    LLMConfigError,
+    LLMError,
+    LLMRequest,
+    T,
+)
+from evidence_judge.llm.budget import Budget, run_budget
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +53,23 @@ class _Extraction:
     fallback: bool = False
 
 
+class _FatalErrorTrap:
+    """Remembers an `LLMConfigError` a check swallowed, so the run fails instead of degrading."""
+
+    def __init__(self, inner: LLMClient) -> None:
+        self.inner = inner
+        self.name = inner.name
+        self.error: LLMConfigError | None = None
+
+    async def generate(self, request: LLMRequest, schema: type[T]) -> tuple[T, Usage]:
+        try:
+            return await self.inner.generate(request, schema)
+        except LLMConfigError as exc:
+            if self.error is None:
+                self.error = exc
+            raise
+
+
 class Judge:
     """Grades one run. Stateless between runs; safe to reuse."""
 
@@ -64,8 +89,13 @@ class Judge:
         self._extractor = extractor
 
     async def judge(self, run: Run, options: JudgeOptions | None = None) -> RunVerdict:
-        opts = options or JudgeOptions()
-        llm = None if opts.offline else self._llm
+        """Judge one run. Every LLM call made for it shares one fresh `settings.max_cost_usd`
+        budget, so a Judge reused across runs, or judging runs concurrently, caps each run."""
+        with run_budget(Budget(self._settings.max_cost_usd)):
+            return await self._judge(run, options or JudgeOptions())
+
+    async def _judge(self, run: Run, opts: JudgeOptions) -> RunVerdict:
+        llm = None if opts.offline or self._llm is None else _FatalErrorTrap(self._llm)
         task = run.task or (opts.spec.task if opts.spec else None)
 
         extraction = await self._extract(run, task, llm, opts)
@@ -78,6 +108,8 @@ class Judge:
             )
         )
         expectations = await evaluate_spec(opts.spec, ctx, self._registry) if opts.spec else []
+        if llm is not None and llm.error is not None:
+            raise llm.error
         dimensions = assess_dimensions(run, ctx.index, claim_verdicts, expectations, opts.spec)
         claim_coverage = coverage(extraction.claims.claims, run.agent_answer, [])
         outcome, score, summary = decide(
@@ -116,7 +148,7 @@ class Judge:
                 task=task, answer=run.agent_answer, reasoning=run.agent_reasoning
             )
         except (LLMError, BudgetExceededError) as exc:
-            if isinstance(extractor, HeuristicExtractor):
+            if isinstance(extractor, HeuristicExtractor) or isinstance(exc, LLMConfigError):
                 raise
             log.warning("LLM claim extraction failed, falling back to heuristics: %s", exc)
             claims, usage = await HeuristicExtractor().extract(

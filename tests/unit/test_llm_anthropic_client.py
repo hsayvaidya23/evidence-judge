@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from typing import Any, Literal
@@ -14,7 +15,7 @@ from evidence_judge.config import Settings
 from evidence_judge.extract.schema import ClaimExtraction
 from evidence_judge.llm.anthropic_client import TOOL_NAME, AnthropicClient, strict_json_schema
 from evidence_judge.llm.base import BudgetExceededError, Image, LLMError, LLMRequest, Tier
-from evidence_judge.llm.budget import Budget
+from evidence_judge.llm.budget import Budget, run_budget
 
 
 class Verdict(BaseModel):
@@ -302,3 +303,81 @@ def test_transient_retries_are_delegated_to_the_sdk_client():
     sdk = client._client  # pyright: ignore[reportPrivateUsage]
     assert sdk.max_retries == 5
     assert sdk.timeout == 12.0
+
+
+class _Hanging:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+
+    async def create(self, **kwargs: Any) -> Message:
+        self.started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+async def test_cancelled_call_releases_its_reservation():
+    budget = Budget(1.0)
+    sdk = FakeSDK()
+    hanging = _Hanging()
+    sdk.messages = hanging  # type: ignore[assignment]
+    client = _client(sdk, budget=budget)
+    task = asyncio.create_task(client.generate(LLMRequest(system="s", prompt="p"), Verdict))
+    await hanging.started.wait()
+    assert budget.remaining_usd < 1.0
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert budget.remaining_usd == pytest.approx(1.0)
+
+
+async def test_overspent_call_returns_its_result_and_the_next_call_is_refused():
+    sdk = FakeSDK(
+        _message(_json({"label": "a", "score": 1}), input_tokens=10, output_tokens=200_000),
+        _message(_json({"label": "b", "score": 2})),
+    )
+    budget = Budget(0.05)
+    client = _client(sdk, budget=budget)
+    result, usage = await client.generate(
+        LLMRequest(system="s", prompt="p", max_output_tokens=10), Verdict
+    )
+    assert result.label == "a"
+    assert usage.cost_usd > budget.max_cost_usd
+    with pytest.raises(BudgetExceededError):
+        await client.generate(LLMRequest(system="s", prompt="p", max_output_tokens=10), Verdict)
+
+
+async def test_run_budget_and_client_budget_are_both_enforced():
+    sdk = FakeSDK(_message(_json({"label": "a", "score": 1}), input_tokens=10, output_tokens=10))
+    client_budget = Budget(1.0)
+    per_run = Budget(1.0)
+    client = _client(sdk, budget=client_budget)
+    with run_budget(per_run):
+        _, usage = await client.generate(LLMRequest(system="s", prompt="p"), Verdict)
+    assert per_run.spent_usd == pytest.approx(usage.cost_usd)
+    assert client_budget.spent_usd == pytest.approx(usage.cost_usd)
+    with run_budget(Budget(1e-9)), pytest.raises(BudgetExceededError):
+        await client.generate(LLMRequest(system="s", prompt="p"), Verdict)
+    assert client_budget.remaining_usd == pytest.approx(1.0 - usage.cost_usd)
+
+
+@pytest.mark.parametrize(
+    ("error_type", "status", "expected", "match"),
+    [
+        (anthropic.AuthenticationError, 401, "LLMAuthError", "ANTHROPIC_API_KEY rejected"),
+        (anthropic.PermissionDeniedError, 403, "LLMAuthError", "ANTHROPIC_API_KEY"),
+        (anthropic.NotFoundError, 404, "LLMConfigError", "claude-haiku-5-5"),
+    ],
+)
+async def test_auth_and_config_errors_are_typed_and_release_budget(
+    error_type: type[anthropic.APIStatusError], status: int, expected: str, match: str
+):
+    from evidence_judge.llm import base
+
+    error = error_type("nope", response=httpx2.Response(status, request=_request()), body=None)
+    budget = Budget(1.0)
+    client = _client(FakeSDK(error), budget=budget)
+    with pytest.raises(getattr(base, expected), match=match) as info:
+        await client.generate(LLMRequest(system="s", prompt="p"), Verdict)
+    assert isinstance(info.value, base.LLMConfigError)
+    assert "sk-test-not-real" not in str(info.value)
+    assert budget.remaining_usd == pytest.approx(1.0)

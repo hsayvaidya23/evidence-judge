@@ -380,3 +380,86 @@ def test_passes_ingest_safety_options(
     assert calls.load_kwargs is not None
     assert calls.load_kwargs["allow_mismatch"] is True
     assert calls.load_kwargs["screenshot_root"] == tmp_path
+
+
+def test_rejected_api_key_exits_4_with_a_clear_message(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path
+) -> None:
+    from evidence_judge.llm.base import LLMAuthError
+
+    install(
+        monkeypatch,
+        calls,
+        judge_error=LLMAuthError("ANTHROPIC_API_KEY rejected by the Anthropic API (401)"),
+    )
+    result = runner.invoke(app, ["judge", "--har", str(evidence)])
+    assert result.exit_code == ExitCode.INTERNAL
+    assert "ANTHROPIC_API_KEY rejected" in result.output
+
+
+def test_har_mismatch_points_to_the_cli_flag(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path
+) -> None:
+    from evidence_judge.ingest import MismatchedEvidenceError
+
+    install(monkeypatch, calls, load_error=MismatchedEvidenceError("the HAR is from another run."))
+    result = runner.invoke(app, ["judge", "--har", str(evidence)])
+    assert result.exit_code == ExitCode.USAGE
+    assert "--allow-mismatch" in result.output
+    assert "allow_mismatch=True" not in result.output
+
+
+def test_another_runs_har_is_refused_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EVJ_REDACTION_KEY", "test-key")
+    runs = Path(__file__).parents[1] / "fixtures" / "runs"
+    spec = runs / "honest_success" / "spec.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "judge",
+            "--trace",
+            str(runs / "null_agent" / "trace.zip"),
+            "--har",
+            str(runs / "honest_success" / "run.har"),
+            "--answer",
+            "I placed the order",
+            "--spec",
+            str(spec),
+            "--offline",
+        ],
+        terminal_width=400,
+    )
+    assert result.exit_code == ExitCode.USAGE, result.output
+    assert "--allow-mismatch" in result.output
+
+
+def test_invalid_claims_file_is_not_echoed(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path
+) -> None:
+    install(monkeypatch, calls)
+    bad = tmp_path / "claims.json"
+    bad.write_text(
+        '{"claims": [{"id": "c1", "text": "card 4111111111111111 pw hunter2", "kind": 7}]}',
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app, ["judge", "--har", str(evidence), "--claims", str(bad)], terminal_width=400
+    )
+    assert result.exit_code == ExitCode.USAGE
+    assert "hunter2" not in result.output and "4111111111111111" not in result.output
+    assert "claims.json" in result.output
+    assert "claims.0.kind" in result.output
+
+
+def test_unparseable_claims_file_is_not_echoed(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path
+) -> None:
+    install(monkeypatch, calls)
+    bad = tmp_path / "claims.json"
+    bad.write_text('{"claims": [ "secret-sk-ant-abc', encoding="utf-8")
+    result = runner.invoke(
+        app, ["judge", "--har", str(evidence), "--claims", str(bad)], terminal_width=400
+    )
+    assert result.exit_code == ExitCode.USAGE
+    assert "secret-sk-ant-abc" not in result.output
+    assert "json_invalid" in result.output

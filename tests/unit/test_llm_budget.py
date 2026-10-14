@@ -1,7 +1,9 @@
+import asyncio
+
 import pytest
 
 from evidence_judge.llm.base import BudgetExceededError
-from evidence_judge.llm.budget import Budget
+from evidence_judge.llm.budget import Budget, current_budget, run_budget
 from evidence_judge.llm.pricing import DEFAULT_PRICE, DEFAULT_PRICES, ModelPrice, price_for
 
 
@@ -21,12 +23,36 @@ def test_reserve_refuses_when_estimate_overshoots():
         budget.reserve(0.3)
 
 
-def test_settle_raises_when_actual_exceeds_cap():
+def test_settle_records_overspend_without_raising_and_blocks_the_next_call(
+    caplog: pytest.LogCaptureFixture,
+):
     budget = Budget(0.1)
     reserved = budget.reserve(0.05)
-    with pytest.raises(BudgetExceededError):
-        budget.settle(reserved, 0.2)
+    budget.settle(reserved, 0.2)
     assert budget.spent_usd == pytest.approx(0.2)
+    assert budget.remaining_usd == 0.0
+    assert "exceeded" in caplog.text
+    with pytest.raises(BudgetExceededError):
+        budget.reserve(0.0)
+
+
+def test_run_budget_is_scoped_to_the_context():
+    outer = Budget(1.0)
+    assert current_budget() is None
+    with run_budget(outer):
+        assert current_budget() is outer
+    assert current_budget() is None
+
+
+async def test_concurrent_tasks_see_their_own_run_budget():
+    async def task(cap: float) -> float:
+        with run_budget(Budget(cap)):
+            await asyncio.sleep(0)
+            budget = current_budget()
+            assert budget is not None
+            return budget.max_cost_usd
+
+    assert await asyncio.gather(task(1.0), task(2.0)) == [1.0, 2.0]
 
 
 def test_release_frees_reservation():

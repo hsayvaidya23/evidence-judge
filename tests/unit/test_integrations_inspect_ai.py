@@ -142,3 +142,11 @@ def test_runs_inside_an_inspect_eval(tmp_path: Path) -> None:
     assert log.results is not None
     [scores] = log.results.scores
     assert scores.metrics["accuracy"].value == 0.5
+
+
+async def test_offline_scorer_does_not_create_a_redaction_key(tmp_path: Path) -> None:
+    settings = Settings(anthropic_api_key=None, cache_dir=tmp_path / "cache", redaction_key=None)
+    folder = RUNS / "forged_success"
+    score = evidence_judge_scorer(offline=True, settings=settings, base_dir=folder)
+    await score(state({"trace": "trace.zip", "answer_file": "answer.txt"}), Target(""))
+    assert not (tmp_path / "cache").exists()

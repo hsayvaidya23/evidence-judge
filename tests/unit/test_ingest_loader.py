@@ -91,6 +91,7 @@ def test_attach_har_fills_gaps_and_adds_missing_requests(tmp_path: Path) -> None
     order = next(e for e in entries if e["request"]["url"].endswith("/api/orders"))
     order["response"]["content"]["text"] = '{"order_id": 1001}'
     extra = json.loads(json.dumps(order))
+    extra["request"]["method"] = "GET"
     extra["request"]["url"] = extra["request"]["url"].replace("/api/orders", "/api/analytics")
     entries.append(extra)
     har = tmp_path / "run.har"
@@ -221,18 +222,22 @@ def _timed(run: Run, start_wall_ms: float) -> Run:
 
 
 def test_har_only_requests_far_outside_the_trace_window_are_dropped() -> None:
-    trace = _timed(network_run("playwright-trace", "https://a.test/0", "https://a.test/1"), 0.0)
+    urls = [f"https://a.test/{i}" for i in range(4)]
+    trace = _timed(network_run("playwright-trace", *urls), 0.0)
     minutes = 60_000.0
     har = _timed(
         Run(
             run_id="h",
             source="har",
             network=[
-                NetworkEvent(id="net#1", ts=1.0, method="GET", url="https://a.test/0"),
-                NetworkEvent(id="net#2", ts=5 * minutes, method="GET", url="https://a.test/near"),
-                NetworkEvent(id="net#3", ts=30 * minutes, method="POST", url="https://a.test/late"),
+                *(
+                    NetworkEvent(id=f"net#{i}", ts=float(i), method="GET", url=url)
+                    for i, url in enumerate(urls, 1)
+                ),
+                NetworkEvent(id="net#5", ts=5 * minutes, method="GET", url="https://a.test/near"),
+                NetworkEvent(id="net#6", ts=30 * minutes, method="GET", url="https://a.test/late"),
                 NetworkEvent(
-                    id="net#4", ts=-20 * minutes, method="POST", url="https://a.test/early"
+                    id="net#7", ts=-20 * minutes, method="GET", url="https://a.test/early"
                 ),
             ],
             captured={Channel.NETWORK},
@@ -242,9 +247,9 @@ def test_har_only_requests_far_outside_the_trace_window_are_dropped() -> None:
 
     merged = attach_har(trace, har)
 
-    urls = {n.url for n in merged.network}
-    assert "https://a.test/near" in urls
-    assert not urls & {"https://a.test/late", "https://a.test/early"}
+    urls_after = {n.url for n in merged.network}
+    assert "https://a.test/near" in urls_after
+    assert not urls_after & {"https://a.test/late", "https://a.test/early"}
     assert any("2 HAR requests" in w for w in merged.metadata["merge_warnings"])
 
 
@@ -305,3 +310,85 @@ def test_every_fixture_loads_and_is_well_formed(scenario: str) -> None:
     assert (expected["outcome"] == "pass") == (scenario in {"honest_success", "loop"})
     size = sum(f.stat().st_size for f in d.iterdir())
     assert size < 400 * 1024
+
+
+def test_another_runs_har_cannot_fill_a_small_trace() -> None:
+    with pytest.raises(MismatchedEvidenceError, match="time window"):
+        load_run(
+            trace=RUNS / "null_agent" / "trace.zip",
+            har=RUNS / "honest_success" / "run.har",
+            answer="I placed the order",
+        )
+
+
+def test_small_trace_needs_most_har_entries_to_pair_without_clocks() -> None:
+    trace = network_run("playwright-trace", "https://a.test/")
+    har = network_run("har", "https://a.test/", *(f"https://a.test/{i}" for i in range(6)))
+
+    with pytest.raises(MismatchedEvidenceError, match=r"1 of 7 HAR entries"):
+        attach_har(trace, har)
+
+
+def test_har_entries_must_fall_inside_the_trace_window() -> None:
+    trace = _timed(network_run("playwright-trace", "https://a.test/0", "https://a.test/1"), 0.0)
+    har = _timed(
+        network_run("har", "https://a.test/0", "https://a.test/x", "https://a.test/y"), 60_000.0
+    )
+
+    with pytest.raises(MismatchedEvidenceError, match="time window"):
+        attach_har(trace, har)
+    assert len(attach_har(trace, har, allow_mismatch=True).network) == 4
+
+
+def test_har_inside_the_trace_window_is_accepted() -> None:
+    trace = _timed(network_run("playwright-trace", "https://a.test/0", "https://a.test/1"), 0.0)
+    har = _timed(network_run("har", "https://a.test/0", "https://a.test/x"), 500.0)
+
+    merged = attach_har(trace, har)
+
+    assert [n.url for n in merged.network][-1] == "https://a.test/x"
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+def test_har_only_mutations_are_dropped(method: str) -> None:
+    trace = network_run("playwright-trace", "https://a.test/0", "https://a.test/1")
+    har = Run(
+        run_id="h",
+        source="har",
+        network=[
+            NetworkEvent(id="net#1", ts=1.0, method="GET", url="https://a.test/0"),
+            NetworkEvent(id="net#2", ts=2.0, method="GET", url="https://a.test/1"),
+            NetworkEvent(id="net#3", ts=3.0, method=method, url="https://a.test/api/orders"),
+            NetworkEvent(id="net#4", ts=4.0, method="GET", url="https://a.test/extra"),
+        ],
+        captured={Channel.NETWORK},
+    )
+
+    merged = attach_har(trace, har)
+
+    assert [n.url for n in merged.network] == [
+        "https://a.test/0",
+        "https://a.test/1",
+        "https://a.test/extra",
+    ]
+    assert any("1 HAR-only" in w for w in merged.metadata["merge_warnings"])
+    kept = attach_har(trace, har, allow_mismatch=True)
+    order = next(n for n in kept.network if n.url.endswith("/api/orders"))
+    assert order.id in kept.metadata["har_only_requests"]
+
+
+def test_load_run_reports_dropped_har_mutations(tmp_path: Path) -> None:
+    d = RUNS / "honest_success"
+    har_data = json.loads((d / "run.har").read_text())
+    entries = har_data["log"]["entries"]
+    extra = json.loads(json.dumps(entries[-2]))
+    extra["request"]["url"] = extra["request"]["url"].replace("/api/orders", "/api/refunds")
+    entries.append(extra)
+    har = tmp_path / "run.har"
+    har.write_text(json.dumps(har_data))
+
+    run = load_run(trace=d / "trace.zip", har=har)
+
+    assert not any(n.url.endswith("/api/refunds") for n in run.network)
+    assert run.metadata["har_only_requests"] == []
+    assert any("HAR-only" in w for w in run.metadata["merge_warnings"])

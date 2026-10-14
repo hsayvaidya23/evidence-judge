@@ -38,3 +38,13 @@ def test_builds_limited_client_without_cache():
     assert isinstance(client, ConcurrencyLimitedClient)
     assert client.max_concurrent == 4
     assert isinstance(client.inner, AnthropicClient)
+
+
+def test_client_has_no_lifetime_budget_unless_one_is_passed():
+    settings = Settings.model_validate(
+        {"anthropic_api_key": SecretStr("sk-test"), "cache_dir": None}
+    )
+    client = build_llm(settings)
+    assert isinstance(client, ConcurrencyLimitedClient)
+    assert isinstance(client.inner, AnthropicClient)
+    assert client.inner.budget is None

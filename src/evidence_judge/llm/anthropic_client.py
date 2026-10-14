@@ -29,8 +29,16 @@ from pydantic import BaseModel, ValidationError
 
 from evidence_judge.config import Settings
 from evidence_judge.core.verdict import Usage
-from evidence_judge.llm.base import Image, LLMError, LLMRequest, T, Tier
-from evidence_judge.llm.budget import Budget
+from evidence_judge.llm.base import (
+    Image,
+    LLMAuthError,
+    LLMConfigError,
+    LLMError,
+    LLMRequest,
+    T,
+    Tier,
+)
+from evidence_judge.llm.budget import Budget, current_budget
 from evidence_judge.llm.pricing import DEFAULT_PRICES, ModelPrice, PriceTable, price_for
 
 if TYPE_CHECKING:
@@ -105,11 +113,11 @@ def _load_sdk_client(settings: Settings) -> AsyncAnthropic:
     try:
         from anthropic import AsyncAnthropic
     except ImportError as exc:
-        raise LLMError(
+        raise LLMConfigError(
             "The Anthropic SDK is not installed; install with `pip install evidence-judge[anthropic]`"
         ) from exc
     if settings.anthropic_api_key is None:
-        raise LLMError("ANTHROPIC_API_KEY is not set")
+        raise LLMConfigError("ANTHROPIC_API_KEY is not set")
     return AsyncAnthropic(
         api_key=settings.anthropic_api_key.get_secret_value(),
         timeout=settings.request_timeout_s,
@@ -129,7 +137,7 @@ class AnthropicClient:
         sdk_client: AsyncAnthropic | None = None,
     ) -> None:
         self._settings = settings
-        self._budget = budget
+        self.budget = budget
         self._prices = prices
         self._client = sdk_client if sdk_client is not None else _load_sdk_client(settings)
         self.totals = TokenTotals()
@@ -171,6 +179,9 @@ class AnthropicClient:
             APIConnectionError,
             APIStatusError,
             APITimeoutError,
+            AuthenticationError,
+            NotFoundError,
+            PermissionDeniedError,
             RateLimitError,
             omit,
         )
@@ -180,52 +191,67 @@ class AnthropicClient:
             if previous_error is None
             else _with_error(request.prompt, previous_error)
         )
-        reserved = 0.0
-        if self._budget is not None:
-            reserved = self._budget.reserve(self._estimate(price, request, prompt, json_schema))
+        reservations = self._reserve(self._estimate(price, request, prompt, json_schema))
         output_config: OutputConfigParam = {}
         if structured:
             output_config["format"] = {"type": "json_schema", "schema": json_schema}
         if request.effort is not None and model in _EFFORT_MODELS:
             output_config["effort"] = request.effort
         started = time.perf_counter()
+        settled = False
         try:
-            message = await self._client.messages.create(
-                model=model,
-                max_tokens=request.max_output_tokens,
-                system=self._system(request.system, structured=structured),
-                messages=[{"role": "user", "content": self._content(prompt, request.images)}],
-                output_config=output_config or omit,
-                tools=omit if structured else [self._tool(json_schema)],
-                tool_choice=(
-                    omit
-                    if structured
-                    else {"type": "tool", "name": TOOL_NAME, "disable_parallel_tool_use": True}
-                ),
-            )
-        except APITimeoutError as exc:
-            self._release(reserved)
-            raise LLMError(
-                f"Anthropic request timed out after {self._settings.request_timeout_s}s"
-            ) from exc
-        except APIConnectionError as exc:
-            self._release(reserved)
-            raise LLMError("Could not connect to the Anthropic API") from exc
-        except RateLimitError as exc:
-            self._release(reserved)
-            raise LLMError(f"Anthropic rate limit hit (request_id={exc.request_id})") from exc
-        except APIStatusError as exc:
-            self._release(reserved)
-            raise LLMError(
-                f"Anthropic API error {exc.status_code} (request_id={exc.request_id})"
-            ) from exc
-        except AnthropicError as exc:
-            self._release(reserved)
-            raise LLMError(f"Anthropic SDK error: {type(exc).__name__}") from exc
-        latency_ms = (time.perf_counter() - started) * 1000
-        usage = self._record(message, price, latency_ms)
-        if self._budget is not None:
-            self._budget.settle(reserved, usage.cost_usd)
+            try:
+                message = await self._client.messages.create(
+                    model=model,
+                    max_tokens=request.max_output_tokens,
+                    system=self._system(request.system, structured=structured),
+                    messages=[{"role": "user", "content": self._content(prompt, request.images)}],
+                    output_config=output_config or omit,
+                    tools=omit if structured else [self._tool(json_schema)],
+                    tool_choice=(
+                        omit
+                        if structured
+                        else {"type": "tool", "name": TOOL_NAME, "disable_parallel_tool_use": True}
+                    ),
+                )
+            except APITimeoutError as exc:
+                raise LLMError(
+                    f"Anthropic request timed out after {self._settings.request_timeout_s}s"
+                ) from exc
+            except APIConnectionError as exc:
+                raise LLMError("Could not connect to the Anthropic API") from exc
+            except RateLimitError as exc:
+                raise LLMError(f"Anthropic rate limit hit (request_id={exc.request_id})") from exc
+            except AuthenticationError as exc:
+                raise LLMAuthError(
+                    "ANTHROPIC_API_KEY rejected by the Anthropic API "
+                    f"(401, request_id={exc.request_id}); check the key"
+                ) from exc
+            except PermissionDeniedError as exc:
+                raise LLMAuthError(
+                    f"ANTHROPIC_API_KEY is not allowed to use {model!r} "
+                    f"(403, request_id={exc.request_id})"
+                ) from exc
+            except NotFoundError as exc:
+                raise LLMConfigError(
+                    f"model {model!r} not found (404, request_id={exc.request_id}); "
+                    "check EVJ_MODEL_FAST / EVJ_MODEL_STRONG"
+                ) from exc
+            except APIStatusError as exc:
+                raise LLMError(
+                    f"Anthropic API error {exc.status_code} (request_id={exc.request_id})"
+                ) from exc
+            except AnthropicError as exc:
+                raise LLMError(f"Anthropic SDK error: {type(exc).__name__}") from exc
+            latency_ms = (time.perf_counter() - started) * 1000
+            usage = self._record(message, price, latency_ms)
+            for budget, reserved in reservations:
+                budget.settle(reserved, usage.cost_usd)
+            settled = True
+        finally:
+            if not settled:
+                for budget, reserved in reservations:
+                    budget.release(reserved)
         logger.debug(
             "anthropic call model=%s in=%d out=%d cost=%.6f latency_ms=%.0f",
             model,
@@ -236,9 +262,26 @@ class AnthropicClient:
         )
         return message, usage
 
-    def _release(self, reserved: float) -> None:
-        if self._budget is not None:
-            self._budget.release(reserved)
+    def _budgets(self) -> list[Budget]:
+        """The run's budget (see `run_budget`) and this client's own, if set. With neither, each
+        call is capped at `settings.max_cost_usd` on its own."""
+        budgets = [b for b in (current_budget(), self.budget) if b is not None]
+        if not budgets:
+            return [Budget(self._settings.max_cost_usd)]
+        if len(budgets) == 2 and budgets[0] is budgets[1]:
+            return budgets[:1]
+        return budgets
+
+    def _reserve(self, estimate: float) -> list[tuple[Budget, float]]:
+        reservations: list[tuple[Budget, float]] = []
+        try:
+            for budget in self._budgets():
+                reservations.append((budget, budget.reserve(estimate)))
+        except BaseException:
+            for budget, reserved in reservations:
+                budget.release(reserved)
+            raise
+        return reservations
 
     def _record(self, message: Message, price: ModelPrice, latency_ms: float) -> Usage:
         raw = message.usage

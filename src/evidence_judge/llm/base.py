@@ -42,6 +42,15 @@ class BudgetExceededError(LLMError):
     pass
 
 
+class LLMConfigError(LLMError):
+    """The LLM cannot work as configured (unknown model, missing SDK or key). Retrying or
+    falling back to heuristics would only hide it, so the judge lets it propagate."""
+
+
+class LLMAuthError(LLMConfigError):
+    """The provider rejected the API key (401) or refused it access (403)."""
+
+
 class LLMClient(Protocol):
     """Structured-output LLM access. Implementations must return a validated instance of `schema`."""
 

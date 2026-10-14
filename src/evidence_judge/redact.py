@@ -72,6 +72,9 @@ _SECRET_PARAMS = frozenset(
         "session_id",
         "session_token",
         "otp",
+        "jsessionid",
+        "phpsessid",
+        "aspsessionid",
         "x_amz_signature",
         "x_amz_credential",
         "x_amz_security_token",
@@ -102,19 +105,39 @@ _SECRET_FIELD_WORDS = frozenset(
         "passphrase",
         "secret",
         "token",
+        "pass",
+        "pw",
         "otp",
         "totp",
         "mfa",
         "pin",
         "cvv",
+        "cvv2",
         "cvc",
+        "cvc2",
         "csc",
+        "ssn",
         "csrf",
         "xsrf",
         "apikey",
     }
 )
 _SECRET_FIELD_SUFFIXES = ("password", "token", "secret")
+_SECRET_FIELD_PHRASES = (
+    "securitycode",
+    "verificationcode",
+    "onetimecode",
+    "onetimepassword",
+    "socialsecurity",
+)
+"""Secret names spread over several words (``security_code``, ``oneTimeCode``)."""
+_PHONE_FIELD_WORDS = frozenset(
+    {"phone", "mobile", "tel", "telephone", "cell", "cellphone", "msisdn", "fax"}
+)
+_PHONE_VALUE_RE = re.compile(r"\+?[0-9 ().\-]{7,24}")
+_SSN_RE = re.compile(r"(?<![0-9-])([0-9]{3})-([0-9]{2})-([0-9]{4})(?![0-9-])")
+_SSN_CONTEXT_RE = re.compile(r"(?<![a-z])ssn(?![a-z])|social security")
+_SSN_CONTEXT_CHARS = 40
 _SECRET_AUTOCOMPLETE = frozenset({"current-password", "new-password", "one-time-code", "cc-csc"})
 _INPUT_TAG_RE = re.compile(
     r"<input\b(?:[^<>\"']|\"[^\"]{0,4096}\"|'[^']{0,4096}'){0,4096}>", re.IGNORECASE
@@ -138,8 +161,13 @@ _API_KEY_RE = re.compile(
     r"|glpat-[A-Za-z0-9_\-]{20,}"
     r")(?![A-Za-z0-9_-])"
 )
-_JSON_SECRET_RE = re.compile(r'("([A-Za-z0-9_\-.]{1,64})"\s*:\s*")((?:[^"\\]|\\.)+)(")')
-_KV_SECRET_RE = re.compile(r"(?<![A-Za-z0-9_\-.])([A-Za-z0-9_\-.]{1,64})(=)([^&\s\"'<>#;,]+)")
+_JSON_SECRET_RE = re.compile(r'("([A-Za-z0-9_\-.\[\]]{1,64})"\s*:\s*")((?:[^"\\]|\\.)+)(")')
+_JSON_SECRET_NUMBER_RE = re.compile(
+    r'("([A-Za-z0-9_\-.\[\]]{1,64})"\s*:\s*)(-?[0-9]{1,64}(?:\.[0-9]{1,64})?)(?![0-9.eE])'
+)
+_KV_SECRET_RE = re.compile(
+    r"(?<![A-Za-z0-9_\-.\[\]])([A-Za-z0-9_\-.\[\]]{1,64})(=)([^&\s\"'<>#;,]+)"
+)
 _EMAIL_RE = re.compile(
     r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}(?![A-Za-z0-9-])"
 )
@@ -224,6 +252,7 @@ def _digits(value: str) -> str:
 _FINGERPRINT_NORMALISERS: dict[str, Callable[[str], str]] = {
     "email": lambda v: v.strip().casefold(),
     "card": _digits,
+    "phone": _digits,
 }
 """Canonical form per category, so values that evidence matching treats as equal (matching is
 case-insensitive; card numbers are compared without separators) get equal tokens. Credentials
@@ -270,14 +299,38 @@ def _norm_param(name: str) -> str:
 
 def _is_secret_param(name: str, *, in_url: bool) -> bool:
     n = _norm_param(name)
-    if n in _SECRET_PARAMS or n.endswith(_SECRET_PARAM_SUFFIXES):
+    if n in _SECRET_PARAMS or n.endswith(_SECRET_PARAM_SUFFIXES) or _is_secret_field_name(name):
         return True
     return in_url and n in _AMBIGUOUS_URL_PARAMS
 
 
 def _is_secret_field_name(name: str) -> bool:
-    words = [w.lower() for w in _FIELD_WORD_RE.findall(name)]
-    return any(w in _SECRET_FIELD_WORDS or w.endswith(_SECRET_FIELD_SUFFIXES) for w in words)
+    words = _field_words(name)
+    if any(w in _SECRET_FIELD_WORDS or w.endswith(_SECRET_FIELD_SUFFIXES) for w in words):
+        return True
+    joined = "".join(words)
+    return any(phrase in joined for phrase in _SECRET_FIELD_PHRASES)
+
+
+def _is_phone(name: str, value: str) -> bool:
+    """A phone number in a field named for one (``phone``, ``mobileNumber``, ``tel``)."""
+    words = _field_words(name)
+    if not any(w in _PHONE_FIELD_WORDS or w.endswith("phone") for w in words):
+        return False
+    return _PHONE_VALUE_RE.fullmatch(value) is not None and 7 <= len(_digits(value)) <= 15
+
+
+def _ssn_valid(m: re.Match[str]) -> bool:
+    area, group, serial = m.group(1, 2, 3)
+    return area not in {"000", "666"} and area[0] != "9" and group != "00" and serial != "0000"
+
+
+def _ssn_in_context(text: str, start: int) -> bool:
+    field = _FIELD_BEFORE_RE.search(text, max(0, start - _FIELD_LOOKBACK_CHARS), start)
+    if field is not None and _is_secret_field_name(field.group(1)):
+        return True
+    before = text[max(0, start - _SSN_CONTEXT_CHARS) : start].lower()
+    return _SSN_CONTEXT_RE.search(before) is not None
 
 
 def _is_secret_input(attrs: Mapping[str, str]) -> bool:
@@ -449,18 +502,23 @@ class Redactor:
             return self._token("api_key", m.group(0), counts)
 
         def json_secret(m: re.Match[str]) -> str:
-            if not _is_secret_param(m.group(2), in_url=False):
+            category = self._field_category(m.group(2), m.group(3), in_url=False)
+            if category is None:
                 return m.group(0)
-            return m.group(1) + self._token("secret_param", m.group(3), counts) + m.group(4)
+            return m.group(1) + self._token(category, m.group(3), counts) + m.group(4)
+
+        def json_number(m: re.Match[str]) -> str:
+            category = self._field_category(m.group(2), m.group(3), in_url=False)
+            if category is None:
+                return m.group(0)
+            return f'{m.group(1)}"{self._token(category, m.group(3), counts)}"'
 
         def kv_secret(m: re.Match[str]) -> str:
-            if not _is_secret_param(m.group(1), in_url=False):
+            value = unquote_plus(m.group(3))
+            category = self._field_category(m.group(1), value, in_url=False)
+            if category is None:
                 return m.group(0)
-            return (
-                m.group(1)
-                + m.group(2)
-                + self._token("secret_param", unquote_plus(m.group(3)), counts)
-            )
+            return m.group(1) + m.group(2) + self._token(category, value, counts)
 
         def email(m: re.Match[str]) -> str:
             return self._token("email", m.group(0), counts)
@@ -469,21 +527,36 @@ class Redactor:
             digits = self._card_digits(m)
             return m.group(0) if digits is None else self._token("card", digits, counts)
 
+        def ssn(m: re.Match[str]) -> str:
+            if not _ssn_valid(m) or not _ssn_in_context(m.string, m.start()):
+                return m.group(0)
+            return self._token("ssn", m.group(0), counts)
+
         steps: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
             (_INPUT_TAG_RE, html_input),
             (_JWT_RE, jwt),
             (_BEARER_RE, bearer),
             (_API_KEY_RE, api_key),
             (_JSON_SECRET_RE, json_secret),
+            (_JSON_SECRET_NUMBER_RE, json_number),
             (_KV_SECRET_RE, kv_secret),
             (_EMAIL_RE, email),
             (_CARD_RE, card),
+            (_SSN_RE, ssn),
         ]
         for pattern, repl in steps:
             text = self._outside_tokens(text, lambda s, p=pattern, r=repl: p.sub(r, s))
         if "%" in text:
             text = self._outside_tokens(text, lambda s: self._percent_runs(s, counts, form=form))
         return text
+
+    @staticmethod
+    def _field_category(name: str, value: str, *, in_url: bool) -> str | None:
+        if _is_secret_param(name, in_url=in_url):
+            return "secret_param"
+        if _is_phone(name, value):
+            return "phone"
+        return None
 
     def _input_tag(self, tag: str, counts: Counter[str]) -> str:
         """Redact the ``value`` of a password, OTP or token ``<input>``; keep the rest of the tag."""
@@ -507,8 +580,13 @@ class Redactor:
         out: list[str] = []
         for pair in query.split("&"):
             name, sep, raw = pair.partition("=")
-            if sep and raw and _is_secret_param(unquote_plus(name), in_url=True):
-                out.append(f"{name}={self._token('secret_param', unquote_plus(raw), counts)}")
+            category = (
+                self._field_category(unquote_plus(name), unquote_plus(raw), in_url=True)
+                if sep and raw
+                else None
+            )
+            if category is not None:
+                out.append(f"{name}={self._token(category, unquote_plus(raw), counts)}")
                 continue
             if sep and raw:
                 decoded = unquote_plus(raw)

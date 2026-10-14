@@ -1,10 +1,18 @@
-"""A shared, hard USD budget for every LLM call made while judging one run."""
+"""Hard USD budgets for LLM calls: one per judged run, plus an optional cap on a client."""
 
 from __future__ import annotations
 
+import logging
 import threading
+from collections.abc import Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from evidence_judge.llm.base import BudgetExceededError
+
+logger = logging.getLogger(__name__)
+
+_RUN_BUDGET: ContextVar[Budget | None] = ContextVar("evidence_judge_run_budget", default=None)
 
 
 class Budget:
@@ -45,15 +53,38 @@ class Budget:
         return estimate
 
     def settle(self, reserved_usd: float, actual_usd: float) -> None:
+        """Record a finished call's cost. A call that cost more than the cap allows is already
+        paid for, so its result is kept: the overspend is logged and the next `reserve` fails."""
         with self._lock:
             self._reserved = max(0.0, self._reserved - reserved_usd)
             self._spent += max(0.0, actual_usd)
             spent = self._spent
         if spent > self.max_cost_usd:
-            raise BudgetExceededError(
-                f"LLM budget exceeded: spent ${spent:.4f} of ${self.max_cost_usd:.4f}"
+            logger.warning(
+                "LLM budget exceeded: spent $%.4f of $%.4f; further calls will be refused",
+                spent,
+                self.max_cost_usd,
             )
 
     def release(self, reserved_usd: float) -> None:
         with self._lock:
             self._reserved = max(0.0, self._reserved - reserved_usd)
+
+
+def current_budget() -> Budget | None:
+    """The budget of the run being judged in this context, if any."""
+    return _RUN_BUDGET.get()
+
+
+@contextmanager
+def run_budget(budget: Budget) -> Generator[Budget]:
+    """Charge every LLM call made in this context (and tasks started from it) to `budget`.
+
+    `Judge.judge` opens one per run, so a client reused across runs, or by concurrent runs,
+    caps each run separately.
+    """
+    token = _RUN_BUDGET.set(budget)
+    try:
+        yield budget
+    finally:
+        _RUN_BUDGET.reset(token)

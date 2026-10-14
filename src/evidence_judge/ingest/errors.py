@@ -33,6 +33,10 @@ class BrowserUseFormatError(IngestError):
 class MismatchedEvidenceError(IngestError):
     """Two evidence sources passed for one run look like recordings of different runs."""
 
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"{reason} Pass allow_mismatch=True to merge it anyway.")
+
 
 class TooLargeError(IngestError):
     """An input file exceeds a size limit and was not read."""
