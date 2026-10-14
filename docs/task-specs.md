@@ -90,6 +90,12 @@ refused); a request needs a method or a URL, path, query, regex or body criterio
 predicate needs `contains`, `query_contains` or `regex`; an action needs a name, target or
 value; a value predicate needs `json_path` or `page_regex`.
 
+Malformed values are refused at load time too, so a broken spec exits with code 3 before any
+run is judged: a `status` outside the accepted values (see below), a regex that does not compile
+(`url_regex`, a url `regex`, `page_regex`), a `page_regex` without exactly one capture group, a
+`json_path` that is not a dotted path (`items.0.price`, `$.items[0].price`), and a numeric
+`value` that is not finite (`.nan`, `.inf`).
+
 Inside `expect`, a request predicate needs both a `method` and at least one of `url_contains`,
 `path_contains`, `query_contains`, `url_regex`, `body_contains` or `response_contains`, because
 "some POST succeeded" proves nothing. `forbid` and `allow` may stay broad, as in the read-only
@@ -185,7 +191,8 @@ leads to review, not failure.
   value: 30
 ```
 
-Instead of `json_path`, `page_regex` extracts the value from page text with one capture group:
+Instead of `json_path`, `page_regex` extracts the value from page text with exactly one capture
+group:
 
 ```yaml
 - {kind: value, field: total, page_regex: 'Total:\s*\$([\d.,]+)', op: "<=", value: 30}
@@ -228,8 +235,9 @@ to review, never to failure. Prefer a `request`, `url` or `page_text` predicate 
 `url_regex`, `regex` and `page_regex` come from specs or from an LLM, so they are treated as
 untrusted. They are matched case-insensitively with the [`regex`](https://pypi.org/project/regex/)
 engine, which accepts Python `re` syntax (lookarounds and backreferences included) and supports
-a per-match timeout. A pattern longer than 300 characters is rejected (the predicate becomes
-`no_evidence` with the reason "unsafe regex"). Every other valid pattern runs, but each search
+a per-match timeout. A pattern that does not compile, or is longer than 300 characters ("unsafe
+regex"), is refused when the spec or claims file loads, and an extractor drops it. Every other
+valid pattern runs, but each search
 stops after 50 ms: a pattern that backtracks catastrophically on the evidence, such as `(a+)+$`
 on a long run of `a`, makes the predicate `no_evidence` with the reason "regex timed out", and a
 spec `allow` entry whose regex times out explains no mutation.

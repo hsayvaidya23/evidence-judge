@@ -12,7 +12,13 @@ from urllib.parse import parse_qsl, unquote, unquote_plus, urlsplit
 import regex
 
 from evidence_judge.checks.errors import InvalidPredicateError, RegexTimeoutError
-from evidence_judge.core.predicates import STATUS_ANY, STATUS_NONE, STATUS_OK, status_spec
+from evidence_judge.core.predicates import (
+    STATUS_ANY,
+    STATUS_NONE,
+    STATUS_OK,
+    compile_pattern,
+    status_spec,
+)
 from evidence_judge.textnorm import normalize
 
 Op = Literal["==", "!=", "<", "<=", ">", ">=", "contains"]
@@ -289,7 +295,6 @@ def host_allowed(host: str | None, allowed: list[str]) -> bool:
     return False
 
 
-MAX_REGEX_LENGTH: Final = 300
 MAX_REGEX_MATCHES: Final = 50
 MAX_REGEX_INPUT: Final = 10_000
 REGEX_TIMEOUT_SECONDS: Final = 0.05
@@ -301,14 +306,10 @@ def compile_regex(pattern: str) -> regex.Pattern[str]:
     Patterns over MAX_REGEX_LENGTH characters are rejected. Backtracking is bounded at match
     time instead (regex_search), so any valid pattern is accepted.
     """
-    if len(pattern) > MAX_REGEX_LENGTH:
-        raise InvalidPredicateError(
-            f"unsafe regex: pattern is longer than {MAX_REGEX_LENGTH} characters"
-        )
     try:
-        return regex.compile(pattern, regex.IGNORECASE | regex.VERSION0)
-    except (regex.error, ValueError) as exc:
-        raise InvalidPredicateError(f"invalid regex {pattern!r}: {exc}") from exc
+        return compile_pattern(pattern)
+    except ValueError as exc:
+        raise InvalidPredicateError(str(exc)) from exc
 
 
 def regex_search(compiled: regex.Pattern[str], text: str) -> regex.Match[str] | None:

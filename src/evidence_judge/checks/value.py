@@ -107,11 +107,11 @@ def _missing_json_reason(
 
 def _from_pages(regex_source: str, index: EvidenceIndex) -> list[Observation]:
     regex = compile_regex(regex_source)
-    if regex.groups > 1:
-        raise InvalidPredicateError(f"page_regex /{regex_source}/ must have at most one group")
+    if regex.groups != 1:
+        raise InvalidPredicateError(f"page_regex /{regex_source}/ needs exactly one group")
     return [
         Observation(
-            match.group(1) if regex.groups else match.group(0),
+            match.group(1),
             state_id(state, index),
             f"the page {url_path(state.url)}",
         )

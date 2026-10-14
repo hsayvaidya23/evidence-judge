@@ -123,8 +123,8 @@ async def test_differing_page_values_are_noted() -> None:
     assert "observed values differ: '20.00', '25.00'" in res.reason
 
 
-async def test_page_regex_without_group_uses_whole_match() -> None:
-    pred = ValuePredicate(field="order", page_regex=r"order a\d", op="contains", value="A1")
+async def test_page_regex_group_reads_the_value() -> None:
+    pred = ValuePredicate(field="order", page_regex=r"order (a\d)", op="contains", value="A1")
     res = await ValueChecker().evaluate(pred, ctx(honest_run()))
     assert res.status is Support.SUPPORTED
 
@@ -185,8 +185,9 @@ def test_format_value() -> None:
 @pytest.mark.parametrize(
     "pred",
     [
-        ValuePredicate(field="x", page_regex=r"(a)(b)", value=1),
-        ValuePredicate(field="x", page_regex=r"(", value=1),
+        ValuePredicate.model_construct(field="x", page_regex=r"(a)(b)", value=1, op="=="),
+        ValuePredicate.model_construct(field="x", page_regex=r"a", value=1, op="=="),
+        ValuePredicate.model_construct(field="x", page_regex=r"(", value=1, op="=="),
     ],
 )
 async def test_invalid_value_predicates(pred: ValuePredicate) -> None:

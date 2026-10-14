@@ -120,7 +120,7 @@ def test_matcher_rejects_invalid_predicates() -> None:
     with pytest.raises(InvalidPredicateError):
         RequestMatcher(RequestPredicate.model_construct(method="GET", status="200-299"))
     with pytest.raises(InvalidPredicateError):
-        RequestMatcher(RequestPredicate(url_regex="(oops"))
+        RequestMatcher(RequestPredicate.model_construct(url_regex="(oops", status="ok"))
 
 
 def test_matching_requests_helper() -> None:

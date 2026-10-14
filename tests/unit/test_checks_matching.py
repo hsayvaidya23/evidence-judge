@@ -8,7 +8,6 @@ import pytest
 from evidence_judge.checks.errors import InvalidPredicateError, RegexTimeoutError
 from evidence_judge.checks.matching import (
     MAX_REGEX_INPUT,
-    MAX_REGEX_LENGTH,
     MISSING,
     compare,
     compile_regex,
@@ -25,6 +24,7 @@ from evidence_judge.checks.matching import (
     url_host,
     url_path,
 )
+from evidence_judge.core.predicates import MAX_REGEX_LENGTH
 
 
 def test_normalize_folds_unicode_case_and_whitespace() -> None:
