@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 import pytest
 from pydantic import SecretStr
@@ -465,3 +466,10 @@ def test_percent_encoded_email_in_free_text(r: Redactor) -> None:
 @pytest.mark.parametrize("text", ["50%25 off", "a%20b%20c", "/p/red%20kettle?q=a%2Fb"])
 def test_percent_encoding_without_pii_is_left_alone(r: Redactor, text: str) -> None:
     assert red(r, text) == text
+
+
+def test_percent_scan_is_linear_on_long_unescaped_runs(r: Redactor) -> None:
+    text = "a" * 200_000 + "%zz"
+    started = time.perf_counter()
+    assert red(r, text) == text
+    assert time.perf_counter() - started < 1.0

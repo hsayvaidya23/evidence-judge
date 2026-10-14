@@ -172,7 +172,7 @@ _CARD_CONTEXT_RE = re.compile(
 )
 _CARD_CONTEXT_CHARS = 30
 _FIELD_LOOKBACK_CHARS = 80
-_PCT_RUN_RE = re.compile(r"[A-Za-z0-9._~!$'()*,;:@+%-]*%[0-9A-Fa-f]{2}[A-Za-z0-9._~!$'()*,;:@+%-]*")
+_PCT_RUN_RE = re.compile(r"[A-Za-z0-9._~!$'()*,;:@+%-]+")
 _FORM_RE = re.compile(r"[^\s=&]+=[^\s&]*(?:&[^\s=&]*(?:=[^\s&]*)?)*")
 _PCT_SAFE = "[]:"
 
@@ -420,6 +420,8 @@ class Redactor:
 
         def repl(m: re.Match[str]) -> str:
             raw = m.group(0)
+            if "%" not in raw:
+                return raw
             decoded = decode(raw)
             if decoded == raw:
                 return raw
