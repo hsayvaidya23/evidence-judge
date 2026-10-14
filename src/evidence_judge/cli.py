@@ -365,3 +365,114 @@ def schema(
 def version() -> None:
     """Print the evidence-judge version."""
     typer.echo(f"evidence-judge {__version__}")
+
+
+@app.command()
+def bench(
+    runs_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Directory of labelled runs, one sub-directory per scenario",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ],
+    seeds: Annotated[int, typer.Option(min=1, help="Forgeries per failed run and kind")] = 3,
+    out: Annotated[
+        Path | None, typer.Option(help="Write the results JSON here", **_OUT_FILE)
+    ] = None,
+    markdown: Annotated[
+        Path | None, typer.Option(help="Write the Markdown report here", **_OUT_FILE)
+    ] = None,
+    with_llm_baseline: Annotated[
+        bool,
+        typer.Option("--with-llm-baseline", help="Also judge with a transcript LLM judge"),
+    ] = False,
+    baseline_screenshot: Annotated[
+        bool,
+        typer.Option("--baseline-screenshot", help="Show the baseline judge the final screenshot"),
+    ] = False,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline/--online", help="Evidence Judge without (default) or with LLM extraction"
+        ),
+    ] = True,
+    no_redact: Annotated[
+        bool, typer.Option("--no-redact", help="Judge unredacted evidence and agent text")
+    ] = False,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Do not print the report")] = False,
+    debug: Annotated[bool, typer.Option(help="Show tracebacks for internal errors")] = False,
+) -> None:
+    """Benchmark judges on forged runs: false-PASS rates and accuracy on honest controls."""
+    from evidence_judge.baselines import TranscriptLLMJudge
+    from evidence_judge.bench import (
+        BenchConfig,
+        BenchmarkRunner,
+        llm_calls_upper_bound,
+        load_scenarios,
+        to_markdown,
+        write_json,
+        write_markdown,
+    )
+    from evidence_judge.llm.budget import Budget
+
+    try:
+        settings = _settings()
+        try:
+            scenarios = load_scenarios(runs_dir, max_body_chars=settings.max_body_chars)
+        except ValueError as e:
+            raise CliError(str(e), ExitCode.USAGE) from e
+        config = BenchConfig(seeds=seeds, offline=offline)
+        llm: LLMClient | None = None
+        calls = llm_calls_upper_bound(scenarios, config, baseline=with_llm_baseline)
+        if calls:
+            try:
+                llm = factory.build_llm(settings, budget=Budget(settings.max_cost_usd * calls))
+            except LLMError as e:
+                raise CliError(
+                    f"could not initialise the LLM client: {e}", ExitCode.INTERNAL
+                ) from e
+            if llm is None:
+                raise CliError(
+                    "--with-llm-baseline and --online need an LLM; set ANTHROPIC_API_KEY",
+                    ExitCode.USAGE,
+                )
+        runner = BenchmarkRunner(
+            settings,
+            config,
+            llm=llm,
+            baseline=(
+                TranscriptLLMJudge(llm, include_screenshot=baseline_screenshot)
+                if with_llm_baseline and llm is not None
+                else None
+            ),
+            redactor=_redactor(settings) if settings.redact and not no_redact else None,
+        )
+        result = asyncio.run(runner.run(scenarios))
+        if out:
+            write_json(result, out)
+        if markdown:
+            write_markdown(result, markdown)
+    except CliError as e:
+        raise _fail(e) from None
+    except Exception as e:
+        if debug:
+            raise
+        _stderr().print(
+            Text.assemble(
+                ("internal error: ", "bold red"),
+                f"{type(e).__name__}: {e}",
+                ("  (re-run with --debug for a traceback)", "dim"),
+            )
+        )
+        raise typer.Exit(int(ExitCode.INTERNAL)) from None
+
+    if not quiet:
+        typer.echo(to_markdown(result), nl=False)
+        for label, path in (("json", out), ("markdown", markdown)):
+            if path:
+                _stderr().print(Text.assemble((f"wrote {label} ", "dim"), str(path)))
