@@ -6,6 +6,7 @@ from typing import Literal
 import pytest
 
 from evidence_judge.checks.screenshot import ScreenshotAnswer, ScreenshotChecker
+from evidence_judge.config import Settings
 from evidence_judge.core.predicates import Scope, ScreenshotPredicate
 from evidence_judge.core.verdict import Support
 from evidence_judge.extract.prompts import UNTRUSTED_CLAIM_TAG
@@ -120,3 +121,21 @@ async def test_llm_error_is_no_evidence() -> None:
 def test_answer_schema_rejects_other_answers() -> None:
     with pytest.raises(ValueError):
         ScreenshotAnswer.model_validate({"answer": "maybe", "reason": "x"})
+
+
+async def test_disabled_checker_never_sends_screenshots() -> None:
+    llm = FakeVisionLLM()
+    context = ctx(honest_run(), llm)
+    res = await ScreenshotChecker(enabled=False).evaluate(QUESTION, context)
+    assert res.status is Support.NO_EVIDENCE
+    assert res.reason == "screenshot checks disabled by configuration"
+    assert llm.requests == []
+    assert context.usage.llm_calls == 0
+
+
+def test_screenshots_to_llm_setting_defaults_on_and_reads_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert Settings.model_validate({}).screenshots_to_llm is True
+    monkeypatch.setenv("EVJ_SCREENSHOTS_TO_LLM", "false")
+    assert Settings().screenshots_to_llm is False

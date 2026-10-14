@@ -19,6 +19,7 @@ NO_CONFIDENCE = 0.7
 MAX_ANY_SCOPE_SCREENSHOTS = 4
 
 SCREENSHOT_MAX_OUTPUT_TOKENS = 4096
+DISABLED_REASON = "screenshot checks disabled by configuration"
 
 SYSTEM_PROMPT = f"""\
 You check one statement about a recorded web-browser session by looking at screenshots from it, \
@@ -77,11 +78,22 @@ def build_request(predicate: ScreenshotPredicate, images: list[Image]) -> LLMReq
 
 
 class ScreenshotChecker:
+    """Answers screenshot predicates with a vision model.
+
+    `enabled=False` (from `Settings.screenshots_to_llm`) keeps screenshots from ever being sent to
+    a model; every screenshot predicate then reports NO_EVIDENCE.
+    """
+
     kind = KIND
     deterministic = False
 
+    def __init__(self, *, enabled: bool = True) -> None:
+        self.enabled = enabled
+
     async def evaluate(self, predicate: Predicate, ctx: CheckContext) -> PredicateResult:
         pred = require(predicate, ScreenshotPredicate, self.kind)
+        if not self.enabled:
+            return result(Support.NO_EVIDENCE, DISABLED_REASON, KIND)
         loaded = [
             (shot, data)
             for shot in select_screenshots(pred, ctx.index)

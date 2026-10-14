@@ -45,6 +45,11 @@ class Settings(BaseSettings):
             "with neither, a random key is used per process"
         ),
     )
+    screenshots_to_llm: bool = Field(
+        default=True,
+        description="Send recorded screenshots to the vision model; false makes screenshot checks "
+        "report no evidence instead",
+    )
     max_body_chars: int = 20_000
     review_coverage_threshold: float = Field(default=0.6, ge=0, le=1)
 
