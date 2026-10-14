@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
-import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,7 +8,9 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
+import evidence_judge.engine
 import evidence_judge.ingest
+import evidence_judge.llm.factory
 from evidence_judge import __version__
 from evidence_judge.cli import ExitCode, app
 from evidence_judge.config import Settings
@@ -86,14 +86,10 @@ def install(
                 raise judge_error
             return make_verdict(outcome)
 
-    engine = types.ModuleType("evidence_judge.engine")
-    engine.Judge = Judge  # type: ignore[attr-defined]
-    engine.JudgeOptions = JudgeOptions  # type: ignore[attr-defined]
-    factory = types.ModuleType("evidence_judge.llm.factory")
-    factory.build_llm = build_llm  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "evidence_judge.engine", engine)
-    monkeypatch.setitem(sys.modules, "evidence_judge.llm.factory", factory)
-    monkeypatch.setattr(evidence_judge.ingest, "load_run", load_run, raising=False)
+    monkeypatch.setattr(evidence_judge.engine, "Judge", Judge)
+    monkeypatch.setattr(evidence_judge.engine, "JudgeOptions", JudgeOptions)
+    monkeypatch.setattr(evidence_judge.llm.factory, "build_llm", build_llm)
+    monkeypatch.setattr(evidence_judge.ingest, "load_run", load_run)
     monkeypatch.delenv("EVJ_REDACT", raising=False)
     monkeypatch.setenv("EVJ_REDACTION_KEY", "test-key")
 
@@ -312,14 +308,13 @@ def test_debug_reraises(monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence:
     assert isinstance(result.exception, RuntimeError)
 
 
-def test_missing_engine_exit_4(
+def test_unexpected_engine_error_exit_4(
     monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path
 ) -> None:
-    install(monkeypatch, calls)
-    monkeypatch.setitem(sys.modules, "evidence_judge.engine", types.ModuleType("x"))
+    install(monkeypatch, calls, judge_error=RuntimeError("boom"))
     result = runner.invoke(app, ["judge", "--har", str(evidence), "--offline"])
     assert result.exit_code == ExitCode.INTERNAL
-    assert "evidence_judge.engine.Judge is not available" in result.output
+    assert "boom" in result.output
 
 
 def test_inspect_table_and_json(
@@ -363,3 +358,25 @@ def test_redaction_key_is_stable_across_invocations(tmp_path: Path) -> None:
     second = _redactor(settings).fingerprint("person@example.com")
     assert first == second
     assert (tmp_path / "cache" / "redaction.key").exists()
+
+
+def test_passes_ingest_safety_options(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path
+) -> None:
+    install(monkeypatch, calls)
+    result = runner.invoke(
+        app,
+        [
+            "judge",
+            "--har",
+            str(evidence),
+            "--offline",
+            "--allow-mismatch",
+            "--screenshot-root",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == ExitCode.PASS, result.output
+    assert calls.load_kwargs is not None
+    assert calls.load_kwargs["allow_mismatch"] is True
+    assert calls.load_kwargs["screenshot_root"] == tmp_path

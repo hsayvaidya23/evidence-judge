@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import zipfile
 from enum import IntEnum
 from pathlib import Path
-from typing import Annotated, Any, Protocol, cast
+from typing import Annotated, Any
 
 import typer
 import yaml
@@ -17,12 +16,13 @@ from typer._click.core import Context  # pyright: ignore[reportPrivateUsage]
 from typer._click.exceptions import UsageError  # pyright: ignore[reportPrivateUsage]
 from typer.core import TyperGroup
 
-from evidence_judge import __version__
+from evidence_judge import __version__, engine, ingest
 from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
+from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMError
 from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import (
@@ -100,59 +100,16 @@ app = typer.Typer(
 )
 
 
-class _JudgeLike(Protocol):
-    async def judge(self, run: Run, options: Any) -> RunVerdict: ...
-
-
-class _JudgeFactory(Protocol):
-    def __call__(self, settings: Settings, llm: LLMClient | None) -> _JudgeLike: ...
-
-
-class _OptionsFactory(Protocol):
-    def __call__(
-        self, *, offline: bool, spec: TaskSpec | None, claims: ClaimSet | None
-    ) -> object: ...
-
-
-class _LoadRun(Protocol):
-    def __call__(
-        self,
-        *,
-        trace: Path | None = None,
-        har: Path | None = None,
-        browser_use: Path | None = None,
-        answer: str | None = None,
-        answer_file: Path | None = None,
-        reasoning_file: Path | None = None,
-        task: str | None = None,
-        run_id: str | None = None,
-        max_body_chars: int = 20_000,
-    ) -> Run: ...
-
-
-class _BuildLLM(Protocol):
-    def __call__(self, settings: Settings) -> LLMClient | None: ...
-
-
-def _attr(module: str, name: str) -> object:
-    try:
-        return getattr(importlib.import_module(module), name)
-    except (ImportError, AttributeError) as e:
-        raise CliError(f"{module}.{name} is not available: {e}", ExitCode.INTERNAL) from e
-
-
 def _load_run(**kwargs: Any) -> Run:
-    load = cast(_LoadRun, _attr("evidence_judge.ingest", "load_run"))
     try:
-        return load(**kwargs)
+        return ingest.load_run(**kwargs)
     except _INPUT_ERRORS as e:
         raise CliError(f"could not load evidence: {e}", ExitCode.USAGE) from e
 
 
 def _build_llm(settings: Settings) -> LLMClient | None:
-    build = cast(_BuildLLM, _attr("evidence_judge.llm.factory", "build_llm"))
     try:
-        return build(settings)
+        return factory.build_llm(settings)
     except LLMError as e:
         raise CliError(f"could not initialise the LLM client: {e}", ExitCode.INTERNAL) from e
 
@@ -166,11 +123,9 @@ def _run_judge(
     spec: TaskSpec | None,
     claims: ClaimSet | None,
 ) -> RunVerdict:
-    judge_cls = cast(_JudgeFactory, _attr("evidence_judge.engine", "Judge"))
-    options_cls = cast(_OptionsFactory, _attr("evidence_judge.engine", "JudgeOptions"))
-    options = options_cls(offline=offline, spec=spec, claims=claims)
+    options = engine.JudgeOptions(offline=offline, spec=spec, claims=claims)
     try:
-        return asyncio.run(judge_cls(settings, llm).judge(run, options))
+        return asyncio.run(engine.Judge(settings, llm).judge(run, options))
     except LLMError as e:
         raise CliError(f"LLM error: {e}", ExitCode.INTERNAL) from e
 
@@ -259,6 +214,18 @@ def judge(
         bool, typer.Option("--no-redact", help="Keep secrets and PII in evidence and reports")
     ] = False,
     run_id: Annotated[str | None, typer.Option(help="Override the run id")] = None,
+    allow_mismatch: Annotated[
+        bool,
+        typer.Option(
+            "--allow-mismatch", help="Accept a HAR that does not appear to match the trace"
+        ),
+    ] = False,
+    screenshot_root: Annotated[
+        Path | None,
+        typer.Option(
+            help="Directory browser-use screenshots may be read from (default: next to the history)"
+        ),
+    ] = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: Annotated[bool, typer.Option(help="Show tracebacks for internal errors")] = False,
 ) -> None:
@@ -283,6 +250,8 @@ def judge(
             task=task or (task_spec.task if task_spec else None),
             run_id=run_id,
             max_body_chars=settings.max_body_chars,
+            allow_mismatch=allow_mismatch,
+            screenshot_root=screenshot_root,
         )
 
         if settings.redact and not no_redact:
