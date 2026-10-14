@@ -188,6 +188,20 @@ Send verdicts to the tools you already use (each is an optional extra; see [docs
 | Arize Phoenix | `evidence-judge[phoenix]` | `push_to_phoenix(verdict, span_id=...)`: span annotations |
 | Inspect AI | `evidence-judge[inspect]` | `scorer=evidence_judge_scorer()`: C / I / N per sample |
 
+GitHub Actions: gate a pull request on a recorded run.
+
+```yaml
+- uses: hsayvaidya23/evidence-judge@main
+  with:
+    trace: runs/checkout/trace.zip
+    har: runs/checkout/run.har
+    answer-file: runs/checkout/answer.txt
+    spec: specs/checkout.yaml
+    # fail-on-review: "true"
+```
+
+The step fails on FAIL (and optionally NEEDS_REVIEW), writes the verdict to the job summary, and exposes `outcome`, `score` and `report` outputs.
+
 Docker: `docker build -t evidence-judge . && docker run --rm -v "$PWD:/work:ro" evidence-judge judge --trace trace.zip --answer-file answer.txt --offline`
 
 ## Demo
