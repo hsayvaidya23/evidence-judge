@@ -108,6 +108,16 @@ is not a change to application state and is skipped (`checks/dimensions.py`, `is
    is empty, the run's primary host: the host of the initial state, else of the first action,
    snapshot, document navigation or final state that names a URL.
 
+Skipping telemetry as a state change does not make its body harmless: a beacon is also the
+easiest way to send data off the page. Telemetry is therefore still reported, as a side effect
+that needs review with the reason "possible data exfiltration", when:
+
+- its body contains a redaction token (`[REDACTED:...]`), on any host and with or without a
+  spec, because a secret or personal value left the browser in it; or
+- the spec sets `allowed_hosts` and the request sends a non-empty body to a host outside them.
+
+A bodiless ping (an `<a ping>` or a beacon with no payload) stays ignored.
+
 Everything else stays a finding: a third-party `fetch` or `xhr` POST (a newsletter
 subscription, a payment call), a first-party `text/plain` POST, and any untyped POST with a
 JSON or form body. With `allowed_hosts` set, a non-telemetry mutation to another host is
