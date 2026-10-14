@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from evidence_judge.checks.page_text import PageTextChecker
+from evidence_judge.checks.page_text import SNAPSHOT_ABSENCE_CONFIDENCE, PageTextChecker
 from evidence_judge.core.evidence import Channel
 from evidence_judge.core.predicates import PageTextPredicate, Scope
 from evidence_judge.core.verdict import Support
@@ -27,6 +27,7 @@ async def test_final_text_supported_with_excerpt() -> None:
 async def test_final_text_contradicted_names_final_url() -> None:
     res = await PageTextChecker().evaluate(THANKS, ctx(forged_run()))
     assert res.status is Support.CONTRADICTED
+    assert res.confidence == 1.0
     assert res.reason == (
         "Final page text does not contain 'Thank you for your order'; final URL is /cart"
     )
@@ -57,6 +58,8 @@ async def test_any_scope_contradicted_and_uncaptured() -> None:
     res = await PageTextChecker().evaluate(pred, ctx(forged_run()))
     assert res.status is Support.CONTRADICTED
     assert "None of 3 recorded page states contains 'Order A1'" in res.reason
+    assert "snapshots are point-in-time" in res.reason
+    assert res.confidence == SNAPSHOT_ABSENCE_CONFIDENCE < 0.7
     uncaptured = make_run(captured=ALL_CHANNELS - {Channel.SNAPSHOTS})
     res = await PageTextChecker().evaluate(pred, ctx(uncaptured))
     assert res.status is Support.NO_EVIDENCE

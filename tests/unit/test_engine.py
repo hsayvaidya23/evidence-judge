@@ -144,6 +144,27 @@ async def test_contradicted_non_key_claim_needs_review(settings: Settings) -> No
     )
 
 
+async def test_key_claim_refuted_only_by_snapshots_needs_review(settings: Settings) -> None:
+    claims = ClaimSet.model_validate(
+        {
+            "claims": [
+                {
+                    "id": "c1",
+                    "text": "order #Z9 was confirmed",
+                    "quote": "order #Z9 confirmed",
+                    "kind": "outcome",
+                    "key": True,
+                    "predicates": [{"kind": "page_text", "contains": "Z9", "scope": "any"}],
+                }
+            ]
+        }
+    )
+    run = _with_answer(honest_run(), "Done, order #Z9 confirmed.")
+    verdict = await Judge(settings).judge(run, JudgeOptions(claims=claims, spec=shop_spec()))
+    assert verdict.outcome is Outcome.NEEDS_REVIEW, verdict.summary
+    assert "point-in-time" in verdict.summary
+
+
 async def test_loop_is_reported(settings: Settings) -> None:
     verdict = await Judge(settings).judge(_with_answer(loop_run(), "I added the kettle to cart."))
     assert verdict.dimensions[Dimension.LOOPS].findings

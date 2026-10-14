@@ -5,7 +5,7 @@ import pytest
 from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.dimensions import assess_dimensions
 from evidence_judge.checks.expectations import evaluate_spec
-from evidence_judge.checks.outcome import FAIL_SCORE_CAP, decide, score
+from evidence_judge.checks.outcome import CONFIDENT_CONTRADICTION, FAIL_SCORE_CAP, decide, score
 from evidence_judge.checks.registry import default_registry
 from evidence_judge.core.claims import Claim, ClaimKind
 from evidence_judge.core.evidence import Run
@@ -142,7 +142,7 @@ async def test_low_coverage_needs_review() -> None:
     )
 
 
-def verdict(status: Support, *, key: bool = True) -> ClaimVerdict:
+def verdict(status: Support, *, key: bool = True, confidence: float = 1.0) -> ClaimVerdict:
     return ClaimVerdict(
         claim_id="c",
         claim_text="x happened",
@@ -150,7 +150,7 @@ def verdict(status: Support, *, key: bool = True) -> ClaimVerdict:
         status=status,
         reason="Because evidence",
         checker="request",
-        confidence=1.0,
+        confidence=confidence,
     )
 
 
@@ -203,6 +203,22 @@ def test_contradicted_non_key_claim_is_named() -> None:
         review_threshold=0.6,
     )
     assert summary == 'NEEDS_REVIEW: the agent claimed "x happened", but because evidence.'
+
+
+def test_weak_key_contradiction_needs_review() -> None:
+    weak = verdict(Support.CONTRADICTED, confidence=CONFIDENT_CONTRADICTION - 0.1)
+    got, _, summary = decide([weak], [expectation(True)], {}, coverage=None, review_threshold=0.6)
+    assert got is Outcome.NEEDS_REVIEW
+    assert summary == 'NEEDS_REVIEW: the agent claimed "x happened", but because evidence.'
+
+
+def test_weak_key_contradiction_fails_when_corroborated() -> None:
+    weak = verdict(Support.CONTRADICTED, confidence=CONFIDENT_CONTRADICTION - 0.1)
+    other = verdict(Support.CONTRADICTED, key=False, confidence=CONFIDENT_CONTRADICTION - 0.1)
+    got, _, _ = decide([weak, other], [], {}, coverage=None, review_threshold=0.6)
+    assert got is Outcome.FAIL
+    got, _, _ = decide([weak], [expectation(False)], {}, coverage=None, review_threshold=0.6)
+    assert got is Outcome.FAIL
 
 
 def test_score_is_weighted_mean_of_assessable_parts() -> None:

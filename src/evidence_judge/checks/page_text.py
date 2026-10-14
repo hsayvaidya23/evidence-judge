@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Final
+
 from evidence_judge.checks._common import (
     FINAL_ID,
     MAX_CITATIONS,
@@ -17,6 +19,9 @@ from evidence_judge.core.predicates import PageTextPredicate, Predicate, Scope
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 
 KIND = "page_text"
+SNAPSHOT_ABSENCE_CONFIDENCE: Final = 0.6
+"""Snapshots are point-in-time: text shown between them is never recorded, so absence across
+them refutes an any-scope claim only weakly. The final state is authoritative and stays at 1.0."""
 
 
 def check_page_text(predicate: PageTextPredicate, index: EvidenceIndex) -> PredicateResult:
@@ -79,8 +84,10 @@ def _check_any(predicate: PageTextPredicate, index: EvidenceIndex) -> PredicateR
     where = f"; final URL is {url_path(index.final.url)}" if index.final else ""
     return result(
         Support.CONTRADICTED,
-        f"None of {plural(len(states), 'recorded page state')} contains {phrase}{where}",
+        f"None of {plural(len(states), 'recorded page state')} contains {phrase}{where} "
+        "(snapshots are point-in-time, so the text may have appeared between them)",
         KIND,
+        confidence=SNAPSHOT_ABSENCE_CONFIDENCE,
     )
 
 

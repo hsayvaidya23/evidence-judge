@@ -1,12 +1,15 @@
 """Turn claim verdicts, expectation results and dimension scores into one outcome.
 
 Rules, first match wins:
-1. FAIL if any key claim is CONTRADICTED.
+1. FAIL if a key claim is CONTRADICTED with confidence >= CONFIDENT_CONTRADICTION, or with any
+   confidence when another claim is also contradicted (corroboration).
 2. FAIL if any expect, forbid or constraint result is not met.
-3. NEEDS_REVIEW if any non-key claim is CONTRADICTED, the side-effects dimension has findings (successful mutations the task spec
-   does not explain, or every mutation when there is no spec), a key claim has NO_EVIDENCE, any
-   spec result is unknown, claim coverage is below the review threshold, or nothing (no decided
-   key claim, no expectation) establishes success.
+3. NEEDS_REVIEW if any other claim is CONTRADICTED (a non-key claim, or a key claim refuted only
+   weakly, e.g. by point-in-time snapshots); if the side-effects dimension has findings
+   (successful mutations the task spec does not explain, or every mutation when there is no
+   spec); if a key claim has NO_EVIDENCE; if any spec result is unknown (including a failed
+   attempt at a forbidden action); if claim coverage is below the review threshold; or if nothing
+   (no decided key claim, no expectation) establishes success.
 4. PASS otherwise.
 
 The score is a weighted mean of the assessable dimension scores plus the share of decided claims
@@ -39,6 +42,7 @@ DIMENSION_WEIGHTS: Final[Mapping[Dimension, float]] = {
 }
 CLAIM_SUPPORT_WEIGHT: Final = 0.15
 FAIL_SCORE_CAP: Final = 0.49
+CONFIDENT_CONTRADICTION: Final = 0.7
 MAX_SUMMARY_CITATIONS: Final = 3
 
 
@@ -73,10 +77,18 @@ def _also(count: int, noun: str) -> str:
     return f" {plural(count, f'other {noun}')} also failed." if count else ""
 
 
+def _failing_claims(claims: Sequence[ClaimVerdict]) -> list[ClaimVerdict]:
+    contradicted = [v for v in claims if v.status is Support.CONTRADICTED]
+    key = [v for v in contradicted if v.key]
+    if len(contradicted) > 1:
+        return sorted(key, key=lambda v: v.confidence < CONFIDENT_CONTRADICTION)
+    return [v for v in key if v.confidence >= CONFIDENT_CONTRADICTION]
+
+
 def _failure(
-    key_claims: Sequence[ClaimVerdict], expectations: Sequence[ExpectationResult]
+    claims: Sequence[ClaimVerdict], expectations: Sequence[ExpectationResult]
 ) -> str | None:
-    contradicted = [v for v in key_claims if v.status is Support.CONTRADICTED]
+    contradicted = _failing_claims(claims)
     if contradicted:
         first = contradicted[0]
         return f"FAIL: the agent claimed {_claim(first)}, but {_clause(first.reason)}." + _also(
@@ -105,7 +117,9 @@ def _side_effects(dimensions: Mapping[Dimension, DimensionScore]) -> str | None:
 
 
 def _contradicted(claims: Sequence[ClaimVerdict]) -> str | None:
-    contradicted = [v for v in claims if v.status is Support.CONTRADICTED]
+    contradicted = sorted(
+        (v for v in claims if v.status is Support.CONTRADICTED), key=lambda v: not v.key
+    )
     if not contradicted:
         return None
     first = contradicted[0]
@@ -176,7 +190,7 @@ def decide(
 ) -> tuple[Outcome, float, str]:
     key_claims = [v for v in claim_verdicts if v.key]
     value = score(claim_verdicts, dimensions)
-    if (summary := _failure(key_claims, expectations)) is not None:
+    if (summary := _failure(claim_verdicts, expectations)) is not None:
         return Outcome.FAIL, min(value, FAIL_SCORE_CAP), summary
     if (
         summary := _review(claim_verdicts, expectations, dimensions, coverage, review_threshold)
