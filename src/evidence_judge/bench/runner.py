@@ -2,8 +2,13 @@
 
 For every failed scenario the runner forges each `ForgeryKind` with N seeds (only the answer and
 reasoning change), keeps every original run as an honest control, judges all of them with
-Evidence Judge (with and without the task spec) and optionally a transcript LLM judge, and
-reports false-PASS rates on forgeries and accuracy on controls with Wilson 95% intervals.
+Evidence Judge (with the scenario's task spec, with a coarser generic spec when the scenario has
+one, and with no spec) and optionally a transcript LLM judge, and reports false-PASS rates on
+forgeries and accuracy on controls with Wilson 95% intervals.
+
+`injected_predicates` forgeries also replace claim extraction: the judge receives the claims an
+injection-controlled extractor would return (`forgery.injection`), carrying vacuous or weak
+predicates, after the extractor's own validation.
 """
 
 from __future__ import annotations
@@ -20,17 +25,20 @@ from evidence_judge.baselines.llm_judge import TranscriptLLMJudge
 from evidence_judge.bench.dataset import Scenario
 from evidence_judge.bench.stats import wilson_interval
 from evidence_judge.config import Settings
+from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.forgery.base import MANIPULATION_KINDS, Forger, ForgeryKind
+from evidence_judge.forgery.injection import injected_claims
 from evidence_judge.forgery.templates import TemplateForger
 from evidence_judge.llm.base import LLMClient, LLMError
 from evidence_judge.redact import Redactor
 
 SCHEMA_ID: Final = "evidence-judge/bench-result@1"
 EJ_WITH_SPEC: Final = "evidence-judge+spec"
+EJ_GENERIC_SPEC: Final = "evidence-judge+generic-spec"
 EJ_NO_SPEC: Final = "evidence-judge"
 ALL_MANIPULATIONS: Final = "all manipulations"
 MAX_SUMMARY_CHARS: Final = 300
@@ -56,6 +64,8 @@ class Case:
     expected: Outcome
     kind: ForgeryKind | None = None
     seed: int | None = None
+    claims: ClaimSet | None = None
+    """Pre-extracted claims (injected_predicates forgeries); None means extract as usual."""
 
     @property
     def forged(self) -> bool:
@@ -119,6 +129,7 @@ class ScenarioInfo(BaseModel):
     expected: Outcome
     has_spec: bool
     forged: bool
+    has_generic_spec: bool = False
 
 
 class BenchResult(BaseModel):
@@ -141,6 +152,8 @@ class BenchResult(BaseModel):
 class _Prepared:
     run: Run
     spec: TaskSpec | None
+    generic_spec: TaskSpec | None
+    claims: ClaimSet | None
 
 
 @dataclass(slots=True)
@@ -176,6 +189,7 @@ class BenchmarkRunner:
                     expected=s.expected,
                     has_spec=s.spec is not None,
                     forged=s.forgery_base,
+                    has_generic_spec=s.generic_spec is not None,
                 )
                 for s in scenarios
             ],
@@ -185,7 +199,7 @@ class BenchmarkRunner:
         )
 
     def judge_names(self) -> list[str]:
-        names = [EJ_WITH_SPEC, EJ_NO_SPEC]
+        names = [EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC]
         if self.baseline is not None:
             names.append(self.baseline.name)
         return names
@@ -201,6 +215,11 @@ class BenchmarkRunner:
             for kind in self.config.kinds:
                 for seed in range(self.config.seeds):
                     forged = await self.forger.forge(scenario.run, kind, seed=seed)
+                    injected = (
+                        injected_claims(forged, seed=seed)
+                        if kind is ForgeryKind.INJECTED_PREDICATES
+                        else None
+                    )
                     cases.append(
                         Case(
                             case_id=f"{scenario.name}/{kind.value}/{seed}",
@@ -209,18 +228,28 @@ class BenchmarkRunner:
                             expected=Outcome.FAIL,
                             kind=kind,
                             seed=seed,
+                            claims=injected,
                         )
                     )
         return cases
 
     def _prepare(self, case: Case) -> _Prepared:
+        prepared = _Prepared(
+            run=case.run,
+            spec=case.scenario.spec,
+            generic_spec=case.scenario.generic_spec,
+            claims=case.claims,
+        )
         if self.redactor is None:
-            return _Prepared(run=case.run, spec=case.scenario.spec)
-        run, _ = self.redactor.redact_run(case.run)
-        spec = case.scenario.spec
-        if spec is not None:
-            spec, _ = self.redactor.redact_model(spec)
-        return _Prepared(run=run, spec=spec)
+            return prepared
+        prepared.run, _ = self.redactor.redact_run(case.run)
+        if prepared.spec is not None:
+            prepared.spec, _ = self.redactor.redact_model(prepared.spec)
+        if prepared.generic_spec is not None:
+            prepared.generic_spec, _ = self.redactor.redact_model(prepared.generic_spec)
+        if prepared.claims is not None:
+            prepared.claims, _ = self.redactor.redact_model(prepared.claims)
+        return prepared
 
     async def _evaluate(
         self, evidence_judge: Judge, judge: str, case: Case, prepared: _Prepared
@@ -234,13 +263,15 @@ class BenchmarkRunner:
             "seed": case.seed,
             "expected": case.expected,
         }
-        if judge == EJ_WITH_SPEC and prepared.spec is None:
+        specs = {EJ_WITH_SPEC: prepared.spec, EJ_GENERIC_SPEC: prepared.generic_spec}
+        if judge in specs and specs[judge] is None:
             return None
         try:
-            if judge in (EJ_WITH_SPEC, EJ_NO_SPEC):
+            if judge in (EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC):
                 options = JudgeOptions(
                     offline=self.config.offline or self.llm is None,
-                    spec=prepared.spec if judge == EJ_WITH_SPEC else None,
+                    spec=specs.get(judge),
+                    claims=prepared.claims,
                 )
                 verdict = await evidence_judge.judge(prepared.run, options)
                 outcome, summary = verdict.outcome, verdict.summary
@@ -290,6 +321,8 @@ def control_metrics(results: Sequence[CaseResult], judges: Sequence[str]) -> lis
         controls = [r for r in results if r.judge == judge and not r.forged]
         if not controls:
             continue
+        if not controls:
+            continue
         judged = [r for r in controls if r.outcome is not None]
         correct = sum(r.outcome is r.expected for r in judged)
         metrics.append(
@@ -309,7 +342,8 @@ def llm_calls_upper_bound(
     """Judgements that may call an LLM; used to size the benchmark's overall budget."""
     forged = sum(s.forgery_base for s in scenarios) * len(config.kinds) * config.seeds
     cases = len(scenarios) + forged
-    per_case = (0 if config.offline else 2) + (1 if baseline else 0)
+    evidence_judges = len((EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC))
+    per_case = (0 if config.offline else evidence_judges) + (1 if baseline else 0)
     return cases * per_case
 
 

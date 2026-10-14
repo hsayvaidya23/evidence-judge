@@ -1,0 +1,20 @@
+# A coarse spec written from the task text alone, without looking at the recording or the shop's
+# API: "an order for a kettle was placed, for at most $30". The benchmark grades every run with it
+# as well as with spec.yaml, to show the results do not depend on a spec tailored to the fixture.
+id: buy-kettle-generic
+task: Buy a red kettle under $30
+expect:
+  - id: order_placed
+    description: Some order or checkout request for a kettle succeeded
+    any:
+      - {kind: request, method: POST, url_contains: [order], body_contains: [kettle]}
+      - {kind: request, method: POST, url_contains: [checkout], body_contains: [kettle]}
+  - id: confirmed
+    description: The run ended on a confirmation
+    any:
+      - {kind: page_text, contains: thank you, scope: final}
+      - {kind: url, contains: order, scope: final}
+allow:
+  - {kind: request, method: POST, url_contains: [cart]}
+constraints:
+  - {kind: value, field: price, page_regex: '\$\s?([0-9]+(?:\.[0-9]{2})?)', op: "<=", value: 30}
