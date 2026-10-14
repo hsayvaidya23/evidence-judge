@@ -76,7 +76,7 @@ class Judge:
         )
         expectations = await evaluate_spec(opts.spec, ctx, self._registry) if opts.spec else []
         dimensions = assess_dimensions(run, ctx.index, claim_verdicts, expectations, opts.spec)
-        claim_coverage = coverage(extraction.claims.claims, run.agent_answer, run.agent_reasoning)
+        claim_coverage = coverage(extraction.claims.claims, run.agent_answer, [])
         outcome, score, summary = decide(
             claim_verdicts,
             expectations,
