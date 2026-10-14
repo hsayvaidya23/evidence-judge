@@ -9,6 +9,7 @@ from evidence_judge.llm.base import (
 )
 from evidence_judge.llm.budget import Budget
 from evidence_judge.llm.cache import CachedClient
+from evidence_judge.llm.concurrency import ConcurrencyLimitedClient
 from evidence_judge.llm.factory import build_llm
 from evidence_judge.llm.fake import FakeLLM
 from evidence_judge.llm.pricing import DEFAULT_PRICES, ModelPrice, PriceTable
@@ -19,6 +20,7 @@ __all__ = [
     "Budget",
     "BudgetExceededError",
     "CachedClient",
+    "ConcurrencyLimitedClient",
     "FakeLLM",
     "Image",
     "LLMClient",

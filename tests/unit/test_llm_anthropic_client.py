@@ -226,3 +226,10 @@ async def test_unsupported_image_type_rejected():
 def test_missing_api_key_raises():
     with pytest.raises(LLMError, match="ANTHROPIC_API_KEY"):
         AnthropicClient(_settings(anthropic_api_key=None))
+
+
+def test_transient_retries_are_delegated_to_the_sdk_client():
+    client = AnthropicClient(_settings(max_retries=5, request_timeout_s=12.0))
+    sdk = client._client  # pyright: ignore[reportPrivateUsage]
+    assert sdk.max_retries == 5
+    assert sdk.timeout == 12.0

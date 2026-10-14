@@ -26,7 +26,14 @@ class Settings(BaseSettings):
     model_strong: str = "claude-sonnet-5-5"
     max_cost_usd: float = Field(default=0.25, gt=0, description="Hard per-run LLM budget")
     request_timeout_s: float = 60.0
-    max_retries: int = 3
+    max_retries: int = Field(
+        default=3,
+        ge=0,
+        description="SDK retries for 408/409/429/5xx and connection errors (backoff, retry-after)",
+    )
+    max_concurrent_llm_calls: int = Field(
+        default=4, ge=1, description="Upper bound on LLM API requests in flight at once"
+    )
     cache_dir: Path | None = Field(default=Path(".evidence-judge/cache"))
     redact: bool = True
     redaction_key: SecretStr | None = Field(
