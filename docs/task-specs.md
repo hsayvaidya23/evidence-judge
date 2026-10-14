@@ -18,6 +18,7 @@ task: Buy a red kettle under $30    # required, the instruction given to the age
 expect: [...]                       # expectations that must be met
 forbid: [...]                       # expectations that must NOT be met
 constraints: [...]                  # value predicates that must hold
+allow: [...]                        # request predicates for expected intermediate mutations
 allowed_hosts: [shop.example.com]   # mutations to other hosts count as side effects
 ```
 
@@ -33,6 +34,18 @@ Each entry in `expect` and `forbid` is an expectation:
 An expectation needs at least one predicate in `all` or `any`. When both are given, both
 conditions apply. In the verdict each one becomes an `ExpectationResult` with `met: true`,
 `false`, or `null` when the channel it needs was not captured.
+
+### Allowed intermediate mutations
+
+Doing a task usually involves writes that are not the goal itself, such as adding an item to
+the cart before checking out. List them under `allow` (request predicates) so the side-effects
+dimension does not flag them. Any other successful mutation that no expectation, constraint,
+allow entry or verified claim explains is reported as a side effect.
+
+```yaml
+allow:
+  - {kind: request, method: POST, url_contains: [/api/cart]}
+```
 
 ## Predicates
 
