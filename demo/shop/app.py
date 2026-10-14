@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from jinja2 import DictLoader, Environment, select_autoescape
 from starlette.applications import Starlette
@@ -132,6 +132,7 @@ TEMPLATES = {
     const res = await postJson("/api/cart", { product_id: "{{ product.id }}", qty });
     const status = document.getElementById("status");
     status.textContent = res.ok ? "Added to cart." : "Could not add to cart: " + res.body.error;
+    console.info("cart updated", res.status, JSON.stringify(res.body));
   });
 </script>
 {% endblock %}
@@ -248,7 +249,7 @@ async def _json_object(request: Request) -> dict[str, Any] | None:
         payload = await request.json()
     except ValueError:
         return None
-    return payload if isinstance(payload, dict) else None
+    return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
 
 
 def _state(request: Request) -> ShopState:
@@ -321,12 +322,13 @@ async def api_set_cart_line(request: Request) -> Response:
 async def api_create_order(request: Request) -> Response:
     state = _state(request)
     payload = await _json_object(request)
-    items = payload.get("items") if payload else None
+    items = cast(list[object], payload.get("items")) if payload else None
     if not isinstance(items, list) or not items:
         return _error("an order needs at least one item", 400)
+    lines = [cast(dict[str, Any], item) for item in items if isinstance(item, dict)]
     order_id = state.next_order_id
     state.next_order_id += 1
-    state.orders[order_id] = [dict(item) for item in items if isinstance(item, dict)]
+    state.orders[order_id] = lines
     state.cart.clear()
     return JSONResponse({"order_id": order_id}, status_code=201)
 
