@@ -4,6 +4,10 @@ An expectation holds when every `all` predicate is supported and, if `any` is no
 least one `any` predicate is supported. It is refuted when an `all` predicate is contradicted or
 every `any` predicate is. Otherwise it is unknown (None). A `forbid` entry is met when the
 forbidden behaviour is refuted, i.e. its expectation does NOT hold.
+
+For `forbid`, a request predicate left at the default status (2xx) also catches failed
+attempts: a matching request with any status (or none) that did not succeed makes the result
+unknown, so the run goes to review instead of passing as if nothing was tried.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from evidence_judge.checks._common import join_reasons, merge_citations
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.matching import as_text
 from evidence_judge.checks.registry import CheckerRegistry
-from evidence_judge.core.predicates import Predicate, ValuePredicate
+from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
 from evidence_judge.core.taskspec import Expectation, TaskSpec
 from evidence_judge.core.verdict import ExpectationResult, PredicateResult, Support
 
@@ -23,6 +27,7 @@ EXPECT: Final = "expect"
 FORBID: Final = "forbid"
 CONSTRAINT: Final = "constraint"
 
+_DEFAULT_STATUS: Final = RequestPredicate().status
 _TRUTH: Final = {Support.SUPPORTED: True, Support.CONTRADICTED: False, Support.NO_EVIDENCE: None}
 
 
@@ -72,19 +77,51 @@ async def _evaluate(
     return [await registry.evaluate(p, ctx) for p in predicates]
 
 
-async def evaluate_expectation(
-    expectation: Expectation, kind: str, ctx: CheckContext, registry: CheckerRegistry
-) -> ExpectationResult:
+async def _happened(
+    expectation: Expectation, ctx: CheckContext, registry: CheckerRegistry
+) -> tuple[bool | None, list[PredicateResult]]:
     all_results = await _evaluate(expectation.all, ctx, registry)
     any_results = await _evaluate(expectation.any, ctx, registry)
     happened = holds(all_results, any_results)
-    deciders = _explaining(happened, all_results, any_results)
-    met = happened if kind != FORBID or happened is None else not happened
+    return happened, _explaining(happened, all_results, any_results)
+
+
+def _any_status(predicate: Predicate) -> Predicate:
+    if isinstance(predicate, RequestPredicate) and predicate.status == _DEFAULT_STATUS:
+        return predicate.model_copy(update={"status": None})
+    return predicate
+
+
+def _attempt_of(expectation: Expectation) -> Expectation | None:
+    """The same expectation with default-status request predicates widened to any status."""
+    widened = expectation.model_copy(
+        update={
+            "all": [_any_status(p) for p in expectation.all],
+            "any": [_any_status(p) for p in expectation.any],
+        }
+    )
+    return None if widened == expectation else widened
+
+
+async def evaluate_expectation(
+    expectation: Expectation, kind: str, ctx: CheckContext, registry: CheckerRegistry
+) -> ExpectationResult:
+    happened, deciders = await _happened(expectation, ctx, registry)
+    met = happened
+    reason = join_reasons(deciders)
+    if kind == FORBID:
+        met = None if happened is None else not happened
+        attempt = _attempt_of(expectation) if happened is not True else None
+        if attempt is not None:
+            attempted, attempts = await _happened(attempt, ctx, registry)
+            if attempted is True:
+                met, deciders = None, attempts
+                reason = f"attempted forbidden action: {join_reasons(attempts)}"
     return ExpectationResult(
         expectation_id=expectation.id,
         kind=kind,
         met=met,
-        reason=join_reasons(deciders),
+        reason=reason,
         citations=merge_citations(deciders),
     )
 

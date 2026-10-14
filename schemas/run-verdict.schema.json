@@ -29,6 +29,16 @@
       "title": "Citation",
       "type": "object"
     },
+    "ClaimKind": {
+      "enum": [
+        "action",
+        "state",
+        "value",
+        "outcome"
+      ],
+      "title": "ClaimKind",
+      "type": "string"
+    },
     "ClaimVerdict": {
       "additionalProperties": false,
       "properties": {
@@ -39,6 +49,14 @@
         "claim_text": {
           "title": "Claim Text",
           "type": "string"
+        },
+        "quote": {
+          "description": "Verbatim span from the agent output the claim came from",
+          "title": "Quote",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ClaimKind"
         },
         "key": {
           "title": "Key",
@@ -72,6 +90,8 @@
       "required": [
         "claim_id",
         "claim_text",
+        "quote",
+        "kind",
         "key",
         "status",
         "reason",

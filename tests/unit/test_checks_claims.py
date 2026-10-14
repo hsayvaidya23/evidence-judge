@@ -7,6 +7,7 @@ from evidence_judge.core.predicates import (
     PageTextPredicate,
     Predicate,
     RequestPredicate,
+    Scope,
     ScreenshotPredicate,
     UrlPredicate,
 )
@@ -58,6 +59,19 @@ async def test_forged_claim_is_contradicted_by_every_predicate() -> None:
     assert "Final page text does not contain 'Thank you for your order'" in verdict.reason
     assert "Final URL is /cart" in verdict.reason
     assert verdict.checker == "request+page_text+url"
+    assert verdict.confidence == 1.0
+
+
+async def test_contradiction_is_as_firm_as_its_firmest_refutation() -> None:
+    seen_any = PageTextPredicate(contains="Order A1", scope=Scope.ANY)
+    weak = await judge_claim(order_claim(seen_any), ctx(forged_run()), default_registry())
+    assert weak.status is Support.CONTRADICTED
+    assert weak.confidence < 0.7
+    firm = await judge_claim(
+        order_claim(seen_any, ORDER_SENT), ctx(forged_run()), default_registry()
+    )
+    assert firm.status is Support.CONTRADICTED
+    assert firm.confidence == 1.0
 
 
 async def test_uncaptured_channel_keeps_claim_unverified() -> None:

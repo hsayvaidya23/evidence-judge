@@ -1,5 +1,8 @@
 """Judge one claim: any satisfied predicate proves it; all predicates contradicted refutes it.
 
+A refuted claim is as firm as its firmest refutation: a confident network contradiction is not
+weakened by a point-in-time snapshot that also failed to show the claim.
+
 Deterministic predicates are evaluated first. Vision (screenshot) predicates are consulted only
 when the deterministic ones are not decisive, so an LLM never overrides recorded network or page
 evidence.
@@ -52,7 +55,7 @@ def combine(claim: Claim, results: Sequence[PredicateResult]) -> ClaimVerdict:
             Support.CONTRADICTED,
             join_reasons(contradicted),
             contradicted,
-            min(r.confidence for r in contradicted),
+            max(r.confidence for r in contradicted),
         )
     undecided = [r for r in results if r.status is Support.NO_EVIDENCE]
     reason = join_reasons(undecided)
@@ -79,6 +82,8 @@ def _verdict(
     return ClaimVerdict(
         claim_id=claim.id,
         claim_text=claim.text,
+        quote=claim.quote,
+        kind=claim.kind,
         key=claim.key,
         status=status,
         reason=reason,

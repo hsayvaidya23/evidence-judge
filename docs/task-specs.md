@@ -35,12 +35,27 @@ An expectation needs at least one predicate in `all` or `any`. When both are giv
 conditions apply. In the verdict each one becomes an `ExpectationResult` with `met: true`,
 `false`, or `null` when the channel it needs was not captured.
 
+### Forbidden attempts
+
+A `forbid` entry also catches attempts that did not succeed. Inside `forbid`, a `request`
+predicate with the default status (`2xx`, written or omitted) is checked twice:
+
+- a matching request that succeeded breaks the rule (`met: false`, the run fails);
+- otherwise, a matching request with any other status or no response at all makes the result
+  `met: null` with the reason `attempted forbidden action: POST /api/account/delete → 500 ...`,
+  and the run needs review.
+
+To forbid only one exact outcome, give an exact code such as `status: "201"`; that predicate is
+not widened. `expect` entries are unaffected: a request there must succeed to count.
+
 ### Allowed intermediate mutations
 
 Doing a task usually involves writes that are not the goal itself, such as adding an item to
 the cart before checking out. List them under `allow` (request predicates) so the side-effects
-dimension does not flag them. Any other successful mutation that no expectation, constraint,
-allow entry or verified claim explains is reported as a side effect.
+dimension does not flag them. Any other successful mutation that no met expectation,
+constraint or allow entry explains is reported as a side effect. The agent's own claims never
+explain a mutation: "I also changed your email" is still a side effect, even though the claim is
+true. Without a spec, every successful mutation is reported, and the run needs review at best.
 
 ```yaml
 allow:
@@ -80,6 +95,11 @@ Every predicate has a `kind`.
 - {kind: url, contains: /order/confirmation}
 - {kind: url, regex: '/orders/\d+$', scope: any}
 ```
+
+With `scope: any`, visited URLs come from page snapshots, the page URL of each action and
+document navigations in the network log (GET requests for a `document`, or answered with
+`text/html`). A URL is reported as never visited only when snapshots or navigations were
+captured; with actions alone the result is `no_evidence`.
 
 ### `action`: the agent performed a browser action
 

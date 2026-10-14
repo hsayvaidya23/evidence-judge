@@ -48,7 +48,7 @@ def print_verdict(verdict: RunVerdict, console: Console) -> None:
         table.add_column("evidence", ratio=1)
         for cv in verdict.claims:
             text, st = _SUPPORT_STYLE[cv.status]
-            claim = Text(cv.claim_text)
+            claim = Text.assemble(cv.claim_text, "\n", (f'"{cv.quote}"', "dim italic"))
             if cv.key:
                 claim = Text.assemble(("[key] ", "bold"), claim)
             table.add_row(

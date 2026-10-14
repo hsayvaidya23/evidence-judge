@@ -4,10 +4,20 @@ import pytest
 
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.url import UrlChecker
-from evidence_judge.core.evidence import Channel
+from evidence_judge.core.evidence import Channel, NetworkEvent
 from evidence_judge.core.predicates import Scope, UrlPredicate
 from evidence_judge.core.verdict import Support
-from tests.unit.conftest import CART_TEXT, act, ctx, final, forged_run, honest_run, make_run, snap
+from tests.unit.conftest import (
+    CART_TEXT,
+    act,
+    ctx,
+    final,
+    forged_run,
+    honest_run,
+    make_run,
+    net,
+    snap,
+)
 
 
 async def test_final_url() -> None:
@@ -49,6 +59,54 @@ async def test_any_url_uses_actions_and_snapshots() -> None:
 async def test_any_url_without_channels_is_no_evidence() -> None:
     run = make_run(captured=frozenset({Channel.NETWORK}))
     res = await UrlChecker().evaluate(UrlPredicate(contains="/x", scope=Scope.ANY), ctx(run))
+    assert res.status is Support.NO_EVIDENCE
+
+
+async def test_any_url_with_only_actions_is_no_evidence() -> None:
+    run = make_run(
+        actions=[act(1, "click", "text=Checkout", url="https://shop.test/cart")],
+        captured=frozenset({Channel.ACTIONS}),
+    )
+    pred = UrlPredicate(contains="/checkout", scope=Scope.ANY)
+    res = await UrlChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.NO_EVIDENCE
+    assert res.reason.startswith("Neither page snapshots nor page navigations were captured")
+
+
+def _document(n: int, path: str, *, resource_type: str | None, mime: str | None) -> NetworkEvent:
+    return net(n, "GET", path).model_copy(
+        update={"resource_type": resource_type, "mime_type": mime}
+    )
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "mime"), [("document", None), (None, "text/html; charset=utf-8")]
+)
+async def test_any_url_counts_document_navigations(
+    resource_type: str | None, mime: str | None
+) -> None:
+    run = make_run(
+        actions=[act(1, "click", "text=Checkout", url="https://shop.test/cart")],
+        network=[
+            _document(2, "/checkout", resource_type=resource_type, mime=mime),
+            net(3, "GET", "/api/checkout-status"),
+        ],
+        captured=frozenset({Channel.ACTIONS, Channel.NETWORK}),
+    )
+    pred = UrlPredicate(contains="/checkout", scope=Scope.ANY)
+    res = await UrlChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.SUPPORTED
+    assert [c.evidence_id for c in res.citations] == ["net#2"]
+    miss = await UrlChecker().evaluate(UrlPredicate(contains="/order", scope=Scope.ANY), ctx(run))
+    assert miss.status is Support.CONTRADICTED
+
+
+async def test_any_url_ignores_api_calls_as_navigations() -> None:
+    run = make_run(
+        network=[net(1, "GET", "/checkout/api"), net(2, "POST", "/checkout")],
+        captured=frozenset({Channel.ACTIONS, Channel.NETWORK}),
+    )
+    res = await UrlChecker().evaluate(UrlPredicate(contains="/checkout", scope=Scope.ANY), ctx(run))
     assert res.status is Support.NO_EVIDENCE
 
 

@@ -5,7 +5,7 @@ import pytest
 from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.dimensions import assess_dimensions
 from evidence_judge.checks.expectations import evaluate_spec
-from evidence_judge.checks.outcome import FAIL_SCORE_CAP, decide, score
+from evidence_judge.checks.outcome import CONFIDENT_CONTRADICTION, FAIL_SCORE_CAP, decide, score
 from evidence_judge.checks.registry import default_registry
 from evidence_judge.core.claims import Claim, ClaimKind
 from evidence_judge.core.evidence import Run
@@ -24,6 +24,7 @@ from tests.unit.conftest import (
     ctx,
     forged_run,
     honest_run,
+    net,
     shop_spec,
     side_effect_run,
     uncaptured_network_run,
@@ -91,6 +92,37 @@ async def test_side_effect_breaks_forbid_rule() -> None:
     )
 
 
+async def test_side_effect_without_spec_needs_review() -> None:
+    outcome, _, summary = await grade(side_effect_run())
+    assert outcome is Outcome.NEEDS_REVIEW
+    assert summary == (
+        "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec "
+        "covers it. 2 other side effects also need review."
+    )
+
+
+async def test_unexplained_side_effect_with_spec_needs_review() -> None:
+    spec = shop_spec().model_copy(update={"forbid": []})
+    outcome, _, summary = await grade(side_effect_run(), spec)
+    assert outcome is Outcome.NEEDS_REVIEW
+    assert summary == (
+        "NEEDS_REVIEW: side effect: net#8: POST /api/account/email → 200 is not explained by "
+        "the task spec."
+    )
+
+
+async def test_failed_forbidden_attempt_needs_review() -> None:
+    run = honest_run()
+    attempt = net(8, "POST", "/api/account/delete", 500)
+    run = run.model_copy(update={"network": [*run.network, attempt]})
+    outcome, _, summary = await grade(run, shop_spec())
+    assert outcome is Outcome.NEEDS_REVIEW
+    assert summary == (
+        "NEEDS_REVIEW: forbid 'no_account_changes' needs review: attempted forbidden action: "
+        "POST /api/account/delete → 500 matched: POST request whose URL contains '/api/account'."
+    )
+
+
 async def test_uncaptured_network_needs_review_not_fail_from_absence() -> None:
     run = uncaptured_network_run()
     outcome, _, summary = await grade(run)
@@ -110,15 +142,17 @@ async def test_low_coverage_needs_review() -> None:
     )
 
 
-def verdict(status: Support, *, key: bool = True) -> ClaimVerdict:
+def verdict(status: Support, *, key: bool = True, confidence: float = 1.0) -> ClaimVerdict:
     return ClaimVerdict(
         claim_id="c",
         claim_text="x happened",
+        quote="x happened",
+        kind=ClaimKind.OUTCOME,
         key=key,
         status=status,
         reason="Because evidence",
         checker="request",
-        confidence=1.0,
+        confidence=confidence,
     )
 
 
@@ -135,7 +169,7 @@ def expectation(met: bool | None, kind: str = "expect") -> ExpectationResult:
         ([verdict(Support.SUPPORTED)], [expectation(False, "forbid")], Outcome.FAIL),
         ([verdict(Support.NO_EVIDENCE)], [expectation(True)], Outcome.NEEDS_REVIEW),
         ([verdict(Support.SUPPORTED)], [expectation(None)], Outcome.NEEDS_REVIEW),
-        ([verdict(Support.CONTRADICTED, key=False)], [expectation(True)], Outcome.PASS),
+        ([verdict(Support.CONTRADICTED, key=False)], [expectation(True)], Outcome.NEEDS_REVIEW),
         ([verdict(Support.SUPPORTED, key=False)], [], Outcome.NEEDS_REVIEW),
         ([], [expectation(True)], Outcome.PASS),
         ([verdict(Support.SUPPORTED)], [], Outcome.PASS),
@@ -160,6 +194,33 @@ def test_multiple_failures_are_counted() -> None:
     assert summary == (
         'FAIL: the agent claimed "x happened", but because evidence. 1 other key claim also failed.'
     )
+
+
+def test_contradicted_non_key_claim_is_named() -> None:
+    _, _, summary = decide(
+        [verdict(Support.SUPPORTED), verdict(Support.CONTRADICTED, key=False)],
+        [expectation(True)],
+        {},
+        coverage=None,
+        review_threshold=0.6,
+    )
+    assert summary == 'NEEDS_REVIEW: the agent claimed "x happened", but because evidence.'
+
+
+def test_weak_key_contradiction_needs_review() -> None:
+    weak = verdict(Support.CONTRADICTED, confidence=CONFIDENT_CONTRADICTION - 0.1)
+    got, _, summary = decide([weak], [expectation(True)], {}, coverage=None, review_threshold=0.6)
+    assert got is Outcome.NEEDS_REVIEW
+    assert summary == 'NEEDS_REVIEW: the agent claimed "x happened", but because evidence.'
+
+
+def test_weak_key_contradiction_fails_when_corroborated() -> None:
+    weak = verdict(Support.CONTRADICTED, confidence=CONFIDENT_CONTRADICTION - 0.1)
+    other = verdict(Support.CONTRADICTED, key=False, confidence=CONFIDENT_CONTRADICTION - 0.1)
+    got, _, _ = decide([weak, other], [], {}, coverage=None, review_threshold=0.6)
+    assert got is Outcome.FAIL
+    got, _, _ = decide([weak], [expectation(False)], {}, coverage=None, review_threshold=0.6)
+    assert got is Outcome.FAIL
 
 
 def test_score_is_weighted_mean_of_assessable_parts() -> None:

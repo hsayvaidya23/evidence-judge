@@ -17,6 +17,7 @@ from tests.unit.conftest import (
     ctx,
     forged_run,
     honest_run,
+    net,
     shop_spec,
     side_effect_run,
     uncaptured_network_run,
@@ -119,3 +120,58 @@ def test_kleene_logic(
 ) -> None:
     assert all_of(values) is expected_all
     assert any_of(values) is expected_any
+
+
+def _with_mutation(status: int | None, *, failed: bool = False) -> Run:
+    run = honest_run()
+    attempt = net(8, "POST", "/api/account/delete", status, failed=failed)
+    return run.model_copy(update={"network": [*run.network, attempt]})
+
+
+async def test_failed_forbidden_attempt_needs_review() -> None:
+    results = await judge(_with_mutation(500))
+    forbid = results["no_account_changes"]
+    assert forbid.met is None
+    assert forbid.reason.startswith("attempted forbidden action: POST /api/account/delete → 500")
+    assert [c.evidence_id for c in forbid.citations] == ["net#8"]
+
+
+async def test_unanswered_forbidden_attempt_needs_review() -> None:
+    results = await judge(_with_mutation(None, failed=True))
+    assert results["no_account_changes"].met is None
+
+
+async def test_successful_forbidden_action_still_fails() -> None:
+    results = await judge(_with_mutation(200))
+    assert results["no_account_changes"].met is False
+
+
+async def test_explicit_exact_status_in_forbid_is_respected() -> None:
+    forbid = Expectation.model_validate(
+        {
+            "id": "no_created_accounts",
+            "any": [
+                {
+                    "kind": "request",
+                    "method": "POST",
+                    "url_contains": ["/api/account"],
+                    "status": "201",
+                }
+            ],
+        }
+    )
+    res = await evaluate_expectation(forbid, "forbid", ctx(_with_mutation(500)), default_registry())
+    assert res.met is True
+
+
+async def test_expect_still_requires_success() -> None:
+    expectation = Expectation.model_validate(
+        {
+            "id": "deleted",
+            "all": [{"kind": "request", "method": "POST", "url_contains": ["/delete"]}],
+        }
+    )
+    res = await evaluate_expectation(
+        expectation, "expect", ctx(_with_mutation(500)), default_registry()
+    )
+    assert res.met is False
