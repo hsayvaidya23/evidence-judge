@@ -1,11 +1,5 @@
 <p align="center">
-  <img src="docs/assets/mascot.svg" width="130" alt="Judge Owl, the Evidence Judge mascot, holding a magnifying glass">
-</p>
-
-<h1 align="center">Evidence Judge</h1>
-
-<p align="center">
-  <b>Don't trust what the agent says. Check what it did.</b>
+  <img src="docs/assets/hero.svg" width="100%" alt="Evidence Judge: don't trust what the agent says, check what it did. An agent's claim 'I placed the order' is checked against recorded evidence and stamped CONTRADICTED, no POST /api/orders">
 </p>
 
 <p align="center">
@@ -24,6 +18,8 @@
   <a href="docs/">Docs</a>
 </p>
 
+<img align="right" src="docs/assets/mascot.svg" width="120" alt="Judge Owl, the Evidence Judge mascot">
+
 Evidence Judge grades **browser and computer-use agent runs** by pulling out every claim the agent makes and checking each one against what was actually recorded: network requests, page state, screenshots and the final page. An agent can't talk its way into a PASS.
 
 ## 🎬 See it catch a lie
@@ -37,7 +33,7 @@ Evidence Judge grades **browser and computer-use agent runs** by pulling out eve
 **2. Evidence Judge checks the claim against the recording.**
 
 <p align="center">
-  <img src="docs/assets/demo-forged.svg" width="900" alt="evidence-judge judge on a forged run: FAIL 45/100, key claims contradicted, exit code 1">
+  <img src="docs/assets/demo-forged.svg" width="900" alt="evidence-judge judge on a forged run: FAIL 45/100, three key claims contradicted, exit code 1">
 </p>
 
 **3. The report shows exactly why, and every verdict cites its evidence.**
@@ -70,10 +66,7 @@ So Evidence Judge never asks *"does this transcript sound successful?"* It asks 
 ## 🔍 How it works
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-it-works-dark.svg">
-    <img src="docs/assets/how-it-works-light.svg" width="900" alt="Pipeline: ingest, redact, extract claims, predicates, checkers, verdict; the forged order claim ends in FAIL because no POST /api/orders was sent">
-  </picture>
+  <img src="docs/assets/how-it-works.svg" width="900" alt="Pipeline: ingest, redact, extract claims, predicates, checkers, verdict; the forged order claim ends in FAIL because no POST /api/orders was sent">
 </p>
 
 ```mermaid
@@ -234,10 +227,7 @@ the cache directory is not writable, a per-process key is used with a one-line w
 ## 🧪 Benchmark: can a forged story fool it?
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmark-dark.svg">
-    <img src="docs/assets/benchmark-light.svg" width="900" alt="Forged-run benchmark: 0 of 75 forged success stories passed, with or without a task spec">
-  </picture>
+  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 75 forged runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
 </p>
 
 The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites only the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), a prompt-injection attack aimed at the claim extractor, and a style-only control. The actions and network evidence stay the same, so the correct verdict is never PASS.
