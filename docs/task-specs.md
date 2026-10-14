@@ -199,7 +199,9 @@ digits (`24,5`) and a `k`/`m`/`b` suffix. Ambiguous strings such as `1.500` are 
 `no_evidence` ("cannot compare ... numerically"), never a text comparison. `==` and `!=` fall
 back to comparing normalised text.
 
-Without `in_request`, the value is looked up in any state-changing request.
+Without `in_request`, the value is looked up in every state-changing request that took effect
+(answered 2xx or 3xx and not failed); a rejected or failed attempt does not count. With
+`in_request`, its own `status` decides (the default `ok` likewise skips failed attempts).
 If a candidate request's body was truncated before `json_path`, the value cannot be shown to
 hold for every observation, so the predicate is `no_evidence` unless a recorded observation
 already violates it.

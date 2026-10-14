@@ -172,3 +172,26 @@ async def test_truncated_candidate_keeps_a_guardrail_from_passing() -> None:
     res = await ValueChecker().evaluate(PRICE_CAP, ctx(make_run(network=[readable, truncated])))
     assert res.status is Support.NO_EVIDENCE
     assert "net#2" in res.reason
+
+
+@pytest.mark.parametrize(("status", "failed"), [(500, False), (409, False), (None, True)])
+async def test_default_candidates_skip_mutations_that_did_not_take_effect(
+    status: int | None, failed: bool
+) -> None:
+    run = make_run(
+        network=[
+            net(1, "POST", "/api/orders", status, body={"price": 45}, failed=failed),
+            net(2, "POST", "/api/orders", 201, body={"price": 24}),
+        ]
+    )
+    pred = ValuePredicate(field="price", json_path="price", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.SUPPORTED, res.reason
+    assert [c.evidence_id for c in res.citations] == ["net#2"]
+
+
+async def test_redirected_mutation_is_a_default_candidate() -> None:
+    run = make_run(network=[net(1, "POST", "/api/orders", 303, body={"price": 45})])
+    pred = ValuePredicate(field="price", json_path="price", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.CONTRADICTED

@@ -1,7 +1,8 @@
 """ValuePredicate checker.
 
 Values are read from JSON (or form-encoded) bodies via `json_path` - from the requests matching
-`in_request`, or from every mutation when it is unset - and/or from page text via `page_regex`
+`in_request`, or from every mutation that took effect (2xx or 3xx, not failed) when it is
+unset, so a rejected attempt cannot break a constraint - and/or from page text via `page_regex`
 on the most recent page state that matches. Every observation must satisfy the comparison: one
 violating observation makes the predicate CONTRADICTED, which is what a guardrail needs. A
 candidate whose body ingest truncated before the path keeps the predicate from being SUPPORTED:
@@ -62,7 +63,7 @@ def format_value(value: object) -> str:
 def _candidates(predicate: ValuePredicate, index: EvidenceIndex) -> list[NetworkEvent]:
     if predicate.in_request is not None:
         return matching_requests(predicate.in_request, index)
-    return index.mutations()
+    return [e for e in index.mutations() if e.ok]
 
 
 def _read_bodies(event: NetworkEvent, path: str) -> Observation | None:
@@ -97,7 +98,7 @@ def _missing_json_reason(
         return "Network traffic was not captured"
     if predicate.in_request is not None:
         return f"No {RequestMatcher(predicate.in_request).describe()} was captured"
-    return "No mutating request was captured"
+    return "No mutating request that took effect (2xx or 3xx) was captured"
 
 
 def _from_pages(regex_source: str, index: EvidenceIndex) -> Observation | None:
