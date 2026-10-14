@@ -290,6 +290,7 @@ def host_allowed(host: str | None, allowed: list[str]) -> bool:
 
 
 MAX_REGEX_LENGTH: Final = 300
+MAX_REGEX_MATCHES: Final = 50
 MAX_REGEX_INPUT: Final = 10_000
 REGEX_TIMEOUT_SECONDS: Final = 0.05
 
@@ -325,3 +326,23 @@ def regex_search(compiled: regex.Pattern[str], text: str) -> regex.Match[str] | 
     except TimeoutError as exc:
         budget = round(REGEX_TIMEOUT_SECONDS * 1000)
         raise RegexTimeoutError(f"regex timed out after {budget} ms: /{compiled.pattern}/") from exc
+
+
+def regex_findall(compiled: regex.Pattern[str], text: str) -> list[regex.Match[str]]:
+    """Up to MAX_REGEX_MATCHES matches in the same windows and time budget as regex_search."""
+    windows = (
+        [(0, len(text))]
+        if len(text) <= 2 * MAX_REGEX_INPUT
+        else [(0, MAX_REGEX_INPUT), (len(text) - MAX_REGEX_INPUT, len(text))]
+    )
+    found: list[regex.Match[str]] = []
+    try:
+        for start, end in windows:
+            for match in compiled.finditer(text, start, end, timeout=REGEX_TIMEOUT_SECONDS):
+                found.append(match)
+                if len(found) >= MAX_REGEX_MATCHES:
+                    return found
+    except TimeoutError as exc:
+        budget = round(REGEX_TIMEOUT_SECONDS * 1000)
+        raise RegexTimeoutError(f"regex timed out after {budget} ms: /{compiled.pattern}/") from exc
+    return found

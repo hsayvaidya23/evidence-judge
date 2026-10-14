@@ -188,8 +188,15 @@ leads to review, not failure.
 Instead of `json_path`, `page_regex` extracts the value from page text with one capture group:
 
 ```yaml
-- {kind: value, field: total, page_regex: 'Total:\s*\$([0-9.]+)', op: "<=", value: 30}
+- {kind: value, field: total, page_regex: 'Total:\s*\$([\d.,]+)', op: "<=", value: 30}
 ```
+
+`page_regex` reads **every** match on **every** recorded page state (each snapshot and the final
+page), and every value it reads must satisfy the comparison: one violation makes the predicate
+`contradicted`, so a total of `$45.00` on the checkout page is not hidden by a `$5 off` coupon on
+the confirmation page. When the values differ but all satisfy it, the reason says so. Anchor
+the pattern on a label such as `Total:`: a bare price pattern like `\$([\d.]+)` also reads
+shipping fees, coupons and every other product listed on the way.
 
 Numbers are read from JSON numbers and from strings as prices are usually written: currency
 symbols or codes (`$24.00`, `1500 EUR`), thousands grouped with commas, dots, spaces or

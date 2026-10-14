@@ -9,10 +9,12 @@ from evidence_judge.core.verdict import Support
 from tests.unit.conftest import (
     constraint_violation_run,
     ctx,
+    final,
     forged_run,
     honest_run,
     make_run,
     net,
+    snap,
     uncaptured_network_run,
 )
 
@@ -73,7 +75,7 @@ async def test_path_absent_from_bodies() -> None:
     assert "None of 1 candidate request has 'coupon.code'" in res.reason
 
 
-async def test_page_regex_reads_latest_page() -> None:
+async def test_page_regex_reads_every_page() -> None:
     pred = ValuePredicate(field="total", page_regex=r"total \$([\d.]+)", op="<=", value=30)
     res = await ValueChecker().evaluate(pred, ctx(honest_run()))
     assert res.status is Support.SUPPORTED
@@ -81,6 +83,44 @@ async def test_page_regex_reads_latest_page() -> None:
     res = await ValueChecker().evaluate(pred, ctx(constraint_violation_run()))
     assert res.status is Support.CONTRADICTED
     assert "total was '45.00' in the page /order/A1, expected <= 30" in res.reason
+
+
+async def test_page_regex_violation_on_an_earlier_page_is_not_hidden_by_the_final_page() -> None:
+    run = make_run(
+        snapshots=[snap(1, "/checkout", "Steel kettle Total: $45.00 Place order")],
+        final_state=final("/order/1", "Thank you! Use code SAVE for $5 off next time"),
+    )
+    pred = ValuePredicate(field="price", page_regex=r"\$([\d.]+)", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert "45.00" in res.reason
+
+
+async def test_page_regex_reads_every_match_on_a_page() -> None:
+    run = make_run(final_state=final("/checkout", "Shipping $5.00 Subtotal $40.00 Total $45.00"))
+    pred = ValuePredicate(field="price", page_regex=r"\$([\d.]+)", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert "45.00" in res.reason
+
+
+async def test_page_regex_anchored_on_a_label_reads_only_that_value() -> None:
+    run = make_run(final_state=final("/checkout", "Shipping $5.00 Total: $25.00"))
+    pred = ValuePredicate(field="total", page_regex=r"Total:\s*\$([\d.,]+)", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.SUPPORTED
+    assert "25.00" in res.reason
+
+
+async def test_differing_page_values_are_noted() -> None:
+    run = make_run(
+        snapshots=[snap(1, "/cart", "Total: $20.00")],
+        final_state=final("/checkout", "Total: $25.00"),
+    )
+    pred = ValuePredicate(field="total", page_regex=r"Total:\s*\$([\d.,]+)", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.SUPPORTED
+    assert "observed values differ: '20.00', '25.00'" in res.reason
 
 
 async def test_page_regex_without_group_uses_whole_match() -> None:

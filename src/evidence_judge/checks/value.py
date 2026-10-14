@@ -2,11 +2,14 @@
 
 Values are read from JSON (or form-encoded) bodies via `json_path` - from the requests matching
 `in_request`, or from every mutation that took effect (2xx or 3xx, not failed) when it is
-unset, so a rejected attempt cannot break a constraint - and/or from page text via `page_regex`
-on the most recent page state that matches. Every observation must satisfy the comparison: one
-violating observation makes the predicate CONTRADICTED, which is what a guardrail needs. A
-candidate whose body ingest truncated before the path keeps the predicate from being SUPPORTED:
-the unread part could hold a violating value, so the result is NO_EVIDENCE. So is an ordering
+unset, so a rejected attempt cannot break a constraint - and/or from page text via `page_regex`:
+every match on every recorded page state (snapshots and the final page). Every observation must
+satisfy the comparison: one violating observation makes the predicate CONTRADICTED, which is
+what a guardrail needs, and satisfying observations that differ are noted. A page_regex should
+therefore anchor on a label ('Total:\\s*\\$([\\d.,]+)'): a bare price pattern also reads
+shipping fees, coupons and other products. A candidate whose body ingest truncated before the
+path keeps the predicate from being SUPPORTED: the unread part could hold a violating value, so
+the result is NO_EVIDENCE. So is an ordering
 comparison (<, <=, >, >=) on a value that does not parse as a number: text is never ordered.
 """
 
@@ -34,7 +37,7 @@ from evidence_judge.checks.matching import (
     json_path_get,
     parse_body,
     parse_number,
-    regex_search,
+    regex_findall,
     url_path,
 )
 from evidence_judge.checks.request import RequestMatcher, matching_requests
@@ -44,6 +47,7 @@ from evidence_judge.core.predicates import Predicate, ValuePredicate
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 
 KIND = "value"
+MAX_LISTED_VALUES = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,16 +105,19 @@ def _missing_json_reason(
     return "No mutating request that took effect (2xx or 3xx) was captured"
 
 
-def _from_pages(regex_source: str, index: EvidenceIndex) -> Observation | None:
+def _from_pages(regex_source: str, index: EvidenceIndex) -> list[Observation]:
     regex = compile_regex(regex_source)
     if regex.groups > 1:
         raise InvalidPredicateError(f"page_regex /{regex_source}/ must have at most one group")
-    for state in reversed(index.page_states()):
-        match = regex_search(regex, state.text)
-        if match:
-            value = match.group(1) if regex.groups else match.group(0)
-            return Observation(value, state_id(state, index), f"the page {url_path(state.url)}")
-    return None
+    return [
+        Observation(
+            match.group(1) if regex.groups else match.group(0),
+            state_id(state, index),
+            f"the page {url_path(state.url)}",
+        )
+        for state in index.page_states()
+        for match in regex_findall(regex, state.text)
+    ]
 
 
 def _observe(
@@ -132,10 +139,9 @@ def _observe(
         elif not found:
             gaps.append(_missing_json_reason(predicate, predicate.json_path, candidates, index))
     if predicate.page_regex is not None:
-        page = _from_pages(predicate.page_regex, index)
-        if page is not None:
-            observations.append(page)
-        else:
+        pages = _from_pages(predicate.page_regex, index)
+        observations.extend(pages)
+        if not pages:
             gaps.append(f"No recorded page text matches /{predicate.page_regex}/")
     return observations, "; ".join(gaps), unread
 
@@ -179,9 +185,22 @@ def check_value(predicate: ValuePredicate, index: EvidenceIndex) -> PredicateRes
         )
     return result(
         Support.SUPPORTED,
-        f"{field} was {format_value(latest.value)} in {latest.where}, satisfying {expected}",
+        f"{field} was {format_value(latest.value)} in {latest.where}, satisfying {expected}"
+        f"{_disagreement(observations)}",
         KIND,
         _cite(observations),
+    )
+
+
+def _disagreement(observations: list[Observation]) -> str:
+    values = list(dict.fromkeys(format_value(o.value) for o in observations))
+    if len(values) < 2:
+        return ""
+    shown = ", ".join(values[:MAX_LISTED_VALUES])
+    more = f" and {len(values) - MAX_LISTED_VALUES} more" if len(values) > MAX_LISTED_VALUES else ""
+    return (
+        f" ({plural(len(observations), 'observation')}, all satisfying it; observed values "
+        f"differ: {shown}{more})"
     )
 
 

@@ -180,6 +180,10 @@ forbid:
       - {kind: request, method: POST, url_contains: [/api/bookings/upgrade]}
 ```
 
+The `total` regex is anchored on its `Total:` label on purpose. `page_regex` reads every match
+on every recorded page, and every value must satisfy the comparison, so an unanchored
+`EUR\s*([0-9.]+)` would also read nightly rates, taxes and other offers listed on the way.
+
 Values compare numerically when both sides parse as numbers, and as normalised strings
 otherwise, so ISO dates order correctly with `<`, `<=`, `>` and `>=`. Use `contains` for a time
 inside a timestamp (`value: "10:00"`).
