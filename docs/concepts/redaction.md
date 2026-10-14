@@ -25,7 +25,7 @@ flowchart LR
 | `cookie` | Every value in `Cookie` / `Set-Cookie` (names are kept) |
 | `secret_header` | `X-API-Key`, `X-Auth-Token` and headers whose names contain token, secret, session, auth, password, api-key |
 | `api_key` | Common key formats: `sk-...`, `ghp_...`, `github_pat_...`, `AKIA...`, `xox[bp]-...`, `AIza...`, Stripe keys, GitLab tokens |
-| `secret_param` | Secret-looking URL query, fragment, form and JSON fields |
+| `secret_param` | Secret-looking URL query, fragment, form and JSON fields, URLs written inside text, and `password: ...`-style pairs in free text |
 | `url_password` | Passwords in `user:password@host` URLs |
 | `secret_input` | Values typed into password, OTP, PIN or card-security-code fields |
 | `html_secret` | The `value` of password, one-time-code and token `<input>`s in page HTML, hidden CSRF tokens included |

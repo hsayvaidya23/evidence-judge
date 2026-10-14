@@ -9,6 +9,8 @@ leaves the process. Redacting already-redacted data is a no-op.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import re
@@ -78,6 +80,8 @@ _SECRET_PARAMS = frozenset(
         "x_amz_signature",
         "x_amz_credential",
         "x_amz_security_token",
+        "x_goog_signature",
+        "x_goog_credential",
     }
 )
 _SECRET_PARAM_SUFFIXES = (
@@ -116,6 +120,8 @@ _SECRET_FIELD_WORDS = frozenset(
         "cvc",
         "cvc2",
         "csc",
+        "cvn",
+        "2fa",
         "ssn",
         "csrf",
         "xsrf",
@@ -129,6 +135,9 @@ _SECRET_FIELD_PHRASES = (
     "onetimecode",
     "onetimepassword",
     "socialsecurity",
+    "twofactor",
+    "recoverycode",
+    "backupcode",
 )
 """Secret names spread over several words (``security_code``, ``oneTimeCode``)."""
 _PHONE_FIELD_WORDS = frozenset(
@@ -149,6 +158,22 @@ _JWT_RE = re.compile(
     r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*"
 )
 _BEARER_RE = re.compile(r"(?i)\b(bearer\s+)([A-Za-z0-9\-._~+/]{8,}=*)")
+_BASIC_RE = re.compile(r"(?i)\b(basic\s+)([A-Za-z0-9+/]{4,}={0,2})(?![A-Za-z0-9+/=])")
+_AUTH_SCHEMES = r"(?:basic|bearer|digest|token|negotiate|ntlm)"
+_AUTH_TEXT_RE = re.compile(
+    rf"(?i)(?<![A-Za-z0-9_-])((?:proxy-)?authorization[\"']?\s*[:=]\s*[\"']?(?:{_AUTH_SCHEMES}\s+)?)"
+    rf"(?!{_AUTH_SCHEMES}\b)([^\s\"'<>,;]+)"
+)
+_URL_IN_TEXT_RE = re.compile(r"(?i)\b(?:https?|wss?)://[^\s\"'<>\\`]+")
+_ESCAPED_URL_RE = re.compile(r"(?i)\b(?:https?|wss?):\\/\\/(?:[^\s\"'<>\\`]|\\/)+")
+_URL_TRAILING = ".,;:!?)]}"
+_TEXT_PAIR_RE = re.compile(
+    r"(?<![A-Za-z0-9_\-.\[\]])(([A-Za-z][A-Za-z0-9_\-.\[\]]{0,63})[\"']?\s*[:=]\s*([\"']?))"
+    r"([^\s\"'<>,;&]{1,256})(?=\3)"
+)
+"""``password: hunter2``, ``password = 'hunter2'`` and similar pairs written in free text."""
+_PAIR_EXCLUDED_NAMES = frozenset({"pass", "pw", "ssn"})
+"""Names too common in prose ("Boarding pass: ...") or handled by their own rule (SSN)."""
 _API_KEY_RE = re.compile(
     r"(?<![A-Za-z0-9_-])(?:"
     r"sk-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_\-]{16,}"
@@ -331,6 +356,23 @@ def _ssn_in_context(text: str, start: int) -> bool:
         return True
     before = text[max(0, start - _SSN_CONTEXT_CHARS) : start].lower()
     return _SSN_CONTEXT_RE.search(before) is not None
+
+
+def _looks_like_secret(value: str) -> bool:
+    """A free-text value that could be a credential: has a digit or symbol, or is long.
+
+    Keeps prose such as "Password: required" or "Authorization: pending" intact.
+    """
+    return len(value) >= 20 or any(not ch.isalpha() for ch in value)
+
+
+def _is_basic_credential(value: str) -> bool:
+    """Whether ``value`` is base64 of ``user:password`` (HTTP Basic credentials)."""
+    try:
+        decoded = base64.b64decode(value, validate=True).decode("utf-8")
+    except (binascii.Error, ValueError):
+        return False
+    return ":" in decoded and decoded.isprintable()
 
 
 def _is_secret_input(attrs: Mapping[str, str]) -> bool:
@@ -532,14 +574,47 @@ class Redactor:
                 return m.group(0)
             return self._token("ssn", m.group(0), counts)
 
+        def url(m: re.Match[str]) -> str:
+            return self._url_in_text(m.group(0), counts, escaped=False)
+
+        def escaped_url(m: re.Match[str]) -> str:
+            return self._url_in_text(m.group(0), counts, escaped=True)
+
+        def basic(m: re.Match[str]) -> str:
+            if not _is_basic_credential(m.group(2)):
+                return m.group(0)
+            return m.group(1) + self._token("auth", m.group(2), counts)
+
+        def auth_text(m: re.Match[str]) -> str:
+            if not _looks_like_secret(m.group(2)):
+                return m.group(0)
+            return m.group(1) + self._token("auth", m.group(2), counts)
+
+        def text_pair(m: re.Match[str]) -> str:
+            prefix, name, quote_char, value = m.group(1, 2, 3, 4)
+            kept = value if quote_char else value.rstrip(_URL_TRAILING)
+            if (
+                not kept
+                or _norm_param(name) in _PAIR_EXCLUDED_NAMES
+                or not _is_secret_param(name, in_url=False)
+                or not _looks_like_secret(kept)
+            ):
+                return m.group(0)
+            return prefix + self._token("secret_param", kept, counts) + value[len(kept) :]
+
         steps: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
             (_INPUT_TAG_RE, html_input),
+            (_ESCAPED_URL_RE, escaped_url),
+            (_URL_IN_TEXT_RE, url),
             (_JWT_RE, jwt),
             (_BEARER_RE, bearer),
+            (_BASIC_RE, basic),
             (_API_KEY_RE, api_key),
             (_JSON_SECRET_RE, json_secret),
             (_JSON_SECRET_NUMBER_RE, json_number),
+            (_AUTH_TEXT_RE, auth_text),
             (_KV_SECRET_RE, kv_secret),
+            (_TEXT_PAIR_RE, text_pair),
             (_EMAIL_RE, email),
             (_CARD_RE, card),
             (_SSN_RE, ssn),
@@ -549,6 +624,18 @@ class Redactor:
         if "%" in text:
             text = self._outside_tokens(text, lambda s: self._percent_runs(s, counts, form=form))
         return text
+
+    def _url_in_text(self, found: str, counts: Counter[str], *, escaped: bool) -> str:
+        """Redact a URL found inside free text as ``_url`` would, leaving it unchanged otherwise."""
+        url = found.rstrip(_URL_TRAILING)
+        tail = found[len(url) :]
+        plain = url.replace("\\/", "/") if escaped else url
+        local: Counter[str] = Counter()
+        redacted = self._url(plain, local)
+        if not local:
+            return found
+        counts.update(local)
+        return (redacted.replace("/", "\\/") if escaped else redacted) + tail
 
     @staticmethod
     def _field_category(name: str, value: str, *, in_url: bool) -> str | None:
