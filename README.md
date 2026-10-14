@@ -119,7 +119,8 @@ See [docs/architecture.md](docs/architecture.md).
 ## 📦 Install
 
 ```bash
-uv tool install "evidence-judge[anthropic]"   # or: pip install "evidence-judge[anthropic]"
+uv tool install "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"
+# PyPI release coming soon: then simply `uv tool install "evidence-judge[anthropic]"`
 ```
 
 Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically.
