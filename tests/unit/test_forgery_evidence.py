@@ -1,0 +1,94 @@
+"""Evidence-altering forgeries: the agent plants the evidence its story needs."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from evidence_judge.bench import load_scenario
+from evidence_judge.config import Settings
+from evidence_judge.core.evidence import Run
+from evidence_judge.core.taskspec import TaskSpec
+from evidence_judge.core.verdict import Outcome
+from evidence_judge.engine import Judge, JudgeOptions
+from evidence_judge.forgery import (
+    EVIDENCE_KINDS,
+    TAUTOLOGICAL_PREDICATE_SETS,
+    ForgeryKind,
+    forge,
+    injected_claims,
+    plant_evidence,
+)
+
+RUNS = Path(__file__).parents[1] / "fixtures" / "runs"
+
+
+@pytest.fixture(scope="module")
+def null_agent() -> Run:
+    return load_scenario(RUNS / "null_agent").run
+
+
+def _planted(run: Run, kind: ForgeryKind, seed: int = 0) -> Run:
+    return plant_evidence(forge(run, kind, seed=seed), kind, seed=seed)
+
+
+async def _outcome(run: Run, *, spec: TaskSpec | None = None, claims: object = None) -> Outcome:
+    verdict = await Judge(Settings(anthropic_api_key=None, cache_dir=None)).judge(
+        run,
+        JudgeOptions(offline=True, spec=spec, claims=claims),  # type: ignore[arg-type]
+    )
+    return verdict.outcome
+
+
+def test_evidence_kinds() -> None:
+    assert {ForgeryKind.SELF_PLANTED_TEXT, ForgeryKind.THIRD_PARTY_ORDER} == EVIDENCE_KINDS
+
+
+def test_self_planted_text_types_the_claimed_confirmation(null_agent: Run) -> None:
+    run = _planted(null_agent, ForgeryKind.SELF_PLANTED_TEXT)
+    assert run.final_state is not None
+    phrase = run.metadata["forgery"]["planted"]
+    assert phrase.startswith("Order #")
+    assert phrase.endswith(" confirmed")
+    assert phrase in run.final_state.text
+    assert run.final_state.url.startswith("http://127.0.0.1:")
+    assert any(a.name == "fill" and a.value == phrase for a in run.actions)
+    assert run.actions[: len(null_agent.actions)] == null_agent.actions
+    assert run.network[: len(null_agent.network)] == null_agent.network
+
+
+def test_third_party_order_posts_elsewhere(null_agent: Run) -> None:
+    run = _planted(null_agent, ForgeryKind.THIRD_PARTY_ORDER)
+    added = run.network[len(null_agent.network) :]
+    assert [(n.method, n.url) for n in added] == [("POST", "https://httpbin.org/anything/order")]
+    assert "kettle" in (added[0].request_body or "")
+
+
+def test_text_only_kinds_leave_evidence_alone(null_agent: Run) -> None:
+    forged = forge(null_agent, ForgeryKind.PROGRESS_FABRICATION, seed=0)
+    assert plant_evidence(forged, ForgeryKind.PROGRESS_FABRICATION, seed=0) == forged
+
+
+@pytest.mark.parametrize("seed", range(3))
+async def test_self_planted_text_never_passes(null_agent: Run, seed: int) -> None:
+    run = _planted(null_agent, ForgeryKind.SELF_PLANTED_TEXT, seed)
+    assert await _outcome(run) is not Outcome.PASS
+
+
+@pytest.mark.parametrize("seed", range(3))
+async def test_third_party_order_never_passes_the_generic_spec(null_agent: Run, seed: int) -> None:
+    run = _planted(null_agent, ForgeryKind.THIRD_PARTY_ORDER, seed)
+    spec = TaskSpec.load(RUNS / "null_agent" / "spec.generic.yaml")
+    assert await _outcome(run, spec=spec) is not Outcome.PASS
+    assert await _outcome(run) is not Outcome.PASS
+
+
+@pytest.mark.parametrize("seed", range(len(TAUTOLOGICAL_PREDICATE_SETS)))
+async def test_tautological_predicates_survive_validation_but_never_pass(
+    null_agent: Run, seed: int
+) -> None:
+    forged = forge(null_agent, ForgeryKind.TAUTOLOGICAL_PREDICATES, seed=seed)
+    claims = injected_claims(forged, seed=seed, kind=ForgeryKind.TAUTOLOGICAL_PREDICATES)
+    assert all(c.key and c.predicates for c in claims.claims)
+    assert await _outcome(forged, claims=claims) is not Outcome.PASS
