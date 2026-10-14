@@ -3,7 +3,9 @@
 A snapshot's ``html`` is a NodeSnapshot: a text string, an element
 ``[name, attributes?, *children]``, or a subtree back-reference ``[[offset, index]]`` that
 points at node ``index`` (post-order) of snapshot ``current - offset`` of the same frame.
-This mirrors ``snapshotRenderer.ts`` in Playwright's isomorphic trace package.
+This mirrors ``snapshotRenderer.ts`` in Playwright's isomorphic trace package, except that
+offset-0 (same-snapshot) references are rejected: Playwright never writes them and they are
+the only way to build a cycle.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from typing import Any
 
 from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, as_str
 
-_MAX_VISITS = 2_000_000
+DEFAULT_MAX_VISITS = 1_000_000
 
 _SKIPPED_TAGS = frozenset(
     {
@@ -73,7 +75,7 @@ _DIALOG_OPEN_ATTR = "__playwright_dialog_open_"
 
 
 class SnapshotDecodeError(ValueError):
-    """A snapshot's node tree is malformed (e.g. a self-referencing subtree)."""
+    """A snapshot's node tree expands beyond the visit budget (malformed or hostile input)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +90,8 @@ _BLOCK_END = object()
 class FrameSnapshotStore:
     """Snapshot history of every frame, in recording order, for resolving back-references."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_visits: int = DEFAULT_MAX_VISITS) -> None:
+        self.max_visits = max_visits
         self._roots: dict[str, list[object]] = {}
         self._nodes: dict[tuple[str, int], list[object]] = {}
 
@@ -111,7 +114,7 @@ class FrameSnapshotStore:
         if offset is None or node_index is None:
             return None
         target = index - offset
-        if not 0 <= target <= index:
+        if offset < 1 or target < 0:
             return None
         nodes = self._post_order(frame_id, target)
         if not 0 <= node_index < len(nodes):
@@ -180,8 +183,10 @@ class _Renderer:
 
     def _tick(self) -> None:
         self._visits += 1
-        if self._visits > _MAX_VISITS:
-            raise SnapshotDecodeError("snapshot node tree does not terminate")
+        if self._visits > self._store.max_visits:
+            raise SnapshotDecodeError(
+                f"snapshot expands to more than {self._store.max_visits} nodes"
+            )
 
     def _deref(self, node: object, snapshot_index: int) -> tuple[str | list[Any], int] | None:
         """Follow subtree references until a text or element node (or nothing) is reached."""
