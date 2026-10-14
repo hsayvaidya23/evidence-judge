@@ -92,6 +92,34 @@ _AMBIGUOUS_URL_PARAMS = frozenset(
     {"key", "code", "session", "sig", "signature", "auth", "pass", "sid"}
 )
 _SECRET_INPUT_HINTS = ("password", "passwd", "pwd", "secret", "token", "otp", "cvv", "cvc", "pin")
+_SECRET_FIELD_WORDS = frozenset(
+    {
+        "password",
+        "passwd",
+        "pwd",
+        "passcode",
+        "passphrase",
+        "secret",
+        "token",
+        "otp",
+        "totp",
+        "mfa",
+        "pin",
+        "cvv",
+        "cvc",
+        "csc",
+        "csrf",
+        "xsrf",
+        "apikey",
+    }
+)
+_SECRET_FIELD_SUFFIXES = ("password", "token", "secret")
+_SECRET_AUTOCOMPLETE = frozenset({"current-password", "new-password", "one-time-code", "cc-csc"})
+_INPUT_TAG_RE = re.compile(
+    r"<input\b(?:[^<>\"']|\"[^\"]{0,4096}\"|'[^']{0,4096}'){0,4096}>", re.IGNORECASE
+)
+_ATTR_RE = re.compile(r"""([^\s"'<>/=]+)(?:(\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?""")
+_FIELD_WORD_RE = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
 
 _JWT_RE = re.compile(
     r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*"
@@ -167,6 +195,21 @@ def _is_secret_param(name: str, *, in_url: bool) -> bool:
     if n in _SECRET_PARAMS or n.endswith(_SECRET_PARAM_SUFFIXES):
         return True
     return in_url and n in _AMBIGUOUS_URL_PARAMS
+
+
+def _is_secret_field_name(name: str) -> bool:
+    words = [w.lower() for w in _FIELD_WORD_RE.findall(name)]
+    return any(w in _SECRET_FIELD_WORDS or w.endswith(_SECRET_FIELD_SUFFIXES) for w in words)
+
+
+def _is_secret_input(attrs: Mapping[str, str]) -> bool:
+    """Whether an ``<input>`` holds a credential: by type, autocomplete hint, name or id."""
+    if attrs.get("type", "").lower() == "password":
+        return True
+    autocomplete = set(attrs.get("autocomplete", "").lower().split())
+    if autocomplete & _SECRET_AUTOCOMPLETE:
+        return True
+    return any(_is_secret_field_name(attrs.get(a, "")) for a in ("name", "id"))
 
 
 def _is_secret_header(name: str) -> bool:
@@ -275,6 +318,9 @@ class Redactor:
         if not text:
             return text
 
+        def html_input(m: re.Match[str]) -> str:
+            return self._input_tag(m.group(0), counts)
+
         def jwt(m: re.Match[str]) -> str:
             return self._token("jwt", m.group(0), counts)
 
@@ -308,6 +354,7 @@ class Redactor:
             return m.group(0)
 
         steps: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
+            (_INPUT_TAG_RE, html_input),
             (_JWT_RE, jwt),
             (_BEARER_RE, bearer),
             (_API_KEY_RE, api_key),
@@ -319,6 +366,22 @@ class Redactor:
         for pattern, repl in steps:
             text = self._outside_tokens(text, lambda s, p=pattern, r=repl: p.sub(r, s))
         return text
+
+    def _input_tag(self, tag: str, counts: Counter[str]) -> str:
+        """Redact the ``value`` of a password, OTP or token ``<input>``; keep the rest of the tag."""
+        attrs: dict[str, str] = {}
+        value: re.Match[str] | None = None
+        for m in _ATTR_RE.finditer(tag, 6, len(tag) - 1):
+            name = m.group(1).lower()
+            raw = next((g for g in m.group(3, 4, 5) if g is not None), "")
+            attrs.setdefault(name, raw)
+            if name == "value" and value is None and m.group(2) is not None:
+                value = m
+        if value is None or not attrs["value"] or not _is_secret_input(attrs):
+            return tag
+        token = self._token("html_secret", attrs["value"], counts)
+        replaced = f'{value.group(1)}{value.group(2)}"{token}"'
+        return tag[: value.start()] + replaced + tag[value.end() :]
 
     def _query(self, query: str, counts: Counter[str]) -> str:
         if not query:
