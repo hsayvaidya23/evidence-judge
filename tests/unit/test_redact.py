@@ -432,3 +432,36 @@ def test_card_seen_with_context_is_redacted_everywhere_in_the_run(r: Redactor) -
     assert pred.body_contains == [token]
     assert red(Redactor(KEY), "Charged 4111111111111111") == "Charged 4111111111111111"
 
+
+def test_percent_encoded_email_in_form_body(r: Redactor) -> None:
+    out = red(r, "email=jane.doe%40example.com&name=Jane+Doe&card=4242424242424242")
+    token = f"[REDACTED:email:{r.fingerprint('jane.doe@example.com')}]"
+    assert out.startswith(f"email={token}&name=Jane+Doe&card=[REDACTED:card:")
+    assert "%40" not in out and "jane" not in out
+
+
+def test_percent_encoded_email_with_plus_in_form_body(r: Redactor) -> None:
+    out = red(r, "to=Jane+Doe+%3Cjane%40example.com%3E&x=1")
+    assert "jane" not in out
+    assert f"[REDACTED:email:{r.fingerprint('jane@example.com')}]" in out
+    assert out.endswith("&x=1")
+
+
+def test_percent_encoded_email_in_url_path_and_query(r: Redactor) -> None:
+    out, report = r.redact_url(
+        "https://shop.test/users/Jane.Doe%40Example.com/orders?to=jane.doe%2540example.com#x"
+    )
+    token = f"[REDACTED:email:{r.fingerprint('jane.doe@example.com')}]"
+    assert out == f"https://shop.test/users/{token}/orders?to={token}#x"
+    assert report.counts == {"email": 2}
+
+
+def test_percent_encoded_email_in_free_text(r: Redactor) -> None:
+    out = red(r, "redirect to /u/jane.doe%40example.com/profile now")
+    token = f"[REDACTED:email:{r.fingerprint('jane.doe@example.com')}]"
+    assert out == f"redirect to /u/{token}/profile now"
+
+
+@pytest.mark.parametrize("text", ["50%25 off", "a%20b%20c", "/p/red%20kettle?q=a%2Fb"])
+def test_percent_encoding_without_pii_is_left_alone(r: Redactor, text: str) -> None:
+    assert red(r, text) == text

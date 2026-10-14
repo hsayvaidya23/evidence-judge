@@ -15,7 +15,7 @@ import secrets
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any
-from urllib.parse import quote, unquote_plus, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, unquote_plus, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -172,6 +172,9 @@ _CARD_CONTEXT_RE = re.compile(
 )
 _CARD_CONTEXT_CHARS = 30
 _FIELD_LOOKBACK_CHARS = 80
+_PCT_RUN_RE = re.compile(r"[A-Za-z0-9._~!$'()*,;:@+%-]*%[0-9A-Fa-f]{2}[A-Za-z0-9._~!$'()*,;:@+%-]*")
+_FORM_RE = re.compile(r"[^\s=&]+=[^\s&]*(?:&[^\s=&]*(?:=[^\s&]*)?)*")
+_PCT_SAFE = "[]:"
 
 _MODEL_SKIP_KEYS = frozenset(
     {
@@ -411,9 +414,24 @@ class Redactor:
         for m in _CARD_RE.finditer(text):
             self._card_digits(m)
 
+    def _percent_runs(self, text: str, counts: Counter[str], *, form: bool) -> str:
+        """Redact PII hidden by percent-encoding (``jane%40example.com``) and re-encode it."""
+        decode = unquote_plus if form else unquote
+
+        def repl(m: re.Match[str]) -> str:
+            raw = m.group(0)
+            decoded = decode(raw)
+            if decoded == raw:
+                return raw
+            redacted = self._text(decoded, counts)
+            return raw if redacted == decoded else quote(redacted, safe=_PCT_SAFE)
+
+        return _PCT_RUN_RE.sub(repl, text)
+
     def _text(self, text: str, counts: Counter[str]) -> str:
         if not text:
             return text
+        form = "=" in text and _FORM_RE.fullmatch(text) is not None
 
         def html_input(m: re.Match[str]) -> str:
             return self._input_tag(m.group(0), counts)
@@ -460,6 +478,8 @@ class Redactor:
         ]
         for pattern, repl in steps:
             text = self._outside_tokens(text, lambda s, p=pattern, r=repl: p.sub(r, s))
+        if "%" in text:
+            text = self._outside_tokens(text, lambda s: self._percent_runs(s, counts, form=form))
         return text
 
     def _input_tag(self, tag: str, counts: Counter[str]) -> str:
