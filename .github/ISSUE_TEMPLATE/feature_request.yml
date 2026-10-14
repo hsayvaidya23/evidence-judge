@@ -1,0 +1,22 @@
+name: Feature request
+description: Propose a new checker, evidence adapter, report or CLI capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you judge or see today? Describe a concrete agent run.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What evidence would prove or disprove the claim, and how would it be checked?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
