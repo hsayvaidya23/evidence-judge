@@ -19,6 +19,7 @@ from typing import Annotated, Final, Literal
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     ValidationInfo,
@@ -28,8 +29,16 @@ from pydantic import (
 
 MIN_SUBSTRING: Final = 2
 MIN_PAGE_TEXT: Final = 3
+STATUS_OK: Final = "ok"
+"""A response that took effect: 2xx or 3xx (a POST answered 303 by a POST/Redirect/GET flow)."""
+STATUS_NONE: Final = "none"
+"""No response at all (connection error, aborted or blocked request)."""
+STATUS_ANY: Final = "any"
+"""Any outcome: any status, or no response."""
 _WORD = re.compile(r"[^\W_]+")
 _DIGIT = re.compile(r"\d")
+_STATUS_CLASS = re.compile(r"^[1-5]xx$")
+_STATUS_EXACT = re.compile(r"^[1-5]\d\d$")
 
 
 def _non_blank(value: str) -> str:
@@ -65,7 +74,27 @@ def _pattern(value: str) -> str:
     return value
 
 
+def status_spec(value: object) -> str | None:
+    """Canonical form of a request `status`, or ValueError naming the accepted values."""
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool):
+        value = str(value)
+    text = value.strip().lower() if isinstance(value, str) else None
+    if text is not None and (
+        text in (STATUS_OK, STATUS_NONE, STATUS_ANY)
+        or _STATUS_CLASS.match(text)
+        or _STATUS_EXACT.match(text)
+    ):
+        return text
+    raise ValueError(
+        f"status {value!r} must be an exact code from 100 to 599 ('201'), a class ('1xx' to "
+        "'5xx'), 'ok' (2xx or 3xx), 'none' (no response), 'any', or null (any response)"
+    )
+
+
 NonBlank = Annotated[str, AfterValidator(_non_blank)]
+StatusSpec = Annotated[str | None, BeforeValidator(status_spec)]
 Substring = Annotated[str, AfterValidator(_substring)]
 PageText = Annotated[str, AfterValidator(_page_text)]
 Pattern = Annotated[str, AfterValidator(_pattern)]
@@ -97,8 +126,12 @@ class RequestPredicate(_Pred):
         description="All substrings must appear in the decoded query string",
     )
     url_regex: Pattern | None = Field(default=None, description="Matched against the full URL")
-    status: str | None = Field(
-        default="2xx", description="Exact code ('201') or class ('2xx'); null = any"
+    status: StatusSpec = Field(
+        default=STATUS_OK,
+        description=(
+            "'ok' (2xx or 3xx, the default), an exact code ('201'), a class ('2xx'), 'none' "
+            "(no response), 'any' (anything), or null (any response)"
+        ),
     )
     body_contains: list[Substring] = Field(
         default_factory=list[Substring],

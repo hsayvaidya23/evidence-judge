@@ -5,9 +5,10 @@ least one `any` predicate is supported. It is refuted when an `all` predicate is
 every `any` predicate is. Otherwise it is unknown (None). A `forbid` entry is met when the
 forbidden behaviour is refuted, i.e. its expectation does NOT hold.
 
-For `forbid`, a request predicate left at the default status (2xx) also catches failed
-attempts: a matching request with any status (or none) that did not succeed makes the result
-unknown, so the run goes to review instead of passing as if nothing was tried.
+For `forbid`, a request predicate whose status is `ok` (the default), `2xx` or null also
+catches failed attempts: a matching request with any other status, or no response, makes the
+result unknown, so the run goes to review instead of passing as if nothing was tried. A
+forbidden request answered 2xx or 3xx happened (a POST answered 303 took effect).
 """
 
 from __future__ import annotations
@@ -19,7 +20,13 @@ from evidence_judge.checks._common import join_reasons, merge_citations
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.matching import as_text
 from evidence_judge.checks.registry import CheckerRegistry
-from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
+from evidence_judge.core.predicates import (
+    STATUS_ANY,
+    STATUS_OK,
+    Predicate,
+    RequestPredicate,
+    ValuePredicate,
+)
 from evidence_judge.core.taskspec import Expectation, TaskSpec
 from evidence_judge.core.verdict import ExpectationResult, PredicateResult, Support
 
@@ -27,7 +34,7 @@ EXPECT: Final = "expect"
 FORBID: Final = "forbid"
 CONSTRAINT: Final = "constraint"
 
-_DEFAULT_STATUS: Final = RequestPredicate.model_fields["status"].default
+_WIDENED_STATUSES: Final = frozenset({STATUS_OK, "2xx", None})
 _TRUTH: Final = {Support.SUPPORTED: True, Support.CONTRADICTED: False, Support.NO_EVIDENCE: None}
 
 
@@ -87,13 +94,13 @@ async def _happened(
 
 
 def _any_status(predicate: Predicate) -> Predicate:
-    if isinstance(predicate, RequestPredicate) and predicate.status == _DEFAULT_STATUS:
-        return predicate.model_copy(update={"status": None})
+    if isinstance(predicate, RequestPredicate) and predicate.status in _WIDENED_STATUSES:
+        return predicate.model_copy(update={"status": STATUS_ANY})
     return predicate
 
 
 def _attempt_of(expectation: Expectation) -> Expectation | None:
-    """The same expectation with default-status request predicates widened to any status."""
+    """The same expectation with `ok`, `2xx` and null request statuses widened to any outcome."""
     widened = expectation.model_copy(
         update={
             "all": [_any_status(p) for p in expectation.all],

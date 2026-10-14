@@ -223,7 +223,8 @@ quotes short (the minimal span that states the claim).
 Use ONLY these kinds and fields from the output schema, with concrete values:
 - request: an HTTP request happened. method (e.g. POST), url_contains (substrings of the \
 scheme, host and path only, all must appear), query_contains (substrings of the decoded query \
-string), body_contains, response_contains, status ("2xx" default). Best for side effects: \
+string), body_contains, response_contains, status ("ok" default: 2xx or 3xx, so a POST \
+answered with a redirect counts; leave it unset unless the agent named a code). Best for side effects: \
 "placed the order" -> method POST, url_contains ["order"].
 - page_text: visible page text contains a phrase. "order #1042 confirmed" -> contains "1042". \
 Use scope "any" if it may have appeared before the final page.

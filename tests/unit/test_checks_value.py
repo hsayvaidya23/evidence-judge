@@ -55,7 +55,7 @@ async def test_missing_request_is_no_evidence_not_contradicted() -> None:
     res = await ValueChecker().evaluate(PRICE_CAP, ctx(forged_run()))
     assert res.status is Support.NO_EVIDENCE
     assert res.reason == (
-        "No POST request whose URL contains '/api/orders' with status 2xx was captured, "
+        "No POST request whose URL contains '/api/orders' with a 2xx or 3xx status was captured, "
         "so 'price' could not be read"
     )
 

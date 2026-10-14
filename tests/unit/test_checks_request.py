@@ -32,7 +32,7 @@ async def test_forged_order_is_contradicted_with_nearest_miss() -> None:
     res = await RequestChecker().evaluate(ORDER, ctx(forged_run()))
     assert res.status is Support.CONTRADICTED
     assert res.reason.startswith(
-        "No POST request whose URL contains '/api/orders' with status 2xx "
+        "No POST request whose URL contains '/api/orders' with a 2xx or 3xx status "
         "among 4 captured requests (1 mutation)"
     )
     assert "closest was POST /api/cart → 200 (URL lacks '/api/orders')" in res.reason
@@ -55,7 +55,7 @@ async def test_wrong_status_is_explained() -> None:
     run = make_run(network=[net(1, "POST", "/api/orders", 500)])
     res = await RequestChecker().evaluate(ORDER, ctx(run))
     assert res.status is Support.CONTRADICTED
-    assert "status 500, expected 2xx" in res.reason
+    assert "status 500, expected a 2xx or 3xx status" in res.reason
 
 
 async def test_exact_status_and_any_status() -> None:
@@ -118,7 +118,7 @@ async def test_empty_network_has_no_nearest_miss() -> None:
 
 def test_matcher_rejects_invalid_predicates() -> None:
     with pytest.raises(InvalidPredicateError):
-        RequestMatcher(RequestPredicate(method="GET", status="200-299"))
+        RequestMatcher(RequestPredicate.model_construct(method="GET", status="200-299"))
     with pytest.raises(InvalidPredicateError):
         RequestMatcher(RequestPredicate(url_regex="(oops"))
 
@@ -210,7 +210,7 @@ async def test_path_and_query_contains() -> None:
 def test_describe_names_path_and_query() -> None:
     matcher = RequestMatcher(RequestPredicate(path_contains=["/a"], query_contains=["b=1"]))
     assert matcher.describe() == (
-        "request whose path contains '/a' whose query contains 'b=1' with status 2xx"
+        "request whose path contains '/a' whose query contains 'b=1' with a 2xx or 3xx status"
     )
     assert matcher.criteria_count == 3
 

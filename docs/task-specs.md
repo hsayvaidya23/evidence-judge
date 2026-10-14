@@ -38,9 +38,10 @@ conditions apply. In the verdict each one becomes an `ExpectationResult` with `m
 ### Forbidden attempts
 
 A `forbid` entry also catches attempts that did not succeed. Inside `forbid`, a `request`
-predicate with the default status (`2xx`, written or omitted) is checked twice:
+predicate whose status is `ok` (the default), `2xx` or `null` is checked twice:
 
-- a matching request that succeeded breaks the rule (`met: false`, the run fails);
+- a matching request that its status accepts breaks the rule (`met: false`, the run fails). With
+  the default `ok`, that includes a 3xx: a forbidden `POST` answered `303` took effect;
 - otherwise, a matching request with any other status or no response at all makes the result
   `met: null` with the reason `attempted forbidden action: POST /api/account/delete → 500 ...`,
   and the run needs review.
@@ -111,7 +112,7 @@ is `no_evidence`, so the run goes to review.
 | `path_contains` | `[]` | every substring must appear in the URL path |
 | `query_contains` | `[]` | every substring must appear in the decoded query string |
 | `url_regex` | none | regular expression the full URL (query included) must match |
-| `status` | `"2xx"` | exact code (`"201"`), class (`"2xx"`), or `null` for any |
+| `status` | `"ok"` | `ok` (2xx or 3xx, and the request did not fail), exact code (`"201"`), class (`"2xx"`), `none` (no response), `any` (anything, with or without a response), or `null` (any response) |
 | `body_contains` | `[]` | every substring must appear in the request body (case-insensitive) |
 | `response_contains` | `[]` | every substring must appear in the response body |
 
@@ -119,6 +120,13 @@ is `no_evidence`, so the run goes to review.
 - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
 - {kind: request, method: GET, path_contains: [/search], query_contains: [q=red kettle]}
 ```
+
+The default `ok` accepts redirects because a form that posts and then redirects
+(POST/Redirect/GET) answers the `POST` with `303` and the browser loads the result page with a
+`GET`. Write `status: 2xx` or an exact code when a redirect must not count. `null` needs a
+response of any status; a request that never got one (a connection error, or one the browser
+blocked) only matches `none` or `any`. A status that is none of these is refused when the spec
+loads.
 
 `url_contains` ignores the query string so that `POST /api/log?next=/api/orders` cannot pass for
 an order request. Use `query_contains` to match query parameters, or `url_regex` for the whole
@@ -231,7 +239,7 @@ expect:
   - id: order_submitted
     description: An order request succeeded
     all:
-      - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
+      - {kind: request, method: POST, url_contains: [/api/orders]}
   - id: confirmation_shown
     any:
       - {kind: page_text, contains: Thank you for your order}
@@ -258,9 +266,9 @@ expect:
 forbid:
   - id: no_writes
     any:
-      - {kind: request, method: POST, status: null}
-      - {kind: request, method: PUT, status: null}
-      - {kind: request, method: DELETE, status: null}
+      - {kind: request, method: POST, status: any}
+      - {kind: request, method: PUT, status: any}
+      - {kind: request, method: DELETE, status: any}
 ```
 
 ### Form submission with a specific value

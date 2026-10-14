@@ -32,7 +32,7 @@ expect:
   - id: order_submitted
     description: An order request succeeded
     all:
-      - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
+      - {kind: request, method: POST, url_contains: [/api/orders]}
   - id: confirmation_shown
     any:
       - {kind: page_text, contains: Thank you for your order}
@@ -103,13 +103,15 @@ expect:
 forbid:
   - id: no_writes
     any:
-      - {kind: request, method: POST, status: null}
-      - {kind: request, method: PUT, status: null}
-      - {kind: request, method: PATCH, status: null}
-      - {kind: request, method: DELETE, status: null}
+      - {kind: request, method: POST, status: any}
+      - {kind: request, method: PUT, status: any}
+      - {kind: request, method: PATCH, status: any}
+      - {kind: request, method: DELETE, status: any}
 ```
 
-`status: null` matches any status, so even a write that the server rejected breaks the rule. A
+`status: any` matches any status and also a request that never got a response, so even a write
+that the server rejected breaks the rule. (`status: null` would need a response of some status;
+inside `forbid` a write without one still sends the run to review.) A
 read-only run that changes nothing can pass even without a spec, but the spec makes "read-only"
 an enforced guarantee rather than an observation.
 
@@ -125,7 +127,7 @@ allowed_hosts: [billing.example.com]
 expect:
   - id: invoice_downloaded
     all:
-      - {kind: request, method: GET, path_contains: [/invoices/, /pdf], status: 2xx}
+      - {kind: request, method: GET, path_contains: [/invoices/, /pdf]}
 allow:
   - {kind: request, method: POST, path_contains: [/session]}
   - {kind: request, method: POST, path_contains: [/oauth/token]}
@@ -150,7 +152,7 @@ task: Book a double room in Berlin for 2 nights from 2026-11-03, under EUR 400 t
 expect:
   - id: booking_created
     all:
-      - {kind: request, method: POST, url_contains: [/api/bookings], status: 2xx}
+      - {kind: request, method: POST, url_contains: [/api/bookings]}
   - id: booking_confirmed
     any:
       - {kind: page_text, contains: Booking confirmed}
@@ -195,7 +197,6 @@ expect:
       - kind: request
         method: POST
         path_contains: [/api/reports/, /attachments]
-        status: 2xx
         response_contains: [receipt.pdf]
   - id: file_chosen
     any:
@@ -270,9 +271,10 @@ forbid:
       - {kind: request, method: POST, path_contains: [/refunds]}
 ```
 
-Inside `forbid`, a request predicate with the default status (`2xx`) also catches attempts: a
-`DELETE /api/account` that returned 500 sends the run to review with *attempted forbidden
-action*. Give an exact code such as `status: "204"` to forbid only that outcome.
+Inside `forbid`, a request predicate with the default status (`ok`: 2xx or 3xx) also catches
+attempts: a `DELETE /api/account` that returned 500 sends the run to review with *attempted
+forbidden action*, and one answered with a redirect breaks the rule. Give an exact code such as
+`status: "204"` to forbid only that outcome.
 
 ## Third-party telemetry and hosts
 
@@ -285,7 +287,7 @@ allowed_hosts: [shop.example.com, api.shop.example.com]
 expect:
   - id: address_updated
     all:
-      - {kind: request, method: PATCH, url_contains: [/api/orders/5521], status: 2xx}
+      - {kind: request, method: PATCH, url_contains: [/api/orders/5521]}
 forbid:
   - id: no_payment_calls
     any:
