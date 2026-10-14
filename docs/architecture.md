@@ -73,6 +73,24 @@ The CLI (`cli.py`) wires the stages together and maps the outcome to an exit cod
    LLM call and before any report is written, and it is deterministic per key so equal values
    still match across claims and evidence.
 
+## Score
+
+The verdict's `score` (0..1) summarises quality; the `outcome` is the decision. It is a weighted
+mean of the assessable dimension scores (success 0.35, state 0.15, guardrails 0.15, side
+effects 0.10, loops 0.05, recovery 0.05) and a claim-support share (0.15) in which a supported
+claim counts 1, a contradicted claim 0 and a key claim with `no_evidence` 0.5 (non-key claims
+without evidence are left out). Dimensions that are not assessable drop out of the mean. The
+score is capped by outcome so that it never reads better than the verdict:
+
+| Outcome | Score range |
+| --- | --- |
+| `fail` | 0.00 to 0.49 |
+| `needs_review` | 0.00 to 0.69 |
+| `pass` | 0.00 to 1.00 |
+
+So a score of 0.70 or more always means a pass, and a run waiting for review never shows 100/100
+(`checks/outcome.py`, `FAIL_SCORE_CAP`, `REVIEW_SCORE_CAP`).
+
 ## Side effects and telemetry
 
 The side-effects dimension lists every successful mutation (POST, PUT, PATCH, DELETE with no
