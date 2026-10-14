@@ -106,3 +106,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = ["e2e: end-to-end tests that need Playwright browsers", "live: tests that call a real LLM API"]
 addopts = "-m 'not live'"
+filterwarnings = [
+  # Third-party noise from inspect_ai internals, not this package.
+  "ignore:The 'initial' parameter is deprecated:DeprecationWarning:inspect_ai",
+  "ignore:Unclosed <MemoryObjectReceiveStream:ResourceWarning",
+]
