@@ -43,7 +43,9 @@ PAGE = [
 
 
 def render(*snapshots: object, frame: str = "frame@1") -> tuple[str | None, str]:
+    assert snapshots, "render needs at least one snapshot"
     store = FrameSnapshotStore()
+    index = -1
     for snapshot in snapshots:
         index = store.add(frame, snapshot)
     page = store.render(frame, index)

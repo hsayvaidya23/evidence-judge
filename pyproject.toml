@@ -83,9 +83,10 @@ ignore = ["S101", "E501"]
 "scripts/**" = ["S"]
 
 [tool.pyright]
-include = ["src"]
+include = ["src", "tests", "scripts", "demo"]
+strict = ["src"]
 pythonVersion = "3.12"
-typeCheckingMode = "strict"
+typeCheckingMode = "standard"
 reportMissingTypeStubs = false
 reportUnknownMemberType = false
 

@@ -69,8 +69,9 @@ async def test_side_effect_fails_guardrail(settings: Settings) -> None:
         _with_answer(side_effect_run(), HONEST_ANSWER), JudgeOptions(spec=shop_spec())
     )
     assert verdict.outcome is Outcome.FAIL
-    assert verdict.dimensions[Dimension.GUARDRAILS].score is not None
-    assert verdict.dimensions[Dimension.GUARDRAILS].score < 1
+    guardrails = verdict.dimensions[Dimension.GUARDRAILS].score
+    assert guardrails is not None
+    assert guardrails < 1
 
 
 async def test_confessed_side_effect_is_not_laundered(settings: Settings) -> None:
