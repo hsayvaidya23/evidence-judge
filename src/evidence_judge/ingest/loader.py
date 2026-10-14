@@ -16,12 +16,19 @@ from evidence_judge.ingest.playwright_trace import load_playwright_trace
 
 _PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
 MIN_HAR_MATCH_RATIO: Final = 0.5
-"""Share of trace requests a HAR must also contain to count as the same run."""
+"""Share of trace requests a HAR must also contain to count as the same run, and share of HAR
+entries that must pair with a trace request or (when both clocks are known) start inside the
+trace's time window."""
 MIN_REQUESTS_TO_COMPARE: Final = 5
 """Traces with at least this many requests must share ``MIN_HAR_MATCH_RATIO`` of them with a HAR;
 smaller traces with any request must share at least one."""
+HAR_WINDOW_SLACK_MS: Final = 2_000
+"""How far outside the trace's time window a HAR entry may start and still count as in it."""
 MAX_HAR_CLOCK_GAP_MS: Final = 10 * 60 * 1000
 """HAR-only requests starting further than this outside the trace's time window are dropped."""
+MUTATING_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+"""HAR-only requests with these methods are dropped unless ``allow_mismatch``: a side effect the
+trace never saw cannot be evidence on the HAR's word alone."""
 
 
 def load_run(
@@ -105,15 +112,18 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
     are shifted onto the trace clock and added. Network ids are reassigned chronologically.
 
     The trace did not see the unpaired HAR requests, so their new ids are listed in
-    ``metadata["har_only_requests"]``. When both clocks are known, unpaired HAR requests starting
-    more than ``MAX_HAR_CLOCK_GAP_MS`` outside the trace's time window are dropped, with a note in
-    ``metadata["merge_warnings"]`` (unless ``allow_mismatch``).
+    ``metadata["har_only_requests"]``. Unless ``allow_mismatch``, unpaired HAR requests that
+    mutate (``MUTATING_METHODS``) are dropped, and when both clocks are known, unpaired HAR
+    requests starting more than ``MAX_HAR_CLOCK_GAP_MS`` outside the trace's time window are
+    dropped; each drop is noted in ``metadata["merge_warnings"]``.
 
     Raises:
-        MismatchedEvidenceError: the HAR has entries and the trace has requests, but the HAR
-            shares none of them, or (for traces of ``MIN_REQUESTS_TO_COMPARE`` or more requests)
-            fewer than ``MIN_HAR_MATCH_RATIO`` of them, so it is probably from another run.
-            ``allow_mismatch=True`` merges anyway.
+        MismatchedEvidenceError: the HAR does not look like a recording of the trace's run: it
+            shares no request with a trace of fewer than ``MIN_REQUESTS_TO_COMPARE`` requests,
+            or fewer than ``MIN_HAR_MATCH_RATIO`` of a larger trace's; fewer than
+            ``MIN_HAR_MATCH_RATIO`` of its entries pair with the trace or (both clocks known)
+            start within ``HAR_WINDOW_SLACK_MS`` of the trace's time window; or none of its
+            entries do. ``allow_mismatch=True`` merges anyway.
     """
     offset = _clock_offset(trace_run, har_run)
     pending: defaultdict[tuple[str, str], deque[int]] = defaultdict(deque)
@@ -129,22 +139,30 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
         index = queue.popleft()
         paired.add(index)
         network.append(_fill_gaps(event, har_run.network[index]))
+    timed = _clocks_known(trace_run, har_run)
+    window = _trace_window(trace_run) if timed else None
+    shifted = [round(h.ts + offset, 3) for h in har_run.network]
     if not allow_mismatch:
         _check_same_run(len(trace_run.network), len(har_run.network), len(paired))
-    timed = not allow_mismatch and _clocks_known(trace_run, har_run)
-    window = _trace_window(trace_run) if timed else None
+        if window is not None:
+            _check_time_window(shifted, paired, window)
+        elif trace_run.network:
+            _check_har_share(len(har_run.network), len(paired), len(paired), timed=False)
     har_only: list[NetworkEvent] = []
-    dropped = 0
+    late = 0
+    mutations = 0
     for index, h in enumerate(har_run.network):
         if index in paired:
             continue
-        ts = round(h.ts + offset, 3)
-        if window is not None and not window[0] - MAX_HAR_CLOCK_GAP_MS <= ts <= window[1] + (
-            MAX_HAR_CLOCK_GAP_MS
-        ):
-            dropped += 1
-            continue
-        har_only.append(h.model_copy(update={"ts": ts}))
+        ts = shifted[index]
+        if allow_mismatch:
+            har_only.append(h.model_copy(update={"ts": ts}))
+        elif h.method.upper() in MUTATING_METHODS:
+            mutations += 1
+        elif window is not None and not _near(ts, window, MAX_HAR_CLOCK_GAP_MS):
+            late += 1
+        else:
+            har_only.append(h.model_copy(update={"ts": ts}))
     marker = {id(h) for h in har_only}
     network.extend(har_only)
     network.sort(key=lambda n: n.ts)
@@ -155,11 +173,19 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
             r.id for r, n in zip(renumbered, network, strict=True) if id(n) in marker
         ],
     }
-    if dropped:
-        metadata["merge_warnings"] = [
-            f"dropped {dropped} HAR requests that started more than "
+    warnings: list[str] = []
+    if mutations:
+        warnings.append(
+            f"dropped {mutations} HAR-only POST/PUT/PATCH/DELETE requests the trace did not "
+            "record; pass allow_mismatch=True to keep them"
+        )
+    if late:
+        warnings.append(
+            f"dropped {late} HAR requests that started more than "
             f"{MAX_HAR_CLOCK_GAP_MS // 60_000} minutes outside the trace"
-        ]
+        )
+    if warnings:
+        metadata["merge_warnings"] = warnings
     return trace_run.model_copy(
         update={
             "network": renumbered,
@@ -187,6 +213,38 @@ def _check_same_run(trace_requests: int, har_requests: int, paired: int) -> None
         f"({har_requests} entries); the HAR looks like a recording of another run. "
         "Pass allow_mismatch=True to merge it anyway."
     )
+
+
+def _check_time_window(shifted: list[float], paired: set[int], window: tuple[float, float]) -> None:
+    if not shifted:
+        return
+    inside = {i for i, ts in enumerate(shifted) if _near(ts, window, HAR_WINDOW_SLACK_MS)}
+    if not inside:
+        raise MismatchedEvidenceError(
+            f"the HAR's time window ({min(shifted) / 1000:+.1f}s to {max(shifted) / 1000:+.1f}s "
+            "from the trace start) does not overlap the trace's "
+            f"({window[0] / 1000:+.1f}s to {window[1] / 1000:+.1f}s); it looks like a recording "
+            "of another run. Pass allow_mismatch=True to merge it anyway."
+        )
+    _check_har_share(len(shifted), len(paired | inside), len(inside), timed=True)
+
+
+def _check_har_share(har_requests: int, accounted: int, inside: int, *, timed: bool) -> None:
+    if har_requests == 0 or accounted >= MIN_HAR_MATCH_RATIO * har_requests:
+        return
+    reason = (
+        f"only {inside} of {har_requests} HAR entries started inside the trace's time window"
+        if timed
+        else f"only {accounted} of {har_requests} HAR entries pair with a trace request"
+    )
+    raise MismatchedEvidenceError(
+        f"{reason}; the HAR looks like a recording of another run. "
+        "Pass allow_mismatch=True to merge it anyway."
+    )
+
+
+def _near(ts: float, window: tuple[float, float], slack: float) -> bool:
+    return window[0] - slack <= ts <= window[1] + slack
 
 
 def _clocks_known(trace_run: Run, har_run: Run) -> bool:

@@ -95,13 +95,17 @@ compromised agent:
   `TooLargeError` too.
 - **Memory stays bounded.** Event files are streamed line by line, only the part of a body that
   `max_body_chars` keeps is read, and trace screenshots are read from the zip on demand.
-- **Mismatched evidence is refused.** When a HAR shares none of a trace's requests, or fewer
-  than half of them for a trace with 5 or more requests, loading fails with
-  `MismatchedEvidenceError` instead of merging another run's traffic into the evidence. Requests
-  only the HAR saw are listed in `metadata["har_only_requests"]`, and HAR-only requests starting
-  more than 10 minutes outside the trace's time window are dropped with a note in
-  `metadata["merge_warnings"]`. `allow_mismatch=True` (CLI `--allow-mismatch`) overrides all of
-  this.
+- **Mismatched evidence is refused.** Loading a trace with a HAR fails with
+  `MismatchedEvidenceError` instead of merging another run's traffic into the evidence when the
+  HAR shares none of a small trace's requests (fewer than 5), or fewer than half of a larger
+  trace's; when fewer than half of the HAR's entries pair with a trace request or, if both
+  recordings carry wall-clock times, start within 2 seconds of the trace's time window; or when
+  the two time windows do not overlap at all. Requests only the HAR saw are listed in
+  `metadata["har_only_requests"]`. HAR-only `POST`/`PUT`/`PATCH`/`DELETE` requests are dropped,
+  so a side effect the trace never recorded cannot satisfy an expectation on the HAR's word
+  alone, and HAR-only requests starting more than 10 minutes outside the trace's time window are
+  dropped too; both are noted in `metadata["merge_warnings"]`. `allow_mismatch=True` (CLI
+  `--allow-mismatch`) overrides all of this.
 - Every ingest failure is an `IngestError` (a `ValueError`), reported by the CLI as bad input
   (exit code 3).
 
