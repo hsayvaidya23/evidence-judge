@@ -1,0 +1,336 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/schemas/run-verdict.schema.json",
+  "$defs": {
+    "Citation": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "description": "e.g. net#12, act#3, snap#4, shot#7, con#2, final",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        }
+      },
+      "required": [
+        "evidence_id"
+      ],
+      "title": "Citation",
+      "type": "object"
+    },
+    "ClaimVerdict": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "claim_text": {
+          "title": "Claim Text",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/Support"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "checker": {
+          "title": "Checker",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "claim_id",
+        "claim_text",
+        "key",
+        "status",
+        "reason",
+        "checker",
+        "confidence"
+      ],
+      "title": "ClaimVerdict",
+      "type": "object"
+    },
+    "Dimension": {
+      "enum": [
+        "success",
+        "side_effects",
+        "state",
+        "guardrails",
+        "recovery",
+        "loops"
+      ],
+      "title": "Dimension",
+      "type": "string"
+    },
+    "DimensionScore": {
+      "additionalProperties": false,
+      "properties": {
+        "score": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "None when not assessable",
+          "title": "Score"
+        },
+        "findings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Findings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "score"
+      ],
+      "title": "DimensionScore",
+      "type": "object"
+    },
+    "ExpectationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "expectation_id": {
+          "title": "Expectation Id",
+          "type": "string"
+        },
+        "kind": {
+          "description": "expect | forbid | constraint",
+          "title": "Kind",
+          "type": "string"
+        },
+        "met": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "None when the needed evidence channel was not captured",
+          "title": "Met"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "expectation_id",
+        "kind",
+        "met",
+        "reason"
+      ],
+      "title": "ExpectationResult",
+      "type": "object"
+    },
+    "Outcome": {
+      "enum": [
+        "pass",
+        "fail",
+        "needs_review"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "Support": {
+      "enum": [
+        "supported",
+        "contradicted",
+        "no_evidence"
+      ],
+      "title": "Support",
+      "type": "string"
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "properties": {
+        "llm_calls": {
+          "default": 0,
+          "title": "Llm Calls",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "default": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "default": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        },
+        "cost_usd": {
+          "default": 0.0,
+          "title": "Cost Usd",
+          "type": "number"
+        },
+        "latency_ms": {
+          "default": 0.0,
+          "title": "Latency Ms",
+          "type": "number"
+        }
+      },
+      "title": "Usage",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_id": {
+      "default": "evidence-judge/run-verdict@1",
+      "title": "Schema Id",
+      "type": "string"
+    },
+    "judge_version": {
+      "title": "Judge Version",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "task": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Task"
+    },
+    "outcome": {
+      "$ref": "#/$defs/Outcome"
+    },
+    "score": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Score",
+      "type": "number"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/ClaimVerdict"
+      },
+      "title": "Claims",
+      "type": "array"
+    },
+    "expectations": {
+      "items": {
+        "$ref": "#/$defs/ExpectationResult"
+      },
+      "title": "Expectations",
+      "type": "array"
+    },
+    "dimensions": {
+      "additionalProperties": {
+        "$ref": "#/$defs/DimensionScore"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/Dimension"
+      },
+      "title": "Dimensions",
+      "type": "object"
+    },
+    "claim_coverage": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Claim Coverage"
+    },
+    "deterministic_share": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Share of claim verdicts decided without an LLM",
+      "title": "Deterministic Share"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "usage": {
+      "$ref": "#/$defs/Usage"
+    }
+  },
+  "required": [
+    "judge_version",
+    "run_id",
+    "task",
+    "outcome",
+    "score",
+    "summary"
+  ],
+  "title": "RunVerdict",
+  "type": "object"
+}
