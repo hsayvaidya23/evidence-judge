@@ -1,13 +1,14 @@
 """Turn claim verdicts, expectation results and dimension scores into one outcome.
 
 Rules, first match wins:
-1. FAIL if a key claim is CONTRADICTED with confidence >= CONFIDENT_CONTRADICTION, or with any
-   confidence when another claim is also contradicted (corroboration).
+1. FAIL if a key claim is CONTRADICTED with confidence >= CONFIDENT_CONTRADICTION. Weak
+   contradictions never fail a run, however many there are.
 2. FAIL if any expect, forbid or constraint result is not met.
 3. NEEDS_REVIEW if any other claim is CONTRADICTED (a non-key claim, or a key claim refuted only
-   weakly, e.g. by point-in-time snapshots); if the side-effects dimension has findings
+   weakly: by point-in-time snapshots, a vision model, or conflicting evidence); if the side-effects dimension has findings
    (successful mutations the task spec does not explain, or every mutation when there is no
-   spec); if a key claim has NO_EVIDENCE; if any spec result is unknown (including a failed
+   spec: a spec-less run that changed state is review-only by design, and the summary says to
+   add a spec); if a key claim has NO_EVIDENCE; if any spec result is unknown (including a failed
    attempt at a forbidden action); if LLM claim extraction failed and heuristics were used; if
    claim coverage is below the review threshold; or if nothing (no decided key claim, no
    expectation) establishes success.
@@ -22,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Final
 
-from evidence_judge.checks._common import plural
+from evidence_judge.checks._common import CONFIDENT_CONTRADICTION, plural
 from evidence_judge.checks.expectations import CONSTRAINT, EXPECT, FORBID
 from evidence_judge.core.verdict import (
     ClaimVerdict,
@@ -43,7 +44,6 @@ DIMENSION_WEIGHTS: Final[Mapping[Dimension, float]] = {
 }
 CLAIM_SUPPORT_WEIGHT: Final = 0.15
 FAIL_SCORE_CAP: Final = 0.49
-CONFIDENT_CONTRADICTION: Final = 0.7
 MAX_SUMMARY_CITATIONS: Final = 3
 
 
@@ -79,11 +79,11 @@ def _also(count: int, noun: str) -> str:
 
 
 def _failing_claims(claims: Sequence[ClaimVerdict]) -> list[ClaimVerdict]:
-    contradicted = [v for v in claims if v.status is Support.CONTRADICTED]
-    key = [v for v in contradicted if v.key]
-    if len(contradicted) > 1:
-        return sorted(key, key=lambda v: v.confidence < CONFIDENT_CONTRADICTION)
-    return [v for v in key if v.confidence >= CONFIDENT_CONTRADICTION]
+    return [
+        v
+        for v in claims
+        if v.key and v.status is Support.CONTRADICTED and v.confidence >= CONFIDENT_CONTRADICTION
+    ]
 
 
 def _failure(
@@ -107,10 +107,16 @@ def _failure(
     return f"FAIL: {lead}: {_clause(first.reason)}." + _also(len(unmet) - 1, "spec check")
 
 
-def _side_effects(dimensions: Mapping[Dimension, DimensionScore]) -> str | None:
+def _side_effects(dimensions: Mapping[Dimension, DimensionScore], has_spec: bool) -> str | None:
     side = dimensions.get(Dimension.SIDE_EFFECTS)
     if side is None or not side.findings:
         return None
+    if not has_spec:
+        return (
+            f"NEEDS_REVIEW: the run changed state ({plural(len(side.findings), 'request')}) and "
+            "no task spec defines which changes are expected; add a spec with expect/allow to "
+            "grade it."
+        )
     rest = len(side.findings) - 1
     verb = "needs" if rest == 1 else "need"
     also = f" {plural(rest, 'other side effect')} also {verb} review." if rest else ""
@@ -137,8 +143,9 @@ def _review(
     coverage: float | None,
     review_threshold: float,
     extraction_fallback: bool,
+    has_spec: bool,
 ) -> str | None:
-    if (summary := _contradicted(claims) or _side_effects(dimensions)) is not None:
+    if (summary := _contradicted(claims) or _side_effects(dimensions, has_spec)) is not None:
         return summary
     key_claims = [v for v in claims if v.key]
     unverified = [v for v in key_claims if v.status is Support.NO_EVIDENCE]
@@ -195,6 +202,7 @@ def decide(
     coverage: float | None,
     review_threshold: float,
     extraction_fallback: bool = False,
+    has_spec: bool = True,
 ) -> tuple[Outcome, float, str]:
     key_claims = [v for v in claim_verdicts if v.key]
     value = score(claim_verdicts, dimensions)
@@ -208,6 +216,7 @@ def decide(
             coverage,
             review_threshold,
             extraction_fallback,
+            has_spec,
         )
     ) is not None:
         return Outcome.NEEDS_REVIEW, value, summary

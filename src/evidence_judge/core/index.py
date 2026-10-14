@@ -3,6 +3,7 @@ from __future__ import annotations
 import bisect
 from collections.abc import Iterable
 from functools import cached_property
+from urllib.parse import urlsplit
 
 from evidence_judge.core.evidence import (
     ActionEvent,
@@ -13,6 +14,9 @@ from evidence_judge.core.evidence import (
     Run,
     Screenshot,
 )
+from evidence_judge.textnorm import normalize
+
+FINAL_KEY = "final"
 
 
 class EvidenceIndex:
@@ -20,6 +24,7 @@ class EvidenceIndex:
 
     def __init__(self, run: Run) -> None:
         self.run = run
+        self._normalized: dict[str, str] = {}
 
     def has(self, channel: Channel) -> bool:
         return channel in self.run.captured
@@ -46,6 +51,24 @@ class EvidenceIndex:
         m = method.upper()
         return [n for n in self.run.network if n.method.upper() == m]
 
+    @cached_property
+    def primary_host(self) -> str | None:
+        """Host of the first page the run was on: the initial state, else the first action,
+        snapshot, document navigation or final state that names a URL."""
+        initial = self.run.initial_state
+        candidates = [
+            initial.url if initial else None,
+            *(a.url for a in self.run.actions),
+            *(s.url for s in self.run.snapshots),
+            *(n.url for n in self.run.network if is_document_navigation(n)),
+            self.final.url if self.final else None,
+        ]
+        for url in candidates:
+            host = urlsplit(url).hostname if url else None
+            if host:
+                return host.casefold()
+        return None
+
     def mutations(self) -> list[NetworkEvent]:
         return [n for n in self.run.network if n.is_mutation]
 
@@ -71,7 +94,11 @@ class EvidenceIndex:
         return self.run.blobs.get(shot.resource)
 
     def page_states(self) -> list[PageState]:
-        """Every page state seen, in order, ending with the final state."""
+        """Every page state seen, in order, ending with the final state. Built once per index."""
+        return self._page_states
+
+    @cached_property
+    def _page_states(self) -> list[PageState]:
         states = [
             PageState(url=s.url, title=s.title, text=s.text, snapshot_id=s.id)
             for s in self.run.snapshots
@@ -79,3 +106,22 @@ class EvidenceIndex:
         if self.final:
             states.append(self.final)
         return states
+
+    def normalized_text(self, state: PageState) -> str:
+        """`normalize(state.text)`, computed once per snapshot and once for the final state."""
+        key = FINAL_KEY if state is self.final else state.snapshot_id
+        if key is None:
+            return normalize(state.text)
+        cached = self._normalized.get(key)
+        if cached is None:
+            cached = self._normalized[key] = normalize(state.text)
+        return cached
+
+
+def is_document_navigation(event: NetworkEvent) -> bool:
+    """A page load: a GET for a document, or one answered with HTML when the type is unknown."""
+    if event.method.upper() != "GET":
+        return False
+    if event.resource_type:
+        return event.resource_type.lower() == "document"
+    return (event.mime_type or "").split(";", 1)[0].strip().lower() == "text/html"

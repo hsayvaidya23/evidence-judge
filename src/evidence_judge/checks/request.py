@@ -15,8 +15,12 @@ from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.matching import (
     compile_regex,
     contains,
+    is_truncated,
+    regex_search,
     status_matches,
-    url_contains,
+    url_location_contains,
+    url_path_contains,
+    url_query_contains,
     validate_status_spec,
 )
 from evidence_judge.core.evidence import Channel, NetworkEvent
@@ -47,6 +51,8 @@ class RequestMatcher:
         return (
             int(p.method is not None)
             + len(p.url_contains)
+            + len(p.path_contains)
+            + len(p.query_contains)
             + int(p.url_regex is not None)
             + int(p.status is not None)
             + len(p.body_contains)
@@ -59,6 +65,12 @@ class RequestMatcher:
         parts: list[str] = []
         if p.url_contains:
             parts.append("whose URL contains " + " and ".join(quoted(u) for u in p.url_contains))
+        if p.path_contains:
+            parts.append("whose path contains " + " and ".join(quoted(u) for u in p.path_contains))
+        if p.query_contains:
+            parts.append(
+                "whose query contains " + " and ".join(quoted(u) for u in p.query_contains)
+            )
         if p.url_regex:
             parts.append(f"whose URL matches /{p.url_regex}/")
         if p.status:
@@ -79,9 +91,21 @@ class RequestMatcher:
         if p.method and event.method.upper() != p.method.upper():
             out.append(Miss(f"method {event.method.upper()}, expected {p.method.upper()}"))
         out.extend(
-            Miss(f"URL lacks {quoted(u)}") for u in p.url_contains if not url_contains(event.url, u)
+            Miss(f"URL lacks {quoted(u)}")
+            for u in p.url_contains
+            if not url_location_contains(event.url, u)
         )
-        if self._regex and not self._regex.search(event.url):
+        out.extend(
+            Miss(f"path lacks {quoted(u)}")
+            for u in p.path_contains
+            if not url_path_contains(event.url, u)
+        )
+        out.extend(
+            Miss(f"query lacks {quoted(u)}")
+            for u in p.query_contains
+            if not url_query_contains(event.url, u)
+        )
+        if self._regex and not regex_search(self._regex, event.url):
             out.append(Miss(f"URL does not match /{p.url_regex}/"))
         if not status_matches(event.status, p.status):
             got = "no response" if event.status is None else str(event.status)
@@ -99,7 +123,10 @@ def _body_misses(body: str | None, needles: list[str], label: str) -> list[Miss]
         return []
     if body is None:
         return [Miss(f"{label} not recorded", unrecorded=True)]
-    return [Miss(f"{label} lacks {quoted(n)}") for n in needles if not contains(body, n)]
+    absent = [n for n in needles if not contains(body, n)]
+    if is_truncated(body):
+        return [Miss(f"{label} was truncated before {quoted(n)}", unrecorded=True) for n in absent]
+    return [Miss(f"{label} lacks {quoted(n)}") for n in absent]
 
 
 def matching_requests(predicate: RequestPredicate, index: EvidenceIndex) -> list[NetworkEvent]:

@@ -131,3 +131,91 @@ def test_matching_requests_helper() -> None:
 async def test_wrong_predicate_kind_raises() -> None:
     with pytest.raises(PredicateKindMismatchError):
         await RequestChecker().evaluate(PageTextPredicate(contains="x"), ctx(honest_run()))
+
+
+TRUNCATED_RESPONSE = (
+    '{"status": "pending", "items": [' + "x" * 50 + "…[truncated; body is 50000 bytes]"
+)
+TRUNCATED_REQUEST = "q=" + "x" * 50 + "…[truncated 900 chars]"
+
+
+async def test_needle_missing_from_truncated_response_is_no_evidence() -> None:
+    event = net(1, "POST", "/api/orders", 201).model_copy(
+        update={"response_body": TRUNCATED_RESPONSE}
+    )
+    pred = RequestPredicate(
+        method="POST", url_contains=["/api/orders"], response_contains=["order_id"]
+    )
+    res = await RequestChecker().evaluate(pred, ctx(make_run(network=[event])))
+    assert res.status is Support.NO_EVIDENCE
+    assert "response body was truncated before 'order_id'" in res.reason
+    assert res.citations[0].evidence_id == "net#1"
+
+
+async def test_needle_missing_from_truncated_request_body_is_no_evidence() -> None:
+    event = net(1, "POST", "/api/search", 200).model_copy(
+        update={"request_body": TRUNCATED_REQUEST}
+    )
+    pred = RequestPredicate(method="POST", body_contains=["kettle"])
+    res = await RequestChecker().evaluate(pred, ctx(make_run(network=[event])))
+    assert res.status is Support.NO_EVIDENCE
+
+
+async def test_needle_in_recorded_part_of_truncated_body_still_matches() -> None:
+    event = net(1, "POST", "/api/orders", 201).model_copy(
+        update={"response_body": TRUNCATED_RESPONSE}
+    )
+    pred = RequestPredicate(method="POST", response_contains=["pending"])
+    res = await RequestChecker().evaluate(pred, ctx(make_run(network=[event])))
+    assert res.status is Support.SUPPORTED
+
+
+async def test_truncation_does_not_excuse_other_misses() -> None:
+    event = net(1, "POST", "/api/cart", 201).model_copy(
+        update={"response_body": TRUNCATED_RESPONSE}
+    )
+    pred = RequestPredicate(
+        method="POST", url_contains=["/api/orders"], response_contains=["order_id"]
+    )
+    res = await RequestChecker().evaluate(pred, ctx(make_run(network=[event])))
+    assert res.status is Support.CONTRADICTED
+
+
+async def test_url_contains_ignores_the_query_string() -> None:
+    laundered = net(1, "POST", "/api/log?next=/api/orders", 200)
+    res = await RequestChecker().evaluate(ORDER, ctx(make_run(network=[laundered])))
+    assert res.status is Support.CONTRADICTED
+    assert "URL lacks '/api/orders'" in res.reason
+
+
+async def test_url_contains_matches_scheme_host_and_path() -> None:
+    run = make_run(network=[net(1, "POST", "/api/orders?coupon=X#top", 201)])
+    pred = RequestPredicate(method="POST", url_contains=["https://shop.test/api/orders"])
+    assert (await RequestChecker().evaluate(pred, ctx(run))).status is Support.SUPPORTED
+
+
+async def test_path_and_query_contains() -> None:
+    run = make_run(network=[net(1, "GET", "/api/search?q=red%20kettle&page=2")])
+    hit = RequestPredicate(method="GET", path_contains=["/search"], query_contains=["red kettle"])
+    assert (await RequestChecker().evaluate(hit, ctx(run))).status is Support.SUPPORTED
+    in_query = RequestPredicate(method="GET", path_contains=["kettle"])
+    res = await RequestChecker().evaluate(in_query, ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert "path lacks 'kettle'" in res.reason
+    wrong = RequestPredicate(method="GET", query_contains=["page=3"])
+    res = await RequestChecker().evaluate(wrong, ctx(run))
+    assert "query lacks 'page=3'" in res.reason
+
+
+def test_describe_names_path_and_query() -> None:
+    matcher = RequestMatcher(RequestPredicate(path_contains=["/a"], query_contains=["b=1"]))
+    assert matcher.describe() == (
+        "request whose path contains '/a' whose query contains 'b=1' with status 2xx"
+    )
+    assert matcher.criteria_count == 3
+
+
+async def test_url_regex_still_sees_the_full_url() -> None:
+    run = make_run(network=[net(1, "GET", "/api/search?q=kettle")])
+    pred = RequestPredicate(url_regex=r"\?q=kettle$")
+    assert (await RequestChecker().evaluate(pred, ctx(run))).status is Support.SUPPORTED

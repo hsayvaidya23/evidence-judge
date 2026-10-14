@@ -27,9 +27,17 @@ class RequestPredicate(_Pred):
     kind: Literal["request"] = "request"
     method: str | None = Field(default=None, description="HTTP method, e.g. POST")
     url_contains: list[str] = Field(
-        default_factory=list[str], description="All substrings must appear in the URL"
+        default_factory=list[str],
+        description="All substrings must appear in the scheme, host and path (not the query)",
     )
-    url_regex: str | None = None
+    path_contains: list[str] = Field(
+        default_factory=list[str], description="All substrings must appear in the URL path"
+    )
+    query_contains: list[str] = Field(
+        default_factory=list[str],
+        description="All substrings must appear in the decoded query string",
+    )
+    url_regex: str | None = Field(default=None, description="Matched against the full URL")
     status: str | None = Field(
         default="2xx", description="Exact code ('201') or class ('2xx'); null = any"
     )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from evidence_judge.checks._common import (
     FINAL_ID,
     MAX_CITATIONS,
+    WEAK_CONTRADICTION_CONFIDENCE,
     plural,
     quoted,
     require,
@@ -11,9 +12,9 @@ from evidence_judge.checks._common import (
 )
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.errors import InvalidPredicateError
-from evidence_judge.checks.matching import compile_regex, url_contains, url_path
+from evidence_judge.checks.matching import compile_regex, regex_search, url_contains, url_path
 from evidence_judge.core.evidence import Channel, NetworkEvent
-from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.index import EvidenceIndex, is_document_navigation
 from evidence_judge.core.predicates import Predicate, Scope, UrlPredicate
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 
@@ -39,7 +40,7 @@ class UrlMatcher:
         p = self.predicate
         if p.contains is not None and not url_contains(url, p.contains):
             return False
-        return self._regex is None or self._regex.search(url) is not None
+        return self._regex is None or regex_search(self._regex, url) is not None
 
 
 def check_url(predicate: UrlPredicate, index: EvidenceIndex) -> PredicateResult:
@@ -73,15 +74,6 @@ def _check_final(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
     )
 
 
-def _is_navigation(event: NetworkEvent) -> bool:
-    """A page load: a GET for a document, or one answered with HTML when the type is unknown."""
-    if event.method.upper() != "GET":
-        return False
-    if event.resource_type:
-        return event.resource_type.lower() == "document"
-    return (event.mime_type or "").split(";", 1)[0].strip().lower() == "text/html"
-
-
 def _visited(index: EvidenceIndex, navigations: list[NetworkEvent]) -> list[tuple[str, str]]:
     states = [(state_id(s, index), s.url) for s in index.page_states()]
     actions = [(a.id, a.url) for a in index.run.actions if a.url]
@@ -90,7 +82,7 @@ def _visited(index: EvidenceIndex, navigations: list[NetworkEvent]) -> list[tupl
 
 
 def _check_any(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
-    navigations = [n for n in index.requests("GET") if _is_navigation(n)]
+    navigations = [n for n in index.requests("GET") if is_document_navigation(n)]
     visited = _visited(index, navigations)
     hits = [(eid, url) for eid, url in visited if matcher.matches(url)]
     if hits:
@@ -109,10 +101,15 @@ def _check_any(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
             KIND,
         )
     distinct = {url for _, url in visited}
+    reason = f"None of {plural(len(distinct), 'visited URL')} does {matcher.describe()}"
+    if navigations:
+        return result(Support.CONTRADICTED, reason, KIND)
     return result(
         Support.CONTRADICTED,
-        f"None of {plural(len(distinct), 'visited URL')} does {matcher.describe()}",
+        f"{reason} (no page navigations were captured and snapshots are point-in-time, so the "
+        "URL may have been visited between them)",
         KIND,
+        confidence=WEAK_CONTRADICTION_CONFIDENCE,
     )
 
 

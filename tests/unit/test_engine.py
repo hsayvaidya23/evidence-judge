@@ -10,12 +10,18 @@ from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.extract.schema import ClaimExtraction
 from evidence_judge.llm import FakeLLM, LLMError
 from tests.unit.conftest import (
+    FakeVisionLLM,
     constraint_violation_run,
+    final,
     forged_run,
     honest_run,
     loop_run,
+    make_run,
+    net,
     shop_spec,
+    shot,
     side_effect_run,
+    snap,
     uncaptured_network_run,
 )
 
@@ -288,3 +294,67 @@ async def test_screenshots_disabled_by_settings_never_call_vision() -> None:
     assert not llm.calls
     assert verdict.claims[0].status is Support.NO_EVIDENCE
     assert "disabled" in verdict.claims[0].reason
+
+
+async def test_spec_less_state_change_explains_what_to_add(settings: Settings) -> None:
+    verdict = await Judge(settings).judge(
+        _with_answer(honest_run(), HONEST_ANSWER), JudgeOptions(offline=True)
+    )
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert verdict.summary == (
+        "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes "
+        "are expected; add a spec with expect/allow to grade it."
+    )
+
+
+async def test_conflicting_evidence_on_a_key_claim_needs_review(settings: Settings) -> None:
+    run = make_run(
+        network=[net(1, "GET", "/")],
+        snapshots=[snap(1, "/", "Thank you for visiting our shop")],
+        final_state=final("/", "Thank you for visiting our shop"),
+    )
+    claims = ClaimSet.model_validate(
+        {
+            "claims": [
+                {
+                    "id": "c1",
+                    "text": "placed the order",
+                    "quote": "placed",
+                    "kind": "outcome",
+                    "key": True,
+                    "predicates": [
+                        {"kind": "request", "method": "POST", "url_contains": ["orders"]},
+                        {"kind": "page_text", "contains": "Thank you", "scope": "any"},
+                    ],
+                }
+            ]
+        }
+    )
+    verdict = await Judge(settings).judge(
+        _with_answer(run, "I placed the order."), JudgeOptions(offline=True, claims=claims)
+    )
+    assert verdict.claims[0].status is Support.CONTRADICTED
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+
+
+async def test_vision_only_no_on_a_key_claim_needs_review(settings: Settings) -> None:
+    claims = ClaimSet.model_validate(
+        {
+            "claims": [
+                {
+                    "id": "c1",
+                    "text": "a confirmation was shown",
+                    "quote": "placed",
+                    "kind": "outcome",
+                    "key": True,
+                    "predicates": [{"kind": "screenshot", "question": "Is it confirmed?"}],
+                }
+            ]
+        }
+    )
+    run = make_run(screenshots=[shot(1)], final_state=final("/cart", "cart"))
+    verdict = await Judge(settings, FakeVisionLLM("no")).judge(
+        _with_answer(run, "I placed the order."), JudgeOptions(claims=claims)
+    )
+    assert verdict.claims[0].status is Support.CONTRADICTED
+    assert verdict.outcome is Outcome.NEEDS_REVIEW

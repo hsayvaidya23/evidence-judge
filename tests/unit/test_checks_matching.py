@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.matching import (
+    MAX_REGEX_INPUT,
+    MAX_REGEX_LENGTH,
     MISSING,
     compare,
     compile_regex,
@@ -14,6 +18,7 @@ from evidence_judge.checks.matching import (
     normalize,
     parse_body,
     parse_number,
+    regex_search,
     status_matches,
     url_contains,
     url_host,
@@ -176,3 +181,60 @@ def test_compile_regex_raises_typed_error() -> None:
     assert compile_regex(r"total: (\d+)").search("TOTAL: 3")
     with pytest.raises(InvalidPredicateError):
         compile_regex("(unclosed")
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        r"(a+)+$",
+        r"(a*)*b",
+        r"(a|a)*$",
+        r"(a|aa)+$",
+        r"(?:\w+\s?)*!",
+        r"(.*a){20}",
+        r"((ab)*c)+",
+        r"(x+x+)+y",
+        r"((a|b))+c",
+        r"(a+){2,}",
+    ],
+)
+def test_compile_regex_rejects_nested_quantifiers_fast(pattern: str) -> None:
+    start = time.perf_counter()
+    with pytest.raises(InvalidPredicateError, match="unsafe regex"):
+        compile_regex(pattern)
+    assert time.perf_counter() - start < 0.05
+
+
+def test_compile_regex_rejects_long_patterns() -> None:
+    with pytest.raises(InvalidPredicateError, match="longer than"):
+        compile_regex("a" * (MAX_REGEX_LENGTH + 1))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "text"),
+    [
+        (r"/order/[A-Z]\d+$", "https://shop.test/order/A1"),
+        (r"Total:\s*\$([0-9.]+)", "Total: $24.00"),
+        (r"(?:www\.)?shop\.test/(cart|checkout)", "https://www.shop.test/checkout"),
+        (r"(ab)?c+", "abccc"),
+        (r"(\d{3})-(\d{4})", "555-1234"),
+        (r"[(]+a+[)]+", "((aa))"),
+        (r"\(a+\)+", "(aa))"),
+        (r"(?P<id>\d+)/items", "/orders/42/items"),
+        (r"a{2}b{1,3}", "aabbb"),
+        (r"(ab){2}", "abab"),
+    ],
+)
+def test_compile_regex_accepts_ordinary_patterns(pattern: str, text: str) -> None:
+    assert regex_search(compile_regex(pattern), text) is not None
+
+
+def test_regex_search_reads_only_the_bounded_head_and_tail() -> None:
+    regex = compile_regex(r"needle (\d+)")
+    middle = "x" * MAX_REGEX_INPUT + "needle 1" + "x" * MAX_REGEX_INPUT
+    assert regex_search(regex, middle) is None
+    tail = "x" * (3 * MAX_REGEX_INPUT) + "needle 2 end"
+    match = regex_search(regex, tail)
+    assert match is not None
+    assert match.group(1) == "2"
+    assert regex_search(regex, "needle 3" + "x" * (3 * MAX_REGEX_INPUT)) is not None

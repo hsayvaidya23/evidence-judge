@@ -5,6 +5,7 @@ from typing import Final
 from evidence_judge.checks._common import (
     FINAL_ID,
     MAX_CITATIONS,
+    WEAK_CONTRADICTION_CONFIDENCE,
     plural,
     quoted,
     require,
@@ -12,14 +13,15 @@ from evidence_judge.checks._common import (
     state_id,
 )
 from evidence_judge.checks.base import CheckContext
-from evidence_judge.checks.matching import contains, excerpt, url_path
+from evidence_judge.checks.matching import excerpt, url_path
 from evidence_judge.core.evidence import Channel
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import PageTextPredicate, Predicate, Scope
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
+from evidence_judge.textnorm import normalize
 
 KIND = "page_text"
-SNAPSHOT_ABSENCE_CONFIDENCE: Final = 0.6
+SNAPSHOT_ABSENCE_CONFIDENCE: Final = WEAK_CONTRADICTION_CONFIDENCE
 """Snapshots are point-in-time: text shown between them is never recorded, so absence across
 them refutes an any-scope claim only weakly. The final state is authoritative and stays at 1.0."""
 
@@ -39,7 +41,7 @@ def _check_final(predicate: PageTextPredicate, index: EvidenceIndex) -> Predicat
             f"Final page state was not captured, so it cannot show {phrase}",
             KIND,
         )
-    if contains(state.text, predicate.contains):
+    if normalize(predicate.contains) in index.normalized_text(state):
         return result(
             Support.SUPPORTED,
             f"Final page ({url_path(state.url)}) contains {phrase}",
@@ -60,7 +62,8 @@ def _check_final(predicate: PageTextPredicate, index: EvidenceIndex) -> Predicat
 def _check_any(predicate: PageTextPredicate, index: EvidenceIndex) -> PredicateResult:
     phrase = quoted(predicate.contains)
     states = index.page_states()
-    hits = [s for s in states if contains(s.text, predicate.contains)]
+    needle = normalize(predicate.contains)
+    hits = [s for s in states if needle in index.normalized_text(s)]
     if hits:
         cited = list(reversed(hits[-MAX_CITATIONS:]))
         return result(

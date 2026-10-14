@@ -126,3 +126,23 @@ def test_format_value() -> None:
 async def test_invalid_value_predicates(pred: ValuePredicate) -> None:
     with pytest.raises(InvalidPredicateError):
         await ValueChecker().evaluate(pred, ctx(honest_run()))
+
+
+TRUNCATED_JSON = '{"items": [{"sku": "K-1", "na' + "…[truncated; body is 90000 bytes]"
+
+
+async def test_truncated_json_body_is_unrecorded_not_contradicted() -> None:
+    event = net(1, "POST", "/api/orders", 201).model_copy(update={"request_body": TRUNCATED_JSON})
+    res = await ValueChecker().evaluate(PRICE_CAP, ctx(make_run(network=[event])))
+    assert res.status is Support.NO_EVIDENCE
+    assert "truncated" in res.reason
+
+
+async def test_truncated_candidate_keeps_a_guardrail_from_passing() -> None:
+    readable = net(1, "POST", "/api/orders", 201, body={"items": [{"price": 24}]})
+    truncated = net(2, "POST", "/api/orders", 201).model_copy(
+        update={"request_body": TRUNCATED_JSON}
+    )
+    res = await ValueChecker().evaluate(PRICE_CAP, ctx(make_run(network=[readable, truncated])))
+    assert res.status is Support.NO_EVIDENCE
+    assert "net#2" in res.reason

@@ -55,7 +55,19 @@ the cart before checking out. List them under `allow` (request predicates) so th
 dimension does not flag them. Any other successful mutation that no met expectation,
 constraint or allow entry explains is reported as a side effect. The agent's own claims never
 explain a mutation: "I also changed your email" is still a side effect, even though the claim is
-true. Without a spec, every successful mutation is reported, and the run needs review at best.
+true. Telemetry (pings, beacons, CSP reports) is never a side effect; see
+[architecture.md](architecture.md#side-effects-and-telemetry) for the exact rule.
+
+Without a spec, nothing says which changes are expected, so a run that changed state is
+review-only by design. Every successful mutation is reported and the summary reads:
+
+```
+NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are
+expected; add a spec with expect/allow to grade it.
+```
+
+Add a spec whose `expect` entries cover the goal and whose `allow` entries cover the expected
+intermediate writes to let such a run pass.
 
 ```yaml
 allow:
@@ -71,15 +83,27 @@ Every predicate has a `kind`.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `method` | any | HTTP method, e.g. `POST` |
-| `url_contains` | `[]` | every substring must appear in the URL |
-| `url_regex` | none | regular expression the URL must match |
+| `url_contains` | `[]` | every substring must appear in the scheme, host or path (the query string and fragment are ignored) |
+| `path_contains` | `[]` | every substring must appear in the URL path |
+| `query_contains` | `[]` | every substring must appear in the decoded query string |
+| `url_regex` | none | regular expression the full URL (query included) must match |
 | `status` | `"2xx"` | exact code (`"201"`), class (`"2xx"`), or `null` for any |
 | `body_contains` | `[]` | every substring must appear in the request body (case-insensitive) |
 | `response_contains` | `[]` | every substring must appear in the response body |
 
 ```yaml
 - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
+- {kind: request, method: GET, path_contains: [/search], query_contains: [q=red kettle]}
 ```
+
+`url_contains` ignores the query string so that `POST /api/log?next=/api/orders` cannot pass for
+an order request. Use `query_contains` to match query parameters, or `url_regex` for the whole
+URL.
+
+Ingest keeps bodies only up to a size limit and marks a cut body with `…[truncated ...]`. A
+`body_contains` or `response_contains` phrase missing from a truncated body is treated as not
+recorded, so the result is `no_evidence`, never `contradicted`. A phrase found in the recorded
+part still matches.
 
 ### `page_text`: visible text contains a phrase
 
@@ -99,7 +123,10 @@ Every predicate has a `kind`.
 With `scope: any`, visited URLs come from page snapshots, the page URL of each action and
 document navigations in the network log (GET requests for a `document`, or answered with
 `text/html`). A URL is reported as never visited only when snapshots or navigations were
-captured; with actions alone the result is `no_evidence`.
+captured; with actions alone the result is `no_evidence`. When only snapshots were captured
+(no navigations in the network log), absence is a weak contradiction (confidence 0.6), because
+a single-page app can change the URL between snapshots without a navigation; on a key claim it
+leads to review, not failure.
 
 ### `action`: the agent performed a browser action
 
@@ -127,6 +154,9 @@ Instead of `json_path`, `page_regex` extracts the value from page text with one 
 ```
 
 Without `in_request`, the value is looked up in any state-changing request.
+If a candidate request's body was truncated before `json_path`, the value cannot be shown to
+hold for every observation, so the predicate is `no_evidence` unless a recorded observation
+already violates it.
 
 ### `screenshot`: a yes/no question for a vision model
 
@@ -135,7 +165,22 @@ Without `in_request`, the value is looked up in any state-changing request.
 ```
 
 This is the last resort: it needs an LLM, costs money, and is less reliable than the other
-kinds. Prefer a `request`, `url` or `page_text` predicate whenever one can express the condition.
+kinds. A "no" from the model is a weak contradiction (confidence 0.6): on its own it sends a run
+to review, never to failure. Prefer a `request`, `url` or `page_text` predicate whenever one can express the condition.
+
+### Regular expressions
+
+`url_regex`, `regex` and `page_regex` come from specs or from an LLM, so they are treated as
+untrusted. They are matched case-insensitively with Python's `re`, and a pattern is rejected
+(the predicate becomes `no_evidence` with the reason "unsafe regex") when it:
+
+- is longer than 300 characters, or
+- repeats a group whose body itself repeats or alternates, such as `(a+)+`, `(a*)*`,
+  `(a|aa)+`, `(\w+\s?)*` or `(.*a){20}`. These can backtrack catastrophically. The check is
+  conservative and also rejects a few safe patterns like `([\w-]+\.)+`; write them without
+  the outer repetition, for example `[\w.-]+`.
+
+A regex reads at most the first and the last 10,000 characters of a URL or a page's text.
 
 ## Examples
 

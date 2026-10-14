@@ -3,6 +3,13 @@
 A refuted claim is as firm as its firmest refutation: a confident network contradiction is not
 weakened by a point-in-time snapshot that also failed to show the claim.
 
+Support does not outvote a confident refutation from a different kind of evidence. When one
+predicate is supported and a predicate of another kind (checker) is contradicted at or above
+CONFIDENT_CONTRADICTION, the claim is CONTRADICTED with WEAK_CONTRADICTION_CONFIDENCE
+("conflicting evidence"), which sends the run to review: it can neither pass on the weaker
+evidence nor fail on this claim alone. Predicates of the same kind are alternatives (a POST to
+/order or to /checkout), so a missing alternative does not conflict with a supported one.
+
 Deterministic predicates are evaluated first. Vision (screenshot) predicates are consulted only
 when the deterministic ones are not decisive, so an LLM never overrides recorded network or page
 evidence.
@@ -12,7 +19,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from evidence_judge.checks._common import checker_names, join_reasons, merge_citations
+from evidence_judge.checks._common import (
+    CONFIDENT_CONTRADICTION,
+    WEAK_CONTRADICTION_CONFIDENCE,
+    checker_names,
+    join_reasons,
+    merge_citations,
+)
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.registry import CheckerRegistry
 from evidence_judge.core.claims import Claim
@@ -40,6 +53,22 @@ async def judge_claim(claim: Claim, ctx: CheckContext, registry: CheckerRegistry
 
 def combine(claim: Claim, results: Sequence[PredicateResult]) -> ClaimVerdict:
     supported = [r for r in results if r.status is Support.SUPPORTED]
+    contradicted = [r for r in results if r.status is Support.CONTRADICTED]
+    supporting_kinds = {r.checker for r in supported}
+    confident = [
+        r
+        for r in contradicted
+        if r.confidence >= CONFIDENT_CONTRADICTION and r.checker not in supporting_kinds
+    ]
+    if supported and confident:
+        return _verdict(
+            claim,
+            Support.CONTRADICTED,
+            f"conflicting evidence: {join_reasons(supported)} supports the claim, but "
+            f"{join_reasons(confident)} contradicts it",
+            [*supported, *confident],
+            WEAK_CONTRADICTION_CONFIDENCE,
+        )
     if supported:
         return _verdict(
             claim,
@@ -48,7 +77,6 @@ def combine(claim: Claim, results: Sequence[PredicateResult]) -> ClaimVerdict:
             supported,
             max(r.confidence for r in supported),
         )
-    contradicted = [r for r in results if r.status is Support.CONTRADICTED]
     if len(contradicted) == len(results):
         return _verdict(
             claim,

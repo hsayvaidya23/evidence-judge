@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from evidence_judge.checks._common import require, result
+from evidence_judge.checks._common import WEAK_CONTRADICTION_CONFIDENCE, require, result
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.core.evidence import Screenshot
 from evidence_judge.core.index import EvidenceIndex
@@ -15,7 +15,7 @@ from evidence_judge.llm.base import Image, LLMError, LLMRequest, Tier
 
 KIND = "screenshot"
 YES_CONFIDENCE = 0.8
-NO_CONFIDENCE = 0.7
+NO_CONFIDENCE = WEAK_CONTRADICTION_CONFIDENCE
 MAX_ANY_SCOPE_SCREENSHOTS = 4
 
 SCREENSHOT_MAX_OUTPUT_TOKENS = 4096

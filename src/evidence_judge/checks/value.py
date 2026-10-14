@@ -3,7 +3,9 @@
 Values are read from JSON (or form-encoded) bodies via `json_path` - from the requests matching
 `in_request`, or from every mutation when it is unset - and/or from page text via `page_regex`
 on the most recent page state that matches. Every observation must satisfy the comparison: one
-violating observation makes the predicate CONTRADICTED, which is what a guardrail needs.
+violating observation makes the predicate CONTRADICTED, which is what a guardrail needs. A
+candidate whose body ingest truncated before the path keeps the predicate from being SUPPORTED:
+the unread part could hold a violating value, so the result is NO_EVIDENCE.
 """
 
 from __future__ import annotations
@@ -26,9 +28,11 @@ from evidence_judge.checks.matching import (
     as_text,
     compare,
     compile_regex,
+    is_truncated,
     json_path_get,
     parse_body,
     parse_number,
+    regex_search,
     url_path,
 )
 from evidence_judge.checks.request import RequestMatcher, matching_requests
@@ -68,6 +72,19 @@ def _read_bodies(event: NetworkEvent, path: str) -> Observation | None:
     return None
 
 
+def _truncated_without(event: NetworkEvent, path: str) -> bool:
+    bodies = (event.request_body, event.response_body)
+    return any(is_truncated(b) for b in bodies) and _read_bodies(event, path) is None
+
+
+def _truncated_reason(events: list[NetworkEvent], path: str) -> str:
+    ids = ", ".join(e.id for e in events[-MAX_CITATIONS:])
+    return (
+        f"{plural(len(events), 'candidate request')} ({ids}) had a truncated body without "
+        f"{quoted(path)} in its recorded part"
+    )
+
+
 def _missing_json_reason(
     predicate: ValuePredicate, path: str, candidates: list[NetworkEvent], index: EvidenceIndex
 ) -> str:
@@ -87,23 +104,30 @@ def _from_pages(regex_source: str, index: EvidenceIndex) -> Observation | None:
     if regex.groups > 1:
         raise InvalidPredicateError(f"page_regex /{regex_source}/ must have at most one group")
     for state in reversed(index.page_states()):
-        match = regex.search(state.text)
+        match = regex_search(regex, state.text)
         if match:
             value = match.group(1) if regex.groups else match.group(0)
             return Observation(value, state_id(state, index), f"the page {url_path(state.url)}")
     return None
 
 
-def _observe(predicate: ValuePredicate, index: EvidenceIndex) -> tuple[list[Observation], str]:
+def _observe(
+    predicate: ValuePredicate, index: EvidenceIndex
+) -> tuple[list[Observation], str, str | None]:
     if predicate.json_path is None and predicate.page_regex is None:
         raise InvalidPredicateError("value predicate needs 'json_path' or 'page_regex'")
     observations: list[Observation] = []
     gaps: list[str] = []
+    unread: str | None = None
     if predicate.json_path is not None:
         candidates = _candidates(predicate, index)
         found = [o for e in candidates if (o := _read_bodies(e, predicate.json_path)) is not None]
         observations.extend(found)
-        if not found:
+        truncated = [e for e in candidates if _truncated_without(e, predicate.json_path)]
+        if truncated:
+            unread = _truncated_reason(truncated, predicate.json_path)
+            gaps.append(unread)
+        elif not found:
             gaps.append(_missing_json_reason(predicate, predicate.json_path, candidates, index))
     if predicate.page_regex is not None:
         page = _from_pages(predicate.page_regex, index)
@@ -111,11 +135,11 @@ def _observe(predicate: ValuePredicate, index: EvidenceIndex) -> tuple[list[Obse
             observations.append(page)
         else:
             gaps.append(f"No recorded page text matches /{predicate.page_regex}/")
-    return observations, "; ".join(gaps)
+    return observations, "; ".join(gaps), unread
 
 
 def check_value(predicate: ValuePredicate, index: EvidenceIndex) -> PredicateResult:
-    observations, gaps = _observe(predicate, index)
+    observations, gaps, unread = _observe(predicate, index)
     field = predicate.field
     expected = f"{predicate.op} {as_text(predicate.value)}"
     if not observations:
@@ -132,6 +156,14 @@ def check_value(predicate: ValuePredicate, index: EvidenceIndex) -> PredicateRes
             _cite(violations),
         )
     latest = observations[-1]
+    if unread is not None:
+        return result(
+            Support.NO_EVIDENCE,
+            f"{field} was {format_value(latest.value)} in {latest.where}, but {unread}, so not "
+            f"every observation can be shown to satisfy {expected}",
+            KIND,
+            _cite(observations),
+        )
     return result(
         Support.SUPPORTED,
         f"{field} was {format_value(latest.value)} in {latest.where}, satisfying {expected}",

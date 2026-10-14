@@ -55,14 +55,50 @@ The CLI (`cli.py`) wires the stages together and maps the outcome to an exit cod
    cannot talk its way into a pass.
 5. **Abstain over guessing.** Low-confidence or uncheckable key claims lead to `needs_review`,
    not to a confident wrong verdict. Low claim coverage (below
-   `EVJ_REVIEW_COVERAGE_THRESHOLD`) also triggers review. Snapshots are point-in-time, so text
-   missing from every snapshot (`scope: any`) contradicts a claim only with confidence 0.6; a
-   key claim refuted below `CONFIDENT_CONTRADICTION` (0.7, `checks/outcome.py`) fails the run
-   only when another claim is also contradicted or a spec check fails, and otherwise needs
-   review. The final page state is authoritative and refutes with full confidence.
+   `EVJ_REVIEW_COVERAGE_THRESHOLD`) also triggers review. Only a key claim contradicted at or
+   above `CONFIDENT_CONTRADICTION` (0.7, `checks/_common.py`) fails a run. Weak contradictions
+   (`WEAK_CONTRADICTION_CONFIDENCE`, 0.6) only ever lead to review, however many there are; a
+   failed spec check still fails the run on its own. Weak contradictions are:
+   - text or a URL (`scope: any`) missing from every snapshot when no page navigations were
+     captured, because snapshots are point-in-time;
+   - a vision model answering "no" to a screenshot question;
+   - conflicting evidence, where one predicate supports a claim and a predicate of another
+     kind confidently contradicts it (page text says "Thank you" but no order request was
+     sent). Predicates of the same kind are alternatives, so a supported `POST /order` is not
+     in conflict with a missing `POST /checkout`.
+
+   The final page state is authoritative and refutes with full confidence, and so does URL
+   absence when document navigations were captured in the network log.
 6. **Redact before anything leaves the process.** Redaction runs before extraction, before any
    LLM call and before any report is written, and it is deterministic per key so equal values
    still match across claims and evidence.
+
+## Side effects and telemetry
+
+The side-effects dimension lists every successful mutation (POST, PUT, PATCH, DELETE with no
+error status) that no met expectation, constraint request or `allow` entry explains. Telemetry
+is not a change to application state and is skipped (`checks/dimensions.py`, `is_telemetry`):
+
+1. **Typed telemetry.** A request whose resource type, reduced to lower-case letters, is `ping`,
+   `beacon`, `cspreport` or `cspviolationreport`. Chromium (and Playwright traces and HARs
+   recorded with it) types `navigator.sendBeacon` and `<a ping>` as `Ping` and CSP reports as
+   `CSPViolationReport`; other browsers use `beacon` and `csp_report`. These are skipped
+   whatever their host.
+2. **Untyped sendBeacon.** A POST with no resource type (or `other`) and a `text/plain`
+   content type, which is what `sendBeacon` sends for a string body, is skipped only when it
+   goes to a third-party host. First-party hosts are the spec's `allowed_hosts`, or, when that
+   is empty, the run's primary host: the host of the initial state, else of the first action,
+   snapshot, document navigation or final state that names a URL.
+
+Everything else stays a finding: a third-party `fetch` or `xhr` POST (a newsletter
+subscription, a payment call), a first-party `text/plain` POST, and any untyped POST with a
+JSON or form body. With `allowed_hosts` set, a non-telemetry mutation to another host is
+reported as outside the allowed hosts.
+
+Without a task spec nothing defines which changes are expected, so every successful mutation is
+a finding and the run is at best `needs_review`, with the summary "the run changed state (N
+requests) and no task spec defines which changes are expected; add a spec with expect/allow to
+grade it". This is deliberate: a run that changes state can only pass against a spec.
 
 ## Security and limits
 
@@ -79,6 +115,9 @@ shape the pipeline:
 - **Screenshots load lazily.** `Run.blobs` is a `BlobStore` mapping: trace screenshots stay in
   the zip and are read on demand by `EvidenceIndex.screenshot_bytes` and the HTML report, so the
   trace file must stay in place until the report is written.
+- **Regexes are bounded.** Spec and LLM regexes over 300 characters or with a repeated group
+  that repeats or alternates inside are rejected (`checks/matching.py`, `compile_regex`), and
+  every regex reads at most the first and last 10,000 characters of its input.
 - **Merging checks provenance.** `attach_har` pairs requests in linear time and raises
   `MismatchedEvidenceError` when a HAR shares fewer than half of a trace's requests.
 - **Redaction covers text only.** Bodies, headers, URLs, snapshot text and HTML (including the

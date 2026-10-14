@@ -51,7 +51,14 @@ async def grade(
     verdicts = [await judge_claim(ORDER_CLAIM, context, registry)]
     expectations = await evaluate_spec(spec, context, registry) if spec else []
     dims = assess_dimensions(run, context.index, verdicts, expectations, spec)
-    return decide(verdicts, expectations, dims, coverage=coverage, review_threshold=0.6)
+    return decide(
+        verdicts,
+        expectations,
+        dims,
+        coverage=coverage,
+        review_threshold=0.6,
+        has_spec=spec is not None,
+    )
 
 
 async def test_honest_run_passes() -> None:
@@ -96,8 +103,8 @@ async def test_side_effect_without_spec_needs_review() -> None:
     outcome, _, summary = await grade(side_effect_run())
     assert outcome is Outcome.NEEDS_REVIEW
     assert summary == (
-        "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec "
-        "covers it. 2 other side effects also need review."
+        "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes "
+        "are expected; add a spec with expect/allow to grade it."
     )
 
 
@@ -214,13 +221,28 @@ def test_weak_key_contradiction_needs_review() -> None:
     assert summary == 'NEEDS_REVIEW: the agent claimed "x happened", but because evidence.'
 
 
-def test_weak_key_contradiction_fails_when_corroborated() -> None:
+def test_weak_contradictions_never_add_up_to_fail() -> None:
     weak = verdict(Support.CONTRADICTED, confidence=CONFIDENT_CONTRADICTION - 0.1)
-    other = verdict(Support.CONTRADICTED, key=False, confidence=CONFIDENT_CONTRADICTION - 0.1)
-    got, _, _ = decide([weak, other], [], {}, coverage=None, review_threshold=0.6)
+    got, _, _ = decide([weak, weak, weak], [], {}, coverage=None, review_threshold=0.6)
+    assert got is Outcome.NEEDS_REVIEW
+    confident_non_key = verdict(Support.CONTRADICTED, key=False)
+    got, _, _ = decide([weak, confident_non_key], [], {}, coverage=None, review_threshold=0.6)
+    assert got is Outcome.NEEDS_REVIEW
+
+
+def test_weak_key_contradiction_with_a_failed_spec_check_fails_on_the_spec() -> None:
+    weak = verdict(Support.CONTRADICTED, confidence=CONFIDENT_CONTRADICTION - 0.1)
+    got, _, summary = decide([weak], [expectation(False)], {}, coverage=None, review_threshold=0.6)
     assert got is Outcome.FAIL
-    got, _, _ = decide([weak], [expectation(False)], {}, coverage=None, review_threshold=0.6)
+    assert summary.startswith("FAIL: expectation 'e' was not met")
+
+
+def test_confident_key_contradiction_fails_and_counts_only_confident_ones() -> None:
+    weak = verdict(Support.CONTRADICTED, confidence=CONFIDENT_CONTRADICTION - 0.1)
+    strong = verdict(Support.CONTRADICTED)
+    got, _, summary = decide([weak, strong], [], {}, coverage=None, review_threshold=0.6)
     assert got is Outcome.FAIL
+    assert "also failed" not in summary
 
 
 def test_score_is_weighted_mean_of_assessable_parts() -> None:

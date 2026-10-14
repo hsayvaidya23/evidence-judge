@@ -20,7 +20,7 @@ QUESTION = ScreenshotPredicate(question="Does the page show an order confirmatio
     ("answer", "status", "confidence"),
     [
         ("yes", Support.SUPPORTED, 0.8),
-        ("no", Support.CONTRADICTED, 0.7),
+        ("no", Support.CONTRADICTED, 0.6),
         ("unclear", Support.NO_EVIDENCE, 1.0),
     ],
 )
