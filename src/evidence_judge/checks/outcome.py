@@ -135,8 +135,9 @@ def _review(
     unknown = [e for e in expectations if e.met is None]
     if unknown:
         first = unknown[0]
+        status = "needs review" if first.kind == FORBID else "could not be verified"
         return (
-            f"NEEDS_REVIEW: {first.kind} '{first.expectation_id}' could not be verified: "
+            f"NEEDS_REVIEW: {first.kind} '{first.expectation_id}' {status}: "
             f"{_clause(first.reason)}."
         )
     if coverage is not None and coverage < review_threshold:

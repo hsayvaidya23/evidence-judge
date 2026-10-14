@@ -35,6 +35,19 @@ An expectation needs at least one predicate in `all` or `any`. When both are giv
 conditions apply. In the verdict each one becomes an `ExpectationResult` with `met: true`,
 `false`, or `null` when the channel it needs was not captured.
 
+### Forbidden attempts
+
+A `forbid` entry also catches attempts that did not succeed. Inside `forbid`, a `request`
+predicate with the default status (`2xx`, written or omitted) is checked twice:
+
+- a matching request that succeeded breaks the rule (`met: false`, the run fails);
+- otherwise, a matching request with any other status or no response at all makes the result
+  `met: null` with the reason `attempted forbidden action: POST /api/account/delete → 500 ...`,
+  and the run needs review.
+
+To forbid only one exact outcome, give an exact code such as `status: "201"`; that predicate is
+not widened. `expect` entries are unaffected: a request there must succeed to count.
+
 ### Allowed intermediate mutations
 
 Doing a task usually involves writes that are not the goal itself, such as adding an item to
