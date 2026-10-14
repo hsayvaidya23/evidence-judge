@@ -353,7 +353,8 @@ async def test_vision_only_no_on_a_key_claim_needs_review(settings: Settings) ->
         }
     )
     run = make_run(screenshots=[shot(1)], final_state=final("/cart", "cart"))
-    verdict = await Judge(settings, FakeVisionLLM("no")).judge(
+    vision_on = settings.model_copy(update={"screenshots_to_llm": True})
+    verdict = await Judge(vision_on, FakeVisionLLM("no")).judge(
         _with_answer(run, "I placed the order."), JudgeOptions(claims=claims)
     )
     assert verdict.claims[0].status is Support.CONTRADICTED
