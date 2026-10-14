@@ -94,7 +94,10 @@ So a score of 0.70 or more always means a pass, and a run waiting for review nev
 ## Side effects and telemetry
 
 The side-effects dimension lists every successful mutation (POST, PUT, PATCH, DELETE with no
-error status) that no met expectation, constraint request or `allow` entry explains. Telemetry
+error status) that the spec does not explain. Each `expect` entry explains as many mutations
+matching its request predicates as its `max_count` (default 1), each `allow` entry any number
+unless it sets its own `max_count`; a matching mutation past that is reported as a duplicate
+("duplicate POST /api/orders → 201, sent 4 times"), which sends the run to review. Telemetry
 is not a change to application state and is skipped (`checks/dimensions.py`, `is_telemetry`):
 
 1. **Typed telemetry.** A request whose resource type, reduced to lower-case letters, is `ping`,

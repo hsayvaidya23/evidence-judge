@@ -31,11 +31,13 @@ becomes a finding.
 Did the run change anything it should not have? Every successful mutation (`POST`, `PUT`,
 `PATCH`, `DELETE` without an error status) must be **explained** by one of:
 
-- a met `expect` expectation that cites it, or
-- a request predicate in the spec's `expect`, `constraints` (`in_request`) or `allow` entries
-  that matches it.
+- a request predicate of an `expect` entry (including a value predicate's `in_request`), which
+  explains up to that entry's `max_count` matching mutations (1 when unset), or
+- an `allow` entry, which explains any number of matching mutations unless it sets `max_count`.
 
-Anything else is a finding. With `allowed_hosts` set, a mutation to another host is reported as
+Anything else is a finding, and so is a matching mutation beyond the budget: one "order placed"
+expectation explains one order, so four identical orders read *duplicate POST /api/orders →
+201, sent 4 times* and the run goes to review. With `allowed_hosts` set, a mutation to another host is reported as
 outside the allowed hosts. Telemetry (pings, beacons, CSP reports, third-party `sendBeacon`) is
 skipped; see [Architecture](../architecture.md#side-effects-and-telemetry).
 

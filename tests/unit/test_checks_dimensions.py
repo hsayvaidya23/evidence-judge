@@ -16,7 +16,7 @@ from evidence_judge.core.claims import Claim, ClaimKind
 from evidence_judge.core.evidence import Channel, NetworkEvent, Run
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import PageTextPredicate, RequestPredicate
-from evidence_judge.core.taskspec import TaskSpec
+from evidence_judge.core.taskspec import AllowedRequest, TaskSpec
 from evidence_judge.core.verdict import Dimension, DimensionScore
 from tests.unit.conftest import (
     ALL_CHANNELS,
@@ -421,7 +421,7 @@ async def test_allow_regex_that_times_out_explains_nothing() -> None:
     odd = net(9, "POST", "/" + "a" * 9000 + "!", 200)
     run = run.model_copy(update={"network": [*run.network, odd]})
     spec = shop_spec().model_copy(
-        update={"allow": [RequestPredicate(method="POST", url_regex="(a+)+$")]}
+        update={"allow": [AllowedRequest(method="POST", url_regex="(a+)+$")]}
     )
     start = time.perf_counter()
     dims = await assess(run, spec)

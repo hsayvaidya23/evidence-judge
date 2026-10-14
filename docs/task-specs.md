@@ -29,6 +29,7 @@ Each entry in `expect` and `forbid` is an expectation:
   description: An order request succeeded
   all: [<predicate>, ...]              # every predicate must hold
   any: [<predicate>, ...]              # at least one must hold
+  max_count: 1                         # optional, see "Repeated mutations"
 ```
 
 An expectation needs at least one predicate in `all` or `any`. When both are given, both
@@ -75,7 +76,24 @@ intermediate writes to let such a run pass.
 ```yaml
 allow:
   - {kind: request, method: POST, url_contains: [/api/cart]}
+  - {kind: request, method: POST, url_contains: [/api/coupons], max_count: 1}
 ```
+
+### Repeated mutations
+
+An `expect` entry explains only as many mutations as it needs: by default one mutation that
+took effect and matches its request predicates (or a value predicate's `in_request`). An agent
+that places the same order four times meets `order_submitted`, but the other three orders are
+reported as a side effect (`duplicate POST /api/orders → 201, sent 4 times`), so the run needs
+review. Set `max_count: N` on the expectation when the task needs N such requests.
+
+Setting `max_count` explicitly also makes it part of the expectation: more matching mutations
+than that break it (`met: false`, the run fails), which is how to say "exactly once" when a
+duplicate must fail rather than go to review. Failed or rejected attempts (4xx, 5xx, no
+response) are never counted.
+
+`allow` entries explain any number of matching mutations (an agent may add to the cart several
+times) unless the entry sets `max_count`; past it, the extra ones are duplicates too.
 
 ## Predicates
 

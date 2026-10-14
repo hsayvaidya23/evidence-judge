@@ -9,6 +9,9 @@ For `forbid`, a request predicate whose status is `ok` (the default), `2xx` or n
 catches failed attempts: a matching request with any other status, or no response, makes the
 result unknown, so the run goes to review instead of passing as if nothing was tried. A
 forbidden request answered 2xx or 3xx happened (a POST answered 303 took effect).
+
+An `expect` entry with an explicit `max_count` is broken when more mutations that took effect
+match its request predicates than that: "exactly once" is part of the expectation.
 """
 
 from __future__ import annotations
@@ -16,10 +19,21 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Final
 
-from evidence_judge.checks._common import join_reasons, merge_citations
+from evidence_judge.checks._common import (
+    MAX_CITATIONS,
+    cite_request,
+    join_reasons,
+    merge_citations,
+    plural,
+    took_effect,
+)
 from evidence_judge.checks.base import CheckContext
+from evidence_judge.checks.errors import RegexTimeoutError
 from evidence_judge.checks.matching import as_text
 from evidence_judge.checks.registry import CheckerRegistry
+from evidence_judge.checks.request import RequestMatcher
+from evidence_judge.core.evidence import NetworkEvent
+from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import (
     STATUS_ANY,
     STATUS_OK,
@@ -110,9 +124,53 @@ def _attempt_of(expectation: Expectation) -> Expectation | None:
     return None if widened == expectation else widened
 
 
+def matches_any(event: NetworkEvent, matchers: Sequence[RequestMatcher]) -> bool:
+    """True if a matcher covers `event`; a regex that times out covers nothing."""
+    for matcher in matchers:
+        try:
+            if matcher.matches(event):
+                return True
+        except RegexTimeoutError:
+            continue
+    return False
+
+
+def matching_mutations(
+    predicates: Sequence[RequestPredicate], index: EvidenceIndex
+) -> list[NetworkEvent]:
+    """Mutations that took effect and match one of `predicates`, in recorded order."""
+    matchers = [RequestMatcher(p) for p in predicates]
+    if not matchers:
+        return []
+    return [e for e in index.mutations() if took_effect(e) and matches_any(e, matchers)]
+
+
+def _over_count(expectation: Expectation, index: EvidenceIndex) -> ExpectationResult | None:
+    limit = expectation.max_count
+    if limit is None:
+        return None
+    hits = matching_mutations(expectation.request_predicates(), index)
+    if len(hits) <= limit:
+        return None
+    ids = ", ".join(e.id for e in hits[:MAX_CITATIONS])
+    more = ", …" if len(hits) > MAX_CITATIONS else ""
+    return ExpectationResult(
+        expectation_id=expectation.id,
+        kind=EXPECT,
+        met=False,
+        reason=(
+            f"{plural(len(hits), 'matching mutation')} took effect ({ids}{more}), "
+            f"at most {limit} expected"
+        ),
+        citations=[cite_request(e) for e in hits[:MAX_CITATIONS]],
+    )
+
+
 async def evaluate_expectation(
     expectation: Expectation, kind: str, ctx: CheckContext, registry: CheckerRegistry
 ) -> ExpectationResult:
+    if kind == EXPECT and (exceeded := _over_count(expectation, ctx.index)) is not None:
+        return exceeded
     happened, deciders = await _happened(expectation, ctx, registry)
     met = happened
     reason = join_reasons(deciders)
