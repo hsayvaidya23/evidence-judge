@@ -8,7 +8,7 @@ Example (YAML):
       - id: order_submitted
         description: An order request succeeded
         all:
-          - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
+          - {kind: request, method: POST, url_contains: [/api/orders]}
       - id: confirmation_shown
         any:
           - {kind: page_text, contains: Thank you for your order}
