@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+from pydantic import BaseModel
+
+from evidence_judge.checks.errors import PredicateKindMismatchError
+from evidence_judge.checks.matching import url_path
+from evidence_judge.core.evidence import NetworkEvent
+from evidence_judge.core.predicates import Predicate
+from evidence_judge.core.verdict import Citation, PredicateResult, Support
+
+FINAL_ID = "final"
+MAX_CITATIONS = 3
+
+
+def require[P: BaseModel](predicate: Predicate, cls: type[P], checker: str) -> P:
+    if not isinstance(predicate, cls):
+        raise PredicateKindMismatchError(checker, predicate.kind)
+    return predicate
+
+
+def result(
+    status: Support,
+    reason: str,
+    checker: str,
+    citations: Iterable[Citation] = (),
+    confidence: float = 1.0,
+) -> PredicateResult:
+    return PredicateResult(
+        status=status,
+        reason=reason,
+        citations=list(citations),
+        checker=checker,
+        confidence=confidence,
+    )
+
+
+def quoted(text: str) -> str:
+    return repr(text) if "'" not in text else f'"{text}"'
+
+
+def describe_request(event: NetworkEvent) -> str:
+    status = "no response" if event.status is None else str(event.status)
+    if event.failed:
+        status = f"{status}, failed"
+    return f"{event.method.upper()} {url_path(event.url)} → {status}"
+
+
+def cite_request(event: NetworkEvent) -> Citation:
+    return Citation(evidence_id=event.id, excerpt=describe_request(event))
+
+
+def plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
