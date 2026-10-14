@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from evidence_judge.core.claims import Claim, ClaimKind, ClaimSet
 from evidence_judge.core.evidence import Run, Screenshot
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.report.html_report import MAX_TIMELINE_ROWS, render_html, write_html
@@ -31,20 +30,10 @@ def test_outcome_banner(outcome: Outcome, label: str, css: str) -> None:
 
 def test_escapes_agent_controlled_text() -> None:
     run = make_run().model_copy(update={"task": EVIL})
-    verdict = make_verdict(text=EVIL).model_copy(
+    verdict = make_verdict(text=EVIL, quote=f'"><img src=x onerror=alert(1)>{EVIL}').model_copy(
         update={"summary": EVIL, "task": EVIL, "warnings": [EVIL], "run_id": EVIL}
     )
-    claims = ClaimSet(
-        claims=[
-            Claim(
-                id="c1",
-                text=EVIL,
-                quote=f'"><img src=x onerror=alert(1)>{EVIL}',
-                kind=ClaimKind.ACTION,
-            )
-        ]
-    )
-    html = render_html(verdict, run, claims=claims)
+    html = render_html(verdict, run)
     assert "<script>" not in html
     assert "<img src=x" not in html
     assert "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;" in html
@@ -82,11 +71,9 @@ def test_skips_unsafe_or_missing_images() -> None:
 
 
 def test_claim_cards_and_citations_link_to_timeline() -> None:
-    claims = ClaimSet(
-        claims=[Claim(id="c1", text="t", quote="I placed the order!", kind=ClaimKind.OUTCOME)]
-    )
-    html = render_html(make_verdict(), make_run(), claims=claims)
+    html = render_html(make_verdict(), make_run())
     assert "<blockquote>I placed the order!</blockquote>" in html
+    assert "<blockquote>applied a coupon</blockquote>" in html
     assert '<a class="cite" href="#ev-net-2" title="500 Internal Server Error">net#2</a>' in html
     assert 'id="ev-net-2"' in html
     assert "Contradicted" in html and "Supported" in html and "No evidence" in html

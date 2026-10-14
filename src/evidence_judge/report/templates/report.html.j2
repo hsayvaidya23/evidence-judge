@@ -273,7 +273,7 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border
               <span class="badge">{{ c.status_label }}</span>
             </div>
           </div>
-          {% if c.quote %}<blockquote>{{ c.quote }}</blockquote>{% endif %}
+          <blockquote>{{ c.quote }}</blockquote>
           <p class="reason">{{ c.reason }}</p>
           <div class="claim-foot">
             {% if c.citations %}

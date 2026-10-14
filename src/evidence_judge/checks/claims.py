@@ -82,6 +82,8 @@ def _verdict(
     return ClaimVerdict(
         claim_id=claim.id,
         claim_text=claim.text,
+        quote=claim.quote,
+        kind=claim.kind,
         key=claim.key,
         status=status,
         reason=reason,

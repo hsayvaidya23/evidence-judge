@@ -22,6 +22,7 @@ def test_verdict_output_sections() -> None:
     assert "FAIL" in out and "score 42/100" in out
     assert "The order request returned 500" in out
     assert "contradicted" in out and "net#2" in out and "[key]" in out
+    assert '"I placed the order!"' in out
     assert "x order_submitted" in out and "? price" in out
     assert "no_account" not in out
     assert "success 0%" in out and "state n/a" in out

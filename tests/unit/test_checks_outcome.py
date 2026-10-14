@@ -146,6 +146,8 @@ def verdict(status: Support, *, key: bool = True, confidence: float = 1.0) -> Cl
     return ClaimVerdict(
         claim_id="c",
         claim_text="x happened",
+        quote="x happened",
+        kind=ClaimKind.OUTCOME,
         key=key,
         status=status,
         reason="Because evidence",

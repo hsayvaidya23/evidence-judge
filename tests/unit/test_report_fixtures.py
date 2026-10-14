@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.evidence import (
     ActionEvent,
     Channel,
@@ -27,7 +28,11 @@ PNG_1PX = bytes.fromhex(
 EVIL = "<script>alert('xss')</script>"
 
 
-def make_verdict(outcome: Outcome = Outcome.FAIL, text: str = "Ordered the kettle") -> RunVerdict:
+def make_verdict(
+    outcome: Outcome = Outcome.FAIL,
+    text: str = "Ordered the kettle",
+    quote: str = "I placed the order!",
+) -> RunVerdict:
     return RunVerdict(
         judge_version="0.1.0",
         run_id="run-42",
@@ -39,6 +44,8 @@ def make_verdict(outcome: Outcome = Outcome.FAIL, text: str = "Ordered the kettl
             ClaimVerdict(
                 claim_id="c1",
                 claim_text=text,
+                quote=quote,
+                kind=ClaimKind.OUTCOME,
                 key=True,
                 status=Support.CONTRADICTED,
                 reason="POST /api/orders returned 500",
@@ -49,6 +56,8 @@ def make_verdict(outcome: Outcome = Outcome.FAIL, text: str = "Ordered the kettl
             ClaimVerdict(
                 claim_id="c2",
                 claim_text="Saw the confirmation page",
+                quote="the confirmation page appeared",
+                kind=ClaimKind.STATE,
                 key=False,
                 status=Support.SUPPORTED,
                 reason="Screenshot shows confirmation",
@@ -59,6 +68,8 @@ def make_verdict(outcome: Outcome = Outcome.FAIL, text: str = "Ordered the kettl
             ClaimVerdict(
                 claim_id="c3",
                 claim_text="Applied a coupon",
+                quote="applied a coupon",
+                kind=ClaimKind.ACTION,
                 key=False,
                 status=Support.NO_EVIDENCE,
                 reason="No coupon request captured",

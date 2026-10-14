@@ -9,7 +9,6 @@ from urllib.parse import urlsplit
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
 from evidence_judge import __version__
-from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, Run, Screenshot
 from evidence_judge.core.verdict import (
     Citation,
@@ -62,7 +61,7 @@ class CitationView:
 class ClaimView:
     id: str
     text: str
-    quote: str | None
+    quote: str
     key: bool
     status_label: str
     tone: str
@@ -266,18 +265,17 @@ def _citations(cites: list[Citation], ctx: _Ctx) -> list[CitationView]:
     return out
 
 
-def _context(verdict: RunVerdict, run: Run, claims: ClaimSet | None) -> dict[str, object]:
+def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
     ctx = _Ctx(cited={c.evidence_id for c in _all_citations(verdict)})
     rows, hidden = _timeline(run, ctx)
     thumbs = _thumbnails(run, ctx)
     ctx.anchors = {r.anchor for r in rows} | {t.anchor for t in thumbs}
 
-    quotes = {c.id: c.quote for c in claims.claims} if claims else {}
     claim_views = [
         ClaimView(
             id=cv.claim_id,
             text=cv.claim_text,
-            quote=quotes.get(cv.claim_id),
+            quote=cv.quote,
             key=cv.key,
             status_label=_SUPPORT[cv.status][0],
             tone=_SUPPORT[cv.status][1],
@@ -339,14 +337,12 @@ def _context(verdict: RunVerdict, run: Run, claims: ClaimSet | None) -> dict[str
     }
 
 
-def render_html(verdict: RunVerdict, run: Run, *, claims: ClaimSet | None = None) -> str:
+def render_html(verdict: RunVerdict, run: Run) -> str:
     """Render a self-contained HTML report. All agent-controlled text is HTML-escaped."""
-    return _env.get_template("report.html.j2").render(_context(verdict, run, claims))
+    return _env.get_template("report.html.j2").render(_context(verdict, run))
 
 
-def write_html(
-    verdict: RunVerdict, run: Run, path: Path, *, claims: ClaimSet | None = None
-) -> Path:
+def write_html(verdict: RunVerdict, run: Run, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_html(verdict, run, claims=claims), encoding="utf-8")
+    path.write_text(render_html(verdict, run), encoding="utf-8")
     return path

@@ -299,7 +299,7 @@ def judge(
         if out:
             write_json(verdict, out)
         if html:
-            write_html(verdict, run, html, claims=claim_set)
+            write_html(verdict, run, html)
     except CliError as e:
         raise _fail(e) from None
     except Exception as e:

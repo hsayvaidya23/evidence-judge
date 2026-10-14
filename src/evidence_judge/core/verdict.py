@@ -4,6 +4,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from evidence_judge.core.claims import ClaimKind
+
 SCHEMA_ID = "evidence-judge/run-verdict@1"
 
 
@@ -52,6 +54,8 @@ class ClaimVerdict(BaseModel):
 
     claim_id: str
     claim_text: str
+    quote: str = Field(description="Verbatim span from the agent output the claim came from")
+    kind: ClaimKind
     key: bool
     status: Support
     reason: str
