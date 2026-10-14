@@ -15,7 +15,6 @@ import re
 import zipfile
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Final, cast
 
@@ -38,7 +37,12 @@ from evidence_judge.ingest._json import (
     as_object,
     as_str,
 )
-from evidence_judge.ingest._network import check_max_body_chars, inline_body, network_event
+from evidence_judge.ingest._network import (
+    check_max_body_chars,
+    inline_body,
+    network_event,
+    wall_ms,
+)
 from evidence_judge.ingest.errors import TraceFormatError, UnsupportedTraceVersionError
 
 SUPPORTED_TRACE_VERSIONS: Final = frozenset({7, 8, 9, 10})
@@ -425,7 +429,7 @@ class _TraceReader:
         monotonic = as_float(entry.get("_monotonicTime"))
         if monotonic is not None:
             return monotonic
-        started = _wall_ms(as_str(entry.get("startedDateTime")))
+        started = wall_ms(as_str(entry.get("startedDateTime")))
         if started is not None and self.origin.wall is not None:
             return self.origin.monotonic + (started - self.origin.wall)
         return self.origin.monotonic
@@ -563,12 +567,3 @@ def _final_state(snapshots: list[PageSnapshot], shots: list[Screenshot]) -> Page
         snapshot_id=last.id,
         screenshot_id=shots[-1].id if shots else None,
     )
-
-
-def _wall_ms(timestamp: str | None) -> float | None:
-    if not timestamp:
-        return None
-    try:
-        return datetime.fromisoformat(timestamp).timestamp() * 1000
-    except ValueError:
-        return None

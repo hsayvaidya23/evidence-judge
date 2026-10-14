@@ -6,6 +6,7 @@ import base64
 import binascii
 import codecs
 from collections.abc import Callable
+from datetime import datetime
 from urllib.parse import quote_plus
 
 from evidence_judge.core.evidence import NetworkEvent
@@ -94,6 +95,16 @@ def network_event(
         mime_type=response_mime,
         failed=failed,
     )
+
+
+def wall_ms(timestamp: str | None) -> float | None:
+    """Epoch milliseconds of an ISO 8601 HAR timestamp, or None if absent or invalid."""
+    if not timestamp:
+        return None
+    try:
+        return datetime.fromisoformat(timestamp).timestamp() * 1000
+    except ValueError:
+        return None
 
 
 def headers_dict(raw: object) -> dict[str, str]:
