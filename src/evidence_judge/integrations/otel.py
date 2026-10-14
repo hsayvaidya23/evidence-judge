@@ -1,7 +1,8 @@
 """Emit verdicts as OpenTelemetry GenAI ``gen_ai.evaluation.result`` events.
 
-Needs the ``otel`` extra. Only the OpenTelemetry API is used to emit; the SDK (and an OTLP
-exporter) are needed only by :func:`emit_verdict_from_env`, which the CLI's ``--otel`` uses.
+Needs the ``otel`` extra (API, SDK and the OTLP/HTTP exporter). Only the API is used to emit; the
+SDK and exporter are needed only by :func:`emit_verdict_from_env`, which the CLI's ``--otel``
+uses. OTLP over gRPC additionally needs ``opentelemetry-exporter-otlp-proto-grpc``.
 """
 
 from __future__ import annotations
@@ -224,7 +225,8 @@ def _provider_from_env() -> tuple[TracerProvider | None, str | None]:
     except ImportError:
         return None, (
             "no OpenTelemetry tracer provider is configured and opentelemetry-exporter-otlp is "
-            "not installed; verdict not exported (pip install opentelemetry-exporter-otlp)"
+            "not installed; verdict not exported (pip install 'evidence-judge[otel]', plus "
+            "opentelemetry-exporter-otlp-proto-grpc for gRPC)"
         )
     provider = TracerProvider()
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
@@ -235,8 +237,8 @@ def emit_verdict_from_env(verdict: RunVerdict) -> list[str]:
     """Emit a verdict through the globally configured tracer provider and flush it.
 
     If no provider is configured (no auto-instrumentation), one is built from ``OTEL_*``
-    environment variables with an OTLP exporter when ``opentelemetry-sdk`` and
-    ``opentelemetry-exporter-otlp`` are installed. A W3C ``TRACEPARENT`` environment variable,
+    environment variables with an OTLP exporter (HTTP, or gRPC when
+    ``OTEL_EXPORTER_OTLP_PROTOCOL=grpc`` and its exporter is installed). A W3C ``TRACEPARENT`` environment variable,
     when set, names the judged span. Returns warnings for the caller to show.
     """
     trace = _trace_api()
