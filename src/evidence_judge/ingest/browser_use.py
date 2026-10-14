@@ -10,6 +10,8 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -43,21 +45,37 @@ _REASONING_FIELDS: Final = (
     ("next_goal", "Next goal"),
 )
 _SYNTHETIC_STEP_MS = 1000.0
+_IMAGE_KINDS: Final = "a PNG, JPEG, WebP or GIF image"
+
+MAX_SCREENSHOT_BYTES: Final = 10 * 1024 * 1024
+"""Default cap on one screenshot; larger ones are skipped with a warning."""
 
 
-def load_browser_use_history(path: str | Path, *, run_id: str | None = None) -> Run:
+def load_browser_use_history(
+    path: str | Path,
+    *,
+    run_id: str | None = None,
+    screenshot_root: str | Path | None = None,
+    max_screenshot_bytes: int = MAX_SCREENSHOT_BYTES,
+) -> Run:
     """Parse a browser-use history file.
 
     Only actions that produced an ActionResult are recorded: browser-use skips the rest of a
     step's actions once the page changes. Screenshots are loaded from ``state.screenshot_path``
     (relative paths resolve against the history file) or an inline base64 ``state.screenshot``.
 
+    The history is untrusted, so a screenshot path is only read when it resolves (symlinks
+    included) inside ``screenshot_root`` (default: the history file's directory), is a regular
+    file of at most ``max_screenshot_bytes`` and starts with PNG, JPEG, WebP or GIF magic bytes.
+    Anything else is skipped with a warning in ``metadata["warnings"]``.
+
     Raises:
         BrowserUseFormatError: the file is not JSON or has no ``history`` list.
     """
     history_path = Path(path)
     steps = _read_history(history_path)
-    builder = _HistoryBuilder(history_path.parent)
+    root = Path(screenshot_root) if screenshot_root is not None else history_path.parent
+    builder = _HistoryBuilder(root.resolve(), max_screenshot_bytes)
     origin = _step_start(steps[0]) if steps else None
     for number, step in enumerate(steps, 1):
         start = _step_start(step)
@@ -91,6 +109,7 @@ def _step_start(step: JsonObject) -> float | None:
 @dataclass(slots=True)
 class _HistoryBuilder:
     root: Path
+    max_screenshot_bytes: int
     synthetic_time: bool = False
     actions: list[ActionEvent] = field(default_factory=list[ActionEvent])
     reasoning: list[str] = field(default_factory=list[str])
@@ -170,7 +189,11 @@ class _HistoryBuilder:
         image = self._screenshot_bytes(state)
         if image is None:
             return None
-        mime, suffix = _image_type(image)
+        kind = _image_type(image)
+        if kind is None:
+            self.warnings.append(f"step {number}: ignored a screenshot that is not {_IMAGE_KINDS}")
+            return None
+        mime, suffix = kind
         resource = f"browser-use/step-{number}{suffix}"
         self.blobs[resource] = image
         shot = Screenshot(
@@ -182,20 +205,53 @@ class _HistoryBuilder:
     def _screenshot_bytes(self, state: JsonObject) -> bytes | None:
         inline = as_str(state.get("screenshot"))
         if inline:
-            try:
-                return base64.b64decode(inline, validate=True)
-            except (binascii.Error, ValueError):
-                self.warnings.append("ignored an inline screenshot that is not base64")
-                return None
+            return self._inline_screenshot(inline)
         name = as_str(state.get("screenshot_path"))
         if not name:
             return None
-        file = Path(name) if Path(name).is_absolute() else self.root / name
+        return self._file_screenshot(name)
+
+    def _inline_screenshot(self, encoded: str) -> bytes | None:
+        if len(encoded) > (self.max_screenshot_bytes + 2) // 3 * 4:
+            self.warnings.append(self._too_large("an inline screenshot"))
+            return None
         try:
-            return file.read_bytes()
-        except OSError:
+            return base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            self.warnings.append("ignored an inline screenshot that is not base64")
+            return None
+
+    def _file_screenshot(self, name: str) -> bytes | None:
+        try:
+            file = (self.root / name).resolve()
+        except (OSError, RuntimeError, ValueError):
+            self.warnings.append(f"ignored an unresolvable screenshot path: {name}")
+            return None
+        if not file.is_relative_to(self.root):
+            self.warnings.append(f"ignored a screenshot path outside the screenshot root: {name}")
+            return None
+        if not file.exists():
             self.warnings.append(f"screenshot not found: {name}")
             return None
+        if not file.is_file():
+            self.warnings.append(f"ignored a screenshot that is not a regular file: {name}")
+            return None
+        try:
+            with file.open("rb") as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    self.warnings.append(f"ignored a screenshot that is not a regular file: {name}")
+                    return None
+                data = handle.read(self.max_screenshot_bytes + 1)
+        except OSError:
+            self.warnings.append(f"screenshot not readable: {name}")
+            return None
+        if len(data) > self.max_screenshot_bytes:
+            self.warnings.append(self._too_large(f"screenshot {name}"))
+            return None
+        return data
+
+    def _too_large(self, what: str) -> str:
+        return f"ignored {what} larger than {self.max_screenshot_bytes} bytes"
 
     def build(self, run_id: str) -> Run:
         captured = {Channel.ACTIONS}
@@ -252,11 +308,13 @@ def _selector(element: JsonObject, params: JsonObject) -> str | None:
     return f"index={index}" if isinstance(index, int) and not isinstance(index, bool) else None
 
 
-def _image_type(image: bytes) -> tuple[str, str]:
-    if image.startswith(b"\x89PNG"):
+def _image_type(image: bytes) -> tuple[str, str] | None:
+    if image.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png", ".png"
-    if image.startswith(b"\xff\xd8"):
+    if image.startswith(b"\xff\xd8\xff"):
         return "image/jpeg", ".jpg"
-    if image[8:12] == b"WEBP":
+    if image.startswith(b"RIFF") and image[8:12] == b"WEBP":
         return "image/webp", ".webp"
-    return "application/octet-stream", ".bin"
+    if image.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif", ".gif"
+    return None
