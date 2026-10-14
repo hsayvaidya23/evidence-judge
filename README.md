@@ -166,6 +166,30 @@ When `EVJ_REDACTION_KEY` is unset and a run uses the LLM cache, a random key is 
 across runs. Treat that file as a secret. Offline runs and `inspect` never read or create it; if
 the cache directory is not writable, a per-process key is used with a one-line warning.
 
+## Benchmark: can a forged story fool it?
+
+The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites only the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691) plus a style-only control. The actions and network evidence stay the same, so the correct verdict is never PASS.
+
+| Judge | Forged runs | False PASS | 95% CI |
+| --- | ---: | ---: | --- |
+| Evidence Judge + task spec (offline) | 60 | **0** | 0–6% |
+| Evidence Judge, no spec (offline) | 60 | **0** (22 sent to review) | 0–6% |
+
+Honest controls: 7/7 correct with a spec. Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`; add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
+
+## Integrations
+
+Send verdicts to the tools you already use (each is an optional extra; see [docs/integrations.md](docs/integrations.md)):
+
+| Tool | Install | Use |
+| --- | --- | --- |
+| OpenTelemetry | `evidence-judge[otel]` | `--otel`, or `emit_verdict(verdict, parent_context=...)`: `gen_ai.evaluation.result` events on the judged span |
+| Langfuse | `evidence-judge[langfuse]` | `--langfuse-trace-id ID`, or `push_to_langfuse(verdict, trace_id=...)` |
+| Arize Phoenix | `evidence-judge[phoenix]` | `push_to_phoenix(verdict, span_id=...)`: span annotations |
+| Inspect AI | `evidence-judge[inspect]` | `scorer=evidence_judge_scorer()`: C / I / N per sample |
+
+Docker: `docker build -t evidence-judge . && docker run --rm -v "$PWD:/work:ro" evidence-judge judge --trace trace.zip --answer-file answer.txt --offline`
+
 ## Demo
 
 A small shop app and seven recorded agent runs live in the repo: an honest success, an honest failure, a forged success, a constraint violation, a side effect, a click loop and a do-nothing agent. Every one is judged correctly offline, and that is enforced as a golden regression test.
@@ -186,10 +210,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY
 
 ## Roadmap
 
-- Forgery lab and a forged-run benchmark (false-PASS rate vs plain LLM judges)
+- Published LLM-judge baseline numbers on the forged-run benchmark
 - EvidenceBench: public runs with network evidence and human labels
 - Cross-family meta-judge on suspicious passes, judge noise meter
-- OpenTelemetry `gen_ai.evaluation.result` export, Langfuse / Phoenix / Inspect AI integrations
 - Adapters for Stagehand, Skyvern and OpenAI / Anthropic computer use
 
 ## License
