@@ -8,8 +8,9 @@ Rules, first match wins:
    weakly, e.g. by point-in-time snapshots); if the side-effects dimension has findings
    (successful mutations the task spec does not explain, or every mutation when there is no
    spec); if a key claim has NO_EVIDENCE; if any spec result is unknown (including a failed
-   attempt at a forbidden action); if claim coverage is below the review threshold; or if nothing
-   (no decided key claim, no expectation) establishes success.
+   attempt at a forbidden action); if LLM claim extraction failed and heuristics were used; if
+   claim coverage is below the review threshold; or if nothing (no decided key claim, no
+   expectation) establishes success.
 4. PASS otherwise.
 
 The score is a weighted mean of the assessable dimension scores plus the share of decided claims
@@ -135,6 +136,7 @@ def _review(
     dimensions: Mapping[Dimension, DimensionScore],
     coverage: float | None,
     review_threshold: float,
+    extraction_fallback: bool,
 ) -> str | None:
     if (summary := _contradicted(claims) or _side_effects(dimensions)) is not None:
         return summary
@@ -153,6 +155,11 @@ def _review(
         return (
             f"NEEDS_REVIEW: {first.kind} '{first.expectation_id}' {status}: "
             f"{_clause(first.reason)}."
+        )
+    if extraction_fallback:
+        return (
+            "NEEDS_REVIEW: LLM claim extraction failed and the heuristic fallback was used, so the "
+            "agent's claims may be incomplete."
         )
     if coverage is not None and coverage < review_threshold:
         return (
@@ -187,13 +194,21 @@ def decide(
     *,
     coverage: float | None,
     review_threshold: float,
+    extraction_fallback: bool = False,
 ) -> tuple[Outcome, float, str]:
     key_claims = [v for v in claim_verdicts if v.key]
     value = score(claim_verdicts, dimensions)
     if (summary := _failure(claim_verdicts, expectations)) is not None:
         return Outcome.FAIL, min(value, FAIL_SCORE_CAP), summary
     if (
-        summary := _review(claim_verdicts, expectations, dimensions, coverage, review_threshold)
+        summary := _review(
+            claim_verdicts,
+            expectations,
+            dimensions,
+            coverage,
+            review_threshold,
+            extraction_fallback,
+        )
     ) is not None:
         return Outcome.NEEDS_REVIEW, value, summary
     return Outcome.PASS, value, _pass(key_claims, expectations)

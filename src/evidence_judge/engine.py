@@ -42,6 +42,7 @@ class _Extraction:
     claims: ClaimSet
     usage: Usage = field(default_factory=Usage)
     warnings: list[str] = field(default_factory=list[str])
+    fallback: bool = False
 
 
 class Judge:
@@ -83,6 +84,7 @@ class Judge:
             dimensions,
             coverage=claim_coverage,
             review_threshold=self._settings.review_coverage_threshold,
+            extraction_fallback=extraction.fallback,
         )
         return RunVerdict(
             judge_version=__version__,
@@ -121,6 +123,7 @@ class Judge:
                 claims=claims,
                 usage=usage,
                 warnings=[f"LLM claim extraction failed ({exc}); used heuristic extraction"],
+                fallback=True,
             )
         dropped = _HALLUCINATED.search(claims.coverage_note or "")
         warnings = (

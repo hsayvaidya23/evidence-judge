@@ -222,6 +222,18 @@ async def test_llm_extraction_failure_falls_back_to_heuristics(settings: Setting
     assert any("heuristic" in w for w in verdict.warnings)
 
 
+async def test_heuristic_fallback_never_passes(settings: Settings) -> None:
+    llm = FakeLLM(handler=lambda _req, _schema: (_ for _ in ()).throw(LLMError("boom")))
+    verdict = await Judge(settings, llm).judge(
+        _with_answer(honest_run(), HONEST_ANSWER), JudgeOptions(spec=shop_spec())
+    )
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert verdict.summary == (
+        "NEEDS_REVIEW: LLM claim extraction failed and the heuristic fallback was used, so the "
+        "agent's claims may be incomplete."
+    )
+
+
 async def test_offline_never_calls_llm(settings: Settings) -> None:
     llm = FakeLLM()
     await Judge(settings, llm).judge(
