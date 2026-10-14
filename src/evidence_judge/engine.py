@@ -12,7 +12,7 @@ from evidence_judge import __version__
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.dimensions import assess_dimensions
-from evidence_judge.checks.expectations import evaluate_spec
+from evidence_judge.checks.expectations import evaluate_spec, spec_scope
 from evidence_judge.checks.outcome import decide
 from evidence_judge.checks.registry import CheckerRegistry, default_registry
 from evidence_judge.config import Settings
@@ -102,9 +102,10 @@ class Judge:
         ctx = CheckContext(index=EvidenceIndex(run), llm=llm)
         ctx.usage.add(extraction.usage)
 
+        proving = ctx.scoped(spec_scope(opts.spec, ctx.index))
         claim_verdicts = list(
             await asyncio.gather(
-                *(judge_claim(c, ctx, self._registry) for c in extraction.claims.claims)
+                *(judge_claim(c, proving, self._registry) for c in extraction.claims.claims)
             )
         )
         expectations = await evaluate_spec(opts.spec, ctx, self._registry) if opts.spec else []

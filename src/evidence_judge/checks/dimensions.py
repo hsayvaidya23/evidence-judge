@@ -12,8 +12,15 @@ from typing import Final
 
 from evidence_judge.checks._common import describe_request, took_effect
 from evidence_judge.checks.action import canonical_action, describe_action
+from evidence_judge.checks.base import EvidenceScope
 from evidence_judge.checks.errors import InvalidPredicateError
-from evidence_judge.checks.expectations import CONSTRAINT, EXPECT, FORBID, matches_any
+from evidence_judge.checks.expectations import (
+    CONSTRAINT,
+    EXPECT,
+    FORBID,
+    matches_any,
+    spec_scope,
+)
 from evidence_judge.checks.matching import host_allowed, normalize, url_host
 from evidence_judge.checks.page_text import check_page_text
 from evidence_judge.checks.request import RequestMatcher
@@ -125,13 +132,14 @@ class _Budget:
         )
 
 
-def _budgets(spec: TaskSpec | None) -> list[_Budget]:
+def _budgets(spec: TaskSpec | None, index: EvidenceIndex) -> list[_Budget]:
     if spec is None:
         return []
+    scope = spec_scope(spec, index)
     budgets = [
         _Budget(
             f"expectation {e.id!r}",
-            [RequestMatcher(p) for p in e.request_predicates()],
+            [RequestMatcher(p, scope) for p in e.request_predicates()],
             e.max_count or 1,
         )
         for e in spec.expect
@@ -254,7 +262,7 @@ def assess_side_effects(
     if not index.has(Channel.NETWORK):
         return _NOT_ASSESSABLE
     reported = _reported_ids(claims)
-    budgets = _budgets(spec)
+    budgets = _budgets(spec, index)
     allowed = spec.allowed_hosts if spec else []
     first_party = _first_party(index, spec)
     findings: list[str] = []
@@ -275,12 +283,14 @@ def assess_side_effects(
     return DimensionScore(score=_penalised(len(findings), SIDE_EFFECT_PENALTY), findings=findings)
 
 
-def _final_state_check(pred: Predicate, index: EvidenceIndex) -> PredicateResult | None:
+def _final_state_check(
+    pred: Predicate, index: EvidenceIndex, scope: EvidenceScope
+) -> PredicateResult | None:
     try:
         if isinstance(pred, PageTextPredicate) and pred.scope is Scope.FINAL:
-            return check_page_text(pred, index)
+            return check_page_text(pred, index, scope)
         if isinstance(pred, UrlPredicate) and pred.scope is Scope.FINAL:
-            return check_url(pred, index)
+            return check_url(pred, index, scope)
     except InvalidPredicateError:
         return None
     return None
@@ -291,7 +301,10 @@ def assess_state(index: EvidenceIndex, spec: TaskSpec | None) -> DimensionScore:
         return DimensionScore(score=None, findings=["final page state was not captured"])
     if spec is None:
         return _NOT_ASSESSABLE
-    results = [r for p in _spec_predicates(spec) if (r := _final_state_check(p, index)) is not None]
+    scope = spec_scope(spec, index)
+    results = [
+        r for p in _spec_predicates(spec) if (r := _final_state_check(p, index, scope)) is not None
+    ]
     decided = [r for r in results if r.status is not Support.NO_EVIDENCE]
     findings = [r.reason for r in decided if r.status is Support.CONTRADICTED]
     return DimensionScore(

@@ -27,7 +27,7 @@ from evidence_judge.checks._common import (
     plural,
     took_effect,
 )
-from evidence_judge.checks.base import CheckContext
+from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.errors import RegexTimeoutError
 from evidence_judge.checks.matching import as_text
 from evidence_judge.checks.registry import CheckerRegistry
@@ -136,20 +136,22 @@ def matches_any(event: NetworkEvent, matchers: Sequence[RequestMatcher]) -> bool
 
 
 def matching_mutations(
-    predicates: Sequence[RequestPredicate], index: EvidenceIndex
+    predicates: Sequence[RequestPredicate],
+    index: EvidenceIndex,
+    scope: EvidenceScope | None = None,
 ) -> list[NetworkEvent]:
     """Mutations that took effect and match one of `predicates`, in recorded order."""
-    matchers = [RequestMatcher(p) for p in predicates]
+    matchers = [RequestMatcher(p, scope) for p in predicates]
     if not matchers:
         return []
     return [e for e in index.mutations() if took_effect(e) and matches_any(e, matchers)]
 
 
-def _over_count(expectation: Expectation, index: EvidenceIndex) -> ExpectationResult | None:
+def _over_count(expectation: Expectation, ctx: CheckContext) -> ExpectationResult | None:
     limit = expectation.max_count
     if limit is None:
         return None
-    hits = matching_mutations(expectation.request_predicates(), index)
+    hits = matching_mutations(expectation.request_predicates(), ctx.index, ctx.scope)
     if len(hits) <= limit:
         return None
     ids = ", ".join(e.id for e in hits[:MAX_CITATIONS])
@@ -169,7 +171,7 @@ def _over_count(expectation: Expectation, index: EvidenceIndex) -> ExpectationRe
 async def evaluate_expectation(
     expectation: Expectation, kind: str, ctx: CheckContext, registry: CheckerRegistry
 ) -> ExpectationResult:
-    if kind == EXPECT and (exceeded := _over_count(expectation, ctx.index)) is not None:
+    if kind == EXPECT and (exceeded := _over_count(expectation, ctx)) is not None:
         return exceeded
     happened, deciders = await _happened(expectation, ctx, registry)
     met = happened
@@ -189,6 +191,11 @@ async def evaluate_expectation(
         reason=reason,
         citations=merge_citations(deciders),
     )
+
+
+def spec_scope(spec: TaskSpec | None, index: EvidenceIndex) -> EvidenceScope:
+    """The hosts that may prove claims and `expect` entries for a run graded with `spec`."""
+    return EvidenceScope.of(index, spec.allowed_hosts if spec else [])
 
 
 def constraint_id(constraint: ValuePredicate) -> str:
@@ -211,7 +218,11 @@ async def evaluate_constraint(
 async def evaluate_spec(
     spec: TaskSpec, ctx: CheckContext, registry: CheckerRegistry
 ) -> list[ExpectationResult]:
-    results = [await evaluate_expectation(e, EXPECT, ctx, registry) for e in spec.expect]
-    results += [await evaluate_expectation(f, FORBID, ctx, registry) for f in spec.forbid]
-    results += [await evaluate_constraint(c, ctx, registry) for c in spec.constraints]
+    """`expect` entries must be proven on the site (`spec_scope`); `forbid` and constraints see
+    every host, so a forbidden or violating request anywhere still counts."""
+    proving = ctx.scoped(spec_scope(spec, ctx.index))
+    everything = ctx.scoped(None)
+    results = [await evaluate_expectation(e, EXPECT, proving, registry) for e in spec.expect]
+    results += [await evaluate_expectation(f, FORBID, everything, registry) for f in spec.forbid]
+    results += [await evaluate_constraint(c, everything, registry) for c in spec.constraints]
     return results

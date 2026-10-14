@@ -91,6 +91,14 @@ score is capped by outcome so that it never reads better than the verdict:
 So a score of 0.70 or more always means a pass, and a run waiting for review never shows 100/100
 (`checks/outcome.py`, `FAIL_SCORE_CAP`, `REVIEW_SCORE_CAP`).
 
+## Which hosts can prove something
+
+Claims and `expect` entries are checked through an `EvidenceScope` (`checks/base.py`): with the
+spec's `allowed_hosts`, only those hosts count; without them, mutations must go to the run's
+primary host (or a subdomain), so a third-party POST cannot satisfy "order placed". Page states
+on `data:`, `about:`, `blob:` and similar URLs never prove anything. `forbid` entries and
+constraints see every host. See [task specs](task-specs.md#which-hosts-can-prove-something).
+
 ## Side effects and telemetry
 
 The side-effects dimension lists every successful mutation (POST, PUT, PATCH, DELETE with no

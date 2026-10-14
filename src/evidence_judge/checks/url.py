@@ -10,7 +10,7 @@ from evidence_judge.checks._common import (
     result,
     state_id,
 )
-from evidence_judge.checks.base import CheckContext
+from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.matching import (
     compile_regex,
@@ -19,6 +19,7 @@ from evidence_judge.checks.matching import (
     url_path,
     url_query_contains,
 )
+from evidence_judge.checks.page_text import off_site
 from evidence_judge.core.evidence import Channel, NetworkEvent
 from evidence_judge.core.index import EvidenceIndex, is_document_navigation
 from evidence_judge.core.predicates import Predicate, Scope, UrlPredicate
@@ -59,14 +60,18 @@ class UrlMatcher:
         return self._regex is None or regex_search(self._regex, url) is not None
 
 
-def check_url(predicate: UrlPredicate, index: EvidenceIndex) -> PredicateResult:
+def check_url(
+    predicate: UrlPredicate, index: EvidenceIndex, scope: EvidenceScope | None = None
+) -> PredicateResult:
     matcher = UrlMatcher(predicate)
     if predicate.scope is Scope.FINAL:
-        return _check_final(matcher, index)
-    return _check_any(matcher, index)
+        return _check_final(matcher, index, scope)
+    return _check_any(matcher, index, scope)
 
 
-def _check_final(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
+def _check_final(
+    matcher: UrlMatcher, index: EvidenceIndex, scope: EvidenceScope | None
+) -> PredicateResult:
     state = index.final
     if state is None:
         return result(
@@ -75,6 +80,13 @@ def _check_final(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
             KIND,
         )
     cite = [Citation(evidence_id=FINAL_ID, excerpt=state.url)]
+    if (why := off_site(state.url, scope)) is not None:
+        return result(
+            Support.NO_EVIDENCE,
+            f"The final URL cannot be shown to {matcher.describe()}: {why}",
+            KIND,
+            cite,
+        )
     if matcher.matches(state.url):
         return result(
             Support.SUPPORTED,
@@ -97,9 +109,13 @@ def _visited(index: EvidenceIndex, navigations: list[NetworkEvent]) -> list[tupl
     return [*actions, *loads, *states]
 
 
-def _check_any(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
+def _check_any(
+    matcher: UrlMatcher, index: EvidenceIndex, scope: EvidenceScope | None
+) -> PredicateResult:
     navigations = [n for n in index.requests("GET") if is_document_navigation(n)]
-    visited = _visited(index, navigations)
+    visited = [
+        (eid, url) for eid, url in _visited(index, navigations) if off_site(url, scope) is None
+    ]
     hits = [(eid, url) for eid, url in visited if matcher.matches(url)]
     if hits:
         cited = list(reversed(hits[-MAX_CITATIONS:]))
@@ -134,4 +150,4 @@ class UrlChecker:
     deterministic = True
 
     async def evaluate(self, predicate: Predicate, ctx: CheckContext) -> PredicateResult:
-        return check_url(require(predicate, UrlPredicate, self.kind), ctx.index)
+        return check_url(require(predicate, UrlPredicate, self.kind), ctx.index, ctx.scope)
