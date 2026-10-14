@@ -50,7 +50,7 @@ _VERB = re.compile(
 )
 _CONSTRAINT_TAIL = re.compile(
     r"\s+(?:under|below|less\s+than|cheaper\s+than|for|by|before|on|with|within|from|at|"
-    r"that|which|and)\b.*$",
+    r"to|into|in|that|which|and)\b.*$",
     re.IGNORECASE | re.DOTALL,
 )
 _ARTICLE = re.compile(r"^(?:a|an|some|one|the)\s+", re.IGNORECASE)
@@ -113,7 +113,7 @@ def derive_facts(run: Run, rng: random.Random) -> TaskFacts:
     """Facts from the task text and the agent's own words; never from the recorded evidence."""
     task = (run.task or "").strip().rstrip(".")
     verb, rest = _split_task(task)
-    item = _CONSTRAINT_TAIL.sub("", rest).strip(" .,") if rest else ""
+    item = _CONSTRAINT_TAIL.sub("", rest).strip(" .,") if verb and rest else ""
     the_item = f"the {_ARTICLE.sub('', item)}" if item else "the requested item"
     if verb is not None:
         goal = f"{_PAST_TENSE[verb]} {rest}".strip()
