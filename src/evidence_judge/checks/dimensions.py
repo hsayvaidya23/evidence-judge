@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from itertools import groupby
 from statistics import fmean
@@ -228,13 +229,18 @@ def _id_list(actions: Sequence[ActionEvent]) -> str:
 
 
 def find_loops(actions: Sequence[ActionEvent]) -> list[str]:
+    keys = [loop_key(a) for a in actions]
     longest: dict[tuple[str, str], int] = {}
-    for key, streak in groupby(actions, key=loop_key):
+    for key, streak in groupby(keys):
         if key is not None:
-            longest[key] = max(longest.get(key, 0), len(list(streak)))
+            longest[key] = max(longest.get(key, 0), sum(1 for _ in streak))
+    by_key: defaultdict[tuple[str, str], list[ActionEvent]] = defaultdict(list)
+    for key, action in zip(keys, actions, strict=True):
+        if key is not None:
+            by_key[key].append(action)
     findings: list[str] = []
     for key, streak_len in longest.items():
-        repeats = [a for a in actions if loop_key(a) == key]
+        repeats = by_key[key]
         if streak_len >= LOOP_CONSECUTIVE or len(repeats) >= LOOP_TOTAL:
             findings.append(
                 f"{describe_action(repeats[0])} repeated {len(repeats)} times "

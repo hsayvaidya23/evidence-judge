@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from evidence_judge.checks.claims import judge_claim
@@ -171,6 +173,14 @@ def test_loop_ids_are_truncated() -> None:
     actions = [act(i, "click", "#next") for i in range(1, 11)]
     (finding,) = find_loops(actions)
     assert finding.endswith("act#1, act#2, act#3, act#4, act#5, …, act#10")
+
+
+def test_loop_detection_is_linear() -> None:
+    actions = [act(i, "click", f"#b{i % 2500}") for i in range(5000)]
+    start = time.perf_counter()
+    findings = find_loops(actions)
+    assert time.perf_counter() - start < 0.5
+    assert findings == []
 
 
 def test_actions_without_target_never_loop() -> None:
