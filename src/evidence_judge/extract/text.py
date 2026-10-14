@@ -3,22 +3,13 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from typing import Literal
 
+from evidence_judge.textnorm import PUNCT_MAP, normalize
+
 Origin = Literal["answer", "reasoning"]
 
-_SINGLE_QUOTES = (0x2018, 0x2019, 0x201A, 0x201B)
-_DOUBLE_QUOTES = (0x201C, 0x201D, 0x201E)
-_DASHES = (0x2013, 0x2014, 0x2212)
-_PUNCT_MAP: dict[int, str] = {
-    **dict.fromkeys(_SINGLE_QUOTES, "'"),
-    **dict.fromkeys(_DOUBLE_QUOTES, '"'),
-    **dict.fromkeys(_DASHES, "-"),
-    0x00A0: " ",
-}
-_WS = re.compile(r"\s+")
 _SENTENCE_BOUNDARY = re.compile(
     r"(?<!\bNo\.)(?<!\bno\.)(?<!\bMr\.)(?<!\bMs\.)(?<!\bDr\.)(?<!\be\.g\.)(?<!\bi\.e\.)"
     r"(?<=[.!?])[\"')\]]*\s+|\n\s*\n|\n(?=\s*(?:[-*•]|\d+[.)])\s)"
@@ -60,11 +51,6 @@ class Sentence:
     origin: Origin
 
 
-def normalize(text: str) -> str:
-    folded = unicodedata.normalize("NFKC", text).translate(_PUNCT_MAP).casefold()
-    return _WS.sub(" ", folded).strip()
-
-
 def quote_in(quote: str, source: str) -> bool:
     needle = normalize(quote).strip(" .\"'")
     return bool(needle) and needle in normalize(source)
@@ -98,7 +84,7 @@ def is_intention(prefix: str) -> bool:
 
 def asserted(sentence: str, start: int) -> bool:
     """True when a verb at `start` is asserted as done, not negated or merely planned."""
-    prefix = clause_prefix(sentence, start).translate(_PUNCT_MAP)
+    prefix = clause_prefix(sentence, start).translate(PUNCT_MAP)
     return not is_negated(prefix) and not is_intention(prefix)
 
 

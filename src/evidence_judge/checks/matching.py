@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import math
 import re
-import unicodedata
 from enum import Enum
 from typing import Final, Literal
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 from evidence_judge.checks.errors import InvalidPredicateError
+from evidence_judge.textnorm import normalize
 
 Op = Literal["==", "!=", "<", "<=", ">", ">=", "contains"]
 
@@ -21,7 +21,6 @@ class _Missing(Enum):
 
 MISSING: Final = _Missing.MISSING
 
-_WHITESPACE = re.compile(r"\s+")
 _NUMBER = re.compile(
     r"""
     ^(?:[a-z]{3}\s*)?
@@ -39,11 +38,6 @@ _SUFFIX_SCALE: Final = {"k": 1e3, "m": 1e6, "b": 1e9}
 _STATUS_CLASS = re.compile(r"^([1-5])xx$")
 _STATUS_EXACT = re.compile(r"^[1-5]\d\d$")
 _INDEX_BRACKETS = re.compile(r"\[(-?\d+)\]")
-
-
-def normalize(text: str) -> str:
-    """Unicode-compatibility fold, case-fold and collapse whitespace."""
-    return _WHITESPACE.sub(" ", unicodedata.normalize("NFKC", text).casefold()).strip()
 
 
 def contains(haystack: str | None, needle: str) -> bool:
