@@ -27,7 +27,8 @@ async def test_live_structured_output_round_trip():
         LLMRequest(
             system="You answer geography questions.",
             prompt="What is the capital of France?",
-            max_output_tokens=1024,
+            max_output_tokens=2048,
+            effort="low",
         ),
         Capital,
     )
