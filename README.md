@@ -58,7 +58,7 @@ See [docs/architecture.md](docs/architecture.md).
 uv tool install "evidence-judge[anthropic]"   # or: pip install "evidence-judge[anthropic]"
 ```
 
-Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and screenshot checks; without it (or with `--offline`) everything runs deterministically.
+Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically.
 
 ## Quick start
 
@@ -71,7 +71,9 @@ context.tracing.start(screenshots=True, snapshots=True)
 context.tracing.stop(path="trace.zip")
 ```
 
-2. Describe what success must look like (optional but recommended):
+2. Describe what success must look like. Optional for read-only tasks, but **required for any
+   task that changes state**: without a spec every state-changing request counts as an
+   unexplained side effect, so the run can at best get `NEEDS_REVIEW`, never `PASS`.
 
 ```yaml
 # spec.yaml
@@ -103,9 +105,15 @@ evidence-judge judge --trace trace.zip --har run.har \
 
 Exit codes: `0` pass, `1` fail, `2` needs review, `3` bad input, `4` internal/LLM error, so it drops straight into CI.
 
-Other commands: `evidence-judge inspect trace.zip` (what was captured), `evidence-judge schema` (verdict JSON Schema), `evidence-judge version`.
+If loading fails because the HAR does not look like the trace's run, check you passed the right
+files; `--allow-mismatch` merges them anyway. browser-use screenshots are only read from the
+history's directory unless you widen it with `--screenshot-root DIR`.
 
-Full spec reference: [docs/task-specs.md](docs/task-specs.md).
+Other commands: `evidence-judge inspect --trace trace.zip --har run.har` (what was captured),
+`evidence-judge schema` (verdict JSON Schema), `evidence-judge version`.
+
+Full references: [docs/cli.md](docs/cli.md) (every command and option) and
+[docs/task-specs.md](docs/task-specs.md).
 
 ## Inputs
 
@@ -113,7 +121,7 @@ Full spec reference: [docs/task-specs.md](docs/task-specs.md).
 | --- | --- | --- |
 | Playwright trace | `--trace trace.zip` | Format v7–v10. Actions, network, DOM snapshots, screenshots, console |
 | HAR 1.2 | `--har run.har` | Fills in request/response bodies the trace missed |
-| browser-use | `--browser-use history.json` | `AgentHistoryList` JSON |
+| browser-use | `--browser-use history.json` | `AgentHistoryList` JSON, or a run directory holding `history.json` |
 | Agent output | `--answer` / `--answer-file`, `--reasoning-file` | What the agent *claims* |
 | Pre-extracted claims | `--claims claims.json` | Skip extraction entirely |
 
@@ -140,12 +148,23 @@ Environment variables (or `.env`, see [.env.example](.env.example)):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | – | Enables LLM extraction and screenshot checks |
+| `ANTHROPIC_API_KEY` | – | Enables LLM claim extraction (and screenshot checks, if allowed) |
 | `EVJ_MODEL_FAST` / `EVJ_MODEL_STRONG` | `claude-haiku-5-5` / `claude-sonnet-5-5` | Models per tier |
 | `EVJ_MAX_COST_USD` | `0.25` | Hard LLM budget per run |
+| `EVJ_REQUEST_TIMEOUT_S` | `60.0` | Timeout of one LLM request, in seconds |
+| `EVJ_MAX_RETRIES` | `3` | Retries for 408/409/429/5xx and connection errors, with backoff |
+| `EVJ_MAX_CONCURRENT_LLM_CALLS` | `4` | LLM requests in flight at once (cache hits are not limited) |
+| `EVJ_CACHE_DIR` | per-user cache dir | LLM response cache **and the redaction key file** `redaction.key` (see below). Default: `$XDG_CACHE_HOME/evidence-judge`, `~/Library/Caches/evidence-judge` (macOS), `%LOCALAPPDATA%\evidence-judge` (Windows) or `~/.cache/evidence-judge` |
 | `EVJ_REDACT` | `true` | Redact secrets and PII before anything else sees the run |
-| `EVJ_REDACTION_KEY` | random | HMAC key so redacted values still match across evidence |
-| `EVJ_CACHE_DIR` | `.evidence-judge/cache` | LLM response cache |
+| `EVJ_REDACTION_KEY` | key file, else per process | HMAC key so redacted values still match across evidence |
+| `EVJ_SCREENSHOTS_TO_LLM` | `false` | Send screenshots to the vision model. Off by default because pixels are never redacted; `judge` prints a notice when it is on |
+| `EVJ_MAX_BODY_CHARS` | `20000` | Characters of each request/response body kept as evidence |
+| `EVJ_REVIEW_COVERAGE_THRESHOLD` | `0.6` | Below this share of the answer turned into checkable claims, the verdict is `NEEDS_REVIEW` |
+
+When `EVJ_REDACTION_KEY` is unset and a run uses the LLM cache, a random key is created at
+`<EVJ_CACHE_DIR>/redaction.key` (mode 0600) so redacted prompts, and so cache keys, stay stable
+across runs. Treat that file as a secret. Offline runs and `inspect` never read or create it; if
+the cache directory is not writable, a per-process key is used with a one-line warning.
 
 ## Demo
 
