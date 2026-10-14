@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from evidence_judge.checks._common import CONFIDENT_CONTRADICTION, WEAK_CONTRADICTION_CONFIDENCE
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.url import UrlChecker
 from evidence_judge.core.evidence import Channel, NetworkEvent
@@ -108,6 +109,29 @@ async def test_any_url_ignores_api_calls_as_navigations() -> None:
     )
     res = await UrlChecker().evaluate(UrlPredicate(contains="/checkout", scope=Scope.ANY), ctx(run))
     assert res.status is Support.NO_EVIDENCE
+
+
+async def test_any_url_absent_from_snapshots_only_is_a_weak_contradiction() -> None:
+    run = make_run(
+        network=[net(1, "POST", "/api/orders", 201)],
+        snapshots=[snap(2, "/cart", CART_TEXT)],
+        final_state=final("/cart", CART_TEXT),
+    )
+    res = await UrlChecker().evaluate(UrlPredicate(contains="/checkout", scope=Scope.ANY), ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert res.confidence == WEAK_CONTRADICTION_CONFIDENCE < CONFIDENT_CONTRADICTION
+    assert "point-in-time" in res.reason
+
+
+async def test_any_url_absent_with_captured_navigations_stays_confident() -> None:
+    run = make_run(
+        network=[_document(1, "/cart", resource_type="document", mime=None)],
+        snapshots=[snap(2, "/cart", CART_TEXT)],
+        final_state=final("/cart", CART_TEXT),
+    )
+    res = await UrlChecker().evaluate(UrlPredicate(contains="/checkout", scope=Scope.ANY), ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert res.confidence == 1.0
 
 
 async def test_url_predicate_needs_a_criterion() -> None:

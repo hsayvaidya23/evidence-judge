@@ -3,6 +3,7 @@ from __future__ import annotations
 from evidence_judge.checks._common import (
     FINAL_ID,
     MAX_CITATIONS,
+    WEAK_CONTRADICTION_CONFIDENCE,
     plural,
     quoted,
     require,
@@ -109,10 +110,15 @@ def _check_any(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
             KIND,
         )
     distinct = {url for _, url in visited}
+    reason = f"None of {plural(len(distinct), 'visited URL')} does {matcher.describe()}"
+    if navigations:
+        return result(Support.CONTRADICTED, reason, KIND)
     return result(
         Support.CONTRADICTED,
-        f"None of {plural(len(distinct), 'visited URL')} does {matcher.describe()}",
+        f"{reason} (no page navigations were captured and snapshots are point-in-time, so the "
+        "URL may have been visited between them)",
         KIND,
+        confidence=WEAK_CONTRADICTION_CONFIDENCE,
     )
 
 

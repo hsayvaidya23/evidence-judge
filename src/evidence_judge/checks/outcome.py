@@ -1,11 +1,11 @@
 """Turn claim verdicts, expectation results and dimension scores into one outcome.
 
 Rules, first match wins:
-1. FAIL if a key claim is CONTRADICTED with confidence >= CONFIDENT_CONTRADICTION, or with any
-   confidence when another claim is also contradicted (corroboration).
+1. FAIL if a key claim is CONTRADICTED with confidence >= CONFIDENT_CONTRADICTION. Weak
+   contradictions never fail a run, however many there are.
 2. FAIL if any expect, forbid or constraint result is not met.
 3. NEEDS_REVIEW if any other claim is CONTRADICTED (a non-key claim, or a key claim refuted only
-   weakly, e.g. by point-in-time snapshots); if the side-effects dimension has findings
+   weakly: by point-in-time snapshots, a vision model, or conflicting evidence); if the side-effects dimension has findings
    (successful mutations the task spec does not explain, or every mutation when there is no
    spec); if a key claim has NO_EVIDENCE; if any spec result is unknown (including a failed
    attempt at a forbidden action); if LLM claim extraction failed and heuristics were used; if
@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Final
 
-from evidence_judge.checks._common import plural
+from evidence_judge.checks._common import CONFIDENT_CONTRADICTION, plural
 from evidence_judge.checks.expectations import CONSTRAINT, EXPECT, FORBID
 from evidence_judge.core.verdict import (
     ClaimVerdict,
@@ -43,7 +43,6 @@ DIMENSION_WEIGHTS: Final[Mapping[Dimension, float]] = {
 }
 CLAIM_SUPPORT_WEIGHT: Final = 0.15
 FAIL_SCORE_CAP: Final = 0.49
-CONFIDENT_CONTRADICTION: Final = 0.7
 MAX_SUMMARY_CITATIONS: Final = 3
 
 
@@ -79,11 +78,11 @@ def _also(count: int, noun: str) -> str:
 
 
 def _failing_claims(claims: Sequence[ClaimVerdict]) -> list[ClaimVerdict]:
-    contradicted = [v for v in claims if v.status is Support.CONTRADICTED]
-    key = [v for v in contradicted if v.key]
-    if len(contradicted) > 1:
-        return sorted(key, key=lambda v: v.confidence < CONFIDENT_CONTRADICTION)
-    return [v for v in key if v.confidence >= CONFIDENT_CONTRADICTION]
+    return [
+        v
+        for v in claims
+        if v.key and v.status is Support.CONTRADICTED and v.confidence >= CONFIDENT_CONTRADICTION
+    ]
 
 
 def _failure(

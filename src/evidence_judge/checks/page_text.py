@@ -5,6 +5,7 @@ from typing import Final
 from evidence_judge.checks._common import (
     FINAL_ID,
     MAX_CITATIONS,
+    WEAK_CONTRADICTION_CONFIDENCE,
     plural,
     quoted,
     require,
@@ -20,7 +21,7 @@ from evidence_judge.core.verdict import Citation, PredicateResult, Support
 from evidence_judge.textnorm import normalize
 
 KIND = "page_text"
-SNAPSHOT_ABSENCE_CONFIDENCE: Final = 0.6
+SNAPSHOT_ABSENCE_CONFIDENCE: Final = WEAK_CONTRADICTION_CONFIDENCE
 """Snapshots are point-in-time: text shown between them is never recorded, so absence across
 them refutes an any-scope claim only weakly. The final state is authoritative and stays at 1.0."""
 

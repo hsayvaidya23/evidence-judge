@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Final
 
 from pydantic import BaseModel
 
@@ -13,6 +14,11 @@ from evidence_judge.core.verdict import Citation, PredicateResult, Support
 
 FINAL_ID = "final"
 MAX_CITATIONS = 3
+CONFIDENT_CONTRADICTION: Final = 0.7
+"""A key claim contradicted at or above this confidence fails the run on its own."""
+WEAK_CONTRADICTION_CONFIDENCE: Final = 0.6
+"""Confidence of contradictions that can only send a run to review: absence across point-in-time
+snapshots, a vision model's "no", or conflicting evidence."""
 
 
 def require[P: BaseModel](predicate: Predicate, cls: type[P], checker: str) -> P:
