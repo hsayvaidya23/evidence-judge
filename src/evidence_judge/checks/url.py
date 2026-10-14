@@ -12,7 +12,7 @@ from evidence_judge.checks._common import (
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.matching import compile_regex, url_contains, url_path
-from evidence_judge.core.evidence import Channel
+from evidence_judge.core.evidence import Channel, NetworkEvent
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import Predicate, Scope, UrlPredicate
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
@@ -73,14 +73,25 @@ def _check_final(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
     )
 
 
-def _visited(index: EvidenceIndex) -> list[tuple[str, str]]:
+def _is_navigation(event: NetworkEvent) -> bool:
+    """A page load: a GET for a document, or one answered with HTML when the type is unknown."""
+    if event.method.upper() != "GET":
+        return False
+    if event.resource_type:
+        return event.resource_type.lower() == "document"
+    return (event.mime_type or "").split(";", 1)[0].strip().lower() == "text/html"
+
+
+def _visited(index: EvidenceIndex, navigations: list[NetworkEvent]) -> list[tuple[str, str]]:
     states = [(state_id(s, index), s.url) for s in index.page_states()]
     actions = [(a.id, a.url) for a in index.run.actions if a.url]
-    return [*actions, *states]
+    loads = [(n.id, n.url) for n in navigations]
+    return [*actions, *loads, *states]
 
 
 def _check_any(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
-    visited = _visited(index)
+    navigations = [n for n in index.requests("GET") if _is_navigation(n)]
+    visited = _visited(index, navigations)
     hits = [(eid, url) for eid, url in visited if matcher.matches(url)]
     if hits:
         cited = list(reversed(hits[-MAX_CITATIONS:]))
@@ -90,11 +101,11 @@ def _check_any(matcher: UrlMatcher, index: EvidenceIndex) -> PredicateResult:
             KIND,
             [Citation(evidence_id=eid, excerpt=url) for eid, url in cited],
         )
-    if not (index.has(Channel.SNAPSHOTS) or index.has(Channel.ACTIONS)):
+    if not (index.has(Channel.SNAPSHOTS) or (index.has(Channel.NETWORK) and navigations)):
         return result(
             Support.NO_EVIDENCE,
-            f"Neither page snapshots nor actions were captured, so no visited URL can be shown "
-            f"to {matcher.describe()}",
+            f"Neither page snapshots nor page navigations were captured, so no visited URL can "
+            f"be shown to {matcher.describe()}",
             KIND,
         )
     distinct = {url for _, url in visited}

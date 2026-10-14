@@ -96,6 +96,11 @@ Every predicate has a `kind`.
 - {kind: url, regex: '/orders/\d+$', scope: any}
 ```
 
+With `scope: any`, visited URLs come from page snapshots, the page URL of each action and
+document navigations in the network log (GET requests for a `document`, or answered with
+`text/html`). A URL is reported as never visited only when snapshots or navigations were
+captured; with actions alone the result is `no_evidence`.
+
 ### `action`: the agent performed a browser action
 
 ```yaml
