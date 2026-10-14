@@ -18,7 +18,7 @@ from typer._click.exceptions import UsageError  # pyright: ignore[reportPrivateU
 from typer.core import TyperGroup
 
 from evidence_judge import __version__
-from evidence_judge.config import Settings
+from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
@@ -184,6 +184,14 @@ def _fail(e: CliError) -> typer.Exit:
     return typer.Exit(int(e.code))
 
 
+def _redactor(settings: Settings) -> Redactor:
+    try:
+        key = stable_redaction_key(settings)
+    except (OSError, ValueError) as e:
+        raise CliError(f"redaction key: {e}", ExitCode.USAGE) from e
+    return Redactor(key) if key is not None else Redactor.from_settings(settings)
+
+
 def _settings() -> Settings:
     try:
         return Settings()
@@ -278,7 +286,7 @@ def judge(
         )
 
         if settings.redact and not no_redact:
-            redactor = Redactor.from_settings(settings)
+            redactor = _redactor(settings)
             run, report = redactor.redact_run(run)
             if task_spec is not None:
                 task_spec, _ = redactor.redact_model(task_spec)
@@ -344,7 +352,7 @@ def inspect(
     except CliError as e:
         raise _fail(e) from None
     if settings.redact and not no_redact:
-        run, _ = Redactor.from_settings(settings).redact_run(run)
+        run, _ = _redactor(settings).redact_run(run)
     summary = summarize_evidence(run)
     if as_json:
         typer.echo(json.dumps(summary.to_dict(), indent=2, ensure_ascii=False))

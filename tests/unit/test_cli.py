@@ -352,3 +352,14 @@ def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert result.stdout.strip() == f"evidence-judge {__version__}"
+
+
+def test_redaction_key_is_stable_across_invocations(tmp_path: Path) -> None:
+    from evidence_judge.cli import _redactor
+    from evidence_judge.config import Settings
+
+    settings = Settings(anthropic_api_key=None, cache_dir=tmp_path / "cache")
+    first = _redactor(settings).fingerprint("person@example.com")
+    second = _redactor(settings).fingerprint("person@example.com")
+    assert first == second
+    assert (tmp_path / "cache" / "redaction.key").exists()
