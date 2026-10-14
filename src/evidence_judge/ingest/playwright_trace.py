@@ -13,6 +13,7 @@ import bisect
 import json
 import re
 import zipfile
+import zlib
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -238,7 +239,7 @@ class _TraceReader:
     def _events(self, name: str) -> Iterator[JsonObject]:
         try:
             raw = self.archive.read(name)
-        except (KeyError, zipfile.BadZipFile, OSError) as exc:
+        except (KeyError, zipfile.BadZipFile, zlib.error, OSError) as exc:
             raise TraceFormatError(f"{name}: cannot read from trace archive ({exc})") from exc
         lines = raw.decode("utf-8", errors="replace").splitlines()
         last = max((i for i, line in enumerate(lines) if line.strip()), default=-1)
@@ -440,11 +441,17 @@ class _TraceReader:
         name = file or (f"resources/{sha1}" if sha1 else None)
         if name is None:
             return inline_body(part)
+        data = self._read_blob(name, "body resource")
+        return data if data is not None else inline_body(part)
+
+    def _read_blob(self, name: str, kind: str) -> bytes | None:
         try:
             return self.archive.read(name)
         except KeyError:
-            self.warnings.append(f"body resource {name} missing from trace")
-            return inline_body(part)
+            self.warnings.append(f"{kind} {name} missing from trace")
+        except (zipfile.BadZipFile, zlib.error, OSError) as exc:
+            self.warnings.append(f"{kind} {name} is corrupt: {exc}")
+        return None
 
     def _build_snapshots(self) -> list[PageSnapshot]:
         out: list[PageSnapshot] = []
@@ -470,11 +477,10 @@ class _TraceReader:
         shots: list[Screenshot] = []
         blobs: dict[str, bytes] = {}
         for raw in sorted(self.shots, key=lambda s: s.time):
-            try:
-                blobs[raw.file] = self.archive.read(raw.file)
-            except KeyError:
-                self.warnings.append(f"screenshot {raw.file} missing from trace")
+            data = self._read_blob(raw.file, "screenshot")
+            if data is None:
                 continue
+            blobs[raw.file] = data
             shots.append(
                 Screenshot(
                     id=f"shot#{len(shots) + 1}",

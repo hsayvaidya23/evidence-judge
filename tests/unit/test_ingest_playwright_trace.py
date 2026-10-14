@@ -426,3 +426,32 @@ def test_page_errors_and_failed_actions(tmp_path: Path) -> None:
     assert select.ts == 90_000
     assert run.console[-1].level == "error"
     assert run.console[-1].text == "x is undefined"
+
+
+def test_missing_blobs_are_skipped_with_warnings(tmp_path: Path) -> None:
+    current = load("honest_success")
+    order = next(n for n in current.network if n.url.endswith("/api/cart"))
+    dropped_shot = current.screenshots[0].resource
+    with zipfile.ZipFile(RUNS / "honest_success" / "trace.zip") as zin:
+        network_lines = zin.read("trace.network").decode().splitlines()
+        cart = next(json.loads(line) for line in network_lines if "/api/cart" in line)
+        dropped_body = cart["snapshot"]["response"]["content"]["_file"]
+        trimmed = tmp_path / "t.zip"
+        with zipfile.ZipFile(trimmed, "w") as zout:
+            for name in zin.namelist():
+                if name not in {dropped_shot, dropped_body}:
+                    zout.writestr(name, zin.read(name))
+
+    run = load_playwright_trace(trimmed)
+
+    assert len(run.screenshots) == len(current.screenshots) - 1
+    assert dropped_shot not in run.blobs
+    cart_event = next(n for n in run.network if n.url.endswith("/api/cart"))
+    assert cart_event.response_body is None
+    assert cart_event.request_body == order.request_body
+    assert sorted(run.metadata["warnings"]) == sorted(
+        [
+            f"body resource {dropped_body} missing from trace",
+            f"screenshot {dropped_shot} missing from trace",
+        ]
+    )
