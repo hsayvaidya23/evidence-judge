@@ -61,3 +61,11 @@ def test_action_version_installs_from_the_repository_not_pypi() -> None:
     assert "git+https://github.com/hsayvaidya23/evidence-judge@" in install["run"]
     assert "==" not in install["run"]
     assert "tag" in action["inputs"]["version"]["description"]
+
+
+def test_action_summary_goes_through_the_escaping_module() -> None:
+    judge = next(s for s in _action()["runs"]["steps"] if s.get("id") == "judge")
+    script: str = judge["run"]
+    assert "-m evidence_judge.ci_summary" in script
+    assert "GITHUB_STEP_SUMMARY" not in script
+    assert "['summary']" not in script

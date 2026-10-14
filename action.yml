@@ -104,21 +104,9 @@ runs:
           echo "::error::evidence-judge exited $code without a verdict"
           exit "$code"
         fi
-        outcome=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['outcome'])" "$out/verdict.json")
-        score=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['score'])" "$out/verdict.json")
-        summary=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['summary'])" "$out/verdict.json")
-        {
-          echo "outcome=$outcome"
-          echo "score=$score"
-          echo "report=$out/report.html"
-        } >> "$GITHUB_OUTPUT"
-        {
-          echo "### Evidence Judge: ${outcome^^}"
-          echo
-          echo "Score: $score"
-          echo
-          echo "$summary"
-        } >> "$GITHUB_STEP_SUMMARY"
+        # Agent text in the summary is escaped so the job summary cannot render it as markup.
+        outcome=$("$(uv tool dir)/evidence-judge/bin/python" -m evidence_judge.ci_summary \
+          "$out/verdict.json" --report "$out/report.html")
         case "$outcome" in
           pass) exit 0 ;;
           needs_review) [ "$EJ_FAIL_ON_REVIEW" = "true" ] && exit 2 || exit 0 ;;

@@ -64,7 +64,8 @@ At least one of `trace`, `har` or `browser-use` is needed.
 1. Installs `uv` and then evidence-judge with the `anthropic` extra.
 2. Runs `evidence-judge judge` with the inputs you gave, writing `verdict.json` and
    `report.html` to `$RUNNER_TEMP/evidence-judge`.
-3. Writes the outcome, score and summary to the **job summary**.
+3. Writes the outcome, score and summary to the **job summary** (with
+   `python -m evidence_judge.ci_summary`, which escapes the summary text).
 4. Exits: `pass` → success; `needs_review` → success, or failure with `fail-on-review: "true"`;
    `fail` → failure. If no verdict was written (bad input, internal error), the step fails with
    evidence-judge's exit code.
@@ -93,7 +94,12 @@ Any `EVJ_*` setting from [Configuration](../reference/configuration.md) can be s
 Agent output ends up in the job log, and GitHub runners interpret lines like `::set-output` or
 `::add-mask` as workflow commands. The action stops workflow-command processing with a random
 `::stop-commands::` token while evidence-judge runs, and resumes it afterwards, so an agent
-cannot inject commands through its answer. The project's CI runs the action (`uses: ./`) on an
+cannot inject commands through its answer.
+
+The verdict summary quotes the agent too, and job summaries render Markdown and HTML. The action
+writes it HTML-escaped inside a `<pre>` block, so links, images, tags, tables and backticks an
+agent writes show up as plain text; only the validated outcome and score are written outside
+it. The project's CI runs the action (`uses: ./`) on an
 honest and a forged demo run and checks its outputs.
 
 !!! note "Artifacts and secrets"
