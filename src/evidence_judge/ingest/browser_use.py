@@ -28,6 +28,7 @@ from evidence_judge.ingest._json import (
 from evidence_judge.ingest.errors import BrowserUseFormatError
 
 SOURCE: Final = "browser-use"
+HISTORY_FILE: Final = "history.json"
 
 _ACTION_NAMES: Final[dict[str, str]] = {
     "navigate": "goto",
@@ -68,7 +69,7 @@ def load_browser_use_history(
     max_screenshot_bytes: int = MAX_SCREENSHOT_BYTES,
     max_file_bytes: int = MAX_HISTORY_BYTES,
 ) -> Run:
-    """Parse a browser-use history file.
+    """Parse a browser-use history file, or the ``history.json`` in a run directory.
 
     Only actions that produced an ActionResult are recorded: browser-use skips the rest of a
     step's actions once the page changes. Screenshots are loaded from ``state.screenshot_path``
@@ -84,6 +85,10 @@ def load_browser_use_history(
         TooLargeError: the file is larger than ``max_file_bytes``.
     """
     history_path = Path(path)
+    if history_path.is_dir():
+        history_path = history_path / HISTORY_FILE
+        if not history_path.is_file():
+            raise BrowserUseFormatError(f"{path}: run directory has no {HISTORY_FILE}")
     steps = _read_history(history_path, max_file_bytes)
     root = Path(screenshot_root) if screenshot_root is not None else history_path.parent
     builder = _HistoryBuilder(root.resolve(), max_screenshot_bytes)

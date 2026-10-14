@@ -301,3 +301,11 @@ def test_supported_image_types(tmp_path: Path, header: bytes, mime: str, suffix:
 
     assert run.screenshots[0].mime_type == mime
     assert run.screenshots[0].resource == f"browser-use/step-1{suffix}"
+
+
+def test_run_directory_loads_its_history_json(tmp_path: Path) -> None:
+    run = load_browser_use_history(HISTORY.parent)
+    assert run.actions == load_browser_use_history(HISTORY).actions
+    assert run.screenshots
+    with pytest.raises(BrowserUseFormatError, match=r"history\.json"):
+        load_browser_use_history(tmp_path)
