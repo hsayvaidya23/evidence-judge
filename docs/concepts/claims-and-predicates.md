@@ -94,6 +94,31 @@ flowchart TD
 A claim with no checkable predicate at all is `no_evidence` with the reason *claim has no
 checkable predicate*.
 
+### Evidence that proves nothing
+
+The agent's claims are untrusted, so a satisfied predicate is turned into `no_evidence`
+(*predicate cannot prove a claim*) when it would hold for any run:
+
+- **Already true before the agent acted.** Each request, `url` and `action` predicate (and, for
+  action and outcome claims, each `page_text` and `value` predicate) is also checked against the
+  run's *baseline*: the initial page, and the requests, snapshots and navigations before the
+  agent's first action that is not a navigation. A predicate the baseline meets, such as a URL
+  containing `://` or the shop's host, `GET` with `url_contains: ["//"]`, or a `goto` whose value
+  contains `http`, is met by an agent that did nothing. State and value claims may still cite
+  text of the start page ("the kettle costs $24").
+- **Echoes of the agent's own input.** Page text the agent typed into a field (a `fill`
+  action's value), or a URL fragment it typed into a `goto`, does not prove that the site
+  produced it: typing "Order #1042 confirmed" into a search box and landing on its results page
+  proves nothing.
+- **Key outcome claims need an outcome.** A key claim of kind `outcome` can only be supported
+  by a mutation request (`POST`, `PUT`, `PATCH`, `DELETE`) or by the final page: `final`-scope
+  `page_text`, `url` or `screenshot`. A click on *Place order* or text seen on some earlier page
+  does not prove the order went through.
+
+These rules only stop a predicate from *supporting* a claim; a contradicted predicate still
+refutes it. Evidence must also come from the site itself; see
+[which hosts can prove something](../task-specs.md#which-hosts-can-prove-something).
+
 ## Confidence
 
 | Confidence | Where it comes from | Effect on a key claim |

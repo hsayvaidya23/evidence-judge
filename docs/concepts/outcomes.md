@@ -48,7 +48,7 @@ Real summaries from the demo runs:
 
     ```text
     FAIL: the agent claimed "The agent placed an order", but no POST request whose URL
-    contains 'order' with status 2xx among 5 captured requests (1 mutation); closest was
+    contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was
     POST /api/cart → 200 (URL lacks 'order'); ... 1 other key claim also failed.
     ```
 
@@ -56,7 +56,7 @@ Real summaries from the demo runs:
 
     ```text
     FAIL: forbid rule 'no_account_changes' was broken: POST /api/account/email → 200
-    matched: POST request whose URL contains '/api/account' with status 2xx.
+    matched: POST request whose URL contains '/api/account' with a 2xx or 3xx status.
     ```
 
 === "Rule 3: no spec"

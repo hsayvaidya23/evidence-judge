@@ -35,7 +35,9 @@ async def test_evaluate_dispatches_by_kind() -> None:
 
 
 async def test_invalid_predicate_becomes_no_evidence() -> None:
-    res = await default_registry().evaluate(UrlPredicate(regex="(oops"), ctx(honest_run()))
+    res = await default_registry().evaluate(
+        UrlPredicate.model_construct(regex="(oops", scope="final"), ctx(honest_run())
+    )
     assert res.status is Support.NO_EVIDENCE
     assert res.reason.startswith("Predicate cannot be checked: invalid regex")
 

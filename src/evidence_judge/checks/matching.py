@@ -12,6 +12,13 @@ from urllib.parse import parse_qsl, unquote, unquote_plus, urlsplit
 import regex
 
 from evidence_judge.checks.errors import InvalidPredicateError, RegexTimeoutError
+from evidence_judge.core.predicates import (
+    STATUS_ANY,
+    STATUS_NONE,
+    STATUS_OK,
+    compile_pattern,
+    status_spec,
+)
 from evidence_judge.textnorm import normalize
 
 Op = Literal["==", "!=", "<", "<=", ">", ">=", "contains"]
@@ -39,8 +46,6 @@ _NUMBER = re.compile(
 _GROUP_SEPARATORS: Final = ",. '"
 _DECIMAL_SEPARATORS: Final = ".,"
 _SUFFIX_SCALE: Final = {"k": 1e3, "m": 1e6, "b": 1e9}
-_STATUS_CLASS = re.compile(r"^([1-5])xx$")
-_STATUS_EXACT = re.compile(r"^[1-5]\d\d$")
 _INDEX_BRACKETS = re.compile(r"\[(-?\d+)\]")
 _TRUNCATION_MARK = re.compile(r"…\[truncated[^\]]{0,60}\]\s*\Z")
 _TRUNCATION_TAIL: Final = 80
@@ -178,26 +183,33 @@ def _ordered[T: (float, str)](left: T, op: Op, right: T) -> bool:
             raise InvalidPredicateError("'contains' is not an ordering operator")
 
 
-def validate_status_spec(spec: str | None) -> None:
-    if spec is None:
-        return
-    value = spec.strip().lower()
-    if not (_STATUS_CLASS.match(value) or _STATUS_EXACT.match(value)):
-        raise InvalidPredicateError(
-            f"status {spec!r} is neither an exact code nor a class like 2xx"
-        )
+def validate_status_spec(spec: str | None) -> str | None:
+    """The canonical status spec, or InvalidPredicateError for a malformed one."""
+    try:
+        return status_spec(spec)
+    except ValueError as exc:
+        raise InvalidPredicateError(str(exc)) from exc
 
 
-def status_matches(status: int | None, spec: str | None) -> bool:
-    """True if `status` satisfies '201', '2xx' or None (any status, including none)."""
-    if spec is None:
+def status_matches(status: int | None, spec: str | None, *, failed: bool = False) -> bool:
+    """True if a request that got `status` (None: no response) satisfies `spec`.
+
+    'ok' is a 2xx or 3xx response to a request that did not fail; 'none' is no response; 'any'
+    is anything; None (null) is any response; otherwise an exact code ('201') or class ('2xx').
+    """
+    value = validate_status_spec(spec)
+    if value == STATUS_ANY:
         return True
-    validate_status_spec(spec)
+    if value == STATUS_NONE:
+        return status is None
     if status is None:
         return False
-    value = spec.strip().lower()
-    if klass := _STATUS_CLASS.match(value):
-        return status // 100 == int(klass[1])
+    if value is None:
+        return True
+    if value == STATUS_OK:
+        return 200 <= status < 400 and not failed
+    if value.endswith("xx"):
+        return status // 100 == int(value[0])
     return status == int(value)
 
 
@@ -283,7 +295,7 @@ def host_allowed(host: str | None, allowed: list[str]) -> bool:
     return False
 
 
-MAX_REGEX_LENGTH: Final = 300
+MAX_REGEX_MATCHES: Final = 50
 MAX_REGEX_INPUT: Final = 10_000
 REGEX_TIMEOUT_SECONDS: Final = 0.05
 
@@ -294,14 +306,10 @@ def compile_regex(pattern: str) -> regex.Pattern[str]:
     Patterns over MAX_REGEX_LENGTH characters are rejected. Backtracking is bounded at match
     time instead (regex_search), so any valid pattern is accepted.
     """
-    if len(pattern) > MAX_REGEX_LENGTH:
-        raise InvalidPredicateError(
-            f"unsafe regex: pattern is longer than {MAX_REGEX_LENGTH} characters"
-        )
     try:
-        return regex.compile(pattern, regex.IGNORECASE | regex.VERSION0)
-    except (regex.error, ValueError) as exc:
-        raise InvalidPredicateError(f"invalid regex {pattern!r}: {exc}") from exc
+        return compile_pattern(pattern)
+    except ValueError as exc:
+        raise InvalidPredicateError(str(exc)) from exc
 
 
 def regex_search(compiled: regex.Pattern[str], text: str) -> regex.Match[str] | None:
@@ -319,3 +327,23 @@ def regex_search(compiled: regex.Pattern[str], text: str) -> regex.Match[str] | 
     except TimeoutError as exc:
         budget = round(REGEX_TIMEOUT_SECONDS * 1000)
         raise RegexTimeoutError(f"regex timed out after {budget} ms: /{compiled.pattern}/") from exc
+
+
+def regex_findall(compiled: regex.Pattern[str], text: str) -> list[regex.Match[str]]:
+    """Up to MAX_REGEX_MATCHES matches in the same windows and time budget as regex_search."""
+    windows = (
+        [(0, len(text))]
+        if len(text) <= 2 * MAX_REGEX_INPUT
+        else [(0, MAX_REGEX_INPUT), (len(text) - MAX_REGEX_INPUT, len(text))]
+    )
+    found: list[regex.Match[str]] = []
+    try:
+        for start, end in windows:
+            for match in compiled.finditer(text, start, end, timeout=REGEX_TIMEOUT_SECONDS):
+                found.append(match)
+                if len(found) >= MAX_REGEX_MATCHES:
+                    return found
+    except TimeoutError as exc:
+        budget = round(REGEX_TIMEOUT_SECONDS * 1000)
+        raise RegexTimeoutError(f"regex timed out after {budget} ms: /{compiled.pattern}/") from exc
+    return found

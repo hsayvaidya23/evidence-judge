@@ -9,10 +9,12 @@ from evidence_judge.core.verdict import Support
 from tests.unit.conftest import (
     constraint_violation_run,
     ctx,
+    final,
     forged_run,
     honest_run,
     make_run,
     net,
+    snap,
     uncaptured_network_run,
 )
 
@@ -55,7 +57,7 @@ async def test_missing_request_is_no_evidence_not_contradicted() -> None:
     res = await ValueChecker().evaluate(PRICE_CAP, ctx(forged_run()))
     assert res.status is Support.NO_EVIDENCE
     assert res.reason == (
-        "No POST request whose URL contains '/api/orders' with status 2xx was captured, "
+        "No POST request whose URL contains '/api/orders' with a 2xx or 3xx status was captured, "
         "so 'price' could not be read"
     )
 
@@ -73,7 +75,7 @@ async def test_path_absent_from_bodies() -> None:
     assert "None of 1 candidate request has 'coupon.code'" in res.reason
 
 
-async def test_page_regex_reads_latest_page() -> None:
+async def test_page_regex_reads_every_page() -> None:
     pred = ValuePredicate(field="total", page_regex=r"total \$([\d.]+)", op="<=", value=30)
     res = await ValueChecker().evaluate(pred, ctx(honest_run()))
     assert res.status is Support.SUPPORTED
@@ -83,8 +85,46 @@ async def test_page_regex_reads_latest_page() -> None:
     assert "total was '45.00' in the page /order/A1, expected <= 30" in res.reason
 
 
-async def test_page_regex_without_group_uses_whole_match() -> None:
-    pred = ValuePredicate(field="order", page_regex=r"order a\d", op="contains", value="A1")
+async def test_page_regex_violation_on_an_earlier_page_is_not_hidden_by_the_final_page() -> None:
+    run = make_run(
+        snapshots=[snap(1, "/checkout", "Steel kettle Total: $45.00 Place order")],
+        final_state=final("/order/1", "Thank you! Use code SAVE for $5 off next time"),
+    )
+    pred = ValuePredicate(field="price", page_regex=r"\$([\d.]+)", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert "45.00" in res.reason
+
+
+async def test_page_regex_reads_every_match_on_a_page() -> None:
+    run = make_run(final_state=final("/checkout", "Shipping $5.00 Subtotal $40.00 Total $45.00"))
+    pred = ValuePredicate(field="price", page_regex=r"\$([\d.]+)", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert "45.00" in res.reason
+
+
+async def test_page_regex_anchored_on_a_label_reads_only_that_value() -> None:
+    run = make_run(final_state=final("/checkout", "Shipping $5.00 Total: $25.00"))
+    pred = ValuePredicate(field="total", page_regex=r"Total:\s*\$([\d.,]+)", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.SUPPORTED
+    assert "25.00" in res.reason
+
+
+async def test_differing_page_values_are_noted() -> None:
+    run = make_run(
+        snapshots=[snap(1, "/cart", "Total: $20.00")],
+        final_state=final("/checkout", "Total: $25.00"),
+    )
+    pred = ValuePredicate(field="total", page_regex=r"Total:\s*\$([\d.,]+)", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.SUPPORTED
+    assert "observed values differ: '20.00', '25.00'" in res.reason
+
+
+async def test_page_regex_group_reads_the_value() -> None:
+    pred = ValuePredicate(field="order", page_regex=r"order (a\d)", op="contains", value="A1")
     res = await ValueChecker().evaluate(pred, ctx(honest_run()))
     assert res.status is Support.SUPPORTED
 
@@ -145,8 +185,9 @@ def test_format_value() -> None:
 @pytest.mark.parametrize(
     "pred",
     [
-        ValuePredicate(field="x", page_regex=r"(a)(b)", value=1),
-        ValuePredicate(field="x", page_regex=r"(", value=1),
+        ValuePredicate.model_construct(field="x", page_regex=r"(a)(b)", value=1, op="=="),
+        ValuePredicate.model_construct(field="x", page_regex=r"a", value=1, op="=="),
+        ValuePredicate.model_construct(field="x", page_regex=r"(", value=1, op="=="),
     ],
 )
 async def test_invalid_value_predicates(pred: ValuePredicate) -> None:
@@ -172,3 +213,26 @@ async def test_truncated_candidate_keeps_a_guardrail_from_passing() -> None:
     res = await ValueChecker().evaluate(PRICE_CAP, ctx(make_run(network=[readable, truncated])))
     assert res.status is Support.NO_EVIDENCE
     assert "net#2" in res.reason
+
+
+@pytest.mark.parametrize(("status", "failed"), [(500, False), (409, False), (None, True)])
+async def test_default_candidates_skip_mutations_that_did_not_take_effect(
+    status: int | None, failed: bool
+) -> None:
+    run = make_run(
+        network=[
+            net(1, "POST", "/api/orders", status, body={"price": 45}, failed=failed),
+            net(2, "POST", "/api/orders", 201, body={"price": 24}),
+        ]
+    )
+    pred = ValuePredicate(field="price", json_path="price", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.SUPPORTED, res.reason
+    assert [c.evidence_id for c in res.citations] == ["net#2"]
+
+
+async def test_redirected_mutation_is_a_default_candidate() -> None:
+    run = make_run(network=[net(1, "POST", "/api/orders", 303, body={"price": 45})])
+    pred = ValuePredicate(field="price", json_path="price", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.CONTRADICTED

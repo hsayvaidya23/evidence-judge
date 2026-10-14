@@ -18,6 +18,7 @@ evidence.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Final
 
 from evidence_judge.checks._common import (
     CONFIDENT_CONTRADICTION,
@@ -25,15 +26,31 @@ from evidence_judge.checks._common import (
     checker_names,
     join_reasons,
     merge_citations,
+    quoted,
     result,
 )
+from evidence_judge.checks.action import canonical_action, describe_action
 from evidence_judge.checks.base import CheckContext
+from evidence_judge.checks.matching import contains
 from evidence_judge.checks.registry import CheckerRegistry
-from evidence_judge.core.claims import Claim
-from evidence_judge.core.predicates import vacuity_reason
+from evidence_judge.core.claims import Claim, ClaimKind
+from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.predicates import (
+    PageTextPredicate,
+    Predicate,
+    RequestPredicate,
+    Scope,
+    ScreenshotPredicate,
+    UrlPredicate,
+    ValuePredicate,
+    vacuity_reason,
+)
 from evidence_judge.core.verdict import ClaimVerdict, PredicateResult, Support
 
 NO_PREDICATE_REASON = "claim has no checkable predicate"
+MUTATION_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+TYPING_ACTIONS: Final = frozenset({"fill", "insert_text", "input_text"})
+NAVIGATING_ACTIONS: Final = frozenset({"goto"})
 
 
 def is_decisive(results: Sequence[PredicateResult]) -> bool:
@@ -42,7 +59,63 @@ def is_decisive(results: Sequence[PredicateResult]) -> bool:
     return bool(results) and all(r.status is Support.CONTRADICTED for r in results)
 
 
+def is_strong_outcome_predicate(predicate: Predicate) -> bool:
+    """A mutation request, or page text or a URL on the final page: what an outcome leaves."""
+    match predicate:
+        case RequestPredicate(method=str(method)):
+            return method.upper() in MUTATION_METHODS
+        case PageTextPredicate() | UrlPredicate() | ScreenshotPredicate():
+            return predicate.scope is Scope.FINAL
+        case _:
+            return False
+
+
+def _typed(predicate: Predicate, index: EvidenceIndex) -> str | None:
+    """Why `predicate` only echoes text the agent typed (a field value, a URL it opened)."""
+    match predicate:
+        case PageTextPredicate():
+            needle, names = predicate.contains, TYPING_ACTIONS
+        case UrlPredicate(contains=str(text)) | UrlPredicate(query_contains=str(text)):
+            needle, names = text, NAVIGATING_ACTIONS
+        case _:
+            return None
+    for action in index.run.actions:
+        if canonical_action(action.name) in names and contains(action.value, needle):
+            return (
+                f"the agent typed {quoted(needle)} itself ({action.id}: {describe_action(action)}), "
+                "so a page or URL echoing it proves nothing"
+            )
+    return None
+
+
+async def _unproving(
+    claim: Claim, predicate: Predicate, ctx: CheckContext, registry: CheckerRegistry
+) -> str | None:
+    """Why a specific `predicate` still cannot prove `claim` in this run, or None."""
+    if claim.key and claim.kind is ClaimKind.OUTCOME and not is_strong_outcome_predicate(predicate):
+        return (
+            "a key outcome claim needs a mutation request or the final page (final-scope page "
+            "text or URL) to prove it"
+        )
+    checks_start = not isinstance(predicate, PageTextPredicate | ValuePredicate) or claim.kind in (
+        ClaimKind.ACTION,
+        ClaimKind.OUTCOME,
+    )
+    if checks_start and registry.is_deterministic(predicate):
+        before = await registry.evaluate(predicate, ctx.at_start())
+        if before.status is Support.SUPPORTED:
+            return (
+                "it was already true before the agent acted, so every run of the task meets it "
+                f"({before.reason})"
+            )
+    return _typed(predicate, ctx.index)
+
+
 async def judge_claim(claim: Claim, ctx: CheckContext, registry: CheckerRegistry) -> ClaimVerdict:
+    """Judge `claim`. Besides vacuous predicates, a predicate cannot *support* it when the run met
+    it before the agent's first action (the baseline), when it only echoes text the agent typed,
+    or, for a key outcome claim, when it is neither a mutation request nor the final page. Such a
+    predicate still refutes the claim when it is contradicted."""
     if not claim.predicates:
         return _verdict(claim, Support.NO_EVIDENCE, NO_PREDICATE_REASON, [], 0.0)
     weak = [(p, r) for p in claim.predicates if (r := vacuity_reason(p)) is not None]
@@ -53,10 +126,27 @@ async def judge_claim(claim: Claim, ctx: CheckContext, registry: CheckerRegistry
         result(Support.NO_EVIDENCE, f"Predicate cannot prove a claim: {reason}", p.kind)
         for p, reason in weak
     ]
-    results += [await registry.evaluate(p, ctx) for p in deterministic]
+    results += [await _evaluate(claim, p, ctx, registry) for p in deterministic]
     if not is_decisive(results):
-        results += [await registry.evaluate(p, ctx) for p in fallback]
+        results += [await _evaluate(claim, p, ctx, registry) for p in fallback]
     return combine(claim, results)
+
+
+async def _evaluate(
+    claim: Claim, predicate: Predicate, ctx: CheckContext, registry: CheckerRegistry
+) -> PredicateResult:
+    res = await registry.evaluate(predicate, ctx)
+    if res.status is not Support.SUPPORTED:
+        return res
+    reason = await _unproving(claim, predicate, ctx, registry)
+    if reason is None:
+        return res
+    return result(
+        Support.NO_EVIDENCE,
+        f"Predicate cannot prove a claim: {reason}",
+        res.checker,
+        res.citations,
+    )
 
 
 def combine(claim: Claim, results: Sequence[PredicateResult]) -> ClaimVerdict:

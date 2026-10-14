@@ -8,7 +8,6 @@ import pytest
 from evidence_judge.checks.errors import InvalidPredicateError, RegexTimeoutError
 from evidence_judge.checks.matching import (
     MAX_REGEX_INPUT,
-    MAX_REGEX_LENGTH,
     MISSING,
     compare,
     compile_regex,
@@ -25,6 +24,7 @@ from evidence_judge.checks.matching import (
     url_host,
     url_path,
 )
+from evidence_judge.core.predicates import MAX_REGEX_LENGTH
 
 
 def test_normalize_folds_unicode_case_and_whitespace() -> None:
@@ -158,7 +158,7 @@ def test_ordering_on_non_numbers_is_undecidable(
         (204, "2xx", True),
         (302, "2XX", False),
         (None, "2xx", False),
-        (None, None, True),
+        (None, None, False),
         (500, None, True),
     ],
 )
@@ -166,7 +166,7 @@ def test_status_matches(status: int | None, spec: str | None, expected: bool) ->
     assert status_matches(status, spec) is expected
 
 
-@pytest.mark.parametrize("spec", ["ok", "200-299", "6xx", "20"])
+@pytest.mark.parametrize("spec", ["success", "200-299", "6xx", "20"])
 def test_status_matches_rejects_malformed_spec(spec: str) -> None:
     with pytest.raises(InvalidPredicateError):
         status_matches(200, spec)

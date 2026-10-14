@@ -12,8 +12,8 @@ from evidence_judge.checks._common import (
     result,
     state_id,
 )
-from evidence_judge.checks.base import CheckContext
-from evidence_judge.checks.matching import excerpt, url_path
+from evidence_judge.checks.base import CheckContext, EvidenceScope
+from evidence_judge.checks.matching import excerpt, url_host, url_path
 from evidence_judge.core.evidence import Channel
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import PageTextPredicate, Predicate, Scope
@@ -26,13 +26,27 @@ SNAPSHOT_ABSENCE_CONFIDENCE: Final = WEAK_CONTRADICTION_CONFIDENCE
 them refutes an any-scope claim only weakly. The final state is authoritative and stays at 1.0."""
 
 
-def check_page_text(predicate: PageTextPredicate, index: EvidenceIndex) -> PredicateResult:
+def check_page_text(
+    predicate: PageTextPredicate, index: EvidenceIndex, scope: EvidenceScope | None = None
+) -> PredicateResult:
     if predicate.scope is Scope.FINAL:
-        return _check_final(predicate, index)
-    return _check_any(predicate, index)
+        return _check_final(predicate, index, scope)
+    return _check_any(predicate, index, scope)
 
 
-def _check_final(predicate: PageTextPredicate, index: EvidenceIndex) -> PredicateResult:
+def off_site(url: str, scope: EvidenceScope | None) -> str | None:
+    """Why a page at `url` cannot prove anything under `scope`, or None if it can."""
+    if scope is None or scope.page_allowed(url):
+        return None
+    host = url_host(url)
+    if host is None:
+        return f"{url[:40]} is not a page of the site"
+    return f"{host} is outside {scope.describe()}"
+
+
+def _check_final(
+    predicate: PageTextPredicate, index: EvidenceIndex, scope: EvidenceScope | None
+) -> PredicateResult:
     phrase = quoted(predicate.contains)
     state = index.final
     if state is None:
@@ -40,6 +54,13 @@ def _check_final(predicate: PageTextPredicate, index: EvidenceIndex) -> Predicat
             Support.NO_EVIDENCE,
             f"Final page state was not captured, so it cannot show {phrase}",
             KIND,
+        )
+    if (why := off_site(state.url, scope)) is not None:
+        return result(
+            Support.NO_EVIDENCE,
+            f"The final page cannot show {phrase}: {why}",
+            KIND,
+            [Citation(evidence_id=FINAL_ID, excerpt=state.url[:80])],
         )
     if normalize(predicate.contains) in index.normalized_text(state):
         return result(
@@ -59,9 +80,11 @@ def _check_final(predicate: PageTextPredicate, index: EvidenceIndex) -> Predicat
     )
 
 
-def _check_any(predicate: PageTextPredicate, index: EvidenceIndex) -> PredicateResult:
+def _check_any(
+    predicate: PageTextPredicate, index: EvidenceIndex, scope: EvidenceScope | None
+) -> PredicateResult:
     phrase = quoted(predicate.contains)
-    states = index.page_states()
+    states = [s for s in index.page_states() if off_site(s.url, scope) is None]
     needle = normalize(predicate.contains)
     hits = [s for s in states if needle in index.normalized_text(s)]
     if hits:
@@ -99,4 +122,6 @@ class PageTextChecker:
     deterministic = True
 
     async def evaluate(self, predicate: Predicate, ctx: CheckContext) -> PredicateResult:
-        return check_page_text(require(predicate, PageTextPredicate, self.kind), ctx.index)
+        return check_page_text(
+            require(predicate, PageTextPredicate, self.kind), ctx.index, ctx.scope
+        )

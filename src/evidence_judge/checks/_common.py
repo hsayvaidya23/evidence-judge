@@ -54,6 +54,11 @@ def describe_request(event: NetworkEvent) -> str:
     return f"{event.method.upper()} {url_path(event.url)} → {status}"
 
 
+def took_effect(event: NetworkEvent) -> bool:
+    """A mutation that was not refused: not failed, and answered below 400 (or not at all)."""
+    return event.is_mutation and not event.failed and (event.status is None or event.status < 400)
+
+
 def cite_request(event: NetworkEvent) -> Citation:
     return Citation(evidence_id=event.id, excerpt=describe_request(event))
 

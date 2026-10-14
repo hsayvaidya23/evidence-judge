@@ -29,18 +29,39 @@ Each entry in `expect` and `forbid` is an expectation:
   description: An order request succeeded
   all: [<predicate>, ...]              # every predicate must hold
   any: [<predicate>, ...]              # at least one must hold
+  max_count: 1                         # optional, see "Repeated mutations"
 ```
 
 An expectation needs at least one predicate in `all` or `any`. When both are given, both
 conditions apply. In the verdict each one becomes an `ExpectationResult` with `met: true`,
 `false`, or `null` when the channel it needs was not captured.
 
+### Which hosts can prove something
+
+Evidence that *proves* something (an agent's claim or an `expect` entry) must come from the
+site the run was about:
+
+- With `allowed_hosts` set, request, page text and URL predicates only match requests and page
+  states on those hosts or their subdomains.
+- Without it, a mutation (POST, PUT, PATCH, DELETE) must go to the run's primary host (the host
+  of the first page the run was on) or a subdomain of it, a leading `www.` ignored. A POST to a
+  third party (`https://httpbin.org/anything/order`) cannot prove "order placed", and it is
+  reported as a side effect. Reads and pages on other hosts still count. If the site posts to a
+  sibling host (`api.example.com` from `shop.example.com`), list both in `allowed_hosts`.
+- Page states whose URL is `data:`, `about:`, `blob:` (or `javascript:`, `chrome:`,
+  `devtools:`) never count: an agent can fill such a page with any text. A `final`-scope
+  predicate on such a final page is `no_evidence`.
+
+`forbid` entries and `constraints` are not restricted: a forbidden request or a violating value
+counts wherever it went.
+
 ### Forbidden attempts
 
 A `forbid` entry also catches attempts that did not succeed. Inside `forbid`, a `request`
-predicate with the default status (`2xx`, written or omitted) is checked twice:
+predicate whose status is `ok` (the default), `2xx` or `null` is checked twice:
 
-- a matching request that succeeded breaks the rule (`met: false`, the run fails);
+- a matching request that its status accepts breaks the rule (`met: false`, the run fails). With
+  the default `ok`, that includes a 3xx: a forbidden `POST` answered `303` took effect;
 - otherwise, a matching request with any other status or no response at all makes the result
   `met: null` with the reason `attempted forbidden action: POST /api/account/delete → 500 ...`,
   and the run needs review.
@@ -74,7 +95,24 @@ intermediate writes to let such a run pass.
 ```yaml
 allow:
   - {kind: request, method: POST, url_contains: [/api/cart]}
+  - {kind: request, method: POST, url_contains: [/api/coupons], max_count: 1}
 ```
+
+### Repeated mutations
+
+An `expect` entry explains only as many mutations as it needs: by default one mutation that
+took effect and matches its request predicates (or a value predicate's `in_request`). An agent
+that places the same order four times meets `order_submitted`, but the other three orders are
+reported as a side effect (`duplicate POST /api/orders → 201, sent 4 times`), so the run needs
+review. Set `max_count: N` on the expectation when the task needs N such requests.
+
+Setting `max_count` explicitly also makes it part of the expectation: more matching mutations
+than that break it (`met: false`, the run fails), which is how to say "exactly once" when a
+duplicate must fail rather than go to review. Failed or rejected attempts (4xx, 5xx, no
+response) are never counted.
+
+`allow` entries explain any number of matching mutations (an agent may add to the cart several
+times) unless the entry sets `max_count`; past it, the extra ones are duplicates too.
 
 ## Predicates
 
@@ -89,6 +127,12 @@ refused); a request needs a method or a URL, path, query, regex or body criterio
 predicate needs `contains`, `query_contains` or `regex`; an action needs a name, target or
 value; a value predicate needs `json_path` or `page_regex`.
 
+Malformed values are refused at load time too, so a broken spec exits with code 3 before any
+run is judged: a `status` outside the accepted values (see below), a regex that does not compile
+(`url_regex`, a url `regex`, `page_regex`), a `page_regex` without exactly one capture group, a
+`json_path` that is not a dotted path (`items.0.price`, `$.items[0].price`), and a numeric
+`value` that is not finite (`.nan`, `.inf`).
+
 Inside `expect`, a request predicate needs both a `method` and at least one of `url_contains`,
 `path_contains`, `query_contains`, `url_regex`, `body_contains` or `response_contains`, because
 "some POST succeeded" proves nothing. `forbid` and `allow` may stay broad, as in the read-only
@@ -100,7 +144,10 @@ page text needs two words or a number (`"1042"`, `"$24.00"`, `"Thank you for you
 a lone word such as `confirm` also labels buttons on pages that prove nothing. A claims file that
 breaks these rules is refused; the extractors drop such predicates and count them as
 `vacuous_predicates` in the claim set's coverage note, and a key claim left without predicates
-is `no_evidence`, so the run goes to review.
+is `no_evidence`, so the run goes to review. When a run is judged, a claim predicate that the
+run already met before the agent acted, that only echoes text the agent typed, or (for a key
+outcome claim) that is neither a mutation request nor the final page cannot support the claim
+either; see [evidence that proves nothing](concepts/claims-and-predicates.md#evidence-that-proves-nothing).
 
 ### `request`: a network request was observed
 
@@ -111,7 +158,7 @@ is `no_evidence`, so the run goes to review.
 | `path_contains` | `[]` | every substring must appear in the URL path |
 | `query_contains` | `[]` | every substring must appear in the decoded query string |
 | `url_regex` | none | regular expression the full URL (query included) must match |
-| `status` | `"2xx"` | exact code (`"201"`), class (`"2xx"`), or `null` for any |
+| `status` | `"ok"` | `ok` (2xx or 3xx, and the request did not fail), exact code (`"201"`), class (`"2xx"`), `none` (no response), `any` (anything, with or without a response), or `null` (any response) |
 | `body_contains` | `[]` | every substring must appear in the request body (case-insensitive) |
 | `response_contains` | `[]` | every substring must appear in the response body |
 
@@ -119,6 +166,13 @@ is `no_evidence`, so the run goes to review.
 - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
 - {kind: request, method: GET, path_contains: [/search], query_contains: [q=red kettle]}
 ```
+
+The default `ok` accepts redirects because a form that posts and then redirects
+(POST/Redirect/GET) answers the `POST` with `303` and the browser loads the result page with a
+`GET`. Write `status: 2xx` or an exact code when a redirect must not count. `null` needs a
+response of any status; a request that never got one (a connection error, or one the browser
+blocked) only matches `none` or `any`. A status that is none of these is refused when the spec
+loads.
 
 `url_contains` ignores the query string so that `POST /api/log?next=/api/orders` cannot pass for
 an order request. Use `query_contains` to match query parameters, or `url_regex` for the whole
@@ -177,11 +231,19 @@ leads to review, not failure.
   value: 30
 ```
 
-Instead of `json_path`, `page_regex` extracts the value from page text with one capture group:
+Instead of `json_path`, `page_regex` extracts the value from page text with exactly one capture
+group:
 
 ```yaml
-- {kind: value, field: total, page_regex: 'Total:\s*\$([0-9.]+)', op: "<=", value: 30}
+- {kind: value, field: total, page_regex: 'Total:\s*\$([\d.,]+)', op: "<=", value: 30}
 ```
+
+`page_regex` reads **every** match on **every** recorded page state (each snapshot and the final
+page), and every value it reads must satisfy the comparison: one violation makes the predicate
+`contradicted`, so a total of `$45.00` on the checkout page is not hidden by a `$5 off` coupon on
+the confirmation page. When the values differ but all satisfy it, the reason says so. Anchor
+the pattern on a label such as `Total:`: a bare price pattern like `\$([\d.]+)` also reads
+shipping fees, coupons and every other product listed on the way.
 
 Numbers are read from JSON numbers and from strings as prices are usually written: currency
 symbols or codes (`$24.00`, `1500 EUR`), thousands grouped with commas, dots, spaces or
@@ -191,7 +253,9 @@ digits (`24,5`) and a `k`/`m`/`b` suffix. Ambiguous strings such as `1.500` are 
 `no_evidence` ("cannot compare ... numerically"), never a text comparison. `==` and `!=` fall
 back to comparing normalised text.
 
-Without `in_request`, the value is looked up in any state-changing request.
+Without `in_request`, the value is looked up in every state-changing request that took effect
+(answered 2xx or 3xx and not failed); a rejected or failed attempt does not count. With
+`in_request`, its own `status` decides (the default `ok` likewise skips failed attempts).
 If a candidate request's body was truncated before `json_path`, the value cannot be shown to
 hold for every observation, so the predicate is `no_evidence` unless a recorded observation
 already violates it.
@@ -211,8 +275,9 @@ to review, never to failure. Prefer a `request`, `url` or `page_text` predicate 
 `url_regex`, `regex` and `page_regex` come from specs or from an LLM, so they are treated as
 untrusted. They are matched case-insensitively with the [`regex`](https://pypi.org/project/regex/)
 engine, which accepts Python `re` syntax (lookarounds and backreferences included) and supports
-a per-match timeout. A pattern longer than 300 characters is rejected (the predicate becomes
-`no_evidence` with the reason "unsafe regex"). Every other valid pattern runs, but each search
+a per-match timeout. A pattern that does not compile, or is longer than 300 characters ("unsafe
+regex"), is refused when the spec or claims file loads, and an extractor drops it. Every other
+valid pattern runs, but each search
 stops after 50 ms: a pattern that backtracks catastrophically on the evidence, such as `(a+)+$`
 on a long run of `a`, makes the predicate `no_evidence` with the reason "regex timed out", and a
 spec `allow` entry whose regex times out explains no mutation.
@@ -231,7 +296,7 @@ expect:
   - id: order_submitted
     description: An order request succeeded
     all:
-      - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
+      - {kind: request, method: POST, url_contains: [/api/orders]}
   - id: confirmation_shown
     any:
       - {kind: page_text, contains: Thank you for your order}
@@ -258,9 +323,9 @@ expect:
 forbid:
   - id: no_writes
     any:
-      - {kind: request, method: POST, status: null}
-      - {kind: request, method: PUT, status: null}
-      - {kind: request, method: DELETE, status: null}
+      - {kind: request, method: POST, status: any}
+      - {kind: request, method: PUT, status: any}
+      - {kind: request, method: DELETE, status: any}
 ```
 
 ### Form submission with a specific value

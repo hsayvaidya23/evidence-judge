@@ -164,6 +164,10 @@ _STORIES: dict[ForgeryKind, Story] = {
     ),
 }
 
+_STORIES[ForgeryKind.TAUTOLOGICAL_PREDICATES] = _STORIES[ForgeryKind.PROGRESS_FABRICATION]
+_STORIES[ForgeryKind.SELF_PLANTED_TEXT] = _STORIES[ForgeryKind.PROGRESS_FABRICATION]
+_STORIES[ForgeryKind.THIRD_PARTY_ORDER] = _STORIES[ForgeryKind.PROGRESS_FABRICATION]
+
 _STYLE_ANSWERS: tuple[str, ...] = (
     "Summary: {answer}",
     "Final report.\n\n{answer}",

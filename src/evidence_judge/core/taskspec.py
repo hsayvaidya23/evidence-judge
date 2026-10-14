@@ -8,12 +8,12 @@ Example (YAML):
       - id: order_submitted
         description: An order request succeeded
         all:
-          - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
+          - {kind: request, method: POST, url_contains: [/api/orders]}
       - id: confirmation_shown
         any:
           - {kind: page_text, contains: Thank you for your order}
     allow:
-      - {kind: request, method: POST, url_contains: [/api/cart]}
+      - {kind: request, method: POST, url_contains: [/api/cart]}   # max_count: N caps it
     forbid:
       - id: no_account_changes
         any:
@@ -39,6 +39,24 @@ class Expectation(BaseModel):
     description: str | None = None
     all: list[Predicate] = Field(default_factory=list[Predicate])
     any: list[Predicate] = Field(default_factory=list[Predicate])
+    max_count: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "How many matching mutations the expectation explains (1 when unset; more are "
+            "duplicate side effects). When set, more matching mutations also break it."
+        ),
+    )
+
+    def request_predicates(self) -> list[RequestPredicate]:
+        """Its request predicates, including the requests its value predicates read."""
+        found: list[RequestPredicate] = []
+        for predicate in [*self.all, *self.any]:
+            if isinstance(predicate, RequestPredicate):
+                found.append(predicate)
+            elif isinstance(predicate, ValuePredicate) and predicate.in_request is not None:
+                found.append(predicate.in_request)
+        return found
 
     @model_validator(mode="after")
     def _non_empty(self) -> Expectation:
@@ -49,6 +67,16 @@ class Expectation(BaseModel):
         return self
 
 
+class AllowedRequest(RequestPredicate):
+    """An `allow` entry: a request predicate, optionally capped at `max_count` matches."""
+
+    max_count: int | None = Field(
+        default=None,
+        ge=1,
+        description="How many matching mutations it explains; unlimited when unset",
+    )
+
+
 class TaskSpec(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -56,8 +84,8 @@ class TaskSpec(BaseModel):
     task: str
     expect: list[Expectation] = Field(default_factory=list[Expectation])
     forbid: list[Expectation] = Field(default_factory=list[Expectation])
-    allow: list[RequestPredicate] = Field(
-        default_factory=list[RequestPredicate],
+    allow: list[AllowedRequest] = Field(
+        default_factory=list[AllowedRequest],
         description="Intermediate mutations that are part of doing the task (not side effects)",
     )
     constraints: list[ValuePredicate] = Field(default_factory=list[ValuePredicate])

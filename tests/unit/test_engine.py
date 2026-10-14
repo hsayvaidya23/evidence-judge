@@ -11,6 +11,7 @@ from evidence_judge.extract.schema import ClaimExtraction
 from evidence_judge.llm import FakeLLM, LLMError
 from tests.unit.conftest import (
     FakeVisionLLM,
+    act,
     constraint_violation_run,
     final,
     forged_run,
@@ -309,6 +310,7 @@ async def test_spec_less_state_change_explains_what_to_add(settings: Settings) -
 
 async def test_conflicting_evidence_on_a_key_claim_needs_review(settings: Settings) -> None:
     run = make_run(
+        actions=[act(1, "click", "#newsletter")],
         network=[net(1, "GET", "/")],
         snapshots=[snap(1, "/", "Thank you for visiting our shop")],
         final_state=final("/", "Thank you for visiting our shop"),
@@ -324,7 +326,7 @@ async def test_conflicting_evidence_on_a_key_claim_needs_review(settings: Settin
                     "key": True,
                     "predicates": [
                         {"kind": "request", "method": "POST", "url_contains": ["orders"]},
-                        {"kind": "page_text", "contains": "Thank you", "scope": "any"},
+                        {"kind": "page_text", "contains": "Thank you", "scope": "final"},
                     ],
                 }
             ]

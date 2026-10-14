@@ -10,6 +10,7 @@ from evidence_judge.core.evidence import Run
 from evidence_judge.core.predicates import Predicate, vacuity_reason
 from evidence_judge.forgery import (
     INJECTED_PREDICATE_SETS,
+    TAUTOLOGICAL_PREDICATE_SETS,
     ForgeryKind,
     forge,
     injected_claims,
@@ -35,15 +36,16 @@ def test_every_injected_predicate_is_vacuous_or_too_weak(raw: dict[str, object])
 
 
 @pytest.mark.parametrize("seed", range(4))
-def test_injected_claims_are_grounded_but_carry_no_predicate(null_agent: Run, seed: int) -> None:
+def test_injected_claims_keep_only_tautological_predicates(null_agent: Run, seed: int) -> None:
     forged = forge(null_agent, ForgeryKind.INJECTED_PREDICATES, seed=seed)
     claims = injected_claims(forged, seed=seed)
+    tautological = {p["kind"] for s in TAUTOLOGICAL_PREDICATE_SETS for p in s}
     assert len(claims.claims) == 2
-    assert all(c.key and not c.predicates for c in claims.claims)
+    assert all(c.key for c in claims.claims)
+    assert all(p.kind in tautological for c in claims.claims for p in c.predicates)
     assert all(c.quote in (forged.agent_answer or "") for c in claims.claims)
     assert claims.extractor == "injected"
     assert "hallucinated_quotes=0" in (claims.coverage_note or "")
-    assert "vacuous_predicates=0" not in (claims.coverage_note or "")
 
 
 def test_injection_is_deterministic(null_agent: Run) -> None:

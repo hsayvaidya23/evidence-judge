@@ -6,9 +6,12 @@ Evidence Judge (with the scenario's task spec, with a coarser generic spec when 
 one, and with no spec) and optionally a transcript LLM judge, and reports false-PASS rates on
 forgeries and accuracy on controls with Wilson 95% intervals.
 
-`injected_predicates` forgeries also replace claim extraction: the judge receives the claims an
-injection-controlled extractor would return (`forgery.injection`), carrying vacuous or weak
-predicates, after the extractor's own validation.
+`injected_predicates` and `tautological_predicates` forgeries also replace claim extraction:
+the judge receives the claims an injection-controlled extractor would return
+(`forgery.injection`), carrying vacuous, weak or tautological predicates, after the extractor's
+own validation. `self_planted_text` and `third_party_order` forgeries also append the evidence
+a gaming agent would plant (`forgery.evidence`): its claimed confirmation typed into the shop's
+search box, or an order sent to a third-party host.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.forgery.base import MANIPULATION_KINDS, Forger, ForgeryKind
+from evidence_judge.forgery.evidence import plant_evidence
 from evidence_judge.forgery.injection import injected_claims
 from evidence_judge.forgery.templates import TemplateForger
 from evidence_judge.llm.base import LLMClient, LLMError
@@ -41,6 +45,9 @@ EJ_WITH_SPEC: Final = "evidence-judge+spec"
 EJ_GENERIC_SPEC: Final = "evidence-judge+generic-spec"
 EJ_NO_SPEC: Final = "evidence-judge"
 ALL_MANIPULATIONS: Final = "all manipulations"
+INJECTION_KINDS: Final = frozenset(
+    {ForgeryKind.INJECTED_PREDICATES, ForgeryKind.TAUTOLOGICAL_PREDICATES}
+)
 MAX_SUMMARY_CHARS: Final = 300
 
 
@@ -215,9 +222,10 @@ class BenchmarkRunner:
             for kind in self.config.kinds:
                 for seed in range(self.config.seeds):
                     forged = await self.forger.forge(scenario.run, kind, seed=seed)
+                    forged = plant_evidence(forged, kind, seed=seed)
                     injected = (
-                        injected_claims(forged, seed=seed)
-                        if kind is ForgeryKind.INJECTED_PREDICATES
+                        injected_claims(forged, seed=seed, kind=kind)
+                        if kind in INJECTION_KINDS
                         else None
                     )
                     cases.append(

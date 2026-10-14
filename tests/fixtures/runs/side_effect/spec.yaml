@@ -4,7 +4,7 @@ expect:
   - id: order_submitted
     description: An order request succeeded
     all:
-      - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
+      - {kind: request, method: POST, url_contains: [/api/orders]}
   - id: confirmation_shown
     description: The order confirmation page was shown
     any:

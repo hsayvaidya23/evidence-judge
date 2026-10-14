@@ -11,13 +11,14 @@ from evidence_judge.checks._common import (
     require,
     result,
 )
-from evidence_judge.checks.base import CheckContext
+from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.matching import (
     compile_regex,
     contains,
     is_truncated,
     regex_search,
     status_matches,
+    url_host,
     url_location_contains,
     url_path_contains,
     url_query_contains,
@@ -25,7 +26,7 @@ from evidence_judge.checks.matching import (
 )
 from evidence_judge.core.evidence import Channel, NetworkEvent
 from evidence_judge.core.index import EvidenceIndex
-from evidence_judge.core.predicates import Predicate, RequestPredicate
+from evidence_judge.core.predicates import STATUS_ANY, Predicate, RequestPredicate
 from evidence_judge.core.verdict import PredicateResult, Support
 
 
@@ -40,9 +41,10 @@ class Miss:
 class RequestMatcher:
     """Compiled form of a RequestPredicate. Raises InvalidPredicateError on a malformed one."""
 
-    def __init__(self, predicate: RequestPredicate) -> None:
+    def __init__(self, predicate: RequestPredicate, scope: EvidenceScope | None = None) -> None:
         validate_status_spec(predicate.status)
         self.predicate = predicate
+        self.scope = scope
         self._regex = compile_regex(predicate.url_regex) if predicate.url_regex else None
 
     @property
@@ -54,7 +56,7 @@ class RequestMatcher:
             + len(p.path_contains)
             + len(p.query_contains)
             + int(p.url_regex is not None)
-            + int(p.status is not None)
+            + int(p.status != STATUS_ANY)
             + len(p.body_contains)
             + len(p.response_contains)
         )
@@ -73,8 +75,8 @@ class RequestMatcher:
             )
         if p.url_regex:
             parts.append(f"whose URL matches /{p.url_regex}/")
-        if p.status:
-            parts.append(f"with status {p.status}")
+        if p.status != STATUS_ANY:
+            parts.append(f"with {describe_status(p.status)}")
         if p.body_contains:
             parts.append(
                 "with a request body containing " + " and ".join(quoted(b) for b in p.body_contains)
@@ -107,15 +109,36 @@ class RequestMatcher:
         )
         if self._regex and not regex_search(self._regex, event.url):
             out.append(Miss(f"URL does not match /{p.url_regex}/"))
-        if not status_matches(event.status, p.status):
-            got = "no response" if event.status is None else str(event.status)
-            out.append(Miss(f"status {got}, expected {p.status}"))
+        if not status_matches(event.status, p.status, failed=event.failed):
+            out.append(Miss(f"{_got(event)}, expected {describe_status(p.status)}"))
         out.extend(_body_misses(event.request_body, p.body_contains, "request body"))
         out.extend(_body_misses(event.response_body, p.response_contains, "response body"))
+        if self.scope is not None and not self.scope.request_allowed(event):
+            out.append(Miss(f"went to {url_host(event.url)}, outside {self.scope.describe()}"))
         return out
 
     def matches(self, event: NetworkEvent) -> bool:
         return not self.misses(event)
+
+
+def describe_status(spec: str | None) -> str:
+    match spec:
+        case None:
+            return "any response"
+        case "ok":
+            return "a 2xx or 3xx status"
+        case "none":
+            return "no response"
+        case "any":
+            return "any outcome"
+        case _:
+            return f"status {spec}"
+
+
+def _got(event: NetworkEvent) -> str:
+    if event.status is None:
+        return "no response"
+    return f"status {event.status}, failed" if event.failed else f"status {event.status}"
 
 
 def _body_misses(body: str | None, needles: list[str], label: str) -> list[Miss]:
@@ -134,8 +157,10 @@ def matching_requests(predicate: RequestPredicate, index: EvidenceIndex) -> list
     return [e for e in index.requests() if matcher.matches(e)]
 
 
-def check_request(predicate: RequestPredicate, index: EvidenceIndex) -> PredicateResult:
-    matcher = RequestMatcher(predicate)
+def check_request(
+    predicate: RequestPredicate, index: EvidenceIndex, scope: EvidenceScope | None = None
+) -> PredicateResult:
+    matcher = RequestMatcher(predicate, scope)
     requests = index.requests()
     scored = [(event, matcher.misses(event)) for event in requests]
     hits = [event for event, misses in scored if not misses]
@@ -202,4 +227,4 @@ class RequestChecker:
     deterministic = True
 
     async def evaluate(self, predicate: Predicate, ctx: CheckContext) -> PredicateResult:
-        return check_request(require(predicate, RequestPredicate, self.kind), ctx.index)
+        return check_request(require(predicate, RequestPredicate, self.kind), ctx.index, ctx.scope)
