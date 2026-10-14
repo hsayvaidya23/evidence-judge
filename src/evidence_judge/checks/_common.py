@@ -60,3 +60,19 @@ def state_id(state: PageState, index: EvidenceIndex) -> str:
     if state is index.final or state.snapshot_id is None:
         return FINAL_ID
     return state.snapshot_id
+
+
+def merge_citations(results: Iterable[PredicateResult]) -> list[Citation]:
+    seen: dict[str, Citation] = {}
+    for res in results:
+        for citation in res.citations:
+            seen.setdefault(citation.evidence_id, citation)
+    return list(seen.values())
+
+
+def join_reasons(results: Iterable[PredicateResult]) -> str:
+    return "; ".join(dict.fromkeys(r.reason for r in results))
+
+
+def checker_names(results: Iterable[PredicateResult]) -> str:
+    return "+".join(dict.fromkeys(r.checker for r in results))
