@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     )
     max_body_chars: int = 20_000
     review_coverage_threshold: float = Field(default=0.6, ge=0, le=1)
+
+    @field_validator("anthropic_api_key", "redaction_key", mode="before")
+    @classmethod
+    def _blank_secret_is_unset(cls, value: object) -> object:
+        """`KEY=` in a .env file means "not set", not an empty secret."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 def stable_redaction_key(settings: Settings) -> bytes | None:

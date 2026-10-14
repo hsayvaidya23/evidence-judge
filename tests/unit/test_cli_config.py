@@ -235,3 +235,13 @@ def test_offline_bench_does_not_create_a_redaction_key(
     result = runner.invoke(app, ["bench", str(GOLDEN.parent), "--seeds", "1", "-q"])
     assert result.exit_code == ExitCode.PASS, result.output
     assert not (tmp_path / "cache" / REDACTION_KEY_FILE).exists()
+
+
+def test_blank_secrets_in_env_mean_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    from evidence_judge.config import Settings
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("EVJ_REDACTION_KEY", "   ")
+    settings = Settings()
+    assert settings.anthropic_api_key is None
+    assert settings.redaction_key is None
