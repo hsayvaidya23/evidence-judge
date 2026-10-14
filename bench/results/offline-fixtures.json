@@ -277,7 +277,7 @@
       "seed": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -349,7 +349,7 @@
       "seed": null,
       "expected": "pass",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -373,7 +373,7 @@
       "seed": null,
       "expected": "pass",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it. 6 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (7 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -421,7 +421,7 @@
       "seed": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -445,7 +445,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -469,7 +469,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -493,7 +493,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -517,7 +517,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -541,7 +541,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -565,7 +565,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -589,7 +589,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -613,7 +613,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -637,7 +637,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -661,7 +661,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -685,7 +685,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -709,7 +709,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -733,7 +733,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -757,7 +757,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -781,7 +781,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 1 other side effect also needs review.",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -1885,7 +1885,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -1909,7 +1909,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -1933,7 +1933,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -1957,7 +1957,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2029,7 +2029,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2053,7 +2053,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2077,7 +2077,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2101,7 +2101,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2125,7 +2125,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2149,7 +2149,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2173,7 +2173,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2197,7 +2197,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2221,7 +2221,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 changed state and no task spec covers it (the agent reported it, but a claim cannot authorise a side effect). 2 other side effects also need review.",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     }
   ]
