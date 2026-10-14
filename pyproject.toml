@@ -43,6 +43,7 @@ dev = [
   "playwright>=1.49",
   "starlette>=0.41",
   "uvicorn>=0.32",
+  "httpx>=0.28",
   "anthropic>=0.69",
 ]
 
