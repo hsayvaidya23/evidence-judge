@@ -91,7 +91,7 @@ forged = forge(run, ForgeryKind.ENVIRONMENT_BLAMING, seed=0)
    - **Accuracy** on honest controls: verdict equal to the label.
    - **Wilson 95% score intervals** for both (`evidence_judge.bench.wilson_interval`, checked
      against Newcombe 1998). Wilson stays informative at 0/n, which is where a robust judge lands:
-     0 of 75 still only bounds the true rate below about 5%.
+     0 of 120 still only bounds the true rate below about 3%.
    - Counts of NEEDS_REVIEW, FAIL and judge errors (an LLM error is counted, not guessed).
 
 ## Running it

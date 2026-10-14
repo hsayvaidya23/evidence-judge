@@ -77,7 +77,7 @@ description: Frequently asked questions about Evidence Judge - LLM judges, NEEDS
 ??? question "How reliable is the benchmark?"
 
     It is honest about its size: seven recorded runs of one task on one demo shop, with template
-    forgeries, so the intervals are wide (0 of 60 bounds the false-PASS rate below about 6%).
+    forgeries, so the intervals are wide (0 of 120 bounds the false-PASS rate below about 3%).
     Run it on your own recorded runs with
     [`evidence-judge bench`](guides/benchmark-your-agent.md). Limitations are listed on the
     [benchmark page](benchmark.md#limitations).

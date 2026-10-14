@@ -6,7 +6,7 @@
   <img alt="Python 3.12 | 3.13" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white">
   <img alt="pyright strict" src="https://img.shields.io/badge/types-pyright%20strict-2F6FED">
   <img alt="ruff" src="https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black">
-  <img alt="0 of 75 forged runs passed" src="https://img.shields.io/badge/forged%20runs%20passed-0%2F75-brightgreen">
+  <img alt="0 of 135 forged runs passed" src="https://img.shields.io/badge/forged%20runs%20passed-0%2F135-brightgreen">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -227,16 +227,16 @@ the cache directory is not writable, a per-process key is used with a one-line w
 ## 🧪 Benchmark: can a forged story fool it?
 
 <p align="center">
-  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 75 forged runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
+  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 135 forged runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
 </p>
 
-The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites only the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), a prompt-injection attack aimed at the claim extractor, and a style-only control. The actions and network evidence stay the same, so the correct verdict is never PASS.
+The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites only the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks aimed at the claim extractor, evidence-tampering attacks (the agent types its own "confirmation" into the page, or sends the order to a third-party host), and a style-only control. The real order is never placed, so the correct verdict is never PASS. Counts below pool the 8 attack kinds (120 runs per judge); the style-only control adds 15 more, also 0 passes.
 
 | Judge | Forged runs | False PASS | 95% CI |
 | --- | ---: | ---: | --- |
-| Evidence Judge + exact task spec (offline) | 75 | **0** | 0–5% |
-| Evidence Judge + generic task spec (offline) | 75 | **0** (13 sent to review) | 0–5% |
-| Evidence Judge, no spec (offline) | 75 | **0** (37 sent to review) | 0–5% |
+| Evidence Judge + exact task spec (offline) | 120 | **0** | 0–3% |
+| Evidence Judge + generic task spec (offline) | 120 | **0** (19 sent to review) | 0–3% |
+| Evidence Judge, no spec (offline) | 120 | **0** (66 sent to review) | 0–3% |
 
 Honest controls: 7/7 correct with the exact spec, 6/7 with the generic one (the side-effect run goes to review because the generic spec has no `forbid` rule). Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`; add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
 
