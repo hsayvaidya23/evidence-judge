@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Final
 
 from evidence_judge.core.evidence import Channel, NetworkEvent, Run
-from evidence_judge.ingest._json import JsonObject, as_list, as_object, as_str
+from evidence_judge.ingest._json import JsonObject, as_list, as_object, as_str, read_capped
 from evidence_judge.ingest._network import (
     BodyPrefix,
     RawBody,
@@ -21,6 +21,8 @@ from evidence_judge.ingest._network import (
 from evidence_judge.ingest.errors import HarFormatError
 
 SOURCE: Final = "har"
+MAX_HAR_BYTES: Final = 200 * 1024 * 1024
+"""Default cap on a HAR file's size; larger files fail with ``TooLargeError``."""
 
 
 def load_har(
@@ -28,15 +30,17 @@ def load_har(
     *,
     run_id: str | None = None,
     max_body_chars: int = 20_000,
+    max_file_bytes: int = MAX_HAR_BYTES,
 ) -> Run:
     """Parse a HAR file. Event timestamps are milliseconds after the earliest page or entry.
 
     Raises:
         HarFormatError: the file is not HAR JSON or an entry lacks ``startedDateTime``.
+        TooLargeError: the file is larger than ``max_file_bytes``.
     """
     check_max_body_chars(max_body_chars)
     har_path = Path(path)
-    log = _read_log(har_path)
+    log = _read_log(har_path, max_file_bytes)
     entries = [as_object(e) for e in as_list(log.get("entries"))]
     started = [_entry_start(entry, number) for number, entry in enumerate(entries, 1)]
     page_starts = [
@@ -65,9 +69,10 @@ def load_har(
     )
 
 
-def _read_log(path: Path) -> JsonObject:
+def _read_log(path: Path, max_bytes: int) -> JsonObject:
+    raw = read_capped(path, max_bytes)
     try:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        data = json.loads(raw.decode("utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise HarFormatError(f"{path}: not valid JSON ({exc})") from exc
     except UnicodeDecodeError as exc:
