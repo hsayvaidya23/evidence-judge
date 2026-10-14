@@ -38,6 +38,13 @@ _SUFFIX_SCALE: Final = {"k": 1e3, "m": 1e6, "b": 1e9}
 _STATUS_CLASS = re.compile(r"^([1-5])xx$")
 _STATUS_EXACT = re.compile(r"^[1-5]\d\d$")
 _INDEX_BRACKETS = re.compile(r"\[(-?\d+)\]")
+_TRUNCATION_MARK = re.compile(r"…\[truncated[^\]]{0,60}\]\s*\Z")
+_TRUNCATION_TAIL: Final = 80
+
+
+def is_truncated(body: str | None) -> bool:
+    """True if ingest cut this body short and appended its truncation marker."""
+    return body is not None and _TRUNCATION_MARK.search(body[-_TRUNCATION_TAIL:]) is not None
 
 
 def contains(haystack: str | None, needle: str) -> bool:

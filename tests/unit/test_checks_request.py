@@ -131,3 +131,51 @@ def test_matching_requests_helper() -> None:
 async def test_wrong_predicate_kind_raises() -> None:
     with pytest.raises(PredicateKindMismatchError):
         await RequestChecker().evaluate(PageTextPredicate(contains="x"), ctx(honest_run()))
+
+
+TRUNCATED_RESPONSE = (
+    '{"status": "pending", "items": [' + "x" * 50 + "…[truncated; body is 50000 bytes]"
+)
+TRUNCATED_REQUEST = "q=" + "x" * 50 + "…[truncated 900 chars]"
+
+
+async def test_needle_missing_from_truncated_response_is_no_evidence() -> None:
+    event = net(1, "POST", "/api/orders", 201).model_copy(
+        update={"response_body": TRUNCATED_RESPONSE}
+    )
+    pred = RequestPredicate(
+        method="POST", url_contains=["/api/orders"], response_contains=["order_id"]
+    )
+    res = await RequestChecker().evaluate(pred, ctx(make_run(network=[event])))
+    assert res.status is Support.NO_EVIDENCE
+    assert "response body was truncated before 'order_id'" in res.reason
+    assert res.citations[0].evidence_id == "net#1"
+
+
+async def test_needle_missing_from_truncated_request_body_is_no_evidence() -> None:
+    event = net(1, "POST", "/api/search", 200).model_copy(
+        update={"request_body": TRUNCATED_REQUEST}
+    )
+    pred = RequestPredicate(method="POST", body_contains=["kettle"])
+    res = await RequestChecker().evaluate(pred, ctx(make_run(network=[event])))
+    assert res.status is Support.NO_EVIDENCE
+
+
+async def test_needle_in_recorded_part_of_truncated_body_still_matches() -> None:
+    event = net(1, "POST", "/api/orders", 201).model_copy(
+        update={"response_body": TRUNCATED_RESPONSE}
+    )
+    pred = RequestPredicate(method="POST", response_contains=["pending"])
+    res = await RequestChecker().evaluate(pred, ctx(make_run(network=[event])))
+    assert res.status is Support.SUPPORTED
+
+
+async def test_truncation_does_not_excuse_other_misses() -> None:
+    event = net(1, "POST", "/api/cart", 201).model_copy(
+        update={"response_body": TRUNCATED_RESPONSE}
+    )
+    pred = RequestPredicate(
+        method="POST", url_contains=["/api/orders"], response_contains=["order_id"]
+    )
+    res = await RequestChecker().evaluate(pred, ctx(make_run(network=[event])))
+    assert res.status is Support.CONTRADICTED

@@ -15,6 +15,7 @@ from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.matching import (
     compile_regex,
     contains,
+    is_truncated,
     status_matches,
     url_contains,
     validate_status_spec,
@@ -99,7 +100,10 @@ def _body_misses(body: str | None, needles: list[str], label: str) -> list[Miss]
         return []
     if body is None:
         return [Miss(f"{label} not recorded", unrecorded=True)]
-    return [Miss(f"{label} lacks {quoted(n)}") for n in needles if not contains(body, n)]
+    absent = [n for n in needles if not contains(body, n)]
+    if is_truncated(body):
+        return [Miss(f"{label} was truncated before {quoted(n)}", unrecorded=True) for n in absent]
+    return [Miss(f"{label} lacks {quoted(n)}") for n in absent]
 
 
 def matching_requests(predicate: RequestPredicate, index: EvidenceIndex) -> list[NetworkEvent]:

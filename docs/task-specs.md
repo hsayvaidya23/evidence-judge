@@ -81,6 +81,11 @@ Every predicate has a `kind`.
 - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
 ```
 
+Ingest keeps bodies only up to a size limit and marks a cut body with `…[truncated ...]`. A
+`body_contains` or `response_contains` phrase missing from a truncated body is treated as not
+recorded, so the result is `no_evidence`, never `contradicted`. A phrase found in the recorded
+part still matches.
+
 ### `page_text`: visible text contains a phrase
 
 ```yaml
@@ -127,6 +132,9 @@ Instead of `json_path`, `page_regex` extracts the value from page text with one 
 ```
 
 Without `in_request`, the value is looked up in any state-changing request.
+If a candidate request's body was truncated before `json_path`, the value cannot be shown to
+hold for every observation, so the predicate is `no_evidence` unless a recorded observation
+already violates it.
 
 ### `screenshot`: a yes/no question for a vision model
 
