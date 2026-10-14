@@ -39,8 +39,10 @@ conditions apply. In the verdict each one becomes an `ExpectationResult` with `m
 
 Doing a task usually involves writes that are not the goal itself, such as adding an item to
 the cart before checking out. List them under `allow` (request predicates) so the side-effects
-dimension does not flag them. Any other successful mutation that no expectation, constraint,
-allow entry or verified claim explains is reported as a side effect.
+dimension does not flag them. Any other successful mutation that no met expectation,
+constraint or allow entry explains is reported as a side effect. The agent's own claims never
+explain a mutation: "I also changed your email" is still a side effect, even though the claim is
+true. Without a spec, every successful mutation is reported, and the run needs review at best.
 
 ```yaml
 allow:

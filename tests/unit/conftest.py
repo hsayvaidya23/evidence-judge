@@ -235,6 +235,7 @@ def shop_spec(*, allowed_hosts: list[str] | None = None) -> TaskSpec:
                     "any": [{"kind": "page_text", "contains": "Thank you for your order"}],
                 },
             ],
+            "allow": [{"kind": "request", "method": "POST", "url_contains": ["/api/cart"]}],
             "forbid": [
                 {
                     "id": "no_account_changes",
