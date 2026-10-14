@@ -64,6 +64,15 @@ At least one of `--trace`, `--har` or `--browser-use` is required.
 | `--quiet`, `-q` | Print nothing; only set the exit code |
 | `--debug` / `--no-debug` | Re-raise internal errors with a traceback instead of exiting `4` |
 
+### Export to other tools
+
+| Option | Description |
+| --- | --- |
+| `--otel` | Emit `gen_ai.evaluation.result` events through OpenTelemetry, configured by the standard `OTEL_*` variables (and `TRACEPARENT` to attach to the judged span). Needs the `otel` extra; a missing extra exits `3` before judging |
+| `--langfuse-trace-id ID` | Push the overall score, outcome and dimension scores to this Langfuse trace, using `LANGFUSE_*` variables. Needs the `langfuse` extra |
+
+A failed export prints a warning and never changes the exit code. See [integrations.md](integrations.md).
+
 Messages on stderr: the redaction summary, `no LLM configured; judging offline`, a warning when
 the redaction key file cannot be written (a per-process key is used instead), and a notice when
 `EVJ_SCREENSHOTS_TO_LLM=true` lets unredacted screenshots reach the model provider.
@@ -86,6 +95,28 @@ with a per-process key; `inspect` never reads or creates the redaction key file.
 | `--json` | Print machine-readable JSON instead of a table |
 | `--no-redact` | Show raw URLs and values |
 | `--debug` / `--no-debug` | Re-raise internal errors with a traceback instead of exiting `4` |
+
+## `evidence-judge bench`
+
+Benchmarks judges on forged runs: false-PASS rates and accuracy on honest controls. See
+[benchmark.md](benchmark.md).
+
+```bash
+evidence-judge bench RUNS_DIR [--seeds 3] [--out results.json] [--markdown results.md]
+```
+
+| Option | Description |
+| --- | --- |
+| `RUNS_DIR` | Directory of labelled runs, one sub-directory per scenario (`trace.zip`, optional `run.har`, `answer.txt`, `reasoning.txt`, `spec.yaml`, `expected.json`) |
+| `--seeds N` | Forgeries per failed run and forgery kind (default 3) |
+| `--out FILE` | Write the results JSON here |
+| `--markdown FILE` | Write the Markdown report here |
+| `--with-llm-baseline` | Also judge every case with a transcript LLM judge (needs `ANTHROPIC_API_KEY`) |
+| `--baseline-screenshot` | Show the baseline judge the final screenshot |
+| `--offline` / `--online` | Evidence Judge without (default) or with LLM claim extraction |
+| `--no-redact` | Judge unredacted evidence and agent text |
+| `--quiet`, `-q` | Do not print the report |
+| `--debug` / `--no-debug` | Show tracebacks for internal errors |
 
 ## `evidence-judge schema`
 

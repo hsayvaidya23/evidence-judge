@@ -15,7 +15,7 @@ from evidence_judge.config import Settings
 ROOT = Path(__file__).resolve().parents[2]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 CLI_DOC = (ROOT / "docs" / "cli.md").read_text(encoding="utf-8")
-DOCUMENTED_COMMANDS = ("judge", "inspect")
+DOCUMENTED_COMMANDS = ("judge", "inspect", "bench")
 
 
 def _section(text: str, heading: str) -> str:
