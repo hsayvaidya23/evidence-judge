@@ -208,8 +208,9 @@ quotes short (the minimal span that states the claim).
 
 # Predicates (1-3 per claim; any single one satisfied proves the claim)
 Use ONLY these kinds and fields from the output schema, with concrete values:
-- request: an HTTP request happened. method (e.g. POST), url_contains (substrings, all must \
-appear), body_contains, response_contains, status ("2xx" default). Best for side effects: \
+- request: an HTTP request happened. method (e.g. POST), url_contains (substrings of the \
+scheme, host and path only, all must appear), query_contains (substrings of the decoded query \
+string), body_contains, response_contains, status ("2xx" default). Best for side effects: \
 "placed the order" -> method POST, url_contains ["order"].
 - page_text: visible page text contains a phrase. "order #1042 confirmed" -> contains "1042". \
 Use scope "any" if it may have appeared before the final page.
@@ -221,7 +222,10 @@ target_contains; value_contains).
 - screenshot: a yes/no visual question. LAST RESORT, only when nothing else could verify it.
 Prefer request, page_text, url and action. Use distinctive substrings that the evidence would \
 really contain (ids, numbers, nouns in URLs); avoid vague ones like "success". Never invent \
-evidence, ids or values that are not stated in the agent output or task.
+evidence, ids or values that are not stated in the agent output or task. When you offer \
+alternatives for one claim, make them the same kind (e.g. two request predicates), because a \
+miss on a different kind counts as conflicting evidence. Prefer substrings to regexes; if you \
+must use a regex, keep it short and never nest quantifiers (no "(a+)+" style patterns).
 
 # Examples
 {chr(10).join(_render_example(example) for example in _EXAMPLES)}
