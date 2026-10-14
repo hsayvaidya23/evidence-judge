@@ -110,7 +110,9 @@ from evidence_judge.bench import BenchConfig, BenchmarkRunner, load_scenarios, t
 from evidence_judge.config import Settings
 
 result = asyncio.run(
-    BenchmarkRunner(Settings(), BenchConfig(seeds=3)).run(load_scenarios(Path("tests/fixtures/runs")))
+    BenchmarkRunner(Settings(), BenchConfig(seeds=3)).run(
+        load_scenarios(Path("tests/fixtures/runs"))
+    )
 )
 print(to_markdown(result))
 ```

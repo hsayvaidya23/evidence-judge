@@ -106,7 +106,7 @@ the same run again updates the scores instead of adding duplicates. Score metada
 from langfuse import get_client
 from evidence_judge.integrations.langfuse import push_to_langfuse
 
-langfuse = get_client()                         # reads LANGFUSE_* env vars
+langfuse = get_client()  # reads LANGFUSE_* env vars
 push_to_langfuse(verdict, trace_id=langfuse_trace_id, observation_id=None, client=langfuse)
 langfuse.flush()
 ```
@@ -148,6 +148,7 @@ from evidence_judge.integrations.phoenix import span_annotation_rows, span_annot
 client.spans.log_span_annotations(span_annotations=span_annotations(verdict, span_id=span_id))
 
 import pandas as pd
+
 client.spans.log_span_annotations_dataframe(
     dataframe=pd.DataFrame(span_annotation_rows(verdict, span_id=span_id))
 )
@@ -162,17 +163,21 @@ from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
 from evidence_judge.integrations.inspect_ai import evidence_judge_scorer
 
+
 @task
 def shop_agent() -> Task:
     return Task(
         dataset=[
             Sample(
                 input="Buy a red kettle under $30",
-                metadata={"trace": "runs/42/trace.zip", "har": "runs/42/run.har",
-                          "spec": "runs/42/spec.yaml"},
+                metadata={
+                    "trace": "runs/42/trace.zip",
+                    "har": "runs/42/run.har",
+                    "spec": "runs/42/spec.yaml",
+                },
             ),
         ],
-        solver=my_browser_agent(),   # writes the recording the metadata names
+        solver=my_browser_agent(),  # writes the recording the metadata names
         scorer=evidence_judge_scorer(offline=True),
     )
 ```
