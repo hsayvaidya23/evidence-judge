@@ -290,6 +290,15 @@ def judge(
 
         if llm is None and not offline and not quiet:
             err.print(Text("no LLM configured; judging offline", style="yellow"))
+        if llm is not None and settings.screenshots_to_llm and not quiet:
+            err.print(
+                Text(
+                    "screenshots: unredacted screenshots may be sent to the model provider "
+                    "(EVJ_SCREENSHOTS_TO_LLM=true)",
+                    style="yellow",
+                ),
+                soft_wrap=True,
+            )
         verdict = _run_judge(
             settings, llm, run, offline=offline or llm is None, spec=task_spec, claims=claim_set
         )

@@ -199,3 +199,29 @@ def test_inspect_internal_error_exit_4(
     debug = runner.invoke(app, ["inspect", "--har", str(evidence), "--debug"])
     assert isinstance(debug.exception, RuntimeError)
 
+
+def test_screenshots_are_not_sent_to_the_llm_by_default(no_env_key: None) -> None:
+    assert Settings.model_validate({}).screenshots_to_llm is False
+
+
+def test_notice_when_screenshots_go_to_the_llm(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path
+) -> None:
+    install(monkeypatch, calls)
+    monkeypatch.setenv("EVJ_SCREENSHOTS_TO_LLM", "true")
+    result = runner.invoke(app, ["judge", "--har", str(evidence)])
+    notices = [line for line in result.output.splitlines() if "screenshots" in line]
+    assert len(notices) == 1 and "unredacted" in notices[0]
+    offline = runner.invoke(app, ["judge", "--har", str(evidence), "--offline"])
+    assert "unredacted" not in offline.output
+    quiet = runner.invoke(app, ["judge", "--har", str(evidence), "-q"])
+    assert quiet.output == ""
+
+
+def test_no_screenshot_notice_by_default(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path
+) -> None:
+    install(monkeypatch, calls)
+    monkeypatch.delenv("EVJ_SCREENSHOTS_TO_LLM", raising=False)
+    result = runner.invoke(app, ["judge", "--har", str(evidence)])
+    assert "unredacted" not in result.output

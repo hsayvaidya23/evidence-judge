@@ -67,9 +67,9 @@ class Settings(BaseSettings):
         ),
     )
     screenshots_to_llm: bool = Field(
-        default=True,
-        description="Send recorded screenshots to the vision model; false makes screenshot checks "
-        "report no evidence instead",
+        default=False,
+        description="Send recorded screenshots, which are never redacted, to the vision model; "
+        "while false, screenshot checks report no evidence",
     )
     max_body_chars: int = 20_000
     review_coverage_threshold: float = Field(default=0.6, ge=0, le=1)
