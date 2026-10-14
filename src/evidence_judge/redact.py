@@ -186,6 +186,19 @@ def _luhn_ok(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _digits(value: str) -> str:
+    return "".join(ch for ch in value if ch.isdigit())
+
+
+_FINGERPRINT_NORMALISERS: dict[str, Callable[[str], str]] = {
+    "email": lambda v: v.strip().casefold(),
+    "card": _digits,
+}
+"""Canonical form per category, so values that evidence matching treats as equal (matching is
+case-insensitive; card numbers are compared without separators) get equal tokens. Credentials
+stay case-sensitive: two tokens differing only in case are different secrets."""
+
+
 def _norm_param(name: str) -> str:
     return name.lower().replace("-", "_").strip("[]")
 
@@ -238,7 +251,9 @@ class Redactor:
         if TOKEN_RE.fullmatch(value):
             return value
         counts[category] += 1
-        return f"[REDACTED:{category}:{self.fingerprint(value)}]"
+        normalise = _FINGERPRINT_NORMALISERS.get(category)
+        canonical = normalise(value) if normalise else value
+        return f"[REDACTED:{category}:{self.fingerprint(canonical)}]"
 
     def redact_text(self, text: str) -> tuple[str, RedactionReport]:
         counts: Counter[str] = Counter()

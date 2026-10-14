@@ -320,3 +320,40 @@ def test_redact_claims_and_spec_match_redacted_evidence(r: Redactor) -> None:
     run, _ = r.redact_run(_run())
     assert run.network[0].request_body is not None
     assert token in run.network[0].request_body
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "Jane.Doe@Example.com",
+        "jane.doe@example.com",
+        "JANE.DOE@EXAMPLE.COM",
+        "jAnE.dOe@eXaMpLe.CoM",
+    ],
+)
+def test_email_fingerprint_ignores_case(r: Redactor, variant: str) -> None:
+    assert (
+        red(r, f"to {variant}.") == f"to [REDACTED:email:{r.fingerprint('jane.doe@example.com')}]."
+    )
+
+
+def test_card_fingerprint_ignores_formatting(r: Redactor) -> None:
+    assert (
+        red(r, "card 4111-1111-1111-1111")
+        == red(r, f"card {CARD}")
+        == red(r, f"card {CARD_DIGITS}")
+    )
+
+
+def test_token_fingerprint_stays_case_sensitive(r: Redactor) -> None:
+    upper = red(r, "token=AbCdEf123")
+    lower = red(r, "token=abcdef123")
+    assert upper != lower
+
+
+def test_redaction_tokens_are_lowercase_hex_and_case_stable(r: Redactor) -> None:
+    out = red(r, "mail Jane.Doe@Example.com")
+    token = TOKEN_RE.search(out)
+    assert token is not None
+    assert token.group(0).split(":")[2][:-1] == token.group(0).split(":")[2][:-1].lower()
+    assert red(r, out.casefold()) == out.casefold()
