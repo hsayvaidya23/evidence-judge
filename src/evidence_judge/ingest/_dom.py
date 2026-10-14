@@ -6,6 +6,11 @@ points at node ``index`` (post-order) of snapshot ``current - offset`` of the sa
 This mirrors ``snapshotRenderer.ts`` in Playwright's isomorphic trace package, except that
 offset-0 (same-snapshot) references are rejected: Playwright never writes them and they are
 the only way to build a cycle.
+
+Text typed into ``<input>`` and ``<textarea>`` controls (and their default values) is never page
+text: the agent controls it, so a search box holding "Order #1042 confirmed" must not read as the
+page confirming the order. Button labels and the selected ``<option>`` text, which the page
+authors, are kept.
 """
 
 from __future__ import annotations
@@ -82,6 +87,8 @@ class SnapshotDecodeError(ValueError):
 class RenderedPage:
     title: str | None
     text: str
+    form_values: int = 0
+    """Non-empty text-field and textarea values left out of ``text``."""
 
 
 _BLOCK_END = object()
@@ -147,6 +154,7 @@ class _Renderer:
         self._store = store
         self._frame_id = frame_id
         self._visits = 0
+        self._form_values = 0
 
     def render(self, index: int) -> RenderedPage:
         title: str | None = None
@@ -179,7 +187,11 @@ class _Renderer:
                 out.append(control_text)
                 continue
             stack.extend((child, snapshot_index) for child in reversed(_children(node)))
-        return RenderedPage(title=_normalise(title) or None, text=_normalise("".join(out)))
+        return RenderedPage(
+            title=_normalise(title) or None,
+            text=_normalise("".join(out)),
+            form_values=self._form_values,
+        )
 
     def _tick(self) -> None:
         self._visits += 1
@@ -248,13 +260,21 @@ class _Renderer:
                 return ""
             if kind in _BUTTON_INPUTS:
                 return as_str(attrs.get("value")) or ""
-            return as_str(attrs.get(_VALUE_ATTR)) or as_str(attrs.get("value")) or ""
+            value = as_str(attrs.get(_VALUE_ATTR)) or as_str(attrs.get("value"))
+            return self._excluded_value(value)
         if tag == "TEXTAREA":
             value = as_str(attrs.get(_VALUE_ATTR))
-            return value if value is not None else self._text_content(node, snapshot_index)
+            if value is None:
+                value = self._text_content(node, snapshot_index)
+            return self._excluded_value(value)
         if tag == "SELECT":
             return self._selected_option_text(node, snapshot_index)
         return None
+
+    def _excluded_value(self, value: str | None) -> str:
+        if value and value.strip():
+            self._form_values += 1
+        return ""
 
     def _selected_option_text(self, select: list[Any], snapshot_index: int) -> str:
         options: list[tuple[list[Any], int]] = []

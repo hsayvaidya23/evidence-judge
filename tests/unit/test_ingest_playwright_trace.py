@@ -152,7 +152,8 @@ def test_snapshot_text_is_visible_text_only() -> None:
     product = next(s for s in run.snapshots if s.url.endswith("/products/red-kettle"))
     assert product.title == "Red Kettle | Kettle Co."
     assert "Red Kettle A cheerful 1.5 L stovetop kettle in pillar-box red. $24.00" in product.text
-    assert "Quantity 1 Add to cart" in product.text
+    assert "Quantity Add to cart" in product.text
+    assert run.metadata["form_values_excluded"] > 0
     for snapshot in run.snapshots:
         assert "KETTLE10" not in snapshot.text
         assert "postJson" not in snapshot.text

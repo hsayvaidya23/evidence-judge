@@ -294,6 +294,7 @@ class _TraceReader:
     has_network_file: bool = False
     warnings: list[str] = field(default_factory=list[str])
     store: FrameSnapshotStore = field(default_factory=FrameSnapshotStore)
+    form_values: int = 0
 
     def read_all(self) -> None:
         prefixes = _trace_prefixes(self.archive)
@@ -432,6 +433,7 @@ class _TraceReader:
         except SnapshotDecodeError as exc:
             self.warnings.append(f"snapshot of {url} skipped: {exc}")
             return
+        self.form_values += page.form_values
         page_id = as_str(snapshot.get("pageId")) or frame_id
         self.snapshots.append(_RawSnapshot(time, page_id, url, page.title, page.text, call_id))
 
@@ -642,6 +644,8 @@ class _TraceReader:
             "viewport": options.get("viewport"),
             "start_wall_time_ms": self.origin.wall,
         }
+        if self.form_values:
+            metadata["form_values_excluded"] = self.form_values
         if self.warnings:
             metadata["warnings"] = list(self.warnings)
         return metadata
