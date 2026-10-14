@@ -154,7 +154,7 @@ def expectation(met: bool | None, kind: str = "expect") -> ExpectationResult:
         ([verdict(Support.SUPPORTED)], [expectation(False, "forbid")], Outcome.FAIL),
         ([verdict(Support.NO_EVIDENCE)], [expectation(True)], Outcome.NEEDS_REVIEW),
         ([verdict(Support.SUPPORTED)], [expectation(None)], Outcome.NEEDS_REVIEW),
-        ([verdict(Support.CONTRADICTED, key=False)], [expectation(True)], Outcome.PASS),
+        ([verdict(Support.CONTRADICTED, key=False)], [expectation(True)], Outcome.NEEDS_REVIEW),
         ([verdict(Support.SUPPORTED, key=False)], [], Outcome.NEEDS_REVIEW),
         ([], [expectation(True)], Outcome.PASS),
         ([verdict(Support.SUPPORTED)], [], Outcome.PASS),
@@ -179,6 +179,17 @@ def test_multiple_failures_are_counted() -> None:
     assert summary == (
         'FAIL: the agent claimed "x happened", but because evidence. 1 other key claim also failed.'
     )
+
+
+def test_contradicted_non_key_claim_is_named() -> None:
+    _, _, summary = decide(
+        [verdict(Support.SUPPORTED), verdict(Support.CONTRADICTED, key=False)],
+        [expectation(True)],
+        {},
+        coverage=None,
+        review_threshold=0.6,
+    )
+    assert summary == 'NEEDS_REVIEW: the agent claimed "x happened", but because evidence.'
 
 
 def test_score_is_weighted_mean_of_assessable_parts() -> None:

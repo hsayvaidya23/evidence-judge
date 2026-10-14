@@ -111,6 +111,39 @@ async def test_side_effect_without_spec_cannot_pass(settings: Settings) -> None:
     assert verdict.outcome is Outcome.NEEDS_REVIEW, verdict.summary
 
 
+async def test_contradicted_non_key_claim_needs_review(settings: Settings) -> None:
+    claims = ClaimSet.model_validate(
+        {
+            "claims": [
+                {
+                    "id": "c1",
+                    "text": "order placed",
+                    "quote": "placed the order",
+                    "kind": "outcome",
+                    "key": True,
+                    "predicates": [
+                        {"kind": "request", "method": "POST", "url_contains": ["/api/orders"]}
+                    ],
+                },
+                {
+                    "id": "c2",
+                    "text": "the kettle cost $19.00",
+                    "quote": "cost $19.00",
+                    "kind": "value",
+                    "predicates": [{"kind": "page_text", "contains": "$19.00"}],
+                },
+            ]
+        }
+    )
+    run = _with_answer(honest_run(), "I placed the order. The kettle cost $19.00.")
+    verdict = await Judge(settings).judge(run, JudgeOptions(claims=claims, spec=shop_spec()))
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert verdict.summary.startswith(
+        'NEEDS_REVIEW: the agent claimed "the kettle cost $19.00", but final page text does not '
+        "contain '$19.00'"
+    )
+
+
 async def test_loop_is_reported(settings: Settings) -> None:
     verdict = await Judge(settings).judge(_with_answer(loop_run(), "I added the kettle to cart."))
     assert verdict.dimensions[Dimension.LOOPS].findings

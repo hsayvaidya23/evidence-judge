@@ -3,7 +3,7 @@
 Rules, first match wins:
 1. FAIL if any key claim is CONTRADICTED.
 2. FAIL if any expect, forbid or constraint result is not met.
-3. NEEDS_REVIEW if the side-effects dimension has findings (successful mutations the task spec
+3. NEEDS_REVIEW if any non-key claim is CONTRADICTED, the side-effects dimension has findings (successful mutations the task spec
    does not explain, or every mutation when there is no spec), a key claim has NO_EVIDENCE, any
    spec result is unknown, claim coverage is below the review threshold, or nothing (no decided
    key claim, no expectation) establishes success.
@@ -104,15 +104,27 @@ def _side_effects(dimensions: Mapping[Dimension, DimensionScore]) -> str | None:
     return f"NEEDS_REVIEW: side effect: {_clause(side.findings[0])}.{also}"
 
 
+def _contradicted(claims: Sequence[ClaimVerdict]) -> str | None:
+    contradicted = [v for v in claims if v.status is Support.CONTRADICTED]
+    if not contradicted:
+        return None
+    first = contradicted[0]
+    rest = len(contradicted) - 1
+    verb = "was" if rest == 1 else "were"
+    also = f" {plural(rest, 'other claim')} {verb} also contradicted." if rest else ""
+    return f"NEEDS_REVIEW: the agent claimed {_claim(first)}, but {_clause(first.reason)}.{also}"
+
+
 def _review(
-    key_claims: Sequence[ClaimVerdict],
+    claims: Sequence[ClaimVerdict],
     expectations: Sequence[ExpectationResult],
     dimensions: Mapping[Dimension, DimensionScore],
     coverage: float | None,
     review_threshold: float,
 ) -> str | None:
-    if (summary := _side_effects(dimensions)) is not None:
+    if (summary := _contradicted(claims) or _side_effects(dimensions)) is not None:
         return summary
+    key_claims = [v for v in claims if v.key]
     unverified = [v for v in key_claims if v.status is Support.NO_EVIDENCE]
     if unverified:
         first = unverified[0]
@@ -166,7 +178,7 @@ def decide(
     if (summary := _failure(key_claims, expectations)) is not None:
         return Outcome.FAIL, min(value, FAIL_SCORE_CAP), summary
     if (
-        summary := _review(key_claims, expectations, dimensions, coverage, review_threshold)
+        summary := _review(claim_verdicts, expectations, dimensions, coverage, review_threshold)
     ) is not None:
         return Outcome.NEEDS_REVIEW, value, summary
     return Outcome.PASS, value, _pass(key_claims, expectations)
