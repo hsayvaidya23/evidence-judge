@@ -119,6 +119,9 @@ compromised agent:
   recordings there. The LLM cache and redaction key live outside the repository, in the per-user
   cache directory (`EVJ_CACHE_DIR`).
 - Never commit `.env`. API keys are read from the environment only.
+- Third-party GitHub Actions in the workflows and `action.yml` are pinned to full commit SHAs
+  with a `# vX.Y.Z` comment (Dependabot keeps both current); a new one must be pinned the same
+  way, which a unit test checks.
 - Agent output is untrusted input. The HTML report escapes all agent-controlled text and ships a
   Content-Security-Policy that blocks scripts and external requests; console output never
   interprets agent text as markup. Treat any way around this as a vulnerability.
