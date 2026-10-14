@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -12,6 +13,7 @@ from evidence_judge import __version__
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, Run, Screenshot
 from evidence_judge.core.verdict import (
     Citation,
+    ClaimVerdict,
     Dimension,
     Outcome,
     RunVerdict,
@@ -20,6 +22,7 @@ from evidence_judge.core.verdict import (
 
 MAX_TIMELINE_ROWS = 500
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
+REASON_PREVIEW_PARTS = 1
 _ANCHOR_UNSAFE = re.compile(r"[^A-Za-z0-9]")
 _IMAGE_MIME = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 
@@ -28,6 +31,7 @@ _OUTCOME = {
     Outcome.FAIL: ("Fail", "fail"),
     Outcome.NEEDS_REVIEW: ("Needs review", "review"),
 }
+_GLYPH = {"ok": "✓", "bad": "✗", "muted": "?"}
 _SUPPORT = {
     Support.SUPPORTED: ("Supported", "ok"),
     Support.CONTRADICTED: ("Contradicted", "bad"),
@@ -56,6 +60,8 @@ class CitationView:
     evidence_id: str
     excerpt: str | None
     href: str | None
+    detail: str | None
+    tone: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +73,8 @@ class ClaimView:
     status_label: str
     tone: str
     reason: str
+    reason_head: str
+    reason_rest: list[str]
     checker: str
     confidence: str
     citations: list[CitationView]
@@ -78,6 +86,7 @@ class ExpectationView:
     kind: str
     met_label: str
     tone: str
+    glyph: str
     reason: str
     citations: list[CitationView]
 
@@ -87,6 +96,7 @@ class DimensionView:
     label: str
     score: str
     tone: str
+    bar: int
     findings: list[str]
 
 
@@ -101,6 +111,8 @@ class TimelineRow:
     status: str
     tone: str
     cited: bool
+    mutation: bool
+    offset: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +127,8 @@ class ThumbView:
 class _Ctx:
     cited: set[str] = field(default_factory=set[str])
     anchors: set[str] = field(default_factory=set[str])
+    span: float = 0.0
+    described: dict[str, tuple[str, str]] = field(default_factory=dict[str, tuple[str, str]])
 
 
 def anchor_for(evidence_id: str) -> str:
@@ -166,6 +180,56 @@ def _all_citations(verdict: RunVerdict) -> list[Citation]:
     return out
 
 
+def _offset(ts: float, ctx: _Ctx) -> float:
+    return round(min(100.0, max(0.0, ts / ctx.span * 100)), 2) if ctx.span > 0 else 0.0
+
+
+def _split_reason(reason: str) -> tuple[str, list[str]]:
+    parts = [p.strip() for p in reason.split("; ") if p.strip()]
+    if len(parts) <= REASON_PREVIEW_PARTS:
+        return (reason, [])
+    return ("; ".join(parts[:REASON_PREVIEW_PARTS]), parts[REASON_PREVIEW_PARTS:])
+
+
+def _describe_evidence(run: Run) -> dict[str, tuple[str, str]]:
+    out: dict[str, tuple[str, str]] = {}
+    for n in run.network:
+        path, _ = _short_url(n.url, limit=48)
+        status, tone = _http_tone(n)
+        out[n.id] = (f"{n.method.upper()} {path} · {status}", tone)
+    for a in run.actions:
+        target = a.selector or (_short_url(a.url, limit=40)[0] if a.url else "")
+        out[a.id] = (f"{a.name} {target}".strip(), "bad" if a.error else "ok")
+    for s in run.snapshots:
+        out[s.id] = (f"page {_short_url(s.url, limit=40)[0]}", "muted")
+    for shot in run.screenshots:
+        out[shot.id] = (f"screenshot · {_seconds(shot.ts)}", "muted")
+    for c in run.console:
+        out[c.id] = (f"console.{c.level}", "bad" if c.level == "error" else "muted")
+    if run.final_state is not None:
+        out["final"] = (f"final page {_short_url(run.final_state.url, limit=40)[0]}", "muted")
+    return out
+
+
+def _headline(verdict: RunVerdict) -> str:
+    total = len(verdict.claims)
+    bad = sum(1 for c in verdict.claims if c.status is Support.CONTRADICTED)
+    missing = sum(1 for c in verdict.claims if c.status is Support.NO_EVIDENCE)
+    unmet = sum(1 for e in verdict.expectations if e.met is False)
+    if total == 0:
+        return "The agent made no checkable claims"
+    noun = "claim" if total == 1 else "claims"
+    if bad:
+        verb = "is" if bad == 1 else "are"
+        return f"{bad} of {total} {noun} {verb} contradicted by the recording"
+    if missing:
+        verb = "has" if missing == 1 else "have"
+        return f"{missing} of {total} {noun} {verb} no evidence in the recording"
+    if unmet:
+        return f"Every claim checks out, but {unmet} task expectation{'s' if unmet != 1 else ''} failed"
+    return f"All {total} {noun} backed by recorded evidence"
+
+
 def _action_row(a: ActionEvent, ctx: _Ctx) -> TimelineRow:
     target = a.selector or a.url or ""
     label = f"{a.name} {target}".strip()
@@ -181,6 +245,8 @@ def _action_row(a: ActionEvent, ctx: _Ctx) -> TimelineRow:
         status=status,
         tone=tone,
         cited=a.id in ctx.cited,
+        mutation=False,
+        offset=_offset(a.ts, ctx),
     )
 
 
@@ -197,6 +263,8 @@ def _request_row(n: NetworkEvent, ctx: _Ctx) -> TimelineRow:
         status=status,
         tone=tone,
         cited=n.id in ctx.cited,
+        mutation=n.is_mutation,
+        offset=_offset(n.ts, ctx),
     )
 
 
@@ -264,34 +332,46 @@ def _citations(cites: list[Citation], ctx: _Ctx) -> list[CitationView]:
     for c in cites:
         anchor = anchor_for(c.evidence_id)
         href = f"#{anchor}" if anchor in ctx.anchors else None
-        out.append(CitationView(evidence_id=c.evidence_id, excerpt=c.excerpt, href=href))
+        detail, tone = ctx.described.get(c.evidence_id, (None, "muted"))
+        out.append(
+            CitationView(
+                evidence_id=c.evidence_id, excerpt=c.excerpt, href=href, detail=detail, tone=tone
+            )
+        )
     return out
 
 
+def _claim_view(cv: ClaimVerdict, ctx: _Ctx) -> ClaimView:
+    head, rest = _split_reason(cv.reason)
+    return ClaimView(
+        id=cv.claim_id,
+        text=cv.claim_text,
+        quote=cv.quote,
+        key=cv.key,
+        status_label=_SUPPORT[cv.status][0],
+        tone=_SUPPORT[cv.status][1],
+        reason=cv.reason,
+        reason_head=head,
+        reason_rest=rest,
+        checker=cv.checker,
+        confidence=_pct(cv.confidence),
+        citations=_citations(cv.citations, ctx),
+    )
+
+
 def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
-    ctx = _Ctx(cited={c.evidence_id for c in _all_citations(verdict)})
+    stamps = [a.ts for a in run.actions] + [n.ts for n in run.network]
+    ctx = _Ctx(
+        cited={c.evidence_id for c in _all_citations(verdict)},
+        span=max(stamps, default=0.0),
+        described=_describe_evidence(run),
+    )
     rows, hidden = _timeline(run, ctx)
     thumbs = _thumbnails(run, ctx)
     ctx.anchors = {r.anchor for r in rows} | {t.anchor for t in thumbs}
 
-    claim_views = [
-        ClaimView(
-            id=cv.claim_id,
-            text=cv.claim_text,
-            quote=cv.quote,
-            key=cv.key,
-            status_label=_SUPPORT[cv.status][0],
-            tone=_SUPPORT[cv.status][1],
-            reason=cv.reason,
-            checker=cv.checker,
-            confidence=_pct(cv.confidence),
-            citations=_citations(cv.citations, ctx),
-        )
-        for cv in verdict.claims
-    ]
-    tally = {label: 0 for label, _ in _SUPPORT.values()}
-    for cv in verdict.claims:
-        tally[_SUPPORT[cv.status][0]] += 1
+    claim_views = [_claim_view(cv, ctx) for cv in verdict.claims]
+    counts = Counter(cv.status for cv in verdict.claims)
 
     expectations = [
         ExpectationView(
@@ -299,6 +379,7 @@ def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
             kind=ex.kind,
             met_label="Met" if ex.met else ("Not met" if ex.met is False else "Not assessable"),
             tone="ok" if ex.met else ("bad" if ex.met is False else "muted"),
+            glyph=_GLYPH["ok" if ex.met else ("bad" if ex.met is False else "muted")],
             reason=ex.reason,
             citations=_citations(ex.citations, ctx),
         )
@@ -309,6 +390,7 @@ def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
             label=_DIMENSION_LABEL[d],
             score=_pct(verdict.dimensions[d].score),
             tone=_score_tone(verdict.dimensions[d].score),
+            bar=round((verdict.dimensions[d].score or 0.0) * 100),
             findings=verdict.dimensions[d].findings,
         )
         for d in Dimension
@@ -322,7 +404,8 @@ def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
         "outcome_class": outcome_class,
         "score": round(verdict.score * 100),
         "claims": claim_views,
-        "tally": [(label, n) for label, n in tally.items() if n],
+        "tally": [(label, counts[s], tone) for s, (label, tone) in _SUPPORT.items() if counts[s]],
+        "headline": _headline(verdict),
         "expectations": expectations,
         "dimensions": dimensions,
         "timeline": rows,

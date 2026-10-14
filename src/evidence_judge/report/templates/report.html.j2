@@ -9,236 +9,374 @@
 <meta name="generator" content="evidence-judge {{ tool_version }}">
 <title>{{ outcome_label }} · {{ v.run_id }} · Evidence Judge</title>
 <style>
+@property --p { syntax: "<number>"; inherits: true; initial-value: 0; }
 :root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --surface-2: #f1f3f6;
-  --border: #e1e4ea;
-  --border-strong: #c9ced8;
-  --text: #15181e;
-  --text-2: #4a5160;
-  --text-3: #6b7280;
-  --accent: #3b5bdb;
-  --ok: #0f7a3d;
-  --ok-bg: #e5f6ec;
-  --ok-line: #9fd9b6;
-  --bad: #b42318;
-  --bad-bg: #fdecea;
-  --bad-line: #f3b4ad;
-  --warn: #8a5300;
-  --warn-bg: #fff4dc;
-  --warn-line: #f0cf86;
-  --muted: #4a5160;
-  --muted-bg: #eef0f4;
-  --muted-line: #d5d9e1;
-  --radius: 10px;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --bg: #f4f5f9;
+  --bg-2: #eceef5;
+  --grid: rgba(15, 23, 42, 0.045);
+  --glow-a: rgba(139, 92, 246, 0.10);
+  --glow-b: rgba(34, 211, 238, 0.08);
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-2: #f6f7fb;
+  --line: rgba(15, 23, 42, 0.09);
+  --line-2: rgba(15, 23, 42, 0.16);
+  --sheen: rgba(255, 255, 255, 0.9);
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 12px 32px -18px rgba(15, 23, 42, 0.28);
+  --text: #0b1020;
+  --text-2: #3b4357;
+  --text-3: #6a7287;
+  --violet: #7c3aed;
+  --cyan: #0891b2;
+  --ok: #059669;
+  --bad: #e11d48;
+  --warn: #d97706;
+  --muted: #64748b;
+  --glow: 0.22;
+  --radius: 14px;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0d1015;
-    --surface: #151920;
-    --surface-2: #1b2029;
-    --border: #262c37;
-    --border-strong: #353d4b;
-    --text: #e8eaee;
-    --text-2: #b3b9c5;
-    --text-3: #8b93a2;
-    --accent: #8ea5ff;
-    --ok: #5fd08e;
-    --ok-bg: #102619;
-    --ok-line: #1f5236;
-    --bad: #ff8a80;
-    --bad-bg: #2c1413;
-    --bad-line: #6a2a25;
-    --warn: #f5c35b;
-    --warn-bg: #2a2010;
-    --warn-line: #5f4718;
-    --muted: #b3b9c5;
-    --muted-bg: #1f242e;
-    --muted-line: #343b48;
+    --bg: #07080c;
+    --bg-2: #0d1017;
+    --grid: rgba(148, 163, 255, 0.045);
+    --glow-a: rgba(139, 92, 246, 0.16);
+    --glow-b: rgba(34, 211, 238, 0.09);
+    --panel: rgba(18, 21, 31, 0.78);
+    --panel-2: rgba(255, 255, 255, 0.03);
+    --line: rgba(255, 255, 255, 0.075);
+    --line-2: rgba(255, 255, 255, 0.14);
+    --sheen: rgba(255, 255, 255, 0.06);
+    --shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.9);
+    --text: #eef0f7;
+    --text-2: #b4bacb;
+    --text-3: #7d8499;
+    --violet: #a78bfa;
+    --cyan: #22d3ee;
+    --ok: #10b981;
+    --bad: #f43f5e;
+    --warn: #f59e0b;
+    --muted: #8b93a7;
+    --glow: 0.45;
   }
 }
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; background: var(--bg); }
 body {
   margin: 0;
-  background: var(--bg);
+  min-height: 100vh;
   color: var(--text);
   font: 15px/1.55 var(--sans);
   font-feature-settings: "kern", "tnum";
+  background:
+    radial-gradient(1100px 520px at 12% -120px, var(--glow-a), transparent 70%),
+    radial-gradient(900px 480px at 92% -60px, var(--glow-b), transparent 70%),
+    linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+  background-attachment: scroll;
 }
-a { color: var(--accent); }
-a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 48px; }
-.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; color: var(--text-3); font-size: 13px; }
-.brand { font-weight: 650; letter-spacing: -0.01em; color: var(--text-2); }
-.brand span { color: var(--text-3); font-weight: 500; }
+a { color: var(--cyan); }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 6px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 22px 24px 48px; }
 .mono { font-family: var(--mono); font-size: 0.86em; }
 .muted { color: var(--text-3); }
-
-.banner {
+.lbl, .k {
+  font: 600 10.5px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3);
+}
+:where(.claim, .cite, .check, .trace li) { --t: var(--muted); }
+.t-ok { --t: var(--ok); }
+.t-bad { --t: var(--bad); }
+.t-warn { --t: var(--warn); }
+.t-muted { --t: var(--muted); }
+.panel, .banner {
   position: relative;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 20px;
-  padding: 22px 24px 22px 28px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  overflow: hidden;
+  background: linear-gradient(180deg, var(--sheen), transparent 120px), var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: inset 0 1px 0 var(--sheen), var(--shadow);
 }
-.banner::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 6px; background: var(--tone); }
-.banner.pass { --tone: var(--ok); --tone-bg: var(--ok-bg); }
-.banner.fail { --tone: var(--bad); --tone-bg: var(--bad-bg); }
-.banner.review { --tone: var(--warn); --tone-bg: var(--warn-bg); }
+
+/* top bar */
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.01em; }
+.mark {
+  width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--violet), var(--cyan)); color: #07080c;
+  font: 800 12px/1 var(--mono); letter-spacing: -0.02em;
+  box-shadow: 0 0 18px -4px color-mix(in srgb, var(--violet) 70%, transparent);
+}
+.brand small { color: var(--text-3); font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
+.runid { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); font: 12px/1 var(--mono); color: var(--text-2); max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runid i { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); flex-shrink: 0; }
+
+/* hero */
+.banner { --tone: var(--muted); overflow: hidden; padding: 26px 28px 22px; }
+.banner.pass { --tone: var(--ok); }
+.banner.fail { --tone: var(--bad); }
+.banner.review { --tone: var(--warn); }
+.banner::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background: radial-gradient(520px 260px at 0% 0%, color-mix(in srgb, var(--tone) 16%, transparent), transparent 70%);
+}
+.banner::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--tone), transparent);
+  opacity: 0.8;
+}
+.hero { position: relative; display: grid; grid-template-columns: auto 1fr auto; gap: 26px; align-items: center; }
+.stamp-wrap { display: grid; gap: 10px; justify-items: center; }
 .verdict-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 4px 12px 4px 10px; border-radius: 999px;
-  background: var(--tone-bg); color: var(--tone);
-  font-weight: 700; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase;
+  display: inline-block; padding: 10px 18px 9px; border: 3px solid var(--tone); border-radius: 12px;
+  color: var(--tone); font: 900 34px/1 var(--sans); letter-spacing: 0.1em; text-transform: uppercase;
+  transform: rotate(-5deg); white-space: nowrap;
+  background: color-mix(in srgb, var(--tone) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 25%, transparent), 0 0 34px -6px color-mix(in srgb, var(--tone) calc(var(--glow) * 140%), transparent), inset 0 0 22px -8px color-mix(in srgb, var(--tone) 60%, transparent);
+  text-shadow: 0 0 18px color-mix(in srgb, var(--tone) 55%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--tone) 45%, transparent); outline-offset: 4px;
+  animation: slam 0.55s cubic-bezier(0.2, 1.4, 0.4, 1) 0.15s both;
 }
-.verdict-pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-.banner h1 { margin: 12px 0 6px; font-size: 22px; line-height: 1.3; letter-spacing: -0.015em; font-weight: 650; }
-.banner .summary { margin: 0; color: var(--text-2); max-width: 70ch; }
-.score { text-align: right; align-self: center; min-width: 120px; }
-.score .num { font-size: 48px; font-weight: 700; line-height: 1; letter-spacing: -0.03em; color: var(--tone); }
-.score .num small { font-size: 18px; font-weight: 600; color: var(--text-3); letter-spacing: 0; }
-.score .lbl { margin-top: 6px; font-size: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
-.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; font-size: 13px; color: var(--text-3); }
-.meta b { color: var(--text-2); font-weight: 600; }
-
-.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
-.chip {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 8px;
-  background: var(--surface); border: 1px solid var(--border);
-  font-size: 13px;
+.banner.review .verdict-pill { font-size: 22px; }
+.head .task { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.head .task span:last-child { color: var(--text-2); font-weight: 600; font-size: 14px; }
+.head h1 { margin: 8px 0 0; font-size: 28px; line-height: 1.18; letter-spacing: -0.025em; font-weight: 750; text-wrap: balance; }
+.tally { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.score { position: relative; width: 136px; height: 136px; --p: {{ score }}; animation: fill 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) 0.3s both; }
+.ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(var(--tone) calc(var(--p) * 1%), color-mix(in srgb, var(--text-3) 18%, transparent) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 11px), #000 calc(100% - 10px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 11px), #000 calc(100% - 10px));
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--tone) calc(var(--glow) * 120%), transparent));
 }
-.chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--t); }
-.chip .val { font-weight: 650; color: var(--t); }
-.t-ok { --t: var(--ok); --tb: var(--ok-bg); --tl: var(--ok-line); }
-.t-bad { --t: var(--bad); --tb: var(--bad-bg); --tl: var(--bad-line); }
-.t-warn { --t: var(--warn); --tb: var(--warn-bg); --tl: var(--warn-line); }
-.t-muted { --t: var(--muted); --tb: var(--muted-bg); --tl: var(--muted-line); }
-.chip details { position: relative; }
-.chip summary { cursor: pointer; color: var(--text-3); list-style: none; font-size: 12px; }
-.chip summary::-webkit-details-marker { display: none; }
-.chip ul { margin: 6px 0 0; padding-left: 16px; color: var(--text-2); }
+.score .inner { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.score .num { font-size: 44px; font-weight: 800; line-height: 1; letter-spacing: -0.04em; color: var(--text); }
+.score .num small { display: block; margin-top: 4px; font: 600 11px/1 var(--mono); color: var(--text-3); letter-spacing: 0.04em; }
+.score .lbl { margin-top: 5px; }
+.summary {
+  position: relative; margin: 20px 0 0; padding: 12px 14px; border-radius: 10px;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text-2); font-size: 13.5px; line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.summary .lbl { display: block; margin-bottom: 6px; color: var(--violet); }
+.meta { position: relative; display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 14px; }
+.meta div { display: grid; gap: 5px; }
+.meta b { font: 600 12.5px/1.3 var(--mono); color: var(--text); overflow-wrap: anywhere; }
 
-.callout { margin-top: 16px; padding: 10px 14px; border-radius: var(--radius); background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--text); font-size: 14px; }
-.callout ul { margin: 4px 0 0; padding-left: 18px; }
+/* pills */
+.pill {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 8px; border-radius: 999px;
+  font: 650 12px/18px var(--sans); white-space: nowrap; color: var(--t);
+  background: color-mix(in srgb, var(--t) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--t) 38%, transparent);
+  box-shadow: 0 0 16px -4px color-mix(in srgb, var(--t) calc(var(--glow) * 110%), transparent);
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+.pill b { font-weight: 800; }
+.tag { display: inline-block; padding: 2px 7px; border-radius: 6px; font: 700 10px/16px var(--mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--violet); background: color-mix(in srgb, var(--violet) 12%, transparent); border: 1px solid color-mix(in srgb, var(--violet) 30%, transparent); }
+
+/* dimensions */
+.dims { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin: 14px 0 0; padding: 0; list-style: none; }
+.dim { padding: 12px 14px 12px; border-radius: 12px; }
+.dim .row { display: grid; gap: 7px; }
+.dim .name { font: 600 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dim .val { font-weight: 800; font-size: 22px; line-height: 1; letter-spacing: -0.03em; color: var(--t); text-shadow: 0 0 18px color-mix(in srgb, var(--t) calc(var(--glow) * 90%), transparent); }
+.bar { height: 4px; margin-top: 10px; border-radius: 4px; background: color-mix(in srgb, var(--text-3) 16%, transparent); overflow: hidden; }
+.bar i { display: block; height: 100%; width: var(--w); border-radius: inherit; background: var(--t); box-shadow: 0 0 10px var(--t); animation: grow 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.5s both; }
+.dim details { margin-top: 8px; font-size: 12px; }
+.dim summary { cursor: pointer; color: var(--text-3); font: 11px/1.4 var(--mono); list-style: none; }
+.dim summary::-webkit-details-marker { display: none; }
+.dim summary::before { content: "▸ "; }
+.dim details[open] summary::before { content: "▾ "; }
+.dim ul { margin: 6px 0 0; padding-left: 14px; color: var(--text-2); overflow-wrap: anywhere; }
+
+.callout { margin-top: 14px; padding: 12px 16px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 9%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); color: var(--text); font-size: 14px; }
+.callout strong { font: 700 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--warn); }
+.callout ul { margin: 6px 0 0; padding-left: 18px; }
 
 section { margin-top: 34px; }
-section > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
-h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -0.005em; }
-.count { color: var(--text-3); font-size: 13px; }
+section > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+h2::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: linear-gradient(135deg, var(--violet), var(--cyan)); box-shadow: 0 0 10px var(--violet); }
+.count { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--text-3); font: 12px/1.4 var(--mono); }
 
-.badge {
-  display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 6px;
-  font-size: 12px; font-weight: 650; line-height: 18px; white-space: nowrap;
-  color: var(--t); background: var(--tb); border: 1px solid var(--tl);
-}
-.tag { display: inline-block; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); }
-
-.claims { display: grid; gap: 10px; }
-.claim {
-  padding: 14px 16px; background: var(--surface);
-  border: 1px solid var(--border); border-left: 3px solid var(--t); border-radius: var(--radius);
-}
-.claim-head { display: flex; align-items: flex-start; gap: 10px; justify-content: space-between; }
-.claim-text { font-weight: 600; margin: 0; overflow-wrap: anywhere; }
-.claim-badges { display: flex; gap: 6px; flex-shrink: 0; }
+/* claims */
+.claims { display: grid; gap: 12px; }
+.claim { padding: 16px 18px 14px; overflow: hidden; animation: rise 0.5s ease-out both; animation-delay: calc(0.35s + var(--i, 0) * 0.08s); }
+.claim::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--t); box-shadow: 0 0 14px var(--t); }
+.claim-head { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; }
+.claim-text { margin: 0; font-weight: 700; font-size: 16px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.claim-badges { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.claim-body { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr); gap: 12px; margin-top: 12px; }
+.said, .evidence { padding: 10px 12px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); min-width: 0; }
+.said .lbl { color: var(--warn); }
+.said .lbl::before { content: "▍"; }
+.evidence .lbl { color: var(--cyan); }
+.evidence .lbl::before { content: "▍"; }
 .claim blockquote {
-  margin: 10px 0 0; padding: 6px 12px; border-left: 2px solid var(--border-strong);
-  color: var(--text-2); font-style: italic; overflow-wrap: anywhere; white-space: pre-wrap;
+  margin: 7px 0 0; padding: 0; color: var(--text); font-size: 14.5px; line-height: 1.45;
+  overflow-wrap: anywhere; white-space: pre-wrap;
 }
-.claim .reason { margin: 8px 0 0; color: var(--text-2); overflow-wrap: anywhere; }
-.claim-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 10px; font-size: 12px; color: var(--text-3); }
-.cites { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.claim blockquote::before { content: "“"; color: var(--text-3); }
+.claim blockquote::after { content: "”"; color: var(--text-3); }
+.reason { margin: 7px 0 0; color: var(--text-2); font-size: 13.5px; overflow-wrap: anywhere; }
+.more { margin-top: 6px; font-size: 13px; color: var(--text-2); }
+.more summary { cursor: pointer; color: var(--text-3); font: 11.5px/1.5 var(--mono); list-style: none; }
+.more summary::-webkit-details-marker { display: none; }
+.more summary::before { content: "+ "; color: var(--cyan); }
+.more[open] summary::before { content: "− "; }
+.more ul { margin: 6px 0 0; padding-left: 16px; }
+.more li { margin-top: 3px; overflow-wrap: anywhere; }
+.cites { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .cite {
-  font-family: var(--mono); font-size: 12px; padding: 1px 7px; border-radius: 5px;
-  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); text-decoration: none;
+  display: inline-flex; align-items: stretch; max-width: 100%; border-radius: 7px; overflow: hidden;
+  font: 11.5px/1 var(--mono); text-decoration: none; color: var(--text-2);
+  border: 1px solid color-mix(in srgb, var(--t) 40%, var(--line));
+  background: color-mix(in srgb, var(--t) 7%, transparent);
 }
-a.cite:hover { border-color: var(--accent); color: var(--accent); }
+.cite .cid { padding: 5px 7px; color: var(--cyan); background: color-mix(in srgb, var(--cyan) 10%, transparent); border-right: 1px solid var(--line); white-space: nowrap; }
+.cite .cdesc { padding: 5px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.cite:hover { border-color: var(--cyan); box-shadow: 0 0 14px -2px color-mix(in srgb, var(--cyan) 60%, transparent); }
+.claim-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 11px; color: var(--text-3); font: 11px/1.4 var(--mono); }
+.claim-foot b { color: var(--text-2); font-weight: 600; }
 
-.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-th { font-size: 12px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; background: var(--surface-2); }
-tr:last-child td { border-bottom: 0; }
-td.reason { color: var(--text-2); overflow-wrap: anywhere; min-width: 220px; }
-td.nowrap { white-space: nowrap; }
+/* expectations */
+.checklist { margin: 0; padding: 6px; list-style: none; }
+.check { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 12px 12px; border-radius: 10px; }
+.check + .check { border-top: 1px solid var(--line); }
+.glyph { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font: 800 14px/1 var(--sans); color: var(--t); background: color-mix(in srgb, var(--t) 13%, transparent); border: 1px solid color-mix(in srgb, var(--t) 40%, transparent); box-shadow: 0 0 14px -3px color-mix(in srgb, var(--t) calc(var(--glow) * 120%), transparent); }
+.check .id { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 600 13px/1.6 var(--mono); }
+.check .reason { margin: 3px 0 0; }
+.check .cites { margin-top: 6px; }
 
-.timeline td { padding: 7px 12px; }
-.timeline .lbl { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
-.timeline .detail { display: block; color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; }
-.timeline tr.cited td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-.timeline tr.cited td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-.timeline tr:target td { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+/* waterfall */
+.trace { padding: 8px 0; overflow: hidden; }
+.trace ol { position: relative; margin: 0; padding: 0; list-style: none; }
+.trace ol::before { content: ""; position: absolute; left: 92px; top: 6px; bottom: 6px; width: 1px; background: linear-gradient(var(--line-2), var(--line)); }
+.trace li { position: relative; display: grid; grid-template-columns: 70px 28px minmax(0, 1.25fr) minmax(120px, 1fr) auto; gap: 10px; align-items: center; padding: 7px 16px 7px 14px; }
+.trace li:target { background: color-mix(in srgb, var(--cyan) 12%, transparent); }
+.trace li .time { font: 11.5px/1 var(--mono); color: var(--text-3); text-align: right; }
+.node { position: relative; z-index: 1; width: 11px; height: 11px; margin-left: 2px; border-radius: 50%; background: var(--bg-2); border: 2px solid var(--t); }
+.trace li[data-kind="request"] .node { border-radius: 3px; }
+.trace li .what { min-width: 0; }
+.trace li .kind { font: 600 11px/1 var(--mono); color: var(--text-3); margin-right: 8px; }
+.trace li .label { font: 12.5px/1.4 var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.trace li .detail { display: block; color: var(--text-3); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
+.lane { position: relative; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--text-3) 9%, transparent); }
+.lane i { position: absolute; top: 0; bottom: 0; left: var(--x); width: max(6px, 2.5%); margin-left: -3px; border-radius: 4px; background: var(--t); opacity: 0.85; }
+.trace li .badge { font: 600 11px/1 var(--mono); padding: 4px 7px; border-radius: 6px; color: var(--t); background: color-mix(in srgb, var(--t) 11%, transparent); border: 1px solid color-mix(in srgb, var(--t) 30%, transparent); white-space: nowrap; }
+.trace li[data-mutation] { background: linear-gradient(90deg, color-mix(in srgb, var(--warn) 9%, transparent), transparent 70%); }
+.trace li[data-mutation] .kind { color: var(--warn); }
+.trace li[data-mutation] .lane i { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+.trace li[data-mutation] .node { border-color: var(--warn); }
+.trace li.cited .node { background: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 0 4px color-mix(in srgb, var(--cyan) 22%, transparent), 0 0 14px var(--cyan); }
+.trace li.cited .label::after { content: "cited"; margin-left: 8px; padding: 1px 5px; border-radius: 4px; font: 700 9px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--cyan); border: 1px solid color-mix(in srgb, var(--cyan) 45%, transparent); vertical-align: 2px; }
+.trace li.t-bad .label { color: var(--bad); }
 
-.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.thumbs figure { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.thumbs figure:target { outline: 2px solid var(--accent); }
-.thumbs img { display: block; width: 100%; height: 160px; object-fit: cover; object-position: top; background: var(--surface-2); }
-.thumbs figcaption { padding: 7px 10px; font-size: 12px; color: var(--text-3); border-top: 1px solid var(--border); }
+/* filmstrip */
+.film { display: flex; gap: 14px; overflow-x: auto; padding: 14px; scroll-snap-type: x proximity; }
+.film figure { flex: 0 0 260px; margin: 0; scroll-snap-align: start; border-radius: 10px; overflow: hidden; border: 1px solid var(--line-2); background: var(--panel-2); }
+.film figure:target { outline: 2px solid var(--cyan); box-shadow: 0 0 20px -4px var(--cyan); }
+.film img { display: block; width: 100%; height: 170px; object-fit: cover; object-position: top; background: var(--bg-2); }
+.film figcaption { padding: 8px 10px; font: 11px/1.3 var(--mono); color: var(--text-3); border-top: 1px solid var(--line); }
+.final { margin: 0; padding: 0 14px 14px; font: 12px/1.5 var(--mono); color: var(--text-3); overflow-wrap: anywhere; }
+.empty { padding: 18px; color: var(--text-3); border: 1px dashed var(--line-2); border-radius: 12px; font-size: 14px; }
 
-.final { margin-top: 10px; font-size: 13px; color: var(--text-3); overflow-wrap: anywhere; }
-.empty { padding: 16px; color: var(--text-3); background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius); font-size: 14px; }
+footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--text-3); font: 12px/1.5 var(--mono); }
+.usage { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
+.usage div { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
+.usage dt { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+.usage dd { margin: 4px 0 0; color: var(--text); font: 650 15px/1.2 var(--sans); }
 
-footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 13px; }
-.usage { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 0 0 14px; }
-.usage div { padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
-.usage dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
-.usage dd { margin: 2px 0 0; color: var(--text); font-weight: 650; font-size: 15px; }
+@keyframes slam { 0% { opacity: 0; transform: scale(2.6) rotate(-16deg); } 55% { opacity: 1; transform: scale(0.92) rotate(-4deg); } 75% { transform: scale(1.04) rotate(-5.5deg); } 100% { opacity: 1; transform: scale(1) rotate(-5deg); } }
+@keyframes fill { from { --p: 0; } }
+@keyframes grow { from { width: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
 
+@media (max-width: 900px) {
+  .dims { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .usage { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .claim-body { grid-template-columns: 1fr; }
+}
 @media (max-width: 640px) {
-  .wrap { padding: 16px 12px 32px; }
-  .banner { grid-template-columns: 1fr; padding: 18px 16px 18px 22px; }
-  .score { text-align: left; }
-  .claim-head { flex-direction: column; }
-  .timeline .opt { display: none; }
+  .wrap { padding: 14px 12px 32px; }
+  .runid { max-width: 48%; }
+  .banner { padding: 20px 16px 16px; }
+  .hero { grid-template-columns: 1fr auto; gap: 16px; }
+  .stamp-wrap { justify-items: start; }
+  .head { grid-column: 1 / -1; grid-row: 2; }
+  .head h1 { font-size: 22px; }
+  .verdict-pill { font-size: 26px; }
+  .score { width: 104px; height: 104px; }
+  .score .num { font-size: 32px; }
+  .dims { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .claim { padding: 14px 14px 12px; }
+  .claim-head { flex-direction: column; gap: 8px; }
+  .trace li { grid-template-columns: 52px 20px minmax(0, 1fr) auto; padding: 7px 10px 7px 6px; gap: 8px; }
+  .trace ol::before { left: 68px; }
+  .trace li .opt { display: none; }
+  .usage { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .check { grid-template-columns: 30px minmax(0, 1fr); }
+  .check > .badge { grid-column: 2; justify-self: start; }
+  .meta { gap: 10px 18px; }
+  .film figure { flex-basis: 200px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 @media print {
   body { background: #fff; }
-  .banner, .claim, .table-wrap, .thumbs figure { break-inside: avoid; }
+  .panel, .claim, .trace li, .film figure { break-inside: avoid; box-shadow: none; }
 }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="topbar">
-    <div class="brand">Evidence Judge <span>report</span></div>
-    <div class="mono">{{ v.run_id }}</div>
+    <div class="brand"><span class="mark" aria-hidden="true">EJ</span>Evidence Judge <small>report</small></div>
+    <div class="runid" title="Run id"><i aria-hidden="true"></i>{{ v.run_id }}</div>
   </div>
 
   <main>
     <div class="banner {{ outcome_class }}" role="region" aria-labelledby="verdict-title">
-      <div>
-        <span class="verdict-pill" role="status">{{ outcome_label }}</span>
-        <h1 id="verdict-title">{{ v.task if v.task else "Untitled run" }}</h1>
-        <p class="summary">{{ v.summary }}</p>
-        <div class="meta">
-          <span>Source <b>{{ source }}</b></span>
-          <span>Captured <b>{{ channels | join(", ") if channels else "nothing" }}</b></span>
-          <span>Claim coverage <b>{{ coverage }}</b></span>
-          <span>Decided without LLM <b>{{ deterministic }}</b></span>
+      <div class="hero">
+        <div class="stamp-wrap">
+          <span class="lbl">Verdict</span>
+          <span class="verdict-pill" role="status">{{ outcome_label }}</span>
+        </div>
+        <div class="head">
+          <div class="task"><span class="lbl">Task</span><span>{{ v.task if v.task else "Untitled run" }}</span></div>
+          <h1 id="verdict-title">{{ headline }}</h1>
+          {% if tally %}
+          <ul class="tally" aria-label="Claim tally">
+            {% for label, n, tone in tally %}<li class="pill t-{{ tone }}"><b>{{ n }}</b> {{ label | lower }}</li>{% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+        <div class="score" aria-label="Score {{ score }} out of 100">
+          <div class="ring" aria-hidden="true"></div>
+          <div class="inner">
+            <div class="num">{{ score }}<small>/100</small></div>
+            <div class="lbl">Score</div>
+          </div>
         </div>
       </div>
-      <div class="score" aria-label="Score {{ score }} out of 100">
-        <div class="num">{{ score }}<small>/100</small></div>
-        <div class="lbl">Score</div>
+      <p class="summary"><span class="lbl">Judge summary</span>{{ v.summary }}</p>
+      <div class="meta">
+        <div><span class="k">Source</span><b>{{ source }}</b></div>
+        <div><span class="k">Captured</span><b>{{ channels | join(" · ") if channels else "nothing" }}</b></div>
+        <div><span class="k">Claim coverage</span><b>{{ coverage }}</b></div>
+        <div><span class="k">Decided without LLM</span><b>{{ deterministic }}</b></div>
       </div>
     </div>
 
     {% if dimensions %}
-    <ul class="chips" aria-label="Dimension scores">
+    <ul class="dims" aria-label="Dimension scores">
       {% for d in dimensions %}
-      <li class="chip t-{{ d.tone }}">
-        <span class="dot" aria-hidden="true"></span>
-        <span>{{ d.label }}</span>
-        <span class="val">{{ d.score }}</span>
+      <li class="dim panel t-{{ d.tone }}">
+        <div class="row"><span class="name">{{ d.label }}</span><span class="val">{{ d.score }}</span></div>
+        <div class="bar" aria-hidden="true"><i style="--w: {{ d.bar }}%"></i></div>
         {% if d.findings %}
         <details>
           <summary>{{ d.findings | length }} finding{{ "s" if d.findings | length != 1 }}</summary>
@@ -260,34 +398,47 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border
     <section aria-labelledby="claims-h">
       <header>
         <h2 id="claims-h">Claims</h2>
-        <span class="count">{{ claims | length }} checked{% for label, n in tally %} · {{ n }} {{ label | lower }}{% endfor %}</span>
+        <span class="count"><span>{{ claims | length }} checked</span>{% for label, n, tone in tally %}<span>{{ n }} {{ label | lower }}</span>{% endfor %}</span>
       </header>
       {% if claims %}
       <div class="claims">
         {% for c in claims %}
-        <article class="claim t-{{ c.tone }}" id="claim-{{ loop.index }}">
+        <article class="claim panel t-{{ c.tone }}" id="claim-{{ loop.index }}" style="--i: {{ loop.index0 }}">
           <div class="claim-head">
             <p class="claim-text">{{ c.text }}</p>
             <div class="claim-badges">
               {% if c.key %}<span class="tag" title="The task's success depends on this claim">Key</span>{% endif %}
-              <span class="badge">{{ c.status_label }}</span>
+              <span class="pill badge">{{ c.status_label }}</span>
             </div>
           </div>
-          <blockquote>{{ c.quote }}</blockquote>
-          <p class="reason">{{ c.reason }}</p>
+          <div class="claim-body">
+            <div class="said">
+              <span class="lbl">Agent said</span>
+              <blockquote>{{ c.quote }}</blockquote>
+            </div>
+            <div class="evidence">
+              <span class="lbl">Evidence</span>
+              <p class="reason">{{ c.reason_head }}</p>
+              {% if c.reason_rest %}
+              <details class="more">
+                <summary>{{ c.reason_rest | length }} more check{{ "s" if c.reason_rest | length != 1 }}</summary>
+                <ul>{% for r in c.reason_rest %}<li>{{ r }}</li>{% endfor %}</ul>
+              </details>
+              {% endif %}
+              {% if c.citations %}
+              <div class="cites" aria-label="Evidence">
+                {% for ct in c.citations %}
+                {% if ct.href %}<a class="cite t-{{ ct.tone }}" href="{{ ct.href }}"{% if ct.excerpt %} title="{{ ct.excerpt }}"{% endif %}>{% else %}<span class="cite t-{{ ct.tone }}"{% if ct.excerpt %} title="{{ ct.excerpt }}"{% endif %}>{% endif %}<span class="cid">{{ ct.evidence_id }}</span>{% if ct.detail %}<span class="cdesc">{{ ct.detail }}</span>{% endif %}{% if ct.href %}</a>{% else %}</span>{% endif %}
+                {% endfor %}
+              </div>
+              {% endif %}
+            </div>
+          </div>
           <div class="claim-foot">
-            {% if c.citations %}
-            <span class="cites" aria-label="Evidence">
-              {% for ct in c.citations %}
-              {% if ct.href %}<a class="cite" href="{{ ct.href }}"{% if ct.excerpt %} title="{{ ct.excerpt }}"{% endif %}>{{ ct.evidence_id }}</a>{% else %}<span class="cite"{% if ct.excerpt %} title="{{ ct.excerpt }}"{% endif %}>{{ ct.evidence_id }}</span>{% endif %}
-              {% endfor %}
-            </span>
-            {% else %}
-            <span>No citations</span>
-            {% endif %}
-            <span>checker <span class="mono">{{ c.checker }}</span></span>
-            <span>confidence {{ c.confidence }}</span>
-            <span class="mono">{{ c.id }}</span>
+            {% if not c.citations %}<span>No citations</span>{% endif %}
+            <span>checker <b>{{ c.checker }}</b></span>
+            <span>confidence <b>{{ c.confidence }}</b></span>
+            <span>id <b>{{ c.id }}</b></span>
           </div>
         </article>
         {% endfor %}
@@ -303,40 +454,19 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border
         <h2 id="exp-h">Task expectations</h2>
         <span class="count">{{ expectations | length }} from the task spec</span>
       </header>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th scope="col">Expectation</th><th scope="col">Kind</th><th scope="col">Result</th><th scope="col">Reason</th><th scope="col">Evidence</th></tr></thead>
-          <tbody>
-            {% for e in expectations %}
-            <tr class="t-{{ e.tone }}">
-              <td class="mono">{{ e.id }}</td>
-              <td><span class="tag">{{ e.kind }}</span></td>
-              <td class="nowrap"><span class="badge">{{ e.met_label }}</span></td>
-              <td class="reason">{{ e.reason }}</td>
-              <td><span class="cites">{% for ct in e.citations %}{% if ct.href %}<a class="cite" href="{{ ct.href }}">{{ ct.evidence_id }}</a>{% else %}<span class="cite">{{ ct.evidence_id }}</span>{% endif %}{% endfor %}</span></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-    {% endif %}
-
-    {% if thumbs %}
-    <section aria-labelledby="shots-h">
-      <header>
-        <h2 id="shots-h">Screenshots</h2>
-        <span class="count">cited and final</span>
-      </header>
-      <div class="thumbs">
-        {% for t in thumbs %}
-        <figure id="{{ t.anchor }}">
-          <img src="{{ t.data_uri }}" alt="Screenshot {{ t.evidence_id }}" loading="lazy" decoding="async">
-          <figcaption class="mono">{{ t.caption }}</figcaption>
-        </figure>
+      <ul class="checklist panel">
+        {% for e in expectations %}
+        <li class="check t-{{ e.tone }}">
+          <span class="glyph" aria-hidden="true">{{ e.glyph }}</span>
+          <div>
+            <div class="id">{{ e.id }} <span class="tag">{{ e.kind }}</span></div>
+            <p class="reason">{{ e.reason }}</p>
+            {% if e.citations %}<div class="cites">{% for ct in e.citations %}{% if ct.href %}<a class="cite t-{{ ct.tone }}" href="{{ ct.href }}">{% else %}<span class="cite t-{{ ct.tone }}">{% endif %}<span class="cid">{{ ct.evidence_id }}</span>{% if ct.detail %}<span class="cdesc">{{ ct.detail }}</span>{% endif %}{% if ct.href %}</a>{% else %}</span>{% endif %}{% endfor %}</div>{% endif %}
+          </div>
+          <span class="pill badge">{{ e.met_label }}</span>
+        </li>
         {% endfor %}
-      </div>
-      {% if final_url %}<p class="final">Final page: <span class="mono">{{ final_url }}</span>{% if final_title %} · {{ final_title }}{% endif %}</p>{% endif %}
+      </ul>
     </section>
     {% endif %}
 
@@ -346,26 +476,43 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border
         <span class="count">actions and state-changing requests{% if timeline_hidden %} · {{ timeline_hidden }} more not shown{% endif %}</span>
       </header>
       {% if timeline %}
-      <div class="table-wrap">
-        <table class="timeline">
-          <thead><tr><th scope="col">Time</th><th scope="col" class="opt">ID</th><th scope="col" class="opt">Type</th><th scope="col">Event</th><th scope="col">Status</th></tr></thead>
-          <tbody>
-            {% for r in timeline %}
-            <tr id="{{ r.anchor }}" class="t-{{ r.tone }}{{ ' cited' if r.cited }}">
-              <td class="mono nowrap">{{ r.time }}</td>
-              <td class="mono nowrap opt">{{ r.evidence_id }}</td>
-              <td class="opt"><span class="tag">{{ r.kind }}</span></td>
-              <td><span class="lbl">{{ r.label }}</span>{% if r.detail %}<span class="detail">{{ r.detail }}</span>{% endif %}</td>
-              <td class="nowrap"><span class="badge">{{ r.status }}</span></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="trace panel">
+        <ol>
+          {% for r in timeline %}
+          <li id="{{ r.anchor }}" class="t-{{ r.tone }}{{ ' cited' if r.cited }}" data-kind="{{ r.kind }}"{% if r.mutation %} data-mutation{% endif %}>
+            <span class="time">{{ r.time }}</span>
+            <span class="node" aria-hidden="true"></span>
+            <span class="what"><span class="kind">{{ r.evidence_id }}</span><span class="label">{{ r.label }}</span>{% if r.detail %}<span class="detail">{{ r.detail }}</span>{% endif %}</span>
+            <span class="lane opt" aria-hidden="true"><i style="--x: {{ r.offset }}%"></i></span>
+            <span class="badge">{{ r.status }}</span>
+          </li>
+          {% endfor %}
+        </ol>
       </div>
       {% else %}
       <div class="empty">No actions or state-changing requests were captured.</div>
       {% endif %}
     </section>
+
+    {% if thumbs %}
+    <section aria-labelledby="shots-h">
+      <header>
+        <h2 id="shots-h">Screenshots</h2>
+        <span class="count">cited and final</span>
+      </header>
+      <div class="panel">
+        <div class="film">
+          {% for t in thumbs %}
+          <figure id="{{ t.anchor }}">
+            <img src="{{ t.data_uri }}" alt="Screenshot {{ t.evidence_id }}" loading="lazy" decoding="async">
+            <figcaption>{{ t.caption }}</figcaption>
+          </figure>
+          {% endfor %}
+        </div>
+        {% if final_url %}<p class="final">Final page: {{ final_url }}{% if final_title %} · {{ final_title }}{% endif %}</p>{% endif %}
+      </div>
+    </section>
+    {% endif %}
   </main>
 
   <footer>
@@ -376,7 +523,7 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border
       <div><dt>Cost</dt><dd>{{ cost }}</dd></div>
       <div><dt>LLM latency</dt><dd>{{ latency }}</dd></div>
     </dl>
-    <div>Judged by evidence-judge {{ v.judge_version }} · schema <span class="mono">{{ v.schema_id }}</span> · rendered by {{ tool_version }}</div>
+    <div>Judged by evidence-judge {{ v.judge_version }} · schema {{ v.schema_id }} · rendered by {{ tool_version }}</div>
   </footer>
 </div>
 </body>
