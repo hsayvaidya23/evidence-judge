@@ -42,11 +42,11 @@ jobs:
 | `har` | | Path to a HAR recorded alongside the trace |
 | `browser-use` | | Path to a browser-use history JSON, or its run directory |
 | `answer-file` | | File with the agent's final answer |
-| `reasoning-file` | | File with the agent's reasoning, one step per paragraph |
+| `reasoning-file` | | File with the agent's reasoning, one step per paragraph (steps separated by a blank line) |
 | `spec` | | Task spec YAML (required for write tasks to PASS) |
 | `offline` | `"true"` | No LLM calls (heuristic claim extraction) |
 | `fail-on-review` | `"false"` | Also fail the job when the verdict is NEEDS_REVIEW |
-| `version` | `""` | evidence-judge version to install; empty installs the action's own source |
+| `version` | `""` | Git tag, branch or commit SHA of this repository to install (`git+https://github.com/hsayvaidya23/evidence-judge@<version>`); empty installs the action's own source, the ref you put after `@` in `uses:` |
 | `python-version` | `"3.13"` | Python version to run with |
 
 At least one of `trace`, `har` or `browser-use` is needed.

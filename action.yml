@@ -19,7 +19,7 @@ inputs:
     description: File with the agent's final answer
     required: false
   reasoning-file:
-    description: File with the agent's reasoning, one step per line
+    description: File with the agent's reasoning, one step per paragraph (steps separated by a blank line)
     required: false
   spec:
     description: Task spec YAML (required for write tasks to PASS)
@@ -33,7 +33,7 @@ inputs:
     required: false
     default: "false"
   version:
-    description: "evidence-judge version to install; empty installs this action's own source"
+    description: "Git tag, branch or commit SHA of github.com/hsayvaidya23/evidence-judge to install; empty installs this action's own source"
     required: false
     default: ""
   python-version:
@@ -65,7 +65,7 @@ runs:
         EJ_ACTION_PATH: ${{ github.action_path }}
       run: |
         if [ -n "$EJ_VERSION" ]; then
-          uv tool install "evidence-judge[anthropic]==$EJ_VERSION"
+          uv tool install "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge@$EJ_VERSION"
         else
           uv tool install "$EJ_ACTION_PATH[anthropic]"
         fi

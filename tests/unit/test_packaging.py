@@ -41,3 +41,23 @@ def test_release_runs_the_full_ci_before_publishing() -> None:
     [gate] = [name for name, job in jobs.items() if job.get("uses") == "./.github/workflows/ci.yml"]
     assert gate in jobs["build"]["needs"]
     assert jobs["publish"]["needs"] == "build"
+
+
+def _action() -> dict[str, Any]:
+    import yaml
+
+    return yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+
+
+def test_action_documents_the_reasoning_file_format_the_loader_reads() -> None:
+    description = _action()["inputs"]["reasoning-file"]["description"]
+    assert "paragraph" in description
+    assert "blank line" in description
+
+
+def test_action_version_installs_from_the_repository_not_pypi() -> None:
+    action = _action()
+    install = next(s for s in action["runs"]["steps"] if s.get("name") == "Install evidence-judge")
+    assert "git+https://github.com/hsayvaidya23/evidence-judge@" in install["run"]
+    assert "==" not in install["run"]
+    assert "tag" in action["inputs"]["version"]["description"]
