@@ -3,9 +3,9 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from evidence_judge.core.predicates import Predicate
+from evidence_judge.core.predicates import Predicate, vacuity_reason
 
 
 class ClaimKind(StrEnum):
@@ -30,6 +30,14 @@ class Claim(BaseModel):
         default_factory=list[Predicate],
         description="Evidence that would prove the claim; any one satisfied is enough",
     )
+
+    @field_validator("predicates")
+    @classmethod
+    def _specific(cls, predicates: list[Predicate]) -> list[Predicate]:
+        for index, predicate in enumerate(predicates):
+            if (reason := vacuity_reason(predicate)) is not None:
+                raise ValueError(f"predicate {index} ({predicate.kind}) is too weak: {reason}")
+        return predicates
 
 
 class ClaimSet(BaseModel):

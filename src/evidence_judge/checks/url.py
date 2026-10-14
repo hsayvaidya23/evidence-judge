@@ -12,7 +12,13 @@ from evidence_judge.checks._common import (
 )
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.errors import InvalidPredicateError
-from evidence_judge.checks.matching import compile_regex, regex_search, url_contains, url_path
+from evidence_judge.checks.matching import (
+    compile_regex,
+    regex_search,
+    url_location_contains,
+    url_path,
+    url_query_contains,
+)
 from evidence_judge.core.evidence import Channel, NetworkEvent
 from evidence_judge.core.index import EvidenceIndex, is_document_navigation
 from evidence_judge.core.predicates import Predicate, Scope, UrlPredicate
@@ -23,8 +29,14 @@ KIND = "url"
 
 class UrlMatcher:
     def __init__(self, predicate: UrlPredicate) -> None:
-        if predicate.contains is None and predicate.regex is None:
-            raise InvalidPredicateError("url predicate needs 'contains' or 'regex'")
+        if (
+            predicate.contains is None
+            and predicate.query_contains is None
+            and predicate.regex is None
+        ):
+            raise InvalidPredicateError(
+                "url predicate needs 'contains', 'query_contains' or 'regex'"
+            )
         self.predicate = predicate
         self._regex = compile_regex(predicate.regex) if predicate.regex else None
 
@@ -32,13 +44,17 @@ class UrlMatcher:
         parts: list[str] = []
         if self.predicate.contains is not None:
             parts.append(f"contain {quoted(self.predicate.contains)}")
+        if self.predicate.query_contains is not None:
+            parts.append(f"have a query containing {quoted(self.predicate.query_contains)}")
         if self.predicate.regex is not None:
             parts.append(f"match /{self.predicate.regex}/")
         return " and ".join(parts)
 
     def matches(self, url: str) -> bool:
         p = self.predicate
-        if p.contains is not None and not url_contains(url, p.contains):
+        if p.contains is not None and not url_location_contains(url, p.contains):
+            return False
+        if p.query_contains is not None and not url_query_contains(url, p.query_contains):
             return False
         return self._regex is None or regex_search(self._regex, url) is not None
 

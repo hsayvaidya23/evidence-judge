@@ -55,8 +55,10 @@ the cart before checking out. List them under `allow` (request predicates) so th
 dimension does not flag them. Any other successful mutation that no met expectation,
 constraint or allow entry explains is reported as a side effect. The agent's own claims never
 explain a mutation: "I also changed your email" is still a side effect, even though the claim is
-true. Telemetry (pings, beacons, CSP reports) is never a side effect; see
-[architecture.md](architecture.md#side-effects-and-telemetry) for the exact rule.
+true. Telemetry (pings, beacons, CSP reports) is not a side effect, unless its body carries
+redacted values or, with `allowed_hosts` set, goes to another host (possible data
+exfiltration); see [architecture.md](architecture.md#side-effects-and-telemetry) for the exact
+rule.
 
 Without a spec, nothing says which changes are expected, so a run that changed state is
 review-only by design. Every successful mutation is reported and the summary reads:
@@ -77,6 +79,28 @@ allow:
 ## Predicates
 
 Every predicate has a `kind`.
+
+Predicates that every run would satisfy are rejected when the spec or claims file is loaded,
+with a message naming the field. Strings are stripped; substrings (`url_contains`,
+`path_contains`, `query_contains`, `body_contains`, `response_contains`, a url `contains`, an
+action's `target_contains`, and a value compared with `contains`) need at least 2 characters;
+page text needs at least 3 characters including a letter or digit (so `"24"` or `"!!!"` is
+refused); a request needs a method or a URL, path, query, regex or body criterion; a url
+predicate needs `contains`, `query_contains` or `regex`; an action needs a name, target or
+value; a value predicate needs `json_path` or `page_regex`.
+
+Inside `expect`, a request predicate needs both a `method` and at least one of `url_contains`,
+`path_contains`, `query_contains`, `url_regex`, `body_contains` or `response_contains`, because
+"some POST succeeded" proves nothing. `forbid` and `allow` may stay broad, as in the read-only
+example below.
+
+Claims (pre-extracted or produced by an extractor) are held to a stricter bar, because the agent
+controls what they say: besides the request rule above, an action needs a target or value, and
+page text needs two words or a number (`"1042"`, `"$24.00"`, `"Thank you for your order"`), since
+a lone word such as `confirm` also labels buttons on pages that prove nothing. A claims file that
+breaks these rules is refused; the extractors drop such predicates and count them as
+`vacuous_predicates` in the claim set's coverage note, and a key claim left without predicates
+is `no_evidence`, so the run goes to review.
 
 ### `request`: a network request was observed
 
@@ -117,8 +141,14 @@ part still matches.
 
 ```yaml
 - {kind: url, contains: /order/confirmation}
+- {kind: url, contains: /search, query_contains: q=red kettle}
 - {kind: url, regex: '/orders/\d+$', scope: any}
 ```
+
+`contains` matches the scheme, host and path only, like a request's `url_contains`, so a final
+URL of `/login?next=/order/confirmation` does not count as reaching `/order/confirmation`.
+`query_contains` matches the decoded query string, and `regex` the full URL. When several are
+given, all must hold.
 
 With `scope: any`, visited URLs come from page snapshots, the page URL of each action and
 document navigations in the network log (GET requests for a `document`, or answered with
@@ -153,6 +183,14 @@ Instead of `json_path`, `page_regex` extracts the value from page text with one 
 - {kind: value, field: total, page_regex: 'Total:\s*\$([0-9.]+)', op: "<=", value: 30}
 ```
 
+Numbers are read from JSON numbers and from strings as prices are usually written: currency
+symbols or codes (`$24.00`, `1500 EUR`), thousands grouped with commas, dots, spaces or
+apostrophes (`24,000.50`, `1 500`, `1'500`, `1.500,00 €`), a decimal comma before one or two
+digits (`24,5`) and a `k`/`m`/`b` suffix. Ambiguous strings such as `1.500` are not numbers.
+`<`, `<=`, `>` and `>=` need numbers on both sides; if either side is not one, the predicate is
+`no_evidence` ("cannot compare ... numerically"), never a text comparison. `==` and `!=` fall
+back to comparing normalised text.
+
 Without `in_request`, the value is looked up in any state-changing request.
 If a candidate request's body was truncated before `json_path`, the value cannot be shown to
 hold for every observation, so the predicate is `no_evidence` unless a recorded observation
@@ -171,14 +209,13 @@ to review, never to failure. Prefer a `request`, `url` or `page_text` predicate 
 ### Regular expressions
 
 `url_regex`, `regex` and `page_regex` come from specs or from an LLM, so they are treated as
-untrusted. They are matched case-insensitively with Python's `re`, and a pattern is rejected
-(the predicate becomes `no_evidence` with the reason "unsafe regex") when it:
-
-- is longer than 300 characters, or
-- repeats a group whose body itself repeats or alternates, such as `(a+)+`, `(a*)*`,
-  `(a|aa)+`, `(\w+\s?)*` or `(.*a){20}`. These can backtrack catastrophically. The check is
-  conservative and also rejects a few safe patterns like `([\w-]+\.)+`; write them without
-  the outer repetition, for example `[\w.-]+`.
+untrusted. They are matched case-insensitively with the [`regex`](https://pypi.org/project/regex/)
+engine, which accepts Python `re` syntax (lookarounds and backreferences included) and supports
+a per-match timeout. A pattern longer than 300 characters is rejected (the predicate becomes
+`no_evidence` with the reason "unsafe regex"). Every other valid pattern runs, but each search
+stops after 50 ms: a pattern that backtracks catastrophically on the evidence, such as `(a+)+$`
+on a long run of `a`, makes the predicate `no_evidence` with the reason "regex timed out", and a
+spec `allow` entry whose regex times out explains no mutation.
 
 A regex reads at most the first and the last 10,000 characters of a URL or a page's text.
 

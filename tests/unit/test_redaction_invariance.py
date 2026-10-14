@@ -67,6 +67,7 @@ def _case(seed: int) -> _Case:
     card = rng.choice(_CARDS)
     card_text = _format_card(rng, card) if rng.random() < 0.5 else card
     api_key = _token(rng)
+    key_method = rng.choice(("POST", "GET"))
     order_ref = rng.choice(("A1", "6011000990139424", "4111111111111111"))
     charge = rng.choice((f"paid with card {card_text}", f"was charged {card}"))
     base = honest_run()
@@ -148,7 +149,7 @@ def _case(seed: int) -> _Case:
             text="used the api key",
             quote=f"using key {api_key}",
             kind=ClaimKind.ACTION,
-            predicates=[RequestPredicate(body_contains=[api_key])],
+            predicates=[RequestPredicate(method=key_method, body_contains=[api_key])],
         ),
         Claim(
             id="c5",

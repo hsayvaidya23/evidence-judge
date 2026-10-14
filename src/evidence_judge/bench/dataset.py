@@ -10,6 +10,8 @@ Layout, one directory per scenario::
         answer.txt       agent final answer        (optional)
         reasoning.txt    agent reasoning, one step per paragraph (optional)
         spec.yaml        task spec                 (optional; enables the with-spec judge)
+        spec.generic.yaml  a coarser spec written without looking at the recording
+                         (optional; enables the generic-spec judge)
 
 Directories without ``expected.json`` are skipped.
 """
@@ -29,6 +31,7 @@ from evidence_judge.core.verdict import Outcome
 from evidence_judge.ingest import load_run
 
 EXPECTED_FILE = "expected.json"
+GENERIC_SPEC_FILE = "spec.generic.yaml"
 
 
 class BenchInputError(ValueError):
@@ -41,6 +44,7 @@ class Scenario:
     run: Run
     expected: Outcome
     spec: TaskSpec | None = None
+    generic_spec: TaskSpec | None = None
 
     @property
     def forgery_base(self) -> bool:
@@ -63,6 +67,8 @@ def load_scenario(folder: Path, *, max_body_chars: int = 20_000) -> Scenario:
         expected = Outcome(json.loads((folder / EXPECTED_FILE).read_text("utf-8"))["outcome"])
         spec_path = folder / "spec.yaml"
         spec = TaskSpec.load(spec_path) if spec_path.is_file() else None
+        generic_path = folder / GENERIC_SPEC_FILE
+        generic_spec = TaskSpec.load(generic_path) if generic_path.is_file() else None
         trace = _optional(folder / "trace.zip")
         har = _optional(folder / "run.har")
         history = _optional(folder / "history.json")
@@ -82,7 +88,7 @@ def load_scenario(folder: Path, *, max_body_chars: int = 20_000) -> Scenario:
         raise BenchInputError(f"scenario {name}: {exc}") from exc
     except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError, zipfile.BadZipFile) as exc:
         raise BenchInputError(f"scenario {name}: {type(exc).__name__}: {exc}") from exc
-    return Scenario(name=name, run=run, expected=expected, spec=spec)
+    return Scenario(name=name, run=run, expected=expected, spec=spec, generic_spec=generic_spec)
 
 
 def _optional(path: Path) -> Path | None:

@@ -4,6 +4,7 @@ from evidence_judge.bench.dataset import BenchInputError, Scenario, load_scenari
 from evidence_judge.bench.report import to_json, to_markdown, write_json, write_markdown
 from evidence_judge.bench.runner import (
     ALL_MANIPULATIONS,
+    EJ_GENERIC_SPEC,
     EJ_NO_SPEC,
     EJ_WITH_SPEC,
     BenchConfig,
@@ -22,6 +23,7 @@ from evidence_judge.bench.stats import Z_95, wilson_interval
 
 __all__ = [
     "ALL_MANIPULATIONS",
+    "EJ_GENERIC_SPEC",
     "EJ_NO_SPEC",
     "EJ_WITH_SPEC",
     "Z_95",

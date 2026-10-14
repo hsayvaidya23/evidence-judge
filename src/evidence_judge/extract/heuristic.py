@@ -2,15 +2,19 @@
 
 Recognises common completion phrases ("placed the order", "added to cart", "changed the email",
 "order #1042", "the price was $24") and maps them to request / page_text / value predicates.
-Negated ("could not place") and intended ("will place") phrases are skipped.
+Negated ("could not place") and intended ("will place") phrases are skipped. Predicates too weak
+to prove a claim (core.predicates.vacuity_reason: a request without a URL or body criterion,
+page text of a single word such as "confirm") are dropped and counted in the coverage note.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import product
+
+from pydantic import ValidationError
 
 from evidence_judge.core.claims import Claim, ClaimKind, ClaimSet
 from evidence_judge.core.predicates import (
@@ -18,7 +22,7 @@ from evidence_judge.core.predicates import (
     Predicate,
     RequestPredicate,
     Scope,
-    ValuePredicate,
+    vacuity_reason,
 )
 from evidence_judge.core.verdict import Usage
 from evidence_judge.extract.base import MAX_CLAIMS, MAX_PREDICATES_PER_CLAIM
@@ -137,10 +141,33 @@ def _cart(_sentence: Sentence, match: re.Match[str], _topic: str | None) -> list
     return _requests(["POST"], ["cart"] if noun == "cart" else ["cart", noun], [])
 
 
-def _confirmation(
-    _sentence: Sentence, _match: re.Match[str], _topic: str | None
-) -> list[Predicate]:
-    return [PageTextPredicate(contains="confirm", scope=Scope.ANY)]
+_CONFIRMED_ID = re.compile(r"#?\s?([A-Z0-9-]*\d[A-Z0-9-]*)", _I)
+
+
+def _confirmation(_sentence: Sentence, match: re.Match[str], _topic: str | None) -> list[Predicate]:
+    """The confirmed id when the sentence names one, else multi-word confirmation phrases.
+
+    A bare word like "confirm" also labels the checkout page's Confirm button, so it proves
+    nothing about the outcome.
+    """
+    phrase = match.group(0)
+    reference = _CONFIRMED_ID.search(phrase)
+    if reference is not None and len(reference.group(1)) >= 3:
+        return _page_texts([reference.group(1)])
+    noun = phrase.split()[0].lower()
+    if noun == "confirmation":
+        return _page_texts(["thank you for your", "has been confirmed", "is confirmed"])
+    return _page_texts([f"{noun} confirmed", f"{noun} is confirmed", f"thank you for your {noun}"])
+
+
+def _page_texts(needles: Sequence[str]) -> list[Predicate]:
+    built: list[Predicate] = []
+    for needle in needles:
+        try:
+            built.append(PageTextPredicate(contains=needle, scope=Scope.ANY))
+        except ValidationError:
+            continue
+    return built
 
 
 _RULES: tuple[_Rule, ...] = (
@@ -248,6 +275,12 @@ _RULES: tuple[_Rule, ...] = (
 )
 
 
+@dataclass(slots=True)
+class _Tally:
+    vacuous: int = 0
+    claims: list[Claim] = field(default_factory=list[Claim])
+
+
 class HeuristicExtractor:
     """Deterministic extractor used offline, in CI, and as a fallback when the LLM fails."""
 
@@ -265,31 +298,41 @@ class HeuristicExtractor:
         self, *, task: str | None, answer: str | None, reasoning: list[str]
     ) -> ClaimSet:
         task_norm = normalize(task or "")
-        found: list[Claim] = []
+        tally = _Tally()
         for sentence in sentences(answer, reasoning):
-            found.extend(_rule_claims(sentence, task_norm))
-            found.extend(_reference_claims(sentence))
-            found.extend(_price_claims(sentence, task_norm))
-        unique, _ = dedupe_claims(found, max_predicates=MAX_PREDICATES_PER_CLAIM)
+            _rule_claims(sentence, task_norm, tally)
+            _reference_claims(sentence, tally)
+            _price_claims(sentence, task_norm, tally)
+        unique, _ = dedupe_claims(tally.claims, max_predicates=MAX_PREDICATES_PER_CLAIM)
         capped, truncated = cap_claims(unique, self._max_claims)
         return ClaimSet(
             claims=renumber(capped),
             extractor=self.name,
-            coverage_note=f"truncated={truncated}",
+            coverage_note=f"truncated={truncated}; vacuous_predicates={tally.vacuous}",
         )
 
 
 def _claim(
-    sentence: Sentence, text: str, kind: ClaimKind, key: bool, predicates: list[Predicate]
-) -> Claim:
-    return Claim(
-        id="pending",
-        text=text,
-        quote=sentence.text,
-        kind=kind,
-        origin=sentence.origin,
-        key=key,
-        predicates=predicates[:MAX_PREDICATES_PER_CLAIM],
+    sentence: Sentence,
+    text: str,
+    kind: ClaimKind,
+    key: bool,
+    predicates: list[Predicate],
+    tally: _Tally,
+) -> None:
+    """Record a claim, keeping only predicates specific enough to prove it."""
+    specific = [p for p in predicates if vacuity_reason(p) is None]
+    tally.vacuous += len(predicates) - len(specific)
+    tally.claims.append(
+        Claim(
+            id="pending",
+            text=text,
+            quote=sentence.text,
+            kind=kind,
+            origin=sentence.origin,
+            key=key,
+            predicates=specific[:MAX_PREDICATES_PER_CLAIM],
+        )
     )
 
 
@@ -297,8 +340,7 @@ def _first_asserted(pattern: re.Pattern[str], text: str) -> re.Match[str] | None
     return next((m for m in pattern.finditer(text) if asserted(text, m.start())), None)
 
 
-def _rule_claims(sentence: Sentence, task_norm: str) -> list[Claim]:
-    claims: list[Claim] = []
+def _rule_claims(sentence: Sentence, task_norm: str, tally: _Tally) -> None:
     for rule in _RULES:
         match = _first_asserted(rule.pattern, sentence.text)
         if match is None:
@@ -311,40 +353,41 @@ def _rule_claims(sentence: Sentence, task_norm: str) -> list[Claim]:
             continue
         text = rule.topic_text.format(topic=topic) if rule.topic_text and topic else rule.text
         key = rule.outcome or any(word in task_norm for word in rule.task_words)
-        claims.append(_claim(sentence, text, rule.kind, key, predicates))
-    return claims
+        _claim(sentence, text, rule.kind, key, predicates, tally)
 
 
-def _reference_claims(sentence: Sentence) -> list[Claim]:
-    claims: list[Claim] = []
+def _reference_claims(sentence: Sentence, tally: _Tally) -> None:
     for match in _REFERENCE.finditer(sentence.text):
         if not asserted(sentence.text, match.start()):
             continue
         label = (match.group(1) or "reference").lower()
         number = match.group(2) or match.group(3)
-        predicates: list[Predicate] = [
-            PageTextPredicate(contains=number, scope=Scope.ANY),
-            RequestPredicate(response_contains=[number]),
-        ]
+        predicates = _page_texts([number])
+        if len(number) >= 2:
+            predicates += [
+                RequestPredicate(method=method, response_contains=[number])
+                for method in ("POST", "GET")
+            ]
         text = f"The {label} number {number} was shown"
-        claims.append(_claim(sentence, text, ClaimKind.STATE, True, predicates))
-    return claims
+        _claim(sentence, text, ClaimKind.STATE, True, predicates, tally)
 
 
-def _price_claims(sentence: Sentence, task_norm: str) -> list[Claim]:
+def _price_claims(sentence: Sentence, task_norm: str, tally: _Tally) -> None:
     field_match = _PRICE_FIELD.search(sentence.text)
     if field_match is None:
-        return []
-    field = "total" if field_match.group(1).lower() in _TOTAL_WORDS else "price"
+        return
+    name = "total" if field_match.group(1).lower() in _TOTAL_WORDS else "price"
     key = _PRICE_TASK.search(task_norm) is not None
-    claims: list[Claim] = []
     for match in _PRICE.finditer(sentence.text):
         if not asserted(sentence.text, match.start()):
             continue
         raw = match.group(1)
-        predicates: list[Predicate] = [
-            ValuePredicate(field=field, op="==", value=float(raw.replace(",", ""))),
-            PageTextPredicate(contains=raw, scope=Scope.ANY),
-        ]
-        claims.append(_claim(sentence, f"The {field} was {raw}", ClaimKind.VALUE, key, predicates))
-    return claims
+        shown = match.group(0).strip()
+        _claim(
+            sentence,
+            f"The {name} was {raw}",
+            ClaimKind.VALUE,
+            key,
+            _page_texts([shown]),
+            tally,
+        )

@@ -5,7 +5,13 @@ import pytest
 from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.dimensions import assess_dimensions
 from evidence_judge.checks.expectations import evaluate_spec
-from evidence_judge.checks.outcome import CONFIDENT_CONTRADICTION, FAIL_SCORE_CAP, decide, score
+from evidence_judge.checks.outcome import (
+    CONFIDENT_CONTRADICTION,
+    FAIL_SCORE_CAP,
+    REVIEW_SCORE_CAP,
+    decide,
+    score,
+)
 from evidence_judge.checks.registry import default_registry
 from evidence_judge.core.claims import Claim, ClaimKind
 from evidence_judge.core.evidence import Run
@@ -252,5 +258,32 @@ def test_score_is_weighted_mean_of_assessable_parts() -> None:
         Dimension.STATE: DimensionScore(score=None),
     }
     assert score([], dims) == pytest.approx(0.35 / 0.45)
-    assert score([verdict(Support.SUPPORTED), verdict(Support.NO_EVIDENCE)], {}) == 1.0
+    assert score([verdict(Support.SUPPORTED), verdict(Support.NO_EVIDENCE, key=False)], {}) == 1.0
     assert score([], {}) == 0.0
+
+
+def test_unverified_key_claims_count_half() -> None:
+    assert score([verdict(Support.SUPPORTED), verdict(Support.NO_EVIDENCE)], {}) == 0.75
+    assert score([verdict(Support.NO_EVIDENCE)], {}) == 0.5
+
+
+def test_needs_review_never_scores_like_a_pass() -> None:
+    perfect = {d: DimensionScore(score=1.0) for d in Dimension}
+    outcome, value, _ = decide(
+        [verdict(Support.SUPPORTED)],
+        [expectation(None)],
+        perfect,
+        coverage=None,
+        review_threshold=0.6,
+    )
+    assert outcome is Outcome.NEEDS_REVIEW
+    assert value == REVIEW_SCORE_CAP
+    outcome, value, _ = decide(
+        [verdict(Support.SUPPORTED)],
+        [expectation(True)],
+        perfect,
+        coverage=None,
+        review_threshold=0.6,
+    )
+    assert outcome is Outcome.PASS
+    assert value == 1.0

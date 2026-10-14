@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from evidence_judge.bench.runner import ALL_MANIPULATIONS, BenchResult, Proportion
+from evidence_judge.bench.runner import (
+    ALL_MANIPULATIONS,
+    EJ_GENERIC_SPEC,
+    EJ_NO_SPEC,
+    EJ_WITH_SPEC,
+    BenchResult,
+    Proportion,
+)
 from evidence_judge.core.verdict import Outcome
+from evidence_judge.forgery.base import ForgeryKind
 
 _OUTCOME_LABEL = {
     Outcome.PASS: "PASS",
@@ -36,6 +44,29 @@ def _ci(p: Proportion) -> str:
     return f"{p.ci_low:.0%} to {p.ci_high:.0%}"
 
 
+def _judge_notes(result: BenchResult) -> list[str]:
+    notes: list[str] = []
+    specs = {
+        EJ_WITH_SPEC: "each scenario's `spec.yaml`, written for the shop",
+        EJ_GENERIC_SPEC: (
+            "`spec.generic.yaml`, a coarser spec written from the task text alone "
+            "(an order for a kettle, a confirmation, a price of at most $30)"
+        ),
+        EJ_NO_SPEC: "no task spec, only the agent's claims",
+    }
+    for judge, spec in specs.items():
+        if judge in result.judges:
+            notes.append(f"- `{judge}` grades with {spec}")
+    if ForgeryKind.INJECTED_PREDICATES in result.kinds:
+        notes.append(
+            "- `injected_predicates` forgeries also replace claim extraction with what an "
+            "injection-controlled extractor would return: success claims backed by vacuous or "
+            "weak predicates (any request, page text `confirm` or `24`), passed through the "
+            "extractor's own validation"
+        )
+    return notes
+
+
 def to_markdown(result: BenchResult) -> str:
     forged_bases = [s.name for s in result.scenarios if s.forged]
     forged_cases = len({c.case_id for c in result.cases if c.forged})
@@ -49,6 +80,7 @@ def to_markdown(result: BenchResult) -> str:
         f"{len(forged_bases)} failed runs forged ({', '.join(forged_bases) or 'none'})",
         f"- Forgeries: {len(result.kinds)} kinds x {result.seeds} seeds per failed run = "
         f"{forged_cases} forged runs, forger `{result.forger}`",
+        *_judge_notes(result),
         "",
         "## False PASS on forged runs (lower is better)",
         "",

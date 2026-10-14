@@ -14,8 +14,12 @@ Rules, first match wins:
    expectation) establishes success.
 4. PASS otherwise.
 
-The score is a weighted mean of the assessable dimension scores plus the share of decided claims
-that are supported, using the weights below. A FAIL never scores above FAIL_SCORE_CAP.
+The score is a weighted mean of the assessable dimension scores plus the claim-support share,
+using the weights below. In the claim-support share a supported claim counts 1, a contradicted
+one 0 and a key claim with NO_EVIDENCE 0.5 (non-key claims without evidence are left out). The
+score is then capped by outcome so it never contradicts the verdict: a FAIL never scores above
+FAIL_SCORE_CAP (0.49) and a NEEDS_REVIEW never above REVIEW_SCORE_CAP (0.69); only a PASS can
+score higher.
 """
 
 from __future__ import annotations
@@ -44,6 +48,8 @@ DIMENSION_WEIGHTS: Final[Mapping[Dimension, float]] = {
 }
 CLAIM_SUPPORT_WEIGHT: Final = 0.15
 FAIL_SCORE_CAP: Final = 0.49
+REVIEW_SCORE_CAP: Final = 0.69
+UNVERIFIED_KEY_CLAIM_CREDIT: Final = 0.5
 MAX_SUMMARY_CITATIONS: Final = 3
 
 
@@ -55,10 +61,18 @@ def score(
         for d, s in dimensions.items()
         if s.score is not None and d in DIMENSION_WEIGHTS
     ]
-    decided = [v for v in claim_verdicts if v.status is not Support.NO_EVIDENCE]
-    if decided:
-        supported = sum(v.status is Support.SUPPORTED for v in decided) / len(decided)
-        parts.append((CLAIM_SUPPORT_WEIGHT, supported))
+    credits = [
+        1.0 if v.status is Support.SUPPORTED else 0.0
+        for v in claim_verdicts
+        if v.status is not Support.NO_EVIDENCE
+    ]
+    credits += [
+        UNVERIFIED_KEY_CLAIM_CREDIT
+        for v in claim_verdicts
+        if v.key and v.status is Support.NO_EVIDENCE
+    ]
+    if credits:
+        parts.append((CLAIM_SUPPORT_WEIGHT, sum(credits) / len(credits)))
     total = sum(w for w, _ in parts)
     return sum(w * s for w, s in parts) / total if total else 0.0
 
@@ -219,5 +233,5 @@ def decide(
             has_spec,
         )
     ) is not None:
-        return Outcome.NEEDS_REVIEW, value, summary
+        return Outcome.NEEDS_REVIEW, min(value, REVIEW_SCORE_CAP), summary
     return Outcome.PASS, value, _pass(key_claims, expectations)

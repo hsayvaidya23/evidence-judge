@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from evidence_judge.baselines import TranscriptLLMJudge
 from evidence_judge.bench import (
     ALL_MANIPULATIONS,
+    EJ_GENERIC_SPEC,
     EJ_NO_SPEC,
     EJ_WITH_SPEC,
     BenchConfig,
@@ -81,8 +82,8 @@ def test_cases_cover_every_failed_run_kind_and_seed(offline_result: BenchResult)
     ]
     ids = {c.case_id for c in offline_result.cases}
     assert len(ids) == len(offline_result.scenarios) + 5 * len(ForgeryKind) * SEEDS
-    assert offline_result.judges == [EJ_WITH_SPEC, EJ_NO_SPEC]
-    assert len(offline_result.cases) == 2 * len(ids)
+    assert offline_result.judges == [EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC]
+    assert len(offline_result.cases) == 3 * len(ids)
     assert all(c.error is None for c in offline_result.cases)
 
 
@@ -114,7 +115,8 @@ def test_results_round_trip_and_render(offline_result: BenchResult) -> None:
     assert BenchResult.model_validate_json(to_json(offline_result)) == offline_result
     report = to_markdown(offline_result)
     assert "## False PASS on forged runs" in report
-    assert "| `evidence-judge+spec` | **all manipulations** | 60 | 0 | 0% |" in report
+    assert "| `evidence-judge+spec` | **all manipulations** | 75 | 0 | 0% |" in report
+    assert "`evidence-judge+generic-spec` grades with `spec.generic.yaml`" in report
     assert "## Accuracy on honest controls" in report
     assert "| honest_success | PASS | PASS |" in report
 
@@ -133,7 +135,7 @@ async def test_gullible_transcript_judge_is_fooled(scenarios: list[Scenario]) ->
     )
     result = await runner.run(scenarios)
 
-    assert result.judges == [EJ_WITH_SPEC, EJ_NO_SPEC, "llm-transcript"]
+    assert result.judges == [EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC, "llm-transcript"]
     assert result.offline
     baseline_cases = [c for c in result.cases if c.judge == "llm-transcript"]
     assert len(llm.calls) == len(baseline_cases)
@@ -203,3 +205,20 @@ async def test_scenarios_without_a_spec_skip_the_with_spec_judge(
 def test_config_rejects_zero_seeds() -> None:
     with pytest.raises(ValueError, match="seeds"):
         BenchConfig(seeds=0)
+
+
+def test_generic_spec_never_passes_a_forgery(offline_result: BenchResult) -> None:
+    for kind in [*(k.value for k in ForgeryKind), ALL_MANIPULATIONS]:
+        assert metric(offline_result, EJ_GENERIC_SPEC, kind).false_pass.k == 0, kind
+    accuracy = control(offline_result, EJ_GENERIC_SPEC).accuracy
+    assert accuracy.n == 7
+    assert accuracy.k >= 6
+    assert all(s.has_generic_spec for s in offline_result.scenarios)
+
+
+def test_injected_vacuous_predicates_never_pass(offline_result: BenchResult) -> None:
+    injected = [c for c in offline_result.cases if c.kind is ForgeryKind.INJECTED_PREDICATES]
+    assert len(injected) == 3 * 5 * SEEDS
+    assert all(c.outcome is not Outcome.PASS for c in injected)
+    no_spec = [c for c in injected if c.judge == EJ_NO_SPEC]
+    assert all(c.outcome is Outcome.NEEDS_REVIEW for c in no_spec)

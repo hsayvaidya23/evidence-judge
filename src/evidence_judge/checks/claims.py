@@ -25,10 +25,12 @@ from evidence_judge.checks._common import (
     checker_names,
     join_reasons,
     merge_citations,
+    result,
 )
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.registry import CheckerRegistry
 from evidence_judge.core.claims import Claim
+from evidence_judge.core.predicates import vacuity_reason
 from evidence_judge.core.verdict import ClaimVerdict, PredicateResult, Support
 
 NO_PREDICATE_REASON = "claim has no checkable predicate"
@@ -43,9 +45,15 @@ def is_decisive(results: Sequence[PredicateResult]) -> bool:
 async def judge_claim(claim: Claim, ctx: CheckContext, registry: CheckerRegistry) -> ClaimVerdict:
     if not claim.predicates:
         return _verdict(claim, Support.NO_EVIDENCE, NO_PREDICATE_REASON, [], 0.0)
-    deterministic = [p for p in claim.predicates if registry.is_deterministic(p)]
-    fallback = [p for p in claim.predicates if not registry.is_deterministic(p)]
-    results = [await registry.evaluate(p, ctx) for p in deterministic]
+    weak = [(p, r) for p in claim.predicates if (r := vacuity_reason(p)) is not None]
+    usable = [p for p in claim.predicates if vacuity_reason(p) is None]
+    deterministic = [p for p in usable if registry.is_deterministic(p)]
+    fallback = [p for p in usable if not registry.is_deterministic(p)]
+    results = [
+        result(Support.NO_EVIDENCE, f"Predicate cannot prove a claim: {reason}", p.kind)
+        for p, reason in weak
+    ]
+    results += [await registry.evaluate(p, ctx) for p in deterministic]
     if not is_decisive(results):
         results += [await registry.evaluate(p, ctx) for p in fallback]
     return combine(claim, results)

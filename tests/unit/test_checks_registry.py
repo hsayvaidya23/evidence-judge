@@ -15,14 +15,14 @@ from evidence_judge.core.predicates import (
     UrlPredicate,
 )
 from evidence_judge.core.verdict import Support
-from tests.unit.conftest import ctx, honest_run
+from tests.unit.conftest import ctx, final, honest_run, make_run, snap
 
 
 def test_default_registry_covers_every_predicate_kind() -> None:
     registry = default_registry()
     for kind in ("request", "page_text", "url", "action", "value", "screenshot"):
         assert registry.get(kind).kind == kind
-    assert registry.is_deterministic(RequestPredicate())
+    assert registry.is_deterministic(RequestPredicate(method="POST"))
     assert not registry.is_deterministic(ScreenshotPredicate(question="?"))
 
 
@@ -35,9 +35,9 @@ async def test_evaluate_dispatches_by_kind() -> None:
 
 
 async def test_invalid_predicate_becomes_no_evidence() -> None:
-    res = await default_registry().evaluate(UrlPredicate(), ctx(honest_run()))
+    res = await default_registry().evaluate(UrlPredicate(regex="(oops"), ctx(honest_run()))
     assert res.status is Support.NO_EVIDENCE
-    assert res.reason.startswith("Predicate cannot be checked: url predicate needs")
+    assert res.reason.startswith("Predicate cannot be checked: invalid regex")
 
 
 def test_unknown_kind_and_duplicates() -> None:
@@ -50,9 +50,9 @@ def test_unknown_kind_and_duplicates() -> None:
 
 async def test_catastrophic_regex_is_no_evidence_without_hanging() -> None:
     start = time.perf_counter()
-    res = await default_registry().evaluate(
-        UrlPredicate(regex="(a+)+$", scope=Scope.ANY), ctx(honest_run())
-    )
+    long_page = "/" + "a" * 9000 + "!"
+    run = make_run(snapshots=[snap(1, long_page, "x")], final_state=final(long_page, "x"))
+    res = await default_registry().evaluate(UrlPredicate(regex="(a+)+$", scope=Scope.ANY), ctx(run))
     assert time.perf_counter() - start < 0.5
     assert res.status is Support.NO_EVIDENCE
-    assert "unsafe regex" in res.reason
+    assert "regex timed out" in res.reason

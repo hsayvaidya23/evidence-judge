@@ -103,6 +103,33 @@ async def test_any_violation_wins_over_other_observations() -> None:
     assert "1 other observation satisfied it" in res.reason
 
 
+async def test_unparseable_value_is_no_evidence_for_ordering() -> None:
+    run = make_run(network=[net(1, "POST", "/api/orders", 201, body={"total": "N/A"})])
+    pred = ValuePredicate(field="total", json_path="total", op="<=", value=1000)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.NO_EVIDENCE
+    assert "cannot compare 'N/A' numerically" in res.reason
+
+
+async def test_spaced_thousands_are_compared_numerically() -> None:
+    run = make_run(network=[net(1, "POST", "/api/orders", 201, body={"total": "1 500"})])
+    pred = ValuePredicate(field="total", json_path="total", op="<=", value=1000)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.CONTRADICTED
+
+
+async def test_violation_wins_over_unparseable_observation() -> None:
+    run = make_run(
+        network=[
+            net(1, "POST", "/api/cart", body={"price": "N/A"}),
+            net(2, "POST", "/api/cart", body={"price": 50}),
+        ]
+    )
+    pred = ValuePredicate(field="price", json_path="price", op="<=", value=30)
+    res = await ValueChecker().evaluate(pred, ctx(run))
+    assert res.status is Support.CONTRADICTED
+
+
 async def test_form_encoded_body() -> None:
     run = make_run(network=[net(1, "POST", "/api/orders", 201, body="sku=K-1&qty=2")])
     pred = ValuePredicate(field="qty", json_path="qty", in_request=ORDERS, op="==", value=2)
@@ -118,7 +145,6 @@ def test_format_value() -> None:
 @pytest.mark.parametrize(
     "pred",
     [
-        ValuePredicate(field="x", value=1),
         ValuePredicate(field="x", page_regex=r"(a)(b)", value=1),
         ValuePredicate(field="x", page_regex=r"(", value=1),
     ],

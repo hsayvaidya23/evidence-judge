@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import math
 import re
-from dataclasses import dataclass
 from enum import Enum
 from typing import Final, Literal, cast
 from urllib.parse import parse_qsl, unquote, unquote_plus, urlsplit
 
-from evidence_judge.checks.errors import InvalidPredicateError
+import regex
+
+from evidence_judge.checks.errors import InvalidPredicateError, RegexTimeoutError
 from evidence_judge.textnorm import normalize
 
 Op = Literal["==", "!=", "<", "<=", ">", ">=", "contains"]
@@ -24,17 +25,19 @@ MISSING: Final = _Missing.MISSING
 
 _NUMBER = re.compile(
     r"""
-    ^(?:[a-z]{3}\s*)?
-    [$€£¥₹]?\s*
+    ^(?:(?:[a-z]{3}|rs\.?)\s*)?
     (?P<sign>[+-])?\s*
     [$€£¥₹]?\s*
-    (?P<int>\d{1,3}(?:,\d{3})+|\d+)
-    (?P<frac>\.\d+)?
+    (?P<sign2>[+-])?\s*
+    (?P<core>\d(?:[\d.,' ]*\d)?)
     \s*(?P<suffix>[kmb])?
-    \s*(?:[a-z]{3})?$
+    \s*[$€£¥₹]?
+    \s*(?:[a-z]{3}|zł)?$
     """,
     re.VERBOSE,
 )
+_GROUP_SEPARATORS: Final = ",. '"
+_DECIMAL_SEPARATORS: Final = ".,"
 _SUFFIX_SCALE: Final = {"k": 1e3, "m": 1e6, "b": 1e9}
 _STATUS_CLASS = re.compile(r"^([1-5])xx$")
 _STATUS_EXACT = re.compile(r"^[1-5]\d\d$")
@@ -66,7 +69,14 @@ def excerpt(text: str, needle: str, width: int = 80) -> str:
 
 
 def parse_number(value: object) -> float | None:
-    """Parse '$24.00', '24,000.50', '1.2k', 'USD 30' or a JSON number; None if not numeric."""
+    """Parse a number as written in prices and totals, or None if it is not one (or ambiguous).
+
+    Accepts currency symbols and codes ('$24.00', 'USD 30', '1500 EUR', 'Rs. 1500'), a sign,
+    a k/m/b suffix ('1.2k'), and thousands grouped with commas, dots, spaces (including thin
+    spaces) or apostrophes ('24,000.50', '1 500', "1'500", '1.500,00 €'). A comma followed by
+    one or two digits is a decimal comma ('24,5'). Ambiguous forms such as '1.500' (1.5 or
+    1500) and malformed grouping ('1,50,000') are rejected.
+    """
     if isinstance(value, bool):
         return None
     if isinstance(value, int | float):
@@ -74,12 +84,50 @@ def parse_number(value: object) -> float | None:
     if not isinstance(value, str):
         return None
     match = _NUMBER.match(normalize(value))
-    if match is None:
+    if match is None or (match["sign"] and match["sign2"]):
         return None
-    number = float(match["int"].replace(",", "") + (match["frac"] or ""))
+    number = _parse_digits(match["core"])
+    if number is None:
+        return None
     if match["suffix"]:
         number *= _SUFFIX_SCALE[match["suffix"]]
-    return -number if match["sign"] == "-" else number
+    return -number if "-" in (match["sign"], match["sign2"]) else number
+
+
+def _grouped(digits: str, separator: str) -> str | None:
+    """'1,234,567' -> '1234567' when every group after the first has exactly three digits."""
+    head, *groups = digits.split(separator)
+    if not (1 <= len(head) <= 3 and head.isdigit() and head[0] != "0"):
+        return None
+    if not groups or any(len(g) != 3 or not g.isdigit() for g in groups):
+        return None
+    return head + "".join(groups)
+
+
+def _parse_digits(core: str) -> float | None:
+    separators = {c for c in core if not c.isdigit()}
+    if not separators:
+        return float(core)
+    position = max(core.rfind(c) for c in separators)
+    last = core[position]
+    head, tail = core[:position], core[position + 1 :]
+    if len(separators) == 1:
+        if core.count(last) > 1 or last not in _DECIMAL_SEPARATORS:
+            grouped = _grouped(core, last)
+            return None if grouped is None else float(grouped)
+        if len(tail) == 3:
+            if last == ",":
+                grouped = _grouped(core, last)
+                return None if grouped is None else float(grouped)
+            return float(core) if head == "0" or len(head) > 3 else None
+        if last == "," and len(tail) > 2:
+            return None
+        return float(f"{head}.{tail}")
+    if last not in _DECIMAL_SEPARATORS or len(separators) != 2:
+        return None
+    (group,) = separators - {last}
+    grouped = _grouped(head, group)
+    return None if grouped is None else float(f"{grouped}.{tail}")
 
 
 def as_text(value: object) -> str:
@@ -90,13 +138,20 @@ def as_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def compare(observed: object, op: Op, expected: object) -> bool:
-    """Compare numerically when both sides parse as numbers, else as normalised strings."""
+def compare(observed: object, op: Op, expected: object) -> bool | None:
+    """Compare numerically when both sides parse as numbers.
+
+    `==` and `!=` fall back to normalised strings; `contains` is a normalised substring test.
+    The ordering operators never compare strings: if either side is not a number the result is
+    None (undecidable), because '1 500' < '30' as text says nothing about the amounts.
+    """
     if op == "contains":
         return normalize(as_text(expected)) in normalize(as_text(observed))
     left, right = parse_number(observed), parse_number(expected)
     if left is not None and right is not None:
         return _ordered(left, op, right)
+    if op not in ("==", "!="):
+        return None
     return _ordered(normalize(as_text(observed)), op, normalize(as_text(expected)))
 
 
@@ -230,105 +285,37 @@ def host_allowed(host: str | None, allowed: list[str]) -> bool:
 
 MAX_REGEX_LENGTH: Final = 300
 MAX_REGEX_INPUT: Final = 10_000
-_BRACE_QUANTIFIER = re.compile(r"\{(\d*)(,(\d*))?\}")
+REGEX_TIMEOUT_SECONDS: Final = 0.05
 
 
-@dataclass(slots=True)
-class _Group:
-    repeats: bool = False
-    alternates: bool = False
+def compile_regex(pattern: str) -> regex.Pattern[str]:
+    """Compile an untrusted (spec or LLM) regex with the `regex` engine, case-insensitively.
 
-
-def _quantifier_at(pattern: str, at: int) -> tuple[int, bool] | None:
-    """(length, repeats) of a quantifier starting at `at`; repeats means it allows more than one."""
-    if at >= len(pattern):
-        return None
-    char = pattern[at]
-    if char in "*+":
-        return 1, True
-    if char == "?":
-        return 1, False
-    if char != "{":
-        return None
-    brace = _BRACE_QUANTIFIER.match(pattern, at)
-    if brace is None or (not brace[1] and brace[2] is None):
-        return None
-    upper = brace[1] if brace[2] is None else brace[3]
-    return len(brace[0]), not upper or int(upper) > 1
-
-
-def _class_end(pattern: str, at: int) -> int:
-    """Index just past the character class opening at `at`."""
-    i = at + 1
-    if i < len(pattern) and pattern[i] == "^":
-        i += 1
-    if i < len(pattern) and pattern[i] == "]":
-        i += 1
-    while i < len(pattern) and pattern[i] != "]":
-        i += 2 if pattern[i] == "\\" else 1
-    return i + 1
-
-
-def _skip_quantifier(pattern: str, at: int, stack: list[_Group]) -> int:
-    quantifier = _quantifier_at(pattern, at)
-    if quantifier is None:
-        return at
-    length, repeats = quantifier
-    stack[-1].repeats |= repeats
-    end = at + length
-    return end + 1 if end < len(pattern) and pattern[end] in "?+" else end
-
-
-def unsafe_regex_reason(pattern: str) -> str | None:
-    """Why `pattern` risks catastrophic backtracking, or None.
-
-    Conservative: any repeated group whose body repeats or alternates is rejected, e.g.
-    `(a+)+`, `(a*)*`, `(a|aa)+`, `(.*a){20}`.
+    Patterns over MAX_REGEX_LENGTH characters are rejected. Backtracking is bounded at match
+    time instead (regex_search), so any valid pattern is accepted.
     """
-    stack = [_Group()]
-    i = 0
-    while i < len(pattern):
-        char = pattern[i]
-        if char == "\\":
-            i = _skip_quantifier(pattern, i + 2, stack)
-        elif char == "[":
-            i = _skip_quantifier(pattern, _class_end(pattern, i), stack)
-        elif char == "(":
-            stack.append(_Group())
-            i += 2 if pattern.startswith("(?", i) else 1
-        elif char == ")" and len(stack) > 1:
-            group = stack.pop()
-            quantifier = _quantifier_at(pattern, i + 1)
-            if quantifier and quantifier[1] and (group.repeats or group.alternates):
-                inner = "a repeated or alternating body"
-                return f"a repeated group with {inner} can backtrack catastrophically"
-            stack[-1].repeats |= group.repeats
-            stack[-1].alternates |= group.alternates
-            i = _skip_quantifier(pattern, i + 1, stack)
-        elif char == "|":
-            stack[-1].alternates = True
-            i += 1
-        else:
-            i = _skip_quantifier(pattern, i + 1, stack)
-    return None
-
-
-def compile_regex(pattern: str) -> re.Pattern[str]:
-    """Compile an untrusted (spec or LLM) regex; reject long or backtracking-prone patterns."""
     if len(pattern) > MAX_REGEX_LENGTH:
         raise InvalidPredicateError(
             f"unsafe regex: pattern is longer than {MAX_REGEX_LENGTH} characters"
         )
-    if (reason := unsafe_regex_reason(pattern)) is not None:
-        raise InvalidPredicateError(f"unsafe regex {pattern!r}: {reason}")
     try:
-        return re.compile(pattern, re.IGNORECASE)
-    except re.error as exc:
+        return regex.compile(pattern, regex.IGNORECASE | regex.VERSION0)
+    except (regex.error, ValueError) as exc:
         raise InvalidPredicateError(f"invalid regex {pattern!r}: {exc}") from exc
 
 
-def regex_search(regex: re.Pattern[str], text: str) -> re.Match[str] | None:
-    """Search at most the first and last MAX_REGEX_INPUT characters of `text`."""
-    if len(text) <= 2 * MAX_REGEX_INPUT:
-        return regex.search(text)
-    return regex.search(text, 0, MAX_REGEX_INPUT) or regex.search(text, len(text) - MAX_REGEX_INPUT)
+def regex_search(compiled: regex.Pattern[str], text: str) -> regex.Match[str] | None:
+    """Search at most the first and last MAX_REGEX_INPUT characters of `text`.
+
+    Each search may run for REGEX_TIMEOUT_SECONDS; past that it raises RegexTimeoutError, which
+    checkers turn into NO_EVIDENCE.
+    """
+    try:
+        if len(text) <= 2 * MAX_REGEX_INPUT:
+            return compiled.search(text, timeout=REGEX_TIMEOUT_SECONDS)
+        return compiled.search(
+            text, 0, MAX_REGEX_INPUT, timeout=REGEX_TIMEOUT_SECONDS
+        ) or compiled.search(text, len(text) - MAX_REGEX_INPUT, timeout=REGEX_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        budget = round(REGEX_TIMEOUT_SECONDS * 1000)
+        raise RegexTimeoutError(f"regex timed out after {budget} ms: /{compiled.pattern}/") from exc

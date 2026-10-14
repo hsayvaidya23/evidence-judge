@@ -118,7 +118,7 @@ async def test_empty_network_has_no_nearest_miss() -> None:
 
 def test_matcher_rejects_invalid_predicates() -> None:
     with pytest.raises(InvalidPredicateError):
-        RequestMatcher(RequestPredicate(status="200-299"))
+        RequestMatcher(RequestPredicate(method="GET", status="200-299"))
     with pytest.raises(InvalidPredicateError):
         RequestMatcher(RequestPredicate(url_regex="(oops"))
 
@@ -130,7 +130,7 @@ def test_matching_requests_helper() -> None:
 
 async def test_wrong_predicate_kind_raises() -> None:
     with pytest.raises(PredicateKindMismatchError):
-        await RequestChecker().evaluate(PageTextPredicate(contains="x"), ctx(honest_run()))
+        await RequestChecker().evaluate(PageTextPredicate(contains="xyz"), ctx(honest_run()))
 
 
 TRUNCATED_RESPONSE = (

@@ -73,6 +73,24 @@ The CLI (`cli.py`) wires the stages together and maps the outcome to an exit cod
    LLM call and before any report is written, and it is deterministic per key so equal values
    still match across claims and evidence.
 
+## Score
+
+The verdict's `score` (0..1) summarises quality; the `outcome` is the decision. It is a weighted
+mean of the assessable dimension scores (success 0.35, state 0.15, guardrails 0.15, side
+effects 0.10, loops 0.05, recovery 0.05) and a claim-support share (0.15) in which a supported
+claim counts 1, a contradicted claim 0 and a key claim with `no_evidence` 0.5 (non-key claims
+without evidence are left out). Dimensions that are not assessable drop out of the mean. The
+score is capped by outcome so that it never reads better than the verdict:
+
+| Outcome | Score range |
+| --- | --- |
+| `fail` | 0.00 to 0.49 |
+| `needs_review` | 0.00 to 0.69 |
+| `pass` | 0.00 to 1.00 |
+
+So a score of 0.70 or more always means a pass, and a run waiting for review never shows 100/100
+(`checks/outcome.py`, `FAIL_SCORE_CAP`, `REVIEW_SCORE_CAP`).
+
 ## Side effects and telemetry
 
 The side-effects dimension lists every successful mutation (POST, PUT, PATCH, DELETE with no
@@ -89,6 +107,16 @@ is not a change to application state and is skipped (`checks/dimensions.py`, `is
    goes to a third-party host. First-party hosts are the spec's `allowed_hosts`, or, when that
    is empty, the run's primary host: the host of the initial state, else of the first action,
    snapshot, document navigation or final state that names a URL.
+
+Skipping telemetry as a state change does not make its body harmless: a beacon is also the
+easiest way to send data off the page. Telemetry is therefore still reported, as a side effect
+that needs review with the reason "possible data exfiltration", when:
+
+- its body contains a redaction token (`[REDACTED:...]`), on any host and with or without a
+  spec, because a secret or personal value left the browser in it; or
+- the spec sets `allowed_hosts` and the request sends a non-empty body to a host outside them.
+
+A bodiless ping (an `<a ping>` or a beacon with no payload) stays ignored.
 
 Everything else stays a finding: a third-party `fetch` or `xhr` POST (a newsletter
 subscription, a payment call), a first-party `text/plain` POST, and any untyped POST with a
@@ -115,9 +143,12 @@ shape the pipeline:
 - **Screenshots load lazily.** `Run.blobs` is a `BlobStore` mapping: trace screenshots stay in
   the zip and are read on demand by `EvidenceIndex.screenshot_bytes` and the HTML report, so the
   trace file must stay in place until the report is written.
-- **Regexes are bounded.** Spec and LLM regexes over 300 characters or with a repeated group
-  that repeats or alternates inside are rejected (`checks/matching.py`, `compile_regex`), and
-  every regex reads at most the first and last 10,000 characters of its input.
+- **Regexes are bounded.** Spec and LLM regexes over 300 characters are rejected
+  (`checks/matching.py`, `compile_regex`). The rest run on the `regex` engine with a 50 ms
+  timeout per search (`regex_search`); a timeout makes the predicate `no_evidence` ("regex timed
+  out"). Every regex reads at most the first and last 10,000 characters of its input. The
+  `regex` package was chosen over RE2 because it keeps Python `re` syntax (lookarounds,
+  backreferences) for existing specs while still bounding every match.
 - **Merging checks provenance.** `attach_har` pairs requests in linear time and raises
   `MismatchedEvidenceError` when a HAR shares fewer than half of a trace's requests.
 - **Redaction covers text only.** Bodies, headers, URLs, snapshot text and HTML (including the

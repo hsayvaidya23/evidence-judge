@@ -23,11 +23,13 @@ class ExtractionStats:
     hallucinated_quotes: int
     duplicates: int
     truncated: int
+    vacuous_predicates: int = 0
 
     def note(self) -> str:
         return (
             f"proposed={self.proposed}; hallucinated_quotes={self.hallucinated_quotes}; "
-            f"duplicates={self.duplicates}; truncated={self.truncated}"
+            f"duplicates={self.duplicates}; truncated={self.truncated}; "
+            f"vacuous_predicates={self.vacuous_predicates}"
         )
 
 
@@ -70,27 +72,48 @@ class LLMClaimExtractor:
     def postprocess(
         self, output: ClaimExtraction, *, answer: str, reasoning: str
     ) -> tuple[ClaimSet, ExtractionStats]:
-        sources: dict[Origin, str] = {"answer": answer, "reasoning": reasoning}
-        grounded: list[Claim] = []
-        hallucinated = 0
-        for proposed in output.claims:
-            claim = _ground(proposed, sources)
-            if claim is None:
-                hallucinated += 1
-            else:
-                grounded.append(claim)
-        unique, duplicates = dedupe_claims(grounded, max_predicates=MAX_PREDICATES_PER_CLAIM)
-        capped, truncated = cap_claims(unique, self._max_claims)
-        stats = ExtractionStats(
-            proposed=len(output.claims),
-            hallucinated_quotes=hallucinated,
-            duplicates=duplicates,
-            truncated=truncated,
+        return ground_extraction(
+            output,
+            answer=answer,
+            reasoning=reasoning,
+            extractor=self.name,
+            max_claims=self._max_claims,
         )
-        claim_set = ClaimSet(
-            claims=renumber(capped), extractor=self.name, coverage_note=stats.note()
-        )
-        return claim_set, stats
+
+
+def ground_extraction(
+    output: ClaimExtraction,
+    *,
+    answer: str,
+    reasoning: str,
+    extractor: str,
+    max_claims: int = MAX_CLAIMS,
+) -> tuple[ClaimSet, ExtractionStats]:
+    """Keep proposed claims whose quote occurs in the agent output, deduplicated and capped.
+
+    Predicates were already filtered when `output` was validated: malformed or vacuous ones are
+    dropped and counted (ExtractedClaim.dropped_predicates).
+    """
+    sources: dict[Origin, str] = {"answer": answer, "reasoning": reasoning}
+    grounded: list[Claim] = []
+    hallucinated = 0
+    for proposed in output.claims:
+        claim = _ground(proposed, sources)
+        if claim is None:
+            hallucinated += 1
+        else:
+            grounded.append(claim)
+    unique, duplicates = dedupe_claims(grounded, max_predicates=MAX_PREDICATES_PER_CLAIM)
+    capped, truncated = cap_claims(unique, max_claims)
+    stats = ExtractionStats(
+        proposed=len(output.claims),
+        hallucinated_quotes=hallucinated,
+        duplicates=duplicates,
+        truncated=truncated,
+        vacuous_predicates=sum(c.dropped_predicates for c in output.claims),
+    )
+    claim_set = ClaimSet(claims=renumber(capped), extractor=extractor, coverage_note=stats.note())
+    return claim_set, stats
 
 
 def _ground(proposed: ExtractedClaim, sources: dict[Origin, str]) -> Claim | None:
