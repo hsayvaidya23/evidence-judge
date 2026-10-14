@@ -12,6 +12,8 @@ Example (YAML):
       - id: confirmation_shown
         any:
           - {kind: page_text, contains: Thank you for your order}
+    allow:
+      - {kind: request, method: POST, url_contains: [/api/cart]}
     forbid:
       - id: no_account_changes
         any:
@@ -27,7 +29,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from evidence_judge.core.predicates import Predicate, ValuePredicate
+from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
 
 
 class Expectation(BaseModel):
@@ -54,6 +56,10 @@ class TaskSpec(BaseModel):
     task: str
     expect: list[Expectation] = Field(default_factory=list[Expectation])
     forbid: list[Expectation] = Field(default_factory=list[Expectation])
+    allow: list[RequestPredicate] = Field(
+        default_factory=list[RequestPredicate],
+        description="Intermediate mutations that are part of doing the task (not side effects)",
+    )
     constraints: list[ValuePredicate] = Field(default_factory=list[ValuePredicate])
     allowed_hosts: list[str] = Field(
         default_factory=list[str], description="Mutations to other hosts count as side effects"

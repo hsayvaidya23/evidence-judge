@@ -93,7 +93,7 @@ def _spec_predicates(spec: TaskSpec) -> Iterator[Predicate]:
 
 def _spec_request_matchers(spec: TaskSpec) -> list[RequestMatcher]:
     matchers: list[RequestMatcher] = []
-    for pred in [*_spec_predicates(spec), *spec.constraints]:
+    for pred in [*_spec_predicates(spec), *spec.constraints, *spec.allow]:
         request = pred.in_request if isinstance(pred, ValuePredicate) else pred
         if isinstance(request, RequestPredicate):
             try:

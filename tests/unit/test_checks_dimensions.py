@@ -204,3 +204,38 @@ def test_run_ending_on_error() -> None:
 def test_recovery_not_assessable_without_actions() -> None:
     run = make_run(captured=ALL_CHANNELS - {Channel.ACTIONS})
     assert assess_recovery(run, EvidenceIndex(run)).score is None
+
+
+def test_spec_allow_list_explains_intermediate_mutations() -> None:
+    from evidence_judge.checks.dimensions import assess_side_effects
+    from evidence_judge.core.evidence import Channel, NetworkEvent, Run
+    from evidence_judge.core.index import EvidenceIndex
+    from evidence_judge.core.taskspec import TaskSpec
+
+    run = Run(
+        run_id="r",
+        source="test",
+        network=[
+            NetworkEvent(
+                id="net#1", ts=1, method="POST", url="https://shop.test/api/cart", status=200
+            ),
+            NetworkEvent(
+                id="net#2",
+                ts=2,
+                method="POST",
+                url="https://shop.test/api/account/email",
+                status=200,
+            ),
+        ],
+        captured={Channel.NETWORK},
+    )
+    spec = TaskSpec.model_validate(
+        {
+            "id": "s",
+            "task": "t",
+            "allow": [{"kind": "request", "method": "POST", "url_contains": ["/api/cart"]}],
+        }
+    )
+    score = assess_side_effects(EvidenceIndex(run), [], [], spec)
+    assert len(score.findings) == 1
+    assert "net#2" in score.findings[0]
