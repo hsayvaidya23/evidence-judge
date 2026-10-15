@@ -40,8 +40,8 @@ jobs:
 
     The action installs evidence-judge from the ref you pin, so `@main` would change your
     verdicts whenever `main` moves. Pin a version tag (`@v0.1.0`) or, stricter, its full commit
-    SHA (`@<sha> # v0.1.0`). v0.1.0 is not tagged yet: until the first release, pin a full
-    commit SHA from `main`.
+    SHA (`@<sha> # v0.1.0`). v0.1.0 is not released yet, so there is no tag: until there is,
+    pin a full commit SHA from `main`.
 
 ## Inputs
 

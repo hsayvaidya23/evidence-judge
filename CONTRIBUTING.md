@@ -99,10 +99,19 @@ A maintainer cuts releases from `main`:
    add a new empty `[Unreleased]` above it, and update the link references at the bottom.
    `release.yml` takes the release notes from the `## [X.Y.Z]` section and fails when there is
    none, so a tag pushed while the notes are still under `[Unreleased]` does not release.
-3. Merge that pull request, then tag the merge commit `vX.Y.Z` and push the tag
+3. Update every pre-release note. They all say "not released yet"; list them with
+   `grep -rn "not released yet" README.md SECURITY.md docs src/evidence_judge/_extras.py`.
+   Today they are: the install note and the action pinning note in `README.md`, the supported
+   versions in `SECURITY.md`, the notes in `docs/index.md` (install and action example),
+   `docs/getting-started/install.md`, `docs/cli.md`, `docs/integrations.md`,
+   `docs/guides/mcp.md`, `docs/guides/github-action.md` and `docs/faq.md`, and the
+   missing-extra hint in `src/evidence_judge/_extras.py`. Point them at PyPI and the tag.
+   `tests/unit/test_release_notes.py` fails while any remains and the version has no `.dev`
+   suffix.
+4. Merge that pull request, then tag the merge commit `vX.Y.Z` and push the tag
    (`git tag -s v0.1.0 -m v0.1.0`, `git push origin v0.1.0`).
-4. `release.yml` runs the full CI, checks that the tag matches the package version, builds the
+5. `release.yml` runs the full CI, checks that the tag matches the package version, builds the
    wheel and sdist with a CycloneDX SBOM, attests their build provenance, publishes to PyPI
    with trusted publishing, and creates the GitHub Release from the changelog section with the
    distributions and SBOM attached.
-5. On `main`, set `version` to the next development version (`0.1.1.dev0`).
+6. On `main`, set `version` to the next development version (`0.1.1.dev0`).

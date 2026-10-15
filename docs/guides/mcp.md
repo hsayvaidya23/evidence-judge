@@ -8,10 +8,10 @@ description: Run Evidence Judge as an MCP server so Claude Code, Codex CLI, Gemi
 coding agent that drives a browser (with Playwright MCP, say) can hand the recording to Evidence
 Judge and get a verdict back as a tool result, instead of trusting its own account of the run.
 
-!!! info "Not on PyPI yet"
+!!! info "Not released yet"
 
-    Until v0.1.0 is on PyPI, install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install` and `uvx --from "evidence-judge[mcp]"` forms on this page work
-    once it is; until then, give `uvx` the same GitHub requirement:
+    v0.1.0 is not released yet, so install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install` and `uvx --from "evidence-judge[mcp]"` forms on this page work
+    once it is on PyPI; until then, give `uvx` the same GitHub requirement:
     `uvx --python 3.12 --from "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`.
 
 ```bash

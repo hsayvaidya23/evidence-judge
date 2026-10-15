@@ -139,7 +139,7 @@ flowchart LR
 
 ## Install { .ej-section-title }
 
-Evidence Judge needs Python 3.12 or newer. It is not on PyPI yet, so install it from the repository:
+Evidence Judge needs Python 3.12 or newer. v0.1.0 is not released yet, so install it from the repository:
 
 === "uv"
 
@@ -167,7 +167,7 @@ Evidence Judge needs Python 3.12 or newer. It is not on PyPI yet, so install it 
 === "GitHub Action"
 
     ```yaml
-    - uses: hsayvaidya23/evidence-judge@v0.1.0 # or its full commit SHA; untagged yet, pin a SHA from main
+    - uses: hsayvaidya23/evidence-judge@v0.1.0 # or its full commit SHA; not released yet, so pin a SHA from main
       with:
         trace: runs/checkout/trace.zip
         har: runs/checkout/run.har

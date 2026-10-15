@@ -89,4 +89,4 @@ description: Frequently asked questions about Evidence Judge - LLM judges, NEEDS
 
 ??? question "Is it on PyPI?"
 
-    Not yet. Install from the GitHub repository; see [Install](getting-started/install.md).
+    No: v0.1.0 is not released yet. Install from the GitHub repository; see [Install](getting-started/install.md).

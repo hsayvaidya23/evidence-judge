@@ -12,12 +12,12 @@ pip install "evidence-judge[inspect]"    # Inspect AI
 pip install "evidence-judge[all]"        # all of the above plus anthropic and mcp
 ```
 
-!!! info "Not on PyPI yet"
+!!! info "Not released yet"
 
-    No release has been published to PyPI so far, so install from the GitHub repository, e.g.
+    v0.1.0 is not released yet, so nothing is on PyPI: install from the GitHub repository, e.g.
     `uv tool install --python 3.12 "evidence-judge[otel] @ git+https://github.com/hsayvaidya23/evidence-judge"`
-    (see [Install](getting-started/install.md)). The commands above will work once a release
-    exists.
+    (see [Install](getting-started/install.md)). The commands above will work once it is on
+    PyPI.
 
 To let a coding agent call Evidence Judge as tools, see the [MCP server](guides/mcp.md) guide
 (`evidence-judge[mcp]`).

@@ -115,7 +115,7 @@ See [docs/architecture.md](docs/architecture.md).
 uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
 ```
 
-v0.1.0 is not on PyPI yet, so this installs from GitHub; once it is, `uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"` does the same.
+v0.1.0 is not released yet, so this installs from GitHub; once it is on PyPI, `uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"` does the same.
 
 Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically. The `mcp` extra adds the MCP server (`evidence-judge mcp`), which the Claude Code plugin starts.
 
@@ -318,7 +318,7 @@ GitHub Actions: gate a pull request on a recorded run.
 
 The step fails on FAIL (and optionally NEEDS_REVIEW), writes the verdict to the job summary, and exposes `outcome`, `score` and `report` outputs.
 
-Pin a release, never `@main`: the action installs evidence-judge from the ref you pin, so a moving branch changes your verdicts under you. v0.1.0 is not tagged yet; until it is, pin a full commit SHA from `main`.
+Pin a release, never `@main`: the action installs evidence-judge from the ref you pin, so a moving branch changes your verdicts under you. v0.1.0 is not released yet, so there is no tag; until there is, pin a full commit SHA from `main`.
 
 Docker: `docker build -t evidence-judge . && docker run --rm -v "$PWD:/work:ro" evidence-judge judge --trace trace.zip --answer-file answer.txt --offline`
 

@@ -6,10 +6,10 @@ description: Install the evidence-judge CLI with uv, pip or Docker, and pick the
 
 Evidence Judge needs **Python 3.12 or newer** (it is tested on 3.12 and 3.13).
 
-!!! info "Not on PyPI yet"
+!!! info "Not released yet"
 
-    No release has been published to PyPI so far, so install from the GitHub repository. Once a
-    release exists, `uv tool install --python 3.12 "evidence-judge[anthropic]"` and
+    v0.1.0 is not released yet, so nothing is on PyPI: install from the GitHub repository. Once
+    it is, `uv tool install --python 3.12 "evidence-judge[anthropic]"` and
     `pip install "evidence-judge[anthropic]"` will work as well.
 
 === "uv (recommended)"

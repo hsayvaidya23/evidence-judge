@@ -8,7 +8,7 @@ not as public issues. Include the version (`evidence-judge version`), a descript
 minimal reproduction **with all real data removed**. You can expect an acknowledgement within
 five working days.
 
-Supported versions: the latest release. Until v0.1.0 is on PyPI, that is the `main` branch.
+Supported versions: the latest release. v0.1.0 is not released yet, so for now that is the `main` branch.
 
 ## What Evidence Judge handles
 
