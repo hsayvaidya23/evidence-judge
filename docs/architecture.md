@@ -181,6 +181,7 @@ shape the pipeline:
 | --- | --- |
 | `ingest/loader.py` | `load_run` and `attach_har`: load every source of a run and merge them |
 | `ingest/playwright_trace.py` | Playwright trace zips → `Run` |
+| `ingest/_calls.py` | Recorded Playwright calls: user actions, the deny-by-default INJECT allowlist, action values, route handler calls |
 | `ingest/har.py`, `ingest/_network.py` | HAR logs and HAR entries → network events |
 | `ingest/browser_use.py` | browser-use histories → `Run` |
 | `ingest/_dom.py` | Playwright frame snapshots → visible page text |
