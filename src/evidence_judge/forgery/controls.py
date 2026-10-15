@@ -17,7 +17,7 @@ from urllib.parse import quote_plus, urlsplit
 from evidence_judge.core.actions import GOTO, canonical_action
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, PageSnapshot, Run
 from evidence_judge.core.index import is_document_navigation
-from evidence_judge.forgery.evidence import item_of
+from evidence_judge.forgery.planting import item_of
 
 DETOUR_URL: Final = "https://en.wikipedia.org/wiki/Kettle"
 DETOUR_TEXT: Final = "Kettle - Wikipedia A kettle is a vessel for boiling water."

@@ -175,6 +175,34 @@ shape the pipeline:
   **Screenshot pixels are not**: they reach the HTML report and, for screenshot checks, the
   vision model as recorded. Mask sensitive fields when recording or judge with `--offline`.
 
+## Module map
+
+| Module | What it holds |
+| --- | --- |
+| `ingest/loader.py` | `load_run` and `attach_har`: load every source of a run and merge them |
+| `ingest/playwright_trace.py` | Playwright trace zips → `Run` |
+| `ingest/har.py`, `ingest/_network.py` | HAR logs and HAR entries → network events |
+| `ingest/browser_use.py` | browser-use histories → `Run` |
+| `ingest/_dom.py` | Playwright frame snapshots → visible page text |
+| `core/evidence.py` | `Run` and its events |
+| `core/index.py` | `EvidenceIndex`, the read side every checker uses |
+| `core/site.py` | `Site`: hosts and ports a spec names and a page or request is on |
+| `core/provenance.py` | Evidence the agent made rather than the site |
+| `redact.py` | `Redactor`: secret and PII detection and replacement |
+| `extract/` | Claim extraction (LLM and heuristic) and predicate compilation |
+| `checks/` | One checker per predicate kind, expectations, dimensions, outcome |
+| `engine.py` | `Judge`: the pipeline above |
+| `report/` | JSON, HTML and console reports |
+| `forgery/base.py`, `forgery/templates.py`, `forgery/llm_forger.py` | Story forgeries: rewrite what the agent says |
+| `forgery/evidence.py` | `plant_evidence`: the evidence-altering kinds and which module plants each |
+| `forgery/planting.py` | What a forgery wants the evidence to show (`Targets`) and the planted events |
+| `forgery/echoes.py` | Kinds that make the site repeat the expected texts |
+| `forgery/hosts.py` | Kinds that act or end on a host other than the site |
+| `forgery/outcomes.py` | Kinds that pass off a failure page or a stale confirmation |
+| `forgery/tampering.py` | Kinds that tamper with the browser: scripts, routes, storage, CDP, WebSockets |
+| `forgery/controls.py` | Honest controls with the same shapes as the evidence-altering kinds |
+| `bench/` | The forged-run benchmark |
+
 ## Key types
 
 - `Run` (`core/evidence.py`): the normalised recording. `captured` lists the channels present.

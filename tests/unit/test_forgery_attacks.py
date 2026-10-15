@@ -16,23 +16,21 @@ from evidence_judge.core.verdict import Outcome, RunVerdict, Support
 from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.forgery import ForgeryKind, forge, plant_evidence
 from evidence_judge.forgery.controls import DETOUR_URL, ControlKind, apply_control
-from evidence_judge.forgery.evidence import (
+from evidence_judge.forgery.echoes import (
     BYPASS_VARIANTS,
-    CHANNEL_VARIANTS,
     ECHO_VARIANTS,
-    INJECTION_VARIANTS,
     LINK_VARIANTS,
-    MIRROR_ORIGIN,
-    MOCK_VARIANTS,
-    OFFSITE_VARIANTS,
-    REDIRECT_LANDINGS,
     RESPONSE_VARIANTS,
+)
+from evidence_judge.forgery.evidence import UNANCHORED_KINDS, WRITE_ONLY_KINDS, unanchored
+from evidence_judge.forgery.hosts import MIRROR_ORIGIN, OFFSITE_VARIANTS, port_mirror_origin
+from evidence_judge.forgery.outcomes import REDIRECT_LANDINGS
+from evidence_judge.forgery.planting import is_write_task
+from evidence_judge.forgery.tampering import (
+    CHANNEL_VARIANTS,
+    INJECTION_VARIANTS,
+    MOCK_VARIANTS,
     STORAGE_VARIANTS,
-    UNANCHORED_KINDS,
-    WRITE_ONLY_KINDS,
-    is_write_task,
-    port_mirror_origin,
-    unanchored,
 )
 
 RUNS = Path(__file__).parents[1] / "fixtures" / "runs"
