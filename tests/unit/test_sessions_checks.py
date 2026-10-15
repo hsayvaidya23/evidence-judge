@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from evidence_judge.core.verdict import Support
 from evidence_judge.sessions.checks import SessionIndex, check, path_matches
 from evidence_judge.sessions.models import CallStatus, SessionRun
+from evidence_judge.sessions.normalize import ToolCall
 from evidence_judge.sessions.predicates import (
     BuildPredicate,
     CommandPredicate,
@@ -13,7 +14,7 @@ from evidence_judge.sessions.predicates import (
     SessionPredicate,
     TestResultPredicate,
 )
-from tests.unit.sessions_helpers import GREEN, RED, bash, edit, session, tool, write
+from tests.unit.sessions_helpers import CWD, GREEN, RED, bash, edit, session, tool, write
 
 ALL_PASS = TestResultPredicate()
 
@@ -399,3 +400,58 @@ def test_build_predicates() -> None:
 )
 def test_path_matches(pattern: str, path: str, expected: bool) -> None:
     assert path_matches(pattern, path) is expected
+
+
+def _edit_with_original(name: str, original: str, **tool_input: object) -> ToolCall:
+    return ToolCall(
+        name=name,
+        input={"file_path": f"{CWD}/pyproject.toml", **tool_input},
+        status=CallStatus.OK,
+        result={"originalFile": original},
+    )
+
+
+PYPROJECT = '[project]\nversion = "1"\n\n[tool.pytest.ini_options]\nasyncio_mode = "strict"\n'
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        _edit_with_original("Edit", PYPROJECT, old_string='"strict"', new_string='"auto"'),
+        _edit_with_original(
+            "MultiEdit",
+            PYPROJECT,
+            edits=[{"old_string": '"strict"', "new_string": '"auto"', "replace_all": True}],
+        ),
+        _edit_with_original("Write", PYPROJECT, content=PYPROJECT.replace("strict", "auto")),
+    ],
+)
+def test_pytest_sections_of_shared_config_are_test_configuration(call: ToolCall) -> None:
+    run = session(edit("calc.py"), call, bash("pytest", GREEN))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and "[tool.pytest.ini_options]" in reason
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        _edit_with_original("Edit", PYPROJECT, old_string='"1"', new_string='"2"'),
+        _edit_with_original("Edit", PYPROJECT, old_string="missing", new_string="x"),
+    ],
+)
+def test_other_sections_of_shared_config_are_not(call: ToolCall) -> None:
+    run = session(edit("calc.py"), call, bash("pytest", GREEN))
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        _edit_with_original("MultiEdit", PYPROJECT, edits=["not an edit"]),
+        _edit_with_original("Write", PYPROJECT),
+    ],
+)
+def test_shared_config_without_a_usable_diff_is_suspect(call: ToolCall) -> None:
+    run = session(edit("calc.py"), call, bash("pytest", GREEN))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and "pyproject.toml" in reason
