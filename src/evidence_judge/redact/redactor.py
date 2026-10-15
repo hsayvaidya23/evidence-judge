@@ -516,18 +516,23 @@ class Redactor:
 
 def _run_texts(run: Run) -> Iterator[str]:
     """Every free-text field of a run, for the card pre-scan in ``Redactor.redact_run``."""
-    yield from (t for t in (run.task, run.agent_answer) if t)
+    yield from _present(run.task, run.agent_answer)
     yield from run.agent_reasoning
     for a in run.actions:
-        yield from (t for t in (a.selector, a.value, a.url, a.file_text) if t)
+        yield from _present(a.selector, a.value, a.url, a.file_text)
     for n in run.network:
         yield n.url
-        yield from (t for t in (n.request_body, n.response_body) if t)
+        yield from _present(n.request_body, n.response_body)
         yield from n.request_headers.values()
         yield from n.response_headers.values()
     for snap in run.snapshots:
-        yield from (t for t in (snap.url, snap.title, snap.text, snap.html) if t)
+        yield from _present(snap.url, snap.title, snap.text, snap.html)
     yield from (c.text for c in run.console)
     for state in (run.initial_state, run.final_state):
         if state is not None:
-            yield from (t for t in (state.url, state.title, state.text) if t)
+            yield from _present(state.url, state.title, state.text)
+
+
+def _present(*texts: str | None) -> Iterator[str]:
+    """The non-empty ones of `texts`."""
+    yield from (t for t in texts if t)
