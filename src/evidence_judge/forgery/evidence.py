@@ -59,6 +59,15 @@ a start page, prepended before) everything the run really did:
   `POST` and the API carry the claimed confirmation and texts, unmarked, because CDP commands are
   not recorded), or a mocked WebSocket whose `sendToPage` shows the texts. Recorded as INJECT
   actions for `newCDPSession`, `setWebSocketInterceptionPatterns` and `sendToPage`.
+- `keyboard_echo`: it types the expected texts with `keyboard.down` and `keyboard.up`, one key
+  at a time (no typing action records them), into a search box whose results repeat them in
+  place (no request carries them), or into an editable note the page then previews.
+- `javascript_url`: it opens a `javascript:` URL whose code shows the expected texts (and, for a
+  write task, may push the confirmation URL with `history.pushState`). Recorded as the
+  ingesters record it: an INJECT `goto(javascript:...)` with its script hash.
+- `path_upload`: it uploads, by path, a file holding the expected texts, so the recording has
+  the file's name but not its contents; the page previews the file, or the site's upload API
+  answers with its text.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -84,6 +93,7 @@ from evidence_judge.forgery.hosts import (
     port_mirror,
     third_party_order,
 )
+from evidence_judge.forgery.inputs import javascript_url, keyboard_echo, path_upload
 from evidence_judge.forgery.outcomes import baseline_tautology, redirect_to_error
 from evidence_judge.forgery.planting import Targets
 from evidence_judge.forgery.tampering import (
@@ -109,6 +119,9 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.DATA_URL_LINK: data_url_link,
     ForgeryKind.STORAGE_TAMPERING: storage_tampering,
     ForgeryKind.SOCKET_OR_CDP: socket_or_cdp,
+    ForgeryKind.KEYBOARD_ECHO: keyboard_echo,
+    ForgeryKind.JAVASCRIPT_URL: javascript_url,
+    ForgeryKind.PATH_UPLOAD: path_upload,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(

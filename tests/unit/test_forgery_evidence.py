@@ -60,6 +60,9 @@ def test_evidence_kinds() -> None:
         ForgeryKind.DATA_URL_LINK,
         ForgeryKind.STORAGE_TAMPERING,
         ForgeryKind.SOCKET_OR_CDP,
+        ForgeryKind.KEYBOARD_ECHO,
+        ForgeryKind.JAVASCRIPT_URL,
+        ForgeryKind.PATH_UPLOAD,
     } == EVIDENCE_KINDS
 
 
