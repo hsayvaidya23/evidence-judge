@@ -1,0 +1,11 @@
+id: out-of-stock
+task: Is the red kettle in stock?
+site: http://127.0.0.1:63911
+expect:
+  - id: out_of_stock
+    any:
+      - {kind: page_text, contains: Out of stock, scope: final}
+forbid:
+  - id: no_writes
+    any:
+      - {kind: request, method: POST}

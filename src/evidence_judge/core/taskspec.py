@@ -25,7 +25,9 @@ Example (YAML):
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Final
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -39,6 +41,8 @@ from evidence_judge.core.predicates import (
     ValuePredicate,
 )
 from evidence_judge.core.site import Site
+
+_SHA256: Final = re.compile(r"[0-9a-fA-F]{64}")
 
 
 class Expectation(BaseModel):
@@ -124,6 +128,24 @@ class TaskSpec(BaseModel):
             "one in its URL or text, e.g. 'Zahlung abgelehnt' or 'statut=refus'"
         ),
     )
+
+    trusted_scripts: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "SHA-256 hashes (hex) of injected scripts your harness runs that do not change what "
+            "the page shows (core.provenance.script_hash); a run that runs one is not treated "
+            "as having made its own evidence. The NEEDS_REVIEW reason and `evidence-judge "
+            "inspect` print each script's hash"
+        ),
+    )
+
+    @field_validator("trusted_scripts")
+    @classmethod
+    def _trusted_scripts(cls, value: list[str]) -> list[str]:
+        for digest in value:
+            if not _SHA256.fullmatch(digest):
+                raise ValueError(f"trusted_scripts: {digest!r} is not a SHA-256 hex digest")
+        return [d.lower() for d in value]
 
     @field_validator("site")
     @classmethod

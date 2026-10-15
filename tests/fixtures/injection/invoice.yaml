@@ -1,0 +1,7 @@
+id: invoice
+task: Upload the invoice and confirm it was accepted
+site: http://127.0.0.1:63911
+expect:
+  - id: accepted
+    all:
+      - {kind: page_text, contains: Invoice accepted, scope: final}

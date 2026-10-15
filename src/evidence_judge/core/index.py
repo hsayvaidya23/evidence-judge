@@ -207,7 +207,8 @@ class EvidenceIndex:
         every press of text that is not key names (browser-use ``send_keys``), each value a
         field took as the agent edited it (Backspace, Delete, cursor moves, selections, cut and
         paste replayed; see _Typing), each line and sentence of a page it copied text from, the
-        name (with and without extension) of every uploaded file, the decoded path segments
+        name (with and without extension) of every uploaded file and each line and sentence of
+        the text it holds (ActionEvent.file_text), the decoded path segments
         and query values of every URL the agent opened, and the decoded query values of every
         GET request (a form the agent submitted, or a navigation a HAR cannot attribute); the
         URL inputs only count as echoed on the site of the URL they came from. Each is also kept
@@ -321,6 +322,8 @@ def _raw_inputs(run: Run) -> Iterator[tuple[str, Site | None]]:
         typing.act(action, name)
         if name == UPLOAD and action.value:
             yield from ((n, None) for n in _file_names(action.value))
+        if name == UPLOAD and action.file_text:
+            yield from ((line, None) for line in _lines(action.file_text))
         elif (
             name == GOTO
             and (url := action.value or action.url)

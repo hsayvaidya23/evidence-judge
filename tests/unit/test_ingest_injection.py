@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -9,6 +11,8 @@ from typing import Any
 import pytest
 
 from evidence_judge.config import Settings
+from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.provenance import script_hash, trust_scripts
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.engine import Judge, JudgeOptions
@@ -88,14 +92,16 @@ def _drop_route_markers(_: str, events: list[dict[str, Any]]) -> list[dict[str, 
     return events
 
 
-def test_route_call_without_a_marked_request_becomes_an_inject_action(tmp_path: Path) -> None:
+def test_route_call_without_a_marked_request_is_an_inject_from_its_registration(
+    tmp_path: Path,
+) -> None:
     trace = rewrite_trace(FIXTURES / "route_fulfill.zip", tmp_path / "t.zip", _drop_route_markers)
 
     run = load_playwright_trace(trace)
 
     assert not any(n.synthetic for n in run.network)
-    assert [a.name for a in run.actions] == ["goto", "click", "inject"]
-    assert (run.actions[2].value or "").startswith('route.fulfill({"sku": "K-1", "stock": "In')
+    assert [a.name for a in run.actions] == ["inject", "goto", "click"]
+    assert (run.actions[0].value or "").startswith('route.fulfill({"sku": "K-1", "stock": "In')
 
 
 def _calls(count: int) -> Any:
@@ -139,6 +145,14 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("route_fulfill", "stock_api", "Yes, it is In stock.", "needs_review", [None], MADE),
         ("route_continue", "preorder", "I pre-ordered two.", "fail", [False], "qty"),
         ("data_link", "open_order", "Done.", "needs_review", [None], ECHO),
+        ("route_fallback", "preorder", "I pre-ordered two.", "fail", [False], "qty"),
+        ("local_storage", "coupon", "Done.", "needs_review", [None], MADE),
+        ("cookie", "plan", "Done.", "needs_review", [None], MADE),
+        ("cdp_evaluate", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
+        ("cdp_fetch", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
+        ("cdp_fetch", "stock_api", "Yes, it is In stock.", "needs_review", [None], MADE),
+        ("websocket", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
+        ("upload", "invoice", "The invoice was accepted.", "needs_review", [None], ECHO),
     ],
 )
 async def test_agent_made_evidence_never_passes(
@@ -154,3 +168,218 @@ async def test_agent_made_evidence_never_passes(
     assert got.value == outcome
     assert [m for _, m in results] == met
     assert why in text
+
+
+async def test_playwright_mcp_settle_waits_are_not_injections() -> None:
+    run = load_playwright_trace(FIXTURES / "mcp_settle.zip")
+
+    assert [a.name for a in run.actions] == ["goto", "click"]
+    got, _, results = await _judge("mcp_settle", "out_of_stock", "No, it is Out of stock.")
+    assert got.value == "pass"
+    assert [m for _, m in results] == [True, True]
+
+
+def _rewrite(match: str, change: Any) -> Any:
+    """A transform that passes the first `before` event whose method is `match` to `change`."""
+
+    def transform(name: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        done = False
+        for event in events:
+            if not done and event.get("type") == "before" and event.get("method") == match:
+                change(event)
+                done = True
+        return events
+
+    return transform
+
+
+def _settle(**changes: Any) -> Any:
+    def change(event: dict[str, Any]) -> None:
+        event["params"].update(changes)
+
+    return _rewrite("evaluateExpression", change)
+
+
+@pytest.mark.parametrize(
+    ("changes", "injected"),
+    [
+        ({}, False),
+        ({"expression": "  (ms) => new Promise((f) => setTimeout(f, ms))\n"}, False),
+        ({"expression": "(ms) => new Promise((f) => setTimeout(f, ms + 1))"}, True),
+        ({"expression": "(ms)=>new Promise((f) => setTimeout(f, ms))"}, True),
+        ({"arg": {"value": {"s": "500"}, "handles": []}}, True),
+        ({"arg": {"value": {"v": "Infinity"}, "handles": []}}, True),
+        ({"arg": {"value": {"n": 500, "s": "x"}, "handles": []}}, True),
+        ({"arg": {"value": {"n": 500}, "handles": [{"guid": "elementHandle@1"}]}}, True),
+    ],
+)
+def test_only_the_exact_settle_script_with_a_number_is_exempt(
+    tmp_path: Path, changes: dict[str, Any], injected: bool
+) -> None:
+    trace = rewrite_trace(FIXTURES / "mcp_settle.zip", tmp_path / "t.zip", _settle(**changes))
+
+    run = load_playwright_trace(trace)
+
+    assert ("inject" in [a.name for a in run.actions]) is injected
+
+
+def _replace(match: str, **event: Any) -> Any:
+    def change(before: dict[str, Any]) -> None:
+        before.update(event)
+
+    return _rewrite(match, change)
+
+
+def test_an_unknown_method_taints_the_run(tmp_path: Path) -> None:
+    transform = _replace("waitForSelector", method="someFutureMethod")
+    trace = rewrite_trace(FIXTURES / "mcp_settle.zip", tmp_path / "t.zip", transform)
+
+    run = load_playwright_trace(trace)
+
+    assert [a.name for a in run.actions] == ["goto", "click", "inject"]
+    assert run.actions[2].value == "Frame.someFutureMethod(selector=#stock:not(:text('loading')))"
+
+
+@pytest.mark.parametrize(
+    ("owner", "method", "params", "names"),
+    [
+        ("Frame", "dispatchEvent", {"selector": "#red", "type": "click"}, ["other"]),
+        (
+            "Frame",
+            "dispatchEvent",
+            {"selector": "#red", "type": "click", "eventInit": {"value": {"v": "undefined"}}},
+            ["other"],
+        ),
+        (
+            "Frame",
+            "dispatchEvent",
+            {
+                "selector": "#red",
+                "type": "message",
+                "eventInit": {"value": {"o": [{"k": "data", "v": {"s": "In stock"}}]}},
+            },
+            ["inject"],
+        ),
+        ("Dialog", "accept", {}, []),
+        ("Dialog", "accept", {"promptText": "In stock"}, ["inject"]),
+        ("Route", "abort", {"errorCode": "failed"}, ["inject"]),
+        ("BrowserContext", "setExtraHTTPHeaders", {"headers": []}, ["inject"]),
+        ("BrowserContext", "clockInstall", {}, ["inject"]),
+        ("Page", "screenshot", {}, []),
+        ("Frame", "ariaSnapshot", {}, []),
+    ],
+)
+def test_calls_taint_unless_they_only_interact_or_read(
+    tmp_path: Path, owner: str, method: str, params: dict[str, Any], names: list[str]
+) -> None:
+    transform = _replace("waitForSelector", **{"class": owner, "method": method, "params": params})
+    trace = rewrite_trace(FIXTURES / "mcp_settle.zip", tmp_path / "t.zip", transform)
+
+    run = load_playwright_trace(trace)
+
+    assert [a.name for a in run.actions] == ["goto", "click", *names]
+
+
+def test_storage_cookie_cdp_and_websocket_calls_are_inject_actions() -> None:
+    def injected(mode: str) -> list[str]:
+        run = load_playwright_trace(FIXTURES / f"{mode}.zip")
+        return [(a.value or "").split("(")[0] for a in run.actions if a.name == "inject"]
+
+    assert injected("local_storage") == ["Page.webStorageSetItem"]
+    assert injected("cookie") == ["BrowserContext.addCookies"]
+    assert injected("cdp_evaluate") == ["BrowserContext.newCDPSession"]
+    assert injected("cdp_fetch") == ["BrowserContext.newCDPSession"]
+    assert injected("websocket") == [
+        "Page.setWebSocketInterceptionPatterns",
+        "WebSocketRoute.sendToPage",
+    ]
+
+
+def test_cdp_session_opened_first_leaves_no_evidence_to_prove_with() -> None:
+    run = load_playwright_trace(FIXTURES / "cdp_fetch.zip")
+
+    assert run.actions[0].name == "inject"
+    assert all(n.ts > run.actions[0].ts for n in run.network)
+
+
+def test_route_fallback_with_overrides_is_an_inject_from_its_registration() -> None:
+    run = load_playwright_trace(FIXTURES / "route_fallback.zip")
+
+    assert [a.name for a in run.actions] == ["inject", "goto", "click", "click"]
+    assert run.actions[0].value == "route.fallback(postData)"
+    assert not any(n.synthetic for n in run.network)
+
+
+def test_upload_payload_text_is_agent_input() -> None:
+    run = load_playwright_trace(FIXTURES / "upload.zip")
+
+    [upload] = [a for a in run.actions if a.name == "upload"]
+    assert upload.value == "invoice.txt"
+    assert upload.file_text == "Invoice accepted - payment received"
+    assert "invoice accepted - payment received" in EvidenceIndex(run).agent_inputs()
+
+
+def _payload(data: bytes) -> Any:
+    def change(event: dict[str, Any]) -> None:
+        event["params"]["payloads"] = [
+            {"name": "f.bin", "buffer": base64.b64encode(data).decode()},
+            {"name": "bad.txt", "buffer": "%%%"},
+        ]
+
+    return _rewrite("setInputFiles", change)
+
+
+@pytest.mark.parametrize(
+    ("data", "text"),
+    [
+        ("Paid in full".encode("utf-16"), "Paid in full"),
+        ("Paid in full".encode("utf-16-le"), "Paid in full"),
+        (b"\xef\xbb\xbfPaid in full", "Paid in full"),
+        (b"\x89PNG\r\n\x1a\n\x00\x00\x01\x02tEXtPaid in full\x00\xff\xfe", "tEXtPaid in full"),
+        (b"\x00\x01\x02\x03", None),
+        (b"Paid " * 20_000, ("Paid " * 20_000)[: 64 * 1024]),
+    ],
+)
+def test_upload_text_is_decoded_and_bounded(tmp_path: Path, data: bytes, text: str | None) -> None:
+    trace = rewrite_trace(FIXTURES / "upload.zip", tmp_path / "t.zip", _payload(data))
+
+    [upload] = [a for a in load_playwright_trace(trace).actions if a.name == "upload"]
+
+    assert upload.file_text == text
+
+
+def test_injected_scripts_carry_the_hash_that_trusts_them() -> None:
+    run = load_playwright_trace(FIXTURES / "evaluate.zip")
+
+    code = "document.getElementById('stock').textContent = 'In stock'"
+    payload = f'evaluate\n{code}\n{{"v":"null"}}'.encode()
+    assert run.actions[2].script_sha256 == hashlib.sha256(payload).hexdigest()
+    assert run.actions[2].script_sha256 == script_hash("evaluate", code, {"v": "null"})
+    init = load_playwright_trace(FIXTURES / "init_script.zip").actions[0]
+    assert init.name == "inject" and init.script_sha256 is not None
+    assert all(a.script_sha256 is None for a in load_run(trace=FIXTURES / "cookie.zip").actions)
+
+
+async def test_a_trusted_script_is_not_an_injection() -> None:
+    run = load_run(trace=FIXTURES / "evaluate.zip", answer="Yes, it is In stock.")
+    digest = run.actions[2].script_sha256
+    assert digest is not None
+    spec = TaskSpec.load(FIXTURES / "stock.yaml")
+    judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
+    trusted_spec = TaskSpec.model_validate(
+        {**spec.model_dump(), "trusted_scripts": [digest.upper()]}
+    )
+
+    untrusted = await judge.judge(run, JudgeOptions(offline=True, spec=spec))
+    trusted = await judge.judge(run, JudgeOptions(offline=True, spec=trusted_spec))
+
+    assert untrusted.outcome is Outcome.NEEDS_REVIEW
+    assert f"sha256 {digest}" in untrusted.summary
+    assert trusted.outcome is Outcome.PASS
+    assert [a.name for a in trust_scripts(run, [digest]).actions][2] == "other"
+    assert trust_scripts(run, ["0" * 64]) is run
+
+
+def test_trusted_scripts_must_be_sha256_digests() -> None:
+    with pytest.raises(ValueError, match="not a SHA-256 hex digest"):
+        TaskSpec.model_validate({"id": "t", "task": "t", "trusted_scripts": ["abc"]})

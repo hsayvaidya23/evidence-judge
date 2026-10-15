@@ -173,3 +173,11 @@ def test_fresh_recordings_show_the_agent_made_evidence(tmp_path: Path) -> None:
     assert [(n.method, n.synthetic) for n in runs["route_continue"].network][-1] == ("POST", True)
     assert [a.id for a in runs["data_link"].actions] == ["act#1", "act#2", "act#3.goto", "act#3"]
     assert runs["data_link"].actions[2].value == f"{base}/orders/A77"
+    assert runs["route_fallback"].actions[0].name == "inject"
+    assert [a.name for a in runs["local_storage"].actions] == ["goto", "inject", "click"]
+    assert [a.name for a in runs["cookie"].actions] == ["goto", "inject", "click"]
+    assert [a.name for a in runs["cdp_evaluate"].actions] == ["goto", "click", "inject"]
+    assert runs["cdp_fetch"].actions[0].name == "inject"
+    assert [a.name for a in runs["websocket"].actions].count("inject") == 2
+    assert runs["upload"].actions[-1].file_text == "Invoice accepted - payment received"
+    assert [a.name for a in runs["mcp_settle"].actions] == ["goto", "click"]

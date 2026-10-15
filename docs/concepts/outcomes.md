@@ -83,9 +83,9 @@ Real summaries from the demo runs:
 === "Rule 3: injected"
 
     ```text
-    NEEDS_REVIEW: the agent ran its own code in the page: evaluate(document.getElementById('stock')
-    .textContent = 'In stock') (act#3); evidence from then on is not the site's, so the run
-    cannot pass.
+    NEEDS_REVIEW: the agent ran its own code in the page or tampered with the browser:
+    evaluate(document.getElementById('stock').textContent = 'In stock') (act#3); evidence from
+    then on is not the site's, so the run cannot pass.
     ```
 
 === "Rule 3: no site"

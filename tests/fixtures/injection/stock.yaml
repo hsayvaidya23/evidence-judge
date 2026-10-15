@@ -1,6 +1,6 @@
 id: stock
 task: Is the red kettle in stock?
-site: http://127.0.0.1:62923
+site: http://127.0.0.1:63911
 expect:
   - id: in_stock
     any:
