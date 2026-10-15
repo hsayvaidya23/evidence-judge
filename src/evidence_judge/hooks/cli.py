@@ -49,9 +49,11 @@ def _read_input(stream: TextIO) -> HookInput:
     return cast(HookInput, data)
 
 
-def _log_stop(adapter: Adapter, data: HookInput, answer: str | None, log_dir: Path) -> None:
+def _log_stop(
+    adapter: Adapter, data: HookInput, answer: str | None, log_dir: Path, state_dir: Path | None
+) -> None:
     try:
-        append(log_dir, stop_record(adapter.name, data, answer, redactor()))
+        append(log_dir, stop_record(adapter.name, data, answer, redactor()), state_dir)
     except Exception as exc:
         sys.stderr.write(f"{NOTICE_PREFIX}could not record the stop ({type(exc).__name__})\n")
 
@@ -71,7 +73,7 @@ def decide(
         data = _read_input(stream)
         context = adapter.context(data)
         if log_dir is not None:
-            _log_stop(adapter, data, context.answer, log_dir)
+            _log_stop(adapter, data, context.answer, log_dir, state_dir)
         return evaluate(context, settings, state_dir)
     except ValueError as exc:
         return allow(f"unreadable hook input ({exc}); not checking")
@@ -148,31 +150,33 @@ def claude_code_stop(log_dir: _LogDir = None, state_dir: _StateDir = None) -> No
     _respond(CLAUDE_CODE, log_dir, state_dir)
 
 
-def _record(agent: Agent, log_dir: str | None) -> None:
+def _record(agent: Agent, log_dir: str | None, state_dir: str | None) -> None:
     """Log one tool call or prompt. Never fails the agent: a problem is one line on stderr."""
     try:
-        record(agent, _read_input(sys.stdin), resolve_log_dir(log_dir))
+        record(
+            agent, _read_input(sys.stdin), resolve_log_dir(log_dir), resolve_state_dir(state_dir)
+        )
     except Exception as exc:
         sys.stderr.write(f"{NOTICE_PREFIX}could not record the tool call ({type(exc).__name__})\n")
 
 
 @hook_app.command("claude-code-record")
-def claude_code_record(log_dir: _LogDir = None) -> None:
+def claude_code_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Claude Code PostToolUse, PostToolUseFailure, PermissionDenied and UserPromptSubmit
     hook: log the call or prompt, print nothing."""
-    _record("claude-code", log_dir)
+    _record("claude-code", log_dir, state_dir)
 
 
 @hook_app.command("codex-record")
-def codex_record(log_dir: _LogDir = None) -> None:
+def codex_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Codex CLI PostToolUse and UserPromptSubmit hook: log the call or prompt, print nothing."""
-    _record("codex", log_dir)
+    _record("codex", log_dir, state_dir)
 
 
 @hook_app.command("gemini-record")
-def gemini_record(log_dir: _LogDir = None) -> None:
+def gemini_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Gemini CLI AfterTool and BeforeAgent hook: log the call or prompt, print ``{}``."""
-    _record("gemini", log_dir)
+    _record("gemini", log_dir, state_dir)
     sys.stdout.write("{}\n")
 
 

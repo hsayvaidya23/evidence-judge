@@ -10,7 +10,7 @@
           },
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\" --state-dir \"${CLAUDE_PLUGIN_DATA}/state\"",
             "async": true
           }
         ]
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\" --state-dir \"${CLAUDE_PLUGIN_DATA}/state\"",
             "async": true
           }
         ]
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\" --state-dir \"${CLAUDE_PLUGIN_DATA}/state\"",
             "async": true
           }
         ]
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\" --state-dir \"${CLAUDE_PLUGIN_DATA}/state\"",
             "async": true
           }
         ]

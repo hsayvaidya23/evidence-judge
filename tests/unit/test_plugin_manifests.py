@@ -25,6 +25,13 @@ from typer.core import TyperGroup
 
 from evidence_judge.hooks.cli import hook_app
 
+
+@pytest.fixture(autouse=True)
+def _private_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("EVJ_HOOK_STATE_DIR", str(tmp_path / "hook-state"))
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+
+
 ROOT = Path(__file__).resolve().parents[2]
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 CLAUDE_PLUGIN = ROOT / "plugins" / "claude-code" / "evidence-judge"

@@ -1,9 +1,11 @@
-"""The hooks' private per-session state, kept outside the workspace: the task spec as it was when
-the turn started, so an agent that edits the spec cannot weaken the check of its own answer."""
+"""The hooks' private state, kept outside the workspace: the task spec as it was when the turn
+started, so an agent that edits the spec cannot weaken the check of its own answer; and the
+evidence-log key and head anchor, so a rewritten or truncated log shows."""
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -132,3 +134,80 @@ def load_snapshot(base: Path, session_id: str) -> SpecSnapshot | None:
         copy=copy_path,
         taken_at=float(taken),
     )
+
+
+LOG_CHAIN: Final = "hmac-sha256"
+LOG_KEY_FILE: Final = "log-key"
+LOG_HEAD_FILE: Final = "log-head.json"
+_KEY_BYTES: Final = 32
+
+
+def read_log_key(path: Path) -> bytes | None:
+    try:
+        key = bytes.fromhex(path.read_text("ascii").strip())
+    except (OSError, ValueError):
+        return None
+    return key if len(key) == _KEY_BYTES else None
+
+
+def log_key(base: Path) -> bytes:
+    """The installation's evidence-log key (``<base>/log-key``, mode 0600), created on first
+    use. Anyone who can read it can sign a forged log: keep ``base`` out of the agent's reach.
+
+    Raises:
+        ValueError: the key file exists but holds no usable key.
+    """
+    path = base / LOG_KEY_FILE
+    key = read_log_key(path)
+    if key is not None:
+        return key
+    _private_dir(base)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        key = read_log_key(path)
+        if key is None:
+            raise ValueError(f"{path} is not a usable evidence-log key") from None
+        return key
+    key = os.urandom(_KEY_BYTES)
+    try:
+        os.write(fd, key.hex().encode("ascii") + b"\n")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return key
+
+
+def key_id(key: bytes) -> str:
+    """A public fingerprint of the key, so a log names the key it was signed with."""
+    return hashlib.sha256(b"evidence-judge log key id\0" + key).hexdigest()[:16]
+
+
+def line_mac(key: bytes, line: bytes) -> str:
+    return hmac.new(key, line, hashlib.sha256).hexdigest()
+
+
+def log_head_path(base: Path, session_id: str) -> Path:
+    return session_dir(base, session_id) / LOG_HEAD_FILE
+
+
+def write_log_head(base: Path, session_id: str, count: int, head: str) -> Path:
+    """Anchor the log: how many lines it has and the MAC of its last line, kept apart from the
+    log so that cutting lines off its end shows."""
+    path = log_head_path(base, session_id)
+    write_private(path, json.dumps({"count": count, "head": head}).encode("utf-8"))
+    return path
+
+
+def read_log_head(path: Path) -> tuple[int, str] | None:
+    try:
+        raw: object = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    data = cast(dict[str, object], raw)
+    count, head = data.get("count"), data.get("head")
+    if isinstance(count, int) and not isinstance(count, bool) and isinstance(head, str):
+        return count, head
+    return None

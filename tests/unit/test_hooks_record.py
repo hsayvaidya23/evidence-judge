@@ -27,6 +27,13 @@ from evidence_judge.hooks.record import (
 from evidence_judge.redact import Redactor
 from tests.unit.hook_fixtures import payload, render
 
+
+@pytest.fixture(autouse=True)
+def _private_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("EVJ_HOOK_STATE_DIR", str(tmp_path / "hook-state"))
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+
+
 runner = CliRunner()
 REDACTOR = Redactor(b"k" * 32)
 NOW = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)

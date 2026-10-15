@@ -2,9 +2,14 @@
 per-session log outside the workspace (log format version 1, see
 ``docs/design/coding-agent-sessions.md``).
 
-Lines are hash-chained (``seq`` from 0, ``prev`` = SHA-256 hex of the previous line's bytes) and
-written under an exclusive lock with append + fsync, so concurrent async hooks cannot interleave
-or fork the chain. Excerpts are redacted and bounded; ``stdout_sha256`` hashes the full raw
+Lines are chained (``seq`` from 0, assigned under the lock in arrival order; ``prev`` = the
+previous line's HMAC-SHA256 under the installation's log key, ``chain: "hmac-sha256"`` and the
+key's ``key_id``; without a state directory, the plain SHA-256 of the previous line) and written
+under an exclusive lock with append + fsync, so concurrent async hooks cannot interleave or fork
+the chain. After each line the head anchor in the state directory records the line count and
+the last line's MAC, so cutting lines off the end shows. Async hooks can finish out of order:
+``seq`` is arrival order, ``ts`` is the hook's own clock and ``tool_use_id`` ties a line to the
+agent's transcript. Excerpts are redacted and bounded; ``stdout_sha256`` hashes the full raw
 output, and ``output_truncated`` is true whenever the excerpt is cut or redaction changed it, so
 a redacted excerpt never counts as the whole output.
 
@@ -32,6 +37,7 @@ from pathlib import Path
 from typing import Final, Literal, cast
 
 from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.hooks.state import LOG_CHAIN, key_id, line_mac, log_key, write_log_head
 from evidence_judge.redact import Redactor
 
 FORMAT_VERSION: Final = 1
@@ -306,36 +312,52 @@ def _last_line(fd: int) -> bytes | None:
     return data.rsplit(b"\n", 1)[-1]
 
 
-def _chain(previous: bytes | None) -> tuple[int, str | None]:
+def _next_seq(previous: bytes | None) -> int:
     if previous is None:
-        return 0, None
+        return 0
     try:
         seq = json.loads(previous).get("seq")
     except (ValueError, AttributeError):
         seq = None
-    nxt = seq + 1 if isinstance(seq, int) and not isinstance(seq, bool) else 0
-    return nxt, hashlib.sha256(previous).hexdigest()
+    return seq + 1 if isinstance(seq, int) and not isinstance(seq, bool) else 0
 
 
-def append(log_dir: Path, entry: Mapping[str, JsonValue]) -> Path:
+def _prev(previous: bytes | None, key: bytes | None) -> str | None:
+    if previous is None:
+        return None
+    return line_mac(key, previous) if key is not None else hashlib.sha256(previous).hexdigest()
+
+
+def append(log_dir: Path, entry: Mapping[str, JsonValue], state_dir: Path | None = None) -> Path:
     """Append ``entry`` with its ``seq``/``prev`` to its session's log (directory 0700, file
-    0600), under an exclusive lock, and fsync it."""
+    0600), under an exclusive lock, and fsync it. With ``state_dir``, the chain is keyed with
+    the installation's log key and the head anchor there is updated under the same lock."""
     log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     session = entry.get("session_id")
-    path = log_path(log_dir, session if isinstance(session, str) and session else "unknown")
+    session_id = session if isinstance(session, str) and session else "unknown"
+    path = log_path(log_dir, session_id)
+    key = log_key(state_dir) if state_dir is not None else None
     fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
     try:
         with _locked(fd):
-            seq, prev = _chain(_last_line(fd))
-            line = json.dumps({**entry, "seq": seq, "prev": prev}, ensure_ascii=False, default=str)
-            os.write(fd, line.encode("utf-8") + b"\n")
+            previous = _last_line(fd)
+            seq = _next_seq(previous)
+            chained: dict[str, JsonValue] = {**entry, "seq": seq, "prev": _prev(previous, key)}
+            if key is not None:
+                chained |= {"chain": LOG_CHAIN, "key_id": key_id(key)}
+            line = json.dumps(chained, ensure_ascii=False, default=str).encode("utf-8")
+            os.write(fd, line + b"\n")
             os.fsync(fd)
+            if key is not None and state_dir is not None:
+                write_log_head(state_dir, session_id, seq + 1, line_mac(key, line))
     finally:
         os.close(fd)
     return path
 
 
-def record(agent: Agent, data: Payload, log_dir: Path) -> Path | None:
+def record(
+    agent: Agent, data: Payload, log_dir: Path, state_dir: Path | None = None
+) -> Path | None:
     """Log one hook call. Returns the log file, or None when the event is not logged."""
     entry = build_record(agent, data, redactor())
-    return None if entry is None else append(log_dir, entry)
+    return None if entry is None else append(log_dir, entry, state_dir)

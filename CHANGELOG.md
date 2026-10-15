@@ -339,6 +339,18 @@ the names exported from `evidence_judge`) is defined under
   during the turn, the agent is sent back (`EVJ_HOOK_BLOCK_ON_SPEC_CHANGE=false` only warns).
   `EVJ_HOOK_SPEC` may point outside the workspace. The plugin and extension manifests install
   the turn-start hook.
+- **Evidence logs are HMAC-chained and anchored.** The recorder chained lines with plain SHA-256,
+  so anyone who could write the log could rewrite it and recompute the chain, and cutting lines
+  off the end left no trace. Now, with a state directory (`--state-dir`, as the plugin manifests
+  pass it):
+  - Each line's `prev` is an HMAC-SHA256 under a per-installation key (`<state>/log-key`,
+    mode 0600), and the line names the key's `key_id`.
+  - After every line, including the stop hook's `stop` line, the recorder updates a head anchor
+    (`<state>/<session>/log-head.json`) with the line count and last MAC.
+
+  The loader verifies the chain under the key and the end of the log against the anchor. A
+  truncated or rewritten log is incomplete. Integrity is `full` only when the key and anchor
+  both check out. An unkeyed, unanchored or unverifiable log is `partial`, with the reason.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
