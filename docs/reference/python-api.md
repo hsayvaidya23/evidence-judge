@@ -5,18 +5,15 @@ description: Use Evidence Judge from Python - load a run, redact it, judge it wi
 # Python API
 
 Everything the CLI does is available from Python. The judge is async and stateless between
-runs, so one `Judge` can grade many runs.
+runs, so one `Judge` can grade many runs. Import from the package root: those names are the
+supported API (see [Stability](#stability)).
 
 ## Judge a run
 
 ```python
 import asyncio
 
-from evidence_judge.config import Settings
-from evidence_judge.core.taskspec import TaskSpec
-from evidence_judge.engine import Judge, JudgeOptions
-from evidence_judge.ingest import load_run
-from evidence_judge.llm import build_llm
+from evidence_judge import Judge, JudgeOptions, Settings, TaskSpec, build_llm, load_run
 
 settings = Settings()  # (1)!
 run = load_run(trace="trace.zip", har="run.har", answer_file="answer.txt")  # (2)!
@@ -36,7 +33,7 @@ print(verdict.outcome, verdict.summary)
     verdict, a report or an LLM prompt will leave the machine:
 
     ```python
-    from evidence_judge.redact import Redactor
+    from evidence_judge import Redactor
 
     redactor = Redactor.from_settings(settings)
     run, report = redactor.redact_run(run)
@@ -113,3 +110,34 @@ from evidence_judge.forgery import ForgeryKind, forge
 ```
 
 See [Benchmark your own agent](../guides/benchmark-your-agent.md).
+
+## Stability
+
+Evidence Judge follows [Semantic Versioning](https://semver.org/). While the version is 0.x, a
+minor release (0.1 → 0.2) may break what SemVer covers, and the [changelog](../changelog.md)
+says how; a patch release never does. From 1.0, only a major release may.
+
+SemVer covers:
+
+- **The CLI**: commands, flags, environment variables and exit codes (`0` pass, `1` fail,
+  `2` needs review, `3` bad input, `4` internal or LLM error).
+- **The verdict JSON**: the format named by its `schema_id`
+  (`evidence-judge/run-verdict@1`, see [Verdict JSON schema](verdict-schema.md)). An
+  incompatible change bumps the number after `@`; new optional fields may appear without one.
+- **The Python names exported from `evidence_judge`** (its `__all__`):
+
+| Name | What |
+| --- | --- |
+| `Judge`, `JudgeOptions` | Grade a run, with or without a spec |
+| `load_run` | Load a trace, HAR or browser-use history into a run |
+| `TaskSpec` | A task spec; `TaskSpec.load(path)` |
+| `RunVerdict`, `Outcome` | The verdict and its `pass` / `fail` / `needs_review` outcome |
+| `Settings` | Configuration from `EVJ_*` variables and `.env` |
+| `build_llm` | The configured LLM client, or `None` offline |
+| `Redactor` | Redact a run and spec before the verdict leaves the process |
+| `__version__` | The installed version |
+
+Everything else, including every module path under `evidence_judge.` (`evidence_judge.core`,
+`evidence_judge.ingest`, `evidence_judge.report`, the integrations, bench and forgery modules
+above), is internal: it works today and the examples on this page use it, but it may change in
+any 0.x release without notice.
