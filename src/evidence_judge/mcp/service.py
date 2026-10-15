@@ -530,8 +530,9 @@ def _recordings_in(here: Path, files: list[str]) -> list[FoundRecording]:
                 here,
                 "playwright_trace_dir",
                 note=(
-                    "an unzipped Playwright trace (as Playwright MCP's browser_stop_tracing "
-                    "writes); zip the directory's contents to judge it"
+                    "unzipped Playwright traces, as Playwright MCP's browser_stop_tracing "
+                    "leaves them; to judge one, zip its trace-<id>.trace and "
+                    "trace-<id>.network files with the resources directory"
                 ),
             )
         )
