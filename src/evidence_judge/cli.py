@@ -17,8 +17,9 @@ from typer._click.core import Context  # pyright: ignore[reportPrivateUsage]
 from typer._click.exceptions import UsageError  # pyright: ignore[reportPrivateUsage]
 from typer.core import TyperGroup
 
-from evidence_judge import __version__, engine, ingest
+from evidence_judge import engine, ingest
 from evidence_judge._extras import needs_extra
+from evidence_judge._version import __version__
 from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run

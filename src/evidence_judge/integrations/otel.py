@@ -10,8 +10,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from evidence_judge import __version__
 from evidence_judge._extras import needs_extra
+from evidence_judge._version import __version__
 from evidence_judge.core.verdict import RunVerdict
 from evidence_judge.integrations._common import (
     OUTCOME_EVALUATION,

@@ -11,7 +11,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
-from evidence_judge import __version__
+from evidence_judge._version import __version__
 from evidence_judge.mcp import service
 from evidence_judge.mcp.models import (
     Explanation,

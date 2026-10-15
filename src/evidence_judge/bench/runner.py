@@ -26,7 +26,7 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from evidence_judge import __version__
+from evidence_judge._version import __version__
 from evidence_judge.baselines.llm_judge import TranscriptLLMJudge
 from evidence_judge.bench.dataset import Scenario
 from evidence_judge.bench.stats import wilson_interval

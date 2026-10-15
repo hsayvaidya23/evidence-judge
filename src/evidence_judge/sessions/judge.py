@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from evidence_judge import __version__
+from evidence_judge._version import __version__
 from evidence_judge.core.verdict import (
     Citation,
     ClaimVerdict,

@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 
-from evidence_judge import __version__
+from evidence_judge._version import __version__
 from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.spec_errors import SpecError, load_yaml
 from evidence_judge.core.verdict import (

@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
-from evidence_judge import __version__
+from evidence_judge._version import __version__
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, Run, Screenshot
 from evidence_judge.core.verdict import (
     Citation,

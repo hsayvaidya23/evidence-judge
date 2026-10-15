@@ -8,7 +8,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from evidence_judge import __version__
+from evidence_judge._version import __version__
 from evidence_judge.checks._common import plural
 from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.claims import judge_claim
