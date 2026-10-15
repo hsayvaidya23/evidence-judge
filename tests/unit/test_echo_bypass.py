@@ -13,8 +13,9 @@ from evidence_judge.checks.proof import guarded
 from evidence_judge.checks.registry import default_registry
 from evidence_judge.config import Settings
 from evidence_judge.core.claims import Claim, ClaimKind
+from evidence_judge.core.echo import MASK
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, Run
-from evidence_judge.core.index import MASK, EvidenceIndex, is_short_word
+from evidence_judge.core.index import EvidenceIndex, is_short_word
 from evidence_judge.core.predicates import (
     PageTextPredicate,
     Predicate,

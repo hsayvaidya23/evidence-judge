@@ -41,11 +41,11 @@ from evidence_judge.forgery.controls import ControlKind, apply_control
 from evidence_judge.forgery.evidence import (
     UNANCHORED_KINDS,
     WRITE_ONLY_KINDS,
-    is_write_task,
     plant_evidence,
     unanchored,
 )
 from evidence_judge.forgery.injection import injected_claims
+from evidence_judge.forgery.planting import is_write_task
 from evidence_judge.forgery.templates import TemplateForger
 from evidence_judge.llm.base import LLMClient, LLMError
 from evidence_judge.redact import Redactor

@@ -25,7 +25,7 @@ right. It turns the answer into checkable claims and checks each one against evi
 | Stage | Module | Input → output |
 | --- | --- | --- |
 | Ingest | `ingest/` | Playwright trace, HAR, browser-use history → `Run` with ids (`act#`, `net#`, `snap#`, `shot#`, `con#`) and `captured` channels |
-| Redact | `redact.py` | `Run` → `Run` with secrets and PII replaced by HMAC-fingerprinted tokens |
+| Redact | `redact/` | `Run` → `Run` with secrets and PII replaced by HMAC-fingerprinted tokens |
 | Extract claims | `extract/` | Agent answer and reasoning → `ClaimSet` of atomic claims, each with a verbatim quote. LLM-based, or heuristic with `--offline` |
 | Compile predicates | `extract/` | Each claim → one or more `Predicate`s (request, page_text, url, action, value, screenshot) that would prove it |
 | Deterministic checkers | `checks/` | Predicate + `EvidenceIndex` → `PredicateResult` (supported / contradicted / no_evidence + citations) |
@@ -174,6 +174,38 @@ shape the pipeline:
   `value` of password, token and OTP inputs), console messages and agent text are redacted.
   **Screenshot pixels are not**: they reach the HTML report and, for screenshot checks, the
   vision model as recorded. Mask sensitive fields when recording or judge with `--offline`.
+
+## Module map
+
+| Module | What it holds |
+| --- | --- |
+| `ingest/loader.py` | `load_run` and `attach_har`: load every source of a run and merge them |
+| `ingest/playwright_trace.py` | Playwright trace zips → `Run` |
+| `ingest/_calls.py` | Recorded Playwright calls: user actions, the deny-by-default INJECT allowlist, action values, route handler calls |
+| `ingest/har.py`, `ingest/_network.py` | HAR logs and HAR entries → network events |
+| `ingest/browser_use.py` | browser-use histories → `Run` |
+| `ingest/_dom.py` | Playwright frame snapshots → visible page text |
+| `core/evidence.py` | `Run` and its events |
+| `core/index.py` | `EvidenceIndex`, the read side every checker uses |
+| `core/agent_input.py` | What the agent put into the run: typed and replayed field values, copied page text, uploads, URL values |
+| `core/echo.py` | Finding and masking echoes of agent input in evidence (`MASK`) |
+| `core/site.py` | `Site`: hosts and ports a spec names and a page or request is on |
+| `core/provenance.py` | Evidence the agent made rather than the site |
+| `redact/redactor.py` | `Redactor`: replaces secrets and PII in runs, text and models with fingerprinted tokens |
+| `redact/detectors.py` | What counts as a secret or personal value: patterns, field names, headers |
+| `extract/` | Claim extraction (LLM and heuristic) and predicate compilation |
+| `checks/` | One checker per predicate kind, expectations, dimensions, outcome |
+| `engine.py` | `Judge`: the pipeline above |
+| `report/` | JSON, HTML and console reports |
+| `forgery/base.py`, `forgery/templates.py`, `forgery/llm_forger.py` | Story forgeries: rewrite what the agent says |
+| `forgery/evidence.py` | `plant_evidence`: the evidence-altering kinds and which module plants each |
+| `forgery/planting.py` | What a forgery wants the evidence to show (`Targets`) and the planted events |
+| `forgery/echoes.py` | Kinds that make the site repeat the expected texts |
+| `forgery/hosts.py` | Kinds that act or end on a host other than the site |
+| `forgery/outcomes.py` | Kinds that pass off a failure page or a stale confirmation |
+| `forgery/tampering.py` | Kinds that tamper with the browser: scripts, routes, storage, CDP, WebSockets |
+| `forgery/controls.py` | Honest controls with the same shapes as the evidence-altering kinds |
+| `bench/` | The forged-run benchmark |
 
 ## Key types
 

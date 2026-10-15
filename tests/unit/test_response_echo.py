@@ -16,8 +16,9 @@ from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.registry import default_registry
 from evidence_judge.config import Settings
 from evidence_judge.core.claims import Claim, ClaimKind, ClaimSet
+from evidence_judge.core.echo import MASK
 from evidence_judge.core.evidence import NetworkEvent, Run
-from evidence_judge.core.index import MASK, EvidenceIndex
+from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, Support
