@@ -4693,7 +4693,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '7119'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '7119'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -4705,7 +4705,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '7119'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '7119'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -4909,7 +4909,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '3686'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '3686'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -4921,7 +4921,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '3686'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '3686'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -4981,7 +4981,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '8565'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '8565'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -4993,7 +4993,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '8565'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '8565'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -5017,7 +5017,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '9393'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '9393'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -5029,7 +5029,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '9393'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '9393'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -5053,7 +5053,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '9643'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '9643'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -5065,7 +5065,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '9643'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '9643'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -5089,7 +5089,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '5985'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '5985'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -5101,7 +5101,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '5985'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '5985'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -5521,7 +5521,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '7787'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '7787'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -5533,7 +5533,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 10 recorded page states contains '7787'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '7787'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
