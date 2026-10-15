@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from evidence_judge.sessions.models import Category, CommandAnalysis
@@ -32,6 +32,7 @@ from evidence_judge.sessions.shell.lexer import (
     MAX_NESTING,
     PYTHON,
     SHELLS,
+    Pipeline,
     Simple,
     Wrapped,
     parse,
@@ -997,6 +998,172 @@ def _cd_step(simple: Simple) -> str:
     return "?" if target == "-" or target.startswith("~") or unspelled(target) else target
 
 
+@dataclass(slots=True)
+class _Walk:
+    """What `_analyse` gathers from a command line's simple commands, in order."""
+
+    agent_text: bool
+    categories: list[Category] = field(default_factory=list[Category])
+    programs: list[str] = field(default_factory=list[str])
+    runners: list[str] = field(default_factory=list[str])
+    filters: list[str] = field(default_factory=list[str])
+    deleted: list[str] = field(default_factory=list[str])
+    touched: list[str] = field(default_factory=list[str])
+    written: list[str] = field(default_factory=list[str])
+    cds: list[str] = field(default_factory=list[str])
+    run_cds: list[str] = field(default_factory=list[str])
+    run_env: list[str] = field(default_factory=list[str])
+    persisting: list[str] = field(default_factory=list[str])
+    config_files: list[str] = field(default_factory=list[str])
+    mutating_at: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
+    test_paths: list[str] | None = None
+    collect_only: bool = False
+    mutation: str | None = None
+    opaque: str | None = None
+    lasting: str | None = None
+    nested_store: bool = False
+    nested_guard: str | None = None
+    nested_after: bool = False
+    run_after: bool = False
+    primary: tuple[int, int] | None = None
+    masked: str | None = None
+    output_filter: str | None = None
+
+
+def _note(
+    walk: _Walk, simple: Simple, classified: Classified, alone: bool, at: tuple[int, int]
+) -> None:
+    """Record what every simple command adds, whether or not it nests another command line."""
+    walk.touched.extend(classified.touched or [])
+    walk.opaque = walk.opaque or classified.opaque
+    if classified.program in _DETACHERS:
+        walk.lasting = (
+            walk.lasting or f"{classified.program} starts a job that outlives the command"
+        )
+    if classified.mutation is not None or (
+        classified.nested is not None and classified.nested.mutates
+    ):
+        walk.mutating_at.append(at)
+    walk.categories.append(classified.category)
+    if classified.program:
+        walk.programs.append(classified.program)
+    if classified.program in ("cd", "pushd", "popd"):
+        step = _cd_step(simple)
+        alone = alone and not simple.subshell
+        walk.cds.append(step if alone else "?")
+        if alone:
+            walk.persisting.append(step)
+
+
+def _take_nested(
+    walk: _Walk,
+    simple: Simple,
+    classified: Classified,
+    nested: CommandAnalysis,
+    at: tuple[int, int],
+    cwd: str | None,
+) -> None:
+    """Fold in a command line run by `bash -c`, `xargs` and the like."""
+    walk.runners.extend(nested.runners)
+    walk.filters.extend(nested.test_filters)
+    walk.collect_only = walk.collect_only or nested.collect_only
+    walk.deleted.extend(nested.deleted_paths)
+    walk.agent_text = walk.agent_text or nested.agent_text
+    walk.mutation = walk.mutation or nested.mutation
+    walk.touched.extend(nested.touched_paths)
+    walk.opaque = walk.opaque or nested.opaque_write
+    walk.lasting = walk.lasting or nested.lasting_mutation
+    walk.written.extend(nested.source_findings)
+    walk.nested_store = walk.nested_store or nested.session_store
+    walk.nested_guard = walk.nested_guard or nested.guard_tamper
+    if nested.runners:
+        walk.run_cds = [*walk.cds, *nested.run_cds]
+        walk.test_paths = nested.test_paths
+        outer = [
+            name
+            for name, value in command_env(simple).items()
+            if not run_env_allowed(name) and not harmless_env(name, value, cwd)
+        ]
+        walk.run_env = [*nested.run_env, *outer]
+        walk.config_files.extend(nested.config_files)
+    if nested.runners or (classified.category in _CHECKS and not walk.runners):
+        walk.nested_after = nested.mutation_after_check
+        walk.primary = at
+        walk.masked = nested.exit_masked_by
+        walk.output_filter = nested.output_filter
+
+
+def _take(walk: _Walk, classified: Classified, at: tuple[int, int]) -> None:
+    """Fold in a simple command that runs a program itself."""
+    walk.mutation = walk.mutation or classified.mutation
+    walk.deleted.extend(classified.deleted)
+    if classified.runner is not None:
+        walk.runners.append(classified.runner)
+        walk.filters.extend(classified.filters)
+        walk.run_cds = [*walk.cds, *classified.relocations]
+        walk.run_env = list(classified.run_env)
+        walk.config_files.extend(classified.config_files)
+        walk.run_after = classified.writes_after
+        walk.test_paths = (
+            classified.paths
+            if classified.paths is not None
+            else ([] if not classified.filters else None)
+        )
+        walk.collect_only = walk.collect_only or classified.collect_only
+    elif classified.category not in _CHECKS or walk.runners:
+        return
+    walk.primary = at
+    walk.masked = None
+    walk.output_filter = None
+
+
+def _first_filter(after_pipe: list[Simple]) -> str:
+    """The program the check's output is piped into, skipping `tail`, which keeps the summary."""
+    names = [program_name((unwrap(c.words) or ["?"])[0]) for c in after_pipe]
+    return next((name for name in names if name != "tail"), names[0])
+
+
+def _followed_by(pipelines: list[Pipeline], start: int) -> str | None:
+    """Why the line's exit status is not the check's: a later pipeline joined by anything but
+    `&&`."""
+    for k in range(start, len(pipelines) - 1):
+        op = pipelines[k].op_after
+        if op != "&&":
+            shown = " ".join(pipelines[k + 1].commands[0].words[:3])
+            label = "a newline" if op == "\n" else repr(op)
+            return f"it is followed by {label} and {shown!r}"
+    return None
+
+
+def _mask_exit(
+    walk: _Walk, pipelines: list[Pipeline], pipefail: bool, depth: int, cwd: str | None
+) -> None:
+    """Why the check's exit status may not be the command line's, if it may not."""
+    if walk.primary is None or walk.masked is not None:
+        return
+    p_index, c_index = walk.primary
+    pipeline = pipelines[p_index]
+    after_pipe = pipeline.commands[c_index + 1 :]
+    if after_pipe:
+        walk.output_filter = _first_filter(after_pipe)
+        if not pipefail:
+            walk.masked = f"its output is piped into {walk.output_filter}"
+    if pipeline.commands[c_index].negated:
+        walk.masked = "it is negated with !"
+    if walk.masked is None and pipeline.op_after == "&":
+        walk.masked = "it runs in the background"
+    if walk.masked is None:
+        walk.masked = _followed_by(pipelines, p_index)
+    if walk.masked is None:
+        trailing = [
+            _classify(c, depth, cwd).category
+            for later in pipelines[p_index + 1 :]
+            for c in later.commands
+        ]
+        if any(cat is not Category.READ_ONLY for cat in trailing):
+            walk.masked = "other commands run after it"
+
+
 def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     if len(command) > MAX_COMMAND_CHARS:
         return _empty(f"longer than {MAX_COMMAND_CHARS} characters", command)
@@ -1005,180 +1172,66 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     except ValueError as exc:
         return _empty(str(exc), command)
 
-    categories: list[Category] = []
-    programs: list[str] = []
-    runners: list[str] = []
-    filters: list[str] = []
-    deleted: list[str] = []
-    collect_only = False
-    mutation: str | None = None
-    agent_text = _AGENT_SUMMARY_TEXT.search(command) is not None
-    pipefail = re.search(r"\bpipefail\b", command) is not None
-    primary: tuple[int, int] | None = None
-    masked: str | None = None
-    output_filter: str | None = None
-
-    touched: list[str] = []
-    opaque: str | None = None
-    lasting: str | None = None
-    nested_store = False
-    nested_guard: str | None = None
-    written: list[str] = []
-    cds: list[str] = []
-    test_paths: list[str] | None = None
-    run_cds: list[str] = []
-    run_env: list[str] = []
-    persisting: list[str] = []
-    mutating_at: list[tuple[int, int]] = []
-    nested_after = False
-    run_after = False
-    config_files: list[str] = []
+    walk = _Walk(agent_text=_AGENT_SUMMARY_TEXT.search(command) is not None)
     for p_index, pipeline in enumerate(pipelines):
         for c_index, simple in enumerate(pipeline.commands):
             classified = _classify(simple, depth, cwd)
-            touched.extend(classified.touched or [])
-            opaque = opaque or classified.opaque
-            if classified.program in _DETACHERS:
-                lasting = lasting or f"{classified.program} starts a job that outlives the command"
-            if classified.mutation is not None or (
-                classified.nested is not None and classified.nested.mutates
-            ):
-                mutating_at.append((p_index, c_index))
-            categories.append(classified.category)
-            if classified.program:
-                programs.append(classified.program)
-            if classified.program in ("cd", "pushd", "popd"):
-                step = _cd_step(simple)
-                alone = len(pipeline.commands) == 1 and not simple.subshell
-                cds.append(step if alone else "?")
-                if alone:
-                    persisting.append(step)
-            nested = classified.nested
-            if nested is not None:
-                runners.extend(nested.runners)
-                filters.extend(nested.test_filters)
-                collect_only = collect_only or nested.collect_only
-                deleted.extend(nested.deleted_paths)
-                agent_text = agent_text or nested.agent_text
-                mutation = mutation or nested.mutation
-                touched.extend(nested.touched_paths)
-                opaque = opaque or nested.opaque_write
-                lasting = lasting or nested.lasting_mutation
-                written.extend(nested.source_findings)
-                nested_store = nested_store or nested.session_store
-                nested_guard = nested_guard or nested.guard_tamper
-                if nested.runners:
-                    run_cds = [*cds, *nested.run_cds]
-                    test_paths = nested.test_paths
-                    outer = [
-                        name
-                        for name, value in command_env(simple).items()
-                        if not run_env_allowed(name) and not harmless_env(name, value, cwd)
-                    ]
-                    run_env = [*nested.run_env, *outer]
-                    config_files.extend(nested.config_files)
-                if nested.runners or (classified.category in _CHECKS and not runners):
-                    nested_after = nested.mutation_after_check
-                    primary = (p_index, c_index)
-                    masked = nested.exit_masked_by
-                    output_filter = nested.output_filter
-                continue
-            mutation = mutation or classified.mutation
-            deleted.extend(classified.deleted)
-            if classified.runner is not None:
-                runners.append(classified.runner)
-                filters.extend(classified.filters)
-                run_cds = [*cds, *classified.relocations]
-                run_env = list(classified.run_env)
-                config_files.extend(classified.config_files)
-                run_after = classified.writes_after
-                test_paths = (
-                    classified.paths
-                    if classified.paths is not None
-                    else ([] if not classified.filters else None)
-                )
-                collect_only = collect_only or classified.collect_only
-                primary = (p_index, c_index)
-                masked = None
-                output_filter = None
-            elif classified.category in _CHECKS and not runners:
-                primary = (p_index, c_index)
-                masked = None
-                output_filter = None
+            at = (p_index, c_index)
+            _note(walk, simple, classified, len(pipeline.commands) == 1, at)
+            if classified.nested is not None:
+                _take_nested(walk, simple, classified, classified.nested, at, cwd)
+            else:
+                _take(walk, classified, at)
 
     if any(p.op_after in ("||", "&") for p in pipelines):
-        persisting = ["?" for _ in persisting]
-    if lasting is None and mutation is not None and any(p.op_after == "&" for p in pipelines):
-        lasting = f"{mutation} in a background job"
-    mutation_after = primary is not None and (
-        any(position > primary for position in mutating_at)
-        or (nested_after and primary in mutating_at)
-        or run_after
-    )
-    if primary is not None and masked is None:
-        p_index, c_index = primary
-        pipeline = pipelines[p_index]
-        after_pipe = pipeline.commands[c_index + 1 :]
-        if after_pipe:
-            output_filter = (
-                program_name(unwrap(after_pipe[0].words)[0]) if unwrap(after_pipe[0].words) else "?"
-            )
-            if any(program_name((unwrap(c.words) or ["?"])[0]) != "tail" for c in after_pipe):
-                output_filter = next(
-                    program_name((unwrap(c.words) or ["?"])[0])
-                    for c in after_pipe
-                    if program_name((unwrap(c.words) or ["?"])[0]) != "tail"
-                )
-            if not pipefail:
-                masked = f"its output is piped into {output_filter}"
-        if pipeline.commands[c_index].negated:
-            masked = "it is negated with !"
-        if masked is None and pipeline.op_after == "&":
-            masked = "it runs in the background"
-        if masked is None:
-            for k in range(p_index, len(pipelines) - 1):
-                op = pipelines[k].op_after
-                if op != "&&":
-                    following = pipelines[k + 1]
-                    shown = " ".join(following.commands[0].words[:3])
-                    label = "a newline" if op == "\n" else repr(op)
-                    masked = f"it is followed by {label} and {shown!r}"
-                    break
-        if masked is None:
-            trailing = [
-                _classify(c, depth, cwd).category
-                for later in pipelines[p_index + 1 :]
-                for c in later.commands
-            ]
-            if any(cat is not Category.READ_ONLY for cat in trailing):
-                masked = "other commands run after it"
+        walk.persisting = ["?" for _ in walk.persisting]
+    background = any(p.op_after == "&" for p in pipelines)
+    if walk.lasting is None and walk.mutation is not None and background:
+        walk.lasting = f"{walk.mutation} in a background job"
+    mutation_after = _mutation_after(walk)
+    _mask_exit(walk, pipelines, re.search(r"\bpipefail\b", command) is not None, depth, cwd)
+    return _analysis(walk, pipelines, command, cwd, mutation_after)
 
+
+def _mutation_after(walk: _Walk) -> bool:
+    """Whether the command line changes something after its check ran."""
+    return walk.primary is not None and (
+        any(position > walk.primary for position in walk.mutating_at)
+        or (walk.nested_after and walk.primary in walk.mutating_at)
+        or walk.run_after
+    )
+
+
+def _analysis(
+    walk: _Walk, pipelines: list[Pipeline], command: str, cwd: str | None, mutation_after: bool
+) -> CommandAnalysis:
     return CommandAnalysis(
-        categories=categories,
-        programs=programs,
-        runners=runners,
-        test_filters=list(dict.fromkeys(filters)),
-        collect_only=collect_only,
-        exit_masked_by=masked,
-        output_filter=output_filter,
-        agent_text=agent_text,
-        mutation=mutation,
-        deleted_paths=deleted,
-        touched_paths=list(dict.fromkeys(touched)),
-        opaque_write=opaque,
-        lasting_mutation=lasting,
-        run_cds=run_cds,
-        run_env=run_env,
+        categories=walk.categories,
+        programs=walk.programs,
+        runners=walk.runners,
+        test_filters=list(dict.fromkeys(walk.filters)),
+        collect_only=walk.collect_only,
+        exit_masked_by=walk.masked,
+        output_filter=walk.output_filter,
+        agent_text=walk.agent_text,
+        mutation=walk.mutation,
+        deleted_paths=walk.deleted,
+        touched_paths=list(dict.fromkeys(walk.touched)),
+        opaque_write=walk.opaque,
+        lasting_mutation=walk.lasting,
+        run_cds=walk.run_cds,
+        run_env=walk.run_env,
         exports=exports(pipelines, cwd),
-        config_files=list(dict.fromkeys(config_files)),
-        test_paths=test_paths if len(runners) == 1 else None,
-        cd_targets=persisting,
+        config_files=list(dict.fromkeys(walk.config_files)),
+        test_paths=walk.test_paths if len(walk.runners) == 1 else None,
+        cd_targets=walk.persisting,
         mutation_after_check=mutation_after,
-        session_store=nested_store
-        or writes_session_store(pipelines, command, touched, deleted, opaque),
+        session_store=walk.nested_store
+        or writes_session_store(pipelines, command, walk.touched, walk.deleted, walk.opaque),
         harness_change=harness_change(pipelines, command, cwd),
-        guard_tamper=nested_guard or guard_tamper(pipelines, command, touched, deleted, opaque),
-        source_findings=list(dict.fromkeys([*written, *written_code(pipelines, command)])),
+        guard_tamper=walk.nested_guard
+        or guard_tamper(pipelines, command, walk.touched, walk.deleted, walk.opaque),
+        source_findings=list(dict.fromkeys([*walk.written, *written_code(pipelines, command)])),
     )
 
 
