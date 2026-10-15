@@ -15,6 +15,7 @@ from evidence_judge.core.verdict import (
     Citation,
     ClaimVerdict,
     Dimension,
+    ExpectationResult,
     Outcome,
     RunVerdict,
     Support,
@@ -359,33 +360,29 @@ def _claim_view(cv: ClaimVerdict, ctx: _Ctx) -> ClaimView:
     )
 
 
-def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
-    stamps = [a.ts for a in run.actions] + [n.ts for n in run.network]
-    ctx = _Ctx(
-        cited={c.evidence_id for c in _all_citations(verdict)},
-        span=max(stamps, default=0.0),
-        described=_describe_evidence(run),
+def _met(met: bool | None) -> tuple[str, str]:
+    if met:
+        return "Met", "ok"
+    if met is False:
+        return "Not met", "bad"
+    return "Not assessable", "muted"
+
+
+def _expectation_view(ex: ExpectationResult, ctx: _Ctx) -> ExpectationView:
+    label, tone = _met(ex.met)
+    return ExpectationView(
+        id=ex.expectation_id,
+        kind=ex.kind,
+        met_label=label,
+        tone=tone,
+        glyph=_GLYPH[tone],
+        reason=ex.reason,
+        citations=_citations(ex.citations, ctx),
     )
-    rows, hidden = _timeline(run, ctx)
-    thumbs = _thumbnails(run, ctx)
-    ctx.anchors = {r.anchor for r in rows} | {t.anchor for t in thumbs}
 
-    claim_views = [_claim_view(cv, ctx) for cv in verdict.claims]
-    counts = Counter(cv.status for cv in verdict.claims)
 
-    expectations = [
-        ExpectationView(
-            id=ex.expectation_id,
-            kind=ex.kind,
-            met_label="Met" if ex.met else ("Not met" if ex.met is False else "Not assessable"),
-            tone="ok" if ex.met else ("bad" if ex.met is False else "muted"),
-            glyph=_GLYPH["ok" if ex.met else ("bad" if ex.met is False else "muted")],
-            reason=ex.reason,
-            citations=_citations(ex.citations, ctx),
-        )
-        for ex in verdict.expectations
-    ]
-    dimensions = [
+def _dimension_views(verdict: RunVerdict) -> list[DimensionView]:
+    return [
         DimensionView(
             label=_DIMENSION_LABEL[d],
             score=_pct(verdict.dimensions[d].score),
@@ -396,6 +393,31 @@ def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
         for d in Dimension
         if d in verdict.dimensions
     ]
+
+
+def _new_ctx(verdict: RunVerdict, run: Run) -> _Ctx:
+    stamps = [a.ts for a in run.actions] + [n.ts for n in run.network]
+    return _Ctx(
+        cited={c.evidence_id for c in _all_citations(verdict)},
+        span=max(stamps, default=0.0),
+        described=_describe_evidence(run),
+    )
+
+
+def _tally(verdict: RunVerdict) -> list[tuple[str, int, str]]:
+    counts = Counter(cv.status for cv in verdict.claims)
+    return [(label, counts[s], tone) for s, (label, tone) in _SUPPORT.items() if counts[s]]
+
+
+def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
+    ctx = _new_ctx(verdict, run)
+    rows, hidden = _timeline(run, ctx)
+    thumbs = _thumbnails(run, ctx)
+    ctx.anchors = {r.anchor for r in rows} | {t.anchor for t in thumbs}
+
+    claim_views = [_claim_view(cv, ctx) for cv in verdict.claims]
+    expectations = [_expectation_view(ex, ctx) for ex in verdict.expectations]
+    dimensions = _dimension_views(verdict)
     outcome_label, outcome_class = _OUTCOME[verdict.outcome]
     final = run.final_state
     return {
@@ -404,7 +426,7 @@ def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
         "outcome_class": outcome_class,
         "score": round(verdict.score * 100),
         "claims": claim_views,
-        "tally": [(label, counts[s], tone) for s, (label, tone) in _SUPPORT.items() if counts[s]],
+        "tally": _tally(verdict),
         "headline": _headline(verdict),
         "expectations": expectations,
         "dimensions": dimensions,
