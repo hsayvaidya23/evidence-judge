@@ -565,7 +565,9 @@ Text the page may hide never meets a `page_text` predicate, and it keeps its abs
 contradicting one: when the phrase appears only there, the result is `no_evidence` ("text the
 page may hide"), so the run goes to review instead of passing or failing. The same holds when a
 page has an empty custom element (`<x-badge></x-badge>`): it may render a closed shadow root,
-whose text no snapshot holds, so a phrase missing from that page is not proven missing. The
+whose text no snapshot holds, so a phrase missing from that page is not proven missing; and
+when a `::before` or `::after` rule gives a shown element text (`content: attr(data-status)`),
+which no snapshot holds either. The
 judge still cannot see text a script hides or that another element covers. Prefer phrases the
 page shows only in the state you expect, and pair a read with a `url` or `request` predicate
 when a page carries the phrase hidden.

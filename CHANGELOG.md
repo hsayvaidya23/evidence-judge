@@ -133,6 +133,9 @@ the names exported from `evidence_judge`) is defined under
 
 ### Fixed
 
+- A page whose `::before` or `::after` rule gives a shown element text (`content` with a letter
+  or digit, `attr()` or a counter) is opaque: a phrase missing from its snapshot sends the run to
+  review instead of failing it.
 - A page shown before the agent acted, left and revisited at the end no longer meets a
   `final`-scope expectation or claim.
 - An honest read done by typing the product page's URL can pass: only the navigation that opens

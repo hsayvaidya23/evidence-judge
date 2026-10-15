@@ -391,10 +391,17 @@ class StyleSheets:
         """A ``::slotted()`` rule may hide the elements assigned to this scope's slots."""
         self.details = False
         """A ``::details-content`` rule may show or hide closed ``<details>`` bodies."""
+        self.generators: list[_Selector] = []
+        """The elements a ``::before`` or ``::after`` rule gives text (`_generates_text`)."""
         for sheet in sheets:
             self._sheet(sheet.text, _Context(sheet.url, sheet.maybe))
         if document:
             self._guess_utilities()
+
+    def generates(self, element: Element) -> bool:
+        """A ``::before`` or ``::after`` rule may give `element` text the snapshot does not
+        hold."""
+        return any(_matches(selector, element) != NO for selector in self.generators)
 
     def style(
         self,
@@ -578,6 +585,10 @@ class StyleSheets:
             if validity == _INVALID:
                 return []
             uncertain = uncertain or validity == _UNKNOWN
+            if flag == _GENERATED:
+                if selector is not None and _generates_text(body):
+                    self.generators.append(selector)
+                continue
             if flag and any(True for _ in _declarations(body)):
                 self._flag(flag)
             if selector is not None:
@@ -1113,6 +1124,24 @@ def _blocks(text: str) -> Iterator[tuple[str, str | None]]:
         yield text[start : opened - 1].strip(), text[opened:]
 
 
+_GENERATED: Final = "generated"
+_CONTENT = re.compile(r"(?:^|[;{\s])content\s*:\s*([^;}]*)", re.IGNORECASE)
+_QUOTED = re.compile(r"\"((?:[^\"\\]|\\.)*)\"|'((?:[^'\\]|\\.)*)'")
+
+
+def _generates_text(body: str) -> bool:
+    """A declaration list sets ``content`` to text: an ``attr()``, a counter, or a string with
+    a letter or digit (an icon font's private-use character and ``""`` are not text)."""
+    for match in _CONTENT.finditer(body):
+        value = match.group(1)
+        if re.search(r"\b(?:attr|counters?)\(", value, re.IGNORECASE):
+            return True
+        for quoted in _QUOTED.finditer(value):
+            if any(c.isalnum() for c in _unescape(quoted.group(1) or quoted.group(2) or "")):
+                return True
+    return False
+
+
 def _declarations(text: str) -> Iterator[tuple[str, str | None, bool]]:
     """The tracked properties a declaration list sets: (property, value, important)."""
     for declaration, body in _blocks(text):
@@ -1383,6 +1412,8 @@ def _complex(text: str) -> tuple[_Selector | None, int, str]:
     if found.element is not None:
         if found.element in ("first-line", "first-letter"):
             return _Selector(tuple(parts), tuple(combinators), True), validity, flag
+        if found.element in ("before", "after"):
+            return _Selector(tuple(parts), tuple(combinators), maybe), validity, _GENERATED
         return None, validity, flag
     return _Selector(tuple(parts), tuple(combinators), maybe), validity, flag
 

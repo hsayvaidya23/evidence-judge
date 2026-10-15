@@ -514,6 +514,25 @@ def test_an_empty_custom_element_may_hold_a_closed_shadow_root() -> None:
     assert not _rendered(["X-B", {"style": "display:none"}]).opaque
 
 
+@pytest.mark.parametrize(
+    ("css", "opaque"),
+    [
+        (".st::after{content:attr(data-s)}", True),
+        (".st:before{content:'Out of stock'}", True),
+        (".st::before{content:counter(item)}", True),
+        (".st::after{content:''}", False),
+        (".st::before{content:'\\f00c'}", False),
+        (".other::after{content:attr(data-s)}", False),
+        (".st::after{content:attr(data-s)} .st{display:none}", False),
+    ],
+)
+def test_text_a_pseudo_element_gives_a_shown_element_makes_the_page_opaque(
+    css: str, opaque: bool
+) -> None:
+    page = _rendered(["STYLE", {}, css], ["SPAN", {"class": "st", "data-s": "Out"}], ["P", {}, "K"])
+    assert page.opaque is opaque
+
+
 def test_tooltips_and_the_hidden_attribute_the_page_overrides() -> None:
     page = _rendered(
         ["SVG", {}, ["title", {}, "In stock"], ["desc", {}, "A badge"], ["text", {}, "Badge"]],

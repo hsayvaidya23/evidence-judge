@@ -139,7 +139,8 @@ class RenderedPage:
     unsure_text: str = ""
     """The text whose visibility the reader is unsure of, in document order."""
     opaque: bool = False
-    """The page may show text the snapshot does not hold (a closed shadow root)."""
+    """The page may show text the snapshot does not hold (a closed shadow root, text a
+    ``::before`` or ``::after`` rule gives a shown element)."""
 
 
 _BLOCK_END = object()
@@ -374,7 +375,9 @@ class _Renderer:
             return
         if scope.parts and "part" in element.attrs and not style.unsure:
             style = replace(style, unsure=True)
-        if "-" in tag and not children:
+        if ("-" in tag and not children) or (
+            style.text != HIDDEN and scope.sheets.generates(element)
+        ):
             self._opaque = True
         if tag not in _INLINE_TAGS:
             self._emit(" ", None)

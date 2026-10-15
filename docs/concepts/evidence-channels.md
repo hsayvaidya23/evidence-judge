@@ -69,7 +69,9 @@ model (a condition or selector it cannot evaluate, `var()`, near-zero opacity or
 transparent colour, clipping, off-screen offsets, a utility class no recorded sheet defines, or
 a stylesheet the trace does not hold) goes to `unsure_text` instead: it never proves a
 predicate and keeps its absence from contradicting one. `opaque` marks a page with an empty
-custom element, which may render a closed shadow root no snapshot holds. See
+custom element, which may render a closed shadow root no snapshot holds, or with a shown element
+a `::before` or `::after` rule gives text (`content` with a letter or digit, `attr()` or a
+counter). See
 [`page_text`](../task-specs.md#page_text-the-pages-text-contains-a-phrase).
 Text typed into `<input>` and
 `<textarea>` fields (and their default values) is left out, because the agent controls it: a
