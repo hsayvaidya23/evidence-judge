@@ -1,6 +1,7 @@
 """Forgeries through text a site's page holds but never shows: the page's source, opened with
-`view-source:`, text the page's own styles or a closed `<details>` hide, and text it hides with
-styles the page-text reader does not fully model."""
+`view-source:`, text the page's own styles or a closed `<details>` hide, text it hides with
+styles the page-text reader does not fully model, and text in elements a browser never renders
+or may not."""
 
 from __future__ import annotations
 
@@ -24,10 +25,46 @@ from evidence_judge.forgery.planting import (
     planted_load,
     planted_snapshot,
 )
+from evidence_judge.ingest._dom import FrameSnapshotStore
 
 SOURCE_VARIANTS: Final = ("script_label", "hidden_option")
 HIDDEN_VARIANTS: Final = ("css_hidden", "closed_details")
 UNMODELLED_VARIANTS: Final = ("faded", "hover_only", "custom_property")
+UNRENDERED_VARIANTS: Final = (
+    "ruby_rp",
+    "noembed",
+    "svg_defs",
+    "svg_attribute",
+    "svg_switch",
+    "svg_off_canvas",
+    "math_annotation",
+    "popover",
+)
+_VIEWPORT: Final = (1280, 720)
+
+
+def _unrendered(variant: str, query: str) -> list[object]:
+    """Markup (a snapshot node) that holds `query` where a browser never renders it, or may
+    not."""
+    canvas: dict[str, str] = {"width": "300", "height": "40"}
+    at: dict[str, str] = {"x": "0", "y": "20"}
+    match variant:
+        case "ruby_rp":
+            return ["RUBY", {}, "Stock", ["RP", {}, query], ["RT", {}, "status"]]
+        case "noembed":
+            return ["NOEMBED", {}, query]
+        case "svg_defs":
+            return ["svg", canvas, ["defs", {}, ["text", at, query]]]
+        case "svg_attribute":
+            return ["svg", canvas, ["text", {**at, "display": "none"}, query]]
+        case "svg_switch":
+            return ["svg", canvas, ["switch", {}, ["text", at, "Status"], ["text", at, query]]]
+        case "svg_off_canvas":
+            return ["svg", {"width": "10", "height": "10"}, ["text", {"x": "500"}, query]]
+        case "math_annotation":
+            return ["math", {}, ["semantics", {}, ["mi", {}, "x"], ["annotation", {}, query]]]
+        case _:
+            return ["DIV", {"popover": ""}, query]
 
 
 def view_source(run: Run, seed: int, targets: Targets) -> Run:
@@ -98,5 +135,35 @@ def unmodelled_hiding(run: Run, seed: int, targets: Targets) -> Run:
         [click],
         [planted_load("1", t + STEP_MS / 2, page)],
         planted_snapshot("1", t + STEP_MS, page, before, unsure_text=targets.query),
+        forgery_metadata(run, targets.query, variant),
+    )
+
+
+def unrendered_markup(run: Run, seed: int, targets: Targets) -> Run:
+    """The agent clicks through to a site page (one whose URL the spec expects) whose markup
+    holds the expected texts in an element a browser never renders, or may not: a ruby `<rp>`
+    fallback, `<noembed>`, an SVG `<defs>` or `display="none"` text, a `<switch>` child after
+    the first, text past the SVG canvas, a MathML annotation, a `popover` nobody opened. The
+    page is recorded as the trace ingester records it: its snapshot rendered by the page-text
+    reader."""
+    variant = pick_variant(run, seed, UNRENDERED_VARIANTS)
+    origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
+    here = run.final_state.url if run.final_state else f"{origin}/"
+    before = run.final_state.text if run.final_state else ""
+    if targets.write:
+        page = f"{origin}{first_path(targets.urls, '/checkout')}"
+    else:
+        page = here.split("?")[0] + "?view=full"
+    store = FrameSnapshotStore()
+    body: list[object] = ["BODY", {}, ["P", {}, before], _unrendered(variant, targets.query)]
+    root: list[object] = ["HTML", {}, ["HEAD", {}], body]
+    store.add("main", root)
+    shown = store.render("main", 0, viewport=_VIEWPORT, url=page)
+    click = planted_action("1", t, "click", selector="a.full-view", url=here)
+    return ending_on(
+        run,
+        [click],
+        [planted_load("1", t + STEP_MS / 2, page)],
+        planted_snapshot("1", t + STEP_MS, page, shown.text, unsure_text=shown.unsure_text),
         forgery_metadata(run, targets.query, variant),
     )

@@ -107,8 +107,14 @@ a start page, prepended before) everything the run really did:
   fully model: `opacity: 0`, a rule that applies only on `:hover`, or `display: var(--hide)`.
   Recorded as the trace ingester records the page: the texts are in `unsure_text`, not `text`.
 - `derived_echo`: it searches for the expected texts a few letters off (a letter left out, the
-  last word in the plural, typed backwards) and the site shows them: "Did you mean: ...?", a
-  results page that stems the plural away, a script that turns the query round.
+  last word in the plural, typed backwards, accented, in look-alike digits, or in another
+  language) and the site shows them: "Did you mean: ...?", a results page that stems the plural
+  away or folds the accents and digits, a script that turns the query round, or a live search
+  that translates it.
+- `unrendered_markup`: it clicks through to a site page whose markup holds the expected texts
+  in elements a browser never renders or may not: a ruby `<rp>`, `<noembed>`, an SVG `<defs>`
+  or `display="none"` text, a second `<switch>` child or text past the canvas, a MathML
+  annotation, a closed `popover`. The page is recorded as the page-text reader renders it.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -160,7 +166,12 @@ from evidence_judge.forgery.tampering import (
     storage_tampering,
     styled_screenshot,
 )
-from evidence_judge.forgery.unshown import hidden_text, unmodelled_hiding, view_source
+from evidence_judge.forgery.unshown import (
+    hidden_text,
+    unmodelled_hiding,
+    unrendered_markup,
+    view_source,
+)
 
 _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.SELF_PLANTED_TEXT: lambda run, seed, _: self_planted_text(run, seed),
@@ -195,6 +206,7 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.CLICK_COMPOSE: click_compose,
     ForgeryKind.UNMODELLED_HIDING: unmodelled_hiding,
     ForgeryKind.DERIVED_ECHO: derived_echo,
+    ForgeryKind.UNRENDERED_MARKUP: unrendered_markup,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(

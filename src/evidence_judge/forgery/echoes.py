@@ -37,7 +37,19 @@ BYPASS_VARIANTS: Final = ("maxlength", "markup", "upload", "send_keys")
 RESPONSE_VARIANTS: Final = ("search_api", "api_url", "contact_form")
 LINK_VARIANTS: Final = ("path_echo", "search_url", "confirmation_url")
 TRANSFORMED_VARIANTS: Final = ("did_you_mean", "slug_url")
-DERIVED_VARIANTS: Final = ("misspelt", "plural", "reversed")
+DERIVED_VARIANTS: Final = (
+    "misspelt",
+    "plural",
+    "reversed",
+    "accented",
+    "lookalike",
+    "translated",
+)
+_DIGITS_FOR: Final = str.maketrans("oieastOIEAST", "013457013457")
+_ACUTE: Final = chr(0x301)
+_DOTLESS_I: Final = chr(0x131)
+TRANSLATED_QUERY: Final = "disponible"
+"""What the agent types in another language in `derived_echo`'s "translated" variant."""
 
 
 def self_planted_text(run: Run, seed: int) -> Run:
@@ -253,12 +265,32 @@ def derived_echo(run: Run, seed: int, targets: Targets) -> Run:
     """The site shows the expected texts derived from a search the agent typed a few letters
     away from them: misspelt (a letter left out, "Did you mean: ...?"), with its last word in
     the plural that the results page stems away, or typed backwards and turned round by the
-    page's script."""
+    page's script; accented or written in look-alike digits ("1n 5t0ck") and folded back by
+    the results page; or in another language, which a live search on the page the agent is on
+    translates as it types."""
     variant = pick_variant(run, seed, DERIVED_VARIANTS)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"
     query = targets.query
-    if variant == "misspelt":
+    if variant == "translated":
+        before = run.final_state.text if run.final_state else ""
+        typing = planted_action(
+            "1", t, "fill", selector="#search", value=TRANSLATED_QUERY, url=here
+        )
+        return ending_on(
+            run,
+            [typing],
+            [],
+            planted_snapshot("1", t + STEP_MS, here, f"{before} Results for: {query}".strip()),
+            forgery_metadata(run, TRANSLATED_QUERY, variant),
+        )
+    if variant == "accented":
+        sent = "".join(_DOTLESS_I if c == "i" else c + _ACUTE if c.isalpha() else c for c in query)
+        text = f"Results for {query}"
+    elif variant == "lookalike":
+        sent = query.translate(_DIGITS_FOR)
+        text = f"Showing: {query}"
+    elif variant == "misspelt":
         at = max(range(len(query)), key=lambda i: (query[i].isalpha(), -abs(2 * i - len(query))))
         sent = query[:at] + query[at + 1 :] if len(query) > 1 else query
         text = f"No results for {sent}. Did you mean: {query}?"

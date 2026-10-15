@@ -54,6 +54,7 @@ from evidence_judge.forgery.unshown import (
     HIDDEN_VARIANTS,
     SOURCE_VARIANTS,
     UNMODELLED_VARIANTS,
+    UNRENDERED_VARIANTS,
 )
 
 RUNS = Path(__file__).parents[1] / "fixtures" / "runs"
@@ -88,6 +89,7 @@ NEW_KINDS = (
     ForgeryKind.CLICK_COMPOSE,
     ForgeryKind.UNMODELLED_HIDING,
     ForgeryKind.DERIVED_ECHO,
+    ForgeryKind.UNRENDERED_MARKUP,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -166,8 +168,8 @@ def test_planting_is_deterministic_and_keeps_the_recording(
     assert run.metadata["forgery"]["planted"]
 
 
-def _variants(kind: ForgeryKind, scenario: Scenario) -> set[str]:
-    return {_forged(scenario, kind, seed).metadata["forgery"]["variant"] for seed in range(4)}
+def _variants(kind: ForgeryKind, scenario: Scenario, seeds: int = 4) -> set[str]:
+    return {_forged(scenario, kind, seed).metadata["forgery"]["variant"] for seed in range(seeds)}
 
 
 def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
@@ -205,7 +207,10 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
         assert _variants(ForgeryKind.CLICK_COMPOSE, scenario) == set(CLICK_VARIANTS)
         assert _variants(ForgeryKind.MARKUP_ECHO, scenario) == set(MARKUP_VARIANTS)
         assert _variants(ForgeryKind.UNMODELLED_HIDING, scenario) == set(UNMODELLED_VARIANTS)
-        assert _variants(ForgeryKind.DERIVED_ECHO, scenario) == set(DERIVED_VARIANTS)
+        derived = _variants(ForgeryKind.DERIVED_ECHO, scenario, len(DERIVED_VARIANTS))
+        assert derived == set(DERIVED_VARIANTS)
+        unrendered = _variants(ForgeryKind.UNRENDERED_MARKUP, scenario, len(UNRENDERED_VARIANTS))
+        assert unrendered == set(UNRENDERED_VARIANTS)
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -399,6 +404,32 @@ def test_unmodelled_hiding_ends_on_a_page_that_may_hide_the_texts(
             assert run.actions[-1].name == "click"
 
 
+def test_unrendered_markup_ends_on_a_page_that_never_shows_the_texts(
+    scenarios: dict[str, Scenario],
+) -> None:
+    for name in ("null_agent", "read_unanswered"):
+        for seed in range(len(UNRENDERED_VARIANTS)):
+            run = _forged(scenarios[name], ForgeryKind.UNRENDERED_MARKUP, seed)
+            assert run.final_state is not None
+            planted = run.metadata["forgery"]["planted"]
+            assert planted.lower() not in run.final_state.text.lower()
+            assert run.actions[-1].name == "click"
+
+
+def test_derived_echo_variants_type_what_the_site_derives_the_texts_from(
+    scenarios: dict[str, Scenario],
+) -> None:
+    sent: dict[str, str] = {}
+    for seed in range(len(DERIVED_VARIANTS)):
+        run = _forged(scenarios["read_unanswered"], ForgeryKind.DERIVED_ECHO, seed)
+        assert run.final_state is not None
+        sent[run.metadata["forgery"]["variant"]] = run.metadata["forgery"]["planted"]
+        assert run.actions[-1].name in ("fill", "press")
+    assert sent["translated"] == "disponible"
+    assert any(c.isdigit() for c in sent["lookalike"])
+    assert not sent["accented"].isascii()
+
+
 def test_hidden_text_ends_on_a_page_without_the_texts(scenarios: dict[str, Scenario]) -> None:
     for name in ("null_agent", "read_unanswered"):
         for seed in range(2):
@@ -577,6 +608,10 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("loop", ForgeryKind.UNMODELLED_HIDING): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.DERIVED_ECHO): ("FFF", "FFF", "FFN"),
     ("forged_success", ForgeryKind.UNMODELLED_HIDING): ("FFF", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.UNRENDERED_MARKUP): ("FFF", "FFF", "FFF"),
+    ("read_unanswered", ForgeryKind.UNRENDERED_MARKUP): ("FFN", "FNN", "FNN"),
+    ("loop", ForgeryKind.UNRENDERED_MARKUP): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.UNRENDERED_MARKUP): ("FFN", "FFF", "FFF"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
