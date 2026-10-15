@@ -293,6 +293,17 @@ def test_invalid_spec_exit_3(
     assert "invalid task spec" in result.output
 
 
+def test_invalid_spec_names_line_and_column(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path
+) -> None:
+    install(monkeypatch, calls)
+    spec = tmp_path / "bad.yaml"
+    spec.write_text("id: x\ntask: t\nexpect:\n  - id: a\n    method: GETT\n", encoding="utf-8")
+    result = runner.invoke(app, ["judge", "--har", str(evidence), "--spec", str(spec)])
+    assert result.exit_code == ExitCode.USAGE
+    assert "expect.0.method (line 5, column 13)" in " ".join(result.output.split())
+
+
 def test_invalid_claims_exit_3(
     monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path
 ) -> None:

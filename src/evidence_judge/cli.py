@@ -6,10 +6,10 @@ import zipfile
 from collections.abc import Callable
 from enum import IntEnum, StrEnum
 from pathlib import Path
+from textwrap import indent
 from typing import Annotated, Any
 
 import typer
-import yaml
 from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
@@ -22,6 +22,7 @@ from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
+from evidence_judge.core.spec_errors import SpecError, load_yaml
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
 from evidence_judge.hooks.cli import hook_app
@@ -204,8 +205,10 @@ def _settings(llm: LLMChoice | None = None) -> Settings:
 
 def _load_spec(path: Path) -> TaskSpec:
     try:
-        return TaskSpec.load(path)
-    except (OSError, ValueError, yaml.YAMLError) as e:
+        return load_yaml(path.read_text(encoding="utf-8"), TaskSpec)
+    except SpecError as e:
+        raise CliError(f"invalid task spec {path}:\n{indent(str(e), '  ')}", ExitCode.USAGE) from e
+    except (OSError, ValueError) as e:
         raise CliError(f"invalid task spec {path}: {e}", ExitCode.USAGE) from e
 
 

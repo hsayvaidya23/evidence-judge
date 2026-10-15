@@ -196,6 +196,7 @@ def test_bad_spec_and_claims(tmp_path: Path) -> None:
         app, ["session", "judge", "--offline", "--claude-code", str(SUCCESS), "--spec", str(spec)]
     )
     assert result.exit_code == 3 and "invalid session spec" in result.output
+    assert "expect.0" in result.output and "(line 1, column" in result.output
     claims = tmp_path / "claims.json"
     claims.write_text('{"claims": [{"id": 1}]}')
     result = runner.invoke(
@@ -339,3 +340,15 @@ def test_cli_doc_lists_session_options() -> None:
             for opt in param.opts:
                 if opt.startswith("--"):
                     assert f"`{opt}" in doc, f"{opt} of session {name} missing from docs/cli.md"
+
+
+def test_a_string_rerun_command_gets_a_hint(tmp_path: Path) -> None:
+    spec = tmp_path / "spec.yaml"
+    spec.write_text("rerun:\n  command: pytest -q\n")
+    result = runner.invoke(app, ["session", "rerun", "--spec", str(spec)])
+    assert result.exit_code == 3
+    output = " ".join(result.output.split())
+    assert (
+        'rerun.command (line 2, column 12): command must be a list of arguments, e.g. ["pytest", "-q"]'
+        in output
+    )

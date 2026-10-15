@@ -6,16 +6,17 @@ import asyncio
 import json
 from enum import IntEnum
 from pathlib import Path
+from textwrap import indent
 from typing import Annotated, Any
 
 import typer
-import yaml
 from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 
 from evidence_judge import __version__
 from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.core.spec_errors import SpecError, load_yaml
 from evidence_judge.core.verdict import (
     Citation,
     ExpectationResult,
@@ -185,8 +186,10 @@ def _spec(path: Path | None) -> SessionSpec | None:
     if path is None:
         return None
     try:
-        return SessionSpec.load(path)
-    except (OSError, ValueError, yaml.YAMLError) as e:
+        return load_yaml(path.read_text(encoding="utf-8"), SessionSpec)
+    except SpecError as e:
+        raise _Error(f"invalid session spec {path}:\n{indent(str(e), '  ')}", _Exit.USAGE) from e
+    except (OSError, ValueError) as e:
         raise _Error(f"invalid session spec {path}: {e}", _Exit.USAGE) from e
 
 
