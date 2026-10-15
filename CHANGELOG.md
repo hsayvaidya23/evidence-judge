@@ -133,6 +133,10 @@ the names exported from `evidence_judge`) is defined under
 
 ### Fixed
 
+- `pytest -p no:randomly` (and `no:random_order`, `no:cov`, `no:sugar`, `no:xdist`, like
+  `no:cacheprovider` before) is a whole-suite run: these plugins only shuffle, measure, print or
+  spread the same tests. `-p no:warnings` is still a filter, since it drops
+  `filterwarnings = error`.
 - An honest session that adds a regression test and then runs `pytest tests/` passes. Runs
   selected by plain paths may now count the Python test functions (`def test_*`,
   `async def test_*`) the session's own recorded edits added since the earlier whole-suite run:

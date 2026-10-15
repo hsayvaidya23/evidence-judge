@@ -310,7 +310,9 @@ and the operators between segments (`&&`, `||`, `;`, `|`). The analysis records:
   `--deselect`, `--lf`, `-t`/`--testNamePattern`, `--testPathPattern`, `--onlyChanged`, `-run`,
   `-skip`, `-short`, a named `cargo test` filter or `--test`, a specific `go test` package
   instead of `./...`, `PYTEST_ADDOPTS`, config overrides (`-c`, `-o`, `--override-ini`, `-p`
-  except `-p no:cacheprovider`), and a runner variable changed for the run (`PYTHONPATH=.` and
+  except the switches that neither select nor decide: `-p no:cacheprovider`, `no:randomly`,
+  `no:random_order`, `no:cov`, `no:sugar` and `no:xdist`; `-p no:warnings` drops
+  `filterwarnings = error` and stays a filter), and a runner variable changed for the run (`PYTHONPATH=.` and
   `$PWD` excepted). A run selected only by plain paths records them (`test_paths`);
 - **directories**: the `cd`/`pushd` steps before the test run (`run_cds`) and the top-level
   ones that leave the shell elsewhere for later calls (`cd_targets`), `?` where only the shell

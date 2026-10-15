@@ -487,8 +487,18 @@ _PYTEST_FILTER_FLAGS: Final = {
     "--rootdir": "a different root (--rootdir)",
     "--confcutdir": "--confcutdir",
 }
-_HARMLESS_PLUGIN_SWITCHES: Final = (["no:cacheprovider"],)
-"""`-p` values that change no test's outcome: the cache plugin only stores --lf state."""
+_HARMLESS_PLUGIN_SWITCHES: Final = (
+    ["no:cacheprovider"],
+    ["no:randomly"],
+    ["no:random_order"],
+    ["no:cov"],
+    ["no:sugar"],
+    ["no:xdist"],
+)
+"""`-p` values that change no test's outcome or selection: the cache plugin only stores --lf
+state, randomly and random_order only shuffle, cov only measures, sugar only prints and xdist
+only spreads the same tests over workers. `no:warnings` is not one: it drops `filterwarnings =
+error`, which can turn failing tests into passing ones."""
 _PYTEST_FILTER_SWITCHES: Final = {
     "--lf": "--lf",
     "--last-failed": "--last-failed",
