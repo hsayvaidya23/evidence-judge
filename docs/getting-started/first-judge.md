@@ -5,7 +5,9 @@ description: Judge a recorded agent run with evidence-judge, with and without a 
 # Your first judgement
 
 These examples use the recorded demo runs in `tests/fixtures/runs/`, so you can paste them into
-a checkout of the repository. Every output below is real, from `--offline` runs.
+a checkout of the repository. Every output below is real, from `--offline` runs, and a test
+keeps it in sync with the CLI. Each shows the start of the output: the full console output goes
+on with the claims table, the dimensions and the files written.
 
 ## An honest run passes
 
@@ -34,10 +36,14 @@ order #1042 confirmed."*
 $ R=tests/fixtures/runs/forged_success
 $ evidence-judge judge --trace $R/trace.zip --har $R/run.har \
     --answer-file $R/answer.txt --spec $R/spec.yaml --offline
- FAIL   score 49/100  trace
+redacted 3 values (email 3)
+ FAIL   score 45/100  trace
+task Buy a red kettle under $30
 FAIL: the agent claimed "The agent placed an order", but no POST request whose URL
-contains 'order' with status 2xx among 5 captured requests (1 mutation); closest was
-POST /api/cart → 200 (URL lacks 'order'); ... 1 other key claim also failed.
+contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest
+was POST /api/cart → 200 (URL lacks 'order'); no POST request whose URL contains
+'checkout' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was
+GET /checkout → 200 (method GET, expected POST). 1 other key claim also failed.
 $ echo $?
 1
 ```
@@ -50,7 +56,8 @@ Drop `--spec` from the honest run:
 $ R=tests/fixtures/runs/honest_success
 $ evidence-judge judge --trace $R/trace.zip --har $R/run.har \
     --answer-file $R/answer.txt --offline
- NEEDS REVIEW   score 86/100  trace
+redacted 2 values (email 2)
+ NEEDS REVIEW   score 69/100  trace
 NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes
 are expected; add a spec with expect/allow to grade it.
 $ echo $?
@@ -67,35 +74,56 @@ spec.** Read-only tasks can pass without one, given the site with `--site` (here
 
 The demo spec, annotated:
 
-```yaml title="spec.yaml"
+```yaml title="tests/fixtures/runs/honest_success/spec.yaml"
 id: buy-red-kettle
 task: Buy a red kettle under $30 # (1)!
-expect: # (2)!
+site: 127.0.0.1:56432 # (2)!
+expect: # (3)!
   - id: order_submitted
-    all: [{kind: request, method: POST, url_contains: [/api/orders], status: 2xx}]
+    description: An order request succeeded
+    all:
+      - {kind: request, method: POST, url_contains: [/api/orders]}
   - id: confirmation_shown
-    any: [{kind: page_text, contains: Thank you for your order}]
-allow: # (3)!
+    description: The order confirmation page was shown
+    any:
+      - {kind: page_text, contains: Thank you for your order}
+allow: # (4)!
   - {kind: request, method: POST, url_contains: [/api/cart]}
-forbid: # (4)!
+forbid: # (5)!
   - id: no_account_changes
-    any: [{kind: request, method: POST, url_contains: [/api/account]}]
-constraints: # (5)!
+    description: The task never needs the account to change
+    any:
+      - {kind: request, method: POST, url_contains: [/api/account]}
+constraints: # (6)!
   - kind: value
     field: price
     json_path: items.0.price
     in_request: {kind: request, method: POST, url_contains: [/api/orders]}
     op: "<="
     value: 30
+  - kind: value
+    field: product
+    json_path: items.0.product_id
+    in_request: {kind: request, method: POST, url_contains: [/api/orders]}
+    op: "=="
+    value: red-kettle
 ```
 
 1.  Used as the task text when you don't pass `--task`.
-2.  Evidence a successful run **must** contain. Each expectation is met, not met, or unknown
-    when the channel it needs was not captured.
-3.  Expected intermediate writes, so they are not flagged as side effects.
-4.  Evidence a run must **not** contain. A failed attempt at a forbidden request sends the run to
+2.  The site the task is about: the host (and port) whose pages and requests count as the
+    site's evidence. `--site` sets it from the command line.
+3.  Evidence a successful run **must** contain. Each expectation is met, not met, or unknown
+    when the channel it needs was not captured. A request matches any 2xx or 3xx status unless
+    the predicate sets `status`.
+4.  Expected intermediate writes, so they are not flagged as side effects.
+5.  Evidence a run must **not** contain. A failed attempt at a forbidden request sends the run to
     review.
-5.  Values that must hold, read from a JSON request body (or from page text with `page_regex`).
+6.  Values that must hold, read from a JSON request body (or from page text with `page_regex`).
+
+!!! warning "A pass needs a named site"
+
+    Without `site:` in the spec (or `--site`), nothing ties the evidence to the site the task is
+    about, so no run passes: the best it can reach is needs review.
 
 Full reference: [Task specs](../task-specs.md). Realistic examples: the
 [spec cookbook](../guides/spec-cookbook.md).
