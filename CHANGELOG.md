@@ -139,6 +139,14 @@ the names exported from `evidence_judge`) is defined under
 - **A screenshot alone proves nothing in a run with agent input.** The vision check cannot tell
   the site's text from an echo of what the agent typed, so in such a run a screenshot supports an
   `expect` entry only beside a deterministic predicate, and never a claim on its own.
+- **Typing the evidence key by key, or through a URL, proves nothing.** Text typed with
+  `keyboard.down`/`up` is replayed like any other typing, text inside `contenteditable`
+  elements is never page evidence, and opening a `javascript:` or `vbscript:` URL counts as
+  running code in the page.
+- **An upload whose contents are not in the recording cuts page evidence.** After a file is
+  uploaded from disk or a stream, page text, screenshots, URLs and response bodies cannot prove
+  anything (the page may be showing the file); requests and their statuses still can.
+- Committed trace fixtures no longer carry the recording machine's paths.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
