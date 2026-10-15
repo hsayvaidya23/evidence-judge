@@ -204,6 +204,12 @@ class SessionSpec(BaseModel):
         default=False,
         description="Cap the run at needs review unless it comes from an evidence log",
     )
+    trusted_evidence_log: bool = Field(
+        default=False,
+        description="The evidence log, its key and head anchor were out of the agent's reach "
+        "(sandbox, container or another OS user); only then can a verified log be full tamper "
+        "evidence",
+    )
 
     @model_validator(mode="after")
     def _unique_ids(self) -> Self:

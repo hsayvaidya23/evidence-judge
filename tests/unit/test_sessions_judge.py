@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from evidence_judge.core.claims import ClaimKind
-from evidence_judge.core.verdict import Dimension, Outcome, Support, TamperLevel
+from evidence_judge.core.verdict import Dimension, Outcome, Support, TamperDetection, TamperLevel
 from evidence_judge.llm.base import LLMConfigError, LLMError
 from evidence_judge.llm.fake import FakeLLM
 from evidence_judge.redact import Redactor
@@ -192,11 +192,25 @@ async def test_incomplete_record_and_tamper_requirement() -> None:
     transcript = await SessionJudge().judge(session(*calls, answer=answer), required)
     assert transcript.outcome is Outcome.NEEDS_REVIEW
     log = session(*calls, answer=answer, evidence=EvidenceKind.EVIDENCE_LOG)
-    verdict = await SessionJudge().judge(log, required)
+    assert (await SessionJudge().judge(log, required)).outcome is Outcome.NEEDS_REVIEW
+    verified = log.model_copy(
+        update={"integrity": TamperDetection(level=TamperLevel.FULL, reason="verified")}
+    )
+    untrusted = await SessionJudge().judge(verified, required)
+    assert untrusted.outcome is Outcome.NEEDS_REVIEW
+    assert untrusted.tamper_detection is not None
+    assert "--trusted-log" in untrusted.tamper_detection.reason
+    trusted = SessionJudgeOptions(offline=True, require_tamper_evidence=True, trusted_log=True)
+    verdict = await SessionJudge().judge(verified, trusted)
     assert verdict.outcome is Outcome.PASS
     assert (
         verdict.tamper_detection is not None and verdict.tamper_detection.level is TamperLevel.FULL
     )
+    spec_trusted = SessionJudgeOptions(
+        offline=True,
+        spec=SessionSpec(require_tamper_evidence=True, trusted_evidence_log=True),
+    )
+    assert (await SessionJudge().judge(verified, spec_trusted)).outcome is Outcome.PASS
     stream = session(*calls, answer=answer, evidence=EvidenceKind.HARNESS_STREAM)
     assert (await SessionJudge().judge(stream, required)).outcome is Outcome.PASS
     spec_required = SessionJudgeOptions(

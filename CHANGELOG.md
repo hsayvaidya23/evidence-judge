@@ -351,6 +351,14 @@ the names exported from `evidence_judge`) is defined under
   The loader verifies the chain under the key and the end of the log against the anchor. A
   truncated or rewritten log is incomplete. Integrity is `full` only when the key and anchor
   both check out. An unkeyed, unanchored or unverifiable log is `partial`, with the reason.
+- **An evidence log is no longer `full` tamper evidence just because it parses.**
+  `session judge` reported every complete evidence log as `tamper_detection: full`. An agent
+  that runs unsandboxed as the same OS user can read the log key and sign a forged log, so a
+  log now counts as `full` only when two things hold. First, its HMAC chain and head anchor
+  verify. Second, the user asserts with `--trusted-log` (or the spec's
+  `trusted_evidence_log: true`) that the log, key and anchor were out of the agent's reach.
+  Otherwise the log is `partial`, with the reason, and `--require-tamper-evidence` caps it at
+  needs review. `--log-key` and `--log-anchor` override the default state-directory paths.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

@@ -49,9 +49,8 @@ def _log(tmp_path: Path) -> Path:
 
 
 def integrity(run: SessionRun) -> tuple[str, str]:
-    note = next(n for n in run.notes if n.startswith("log integrity: "))
-    level, reason = note.removeprefix("log integrity: ").split(": ", 1)
-    return level, reason
+    assert run.integrity is not None
+    return run.integrity.level.value, run.integrity.reason
 
 
 def _lines(path: Path) -> list[bytes]:

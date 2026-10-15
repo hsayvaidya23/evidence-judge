@@ -288,5 +288,6 @@ def load_evidence_log(
         ended_at=last_ts,
         events=events,
         complete=complete,
-        notes=[*notes, f"log integrity: {integrity.level.value}: {integrity.reason}"],
+        notes=notes,
+        integrity=integrity,
     )

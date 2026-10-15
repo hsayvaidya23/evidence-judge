@@ -15,6 +15,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from evidence_judge.core.verdict import TamperDetection
+
 
 class SessionSource(StrEnum):
     CLAUDE_CODE = "claude_code"
@@ -243,6 +245,11 @@ class SessionRun(BaseModel):
         "a broken hash chain)",
     )
     notes: list[str] = Field(default_factory=list[str], description="What ingest skipped and why")
+    integrity: TamperDetection | None = Field(
+        default=None,
+        description="What an evidence log's own HMAC chain and head anchor show; None for "
+        "other sources",
+    )
 
     def by_id(self, event_id: str) -> SessionEvent | None:
         return next((e for e in self.events if e.id == event_id), None)

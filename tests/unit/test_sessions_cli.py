@@ -12,6 +12,8 @@ from typer.testing import CliRunner
 import evidence_judge.llm.factory
 from evidence_judge.cli import app
 from evidence_judge.config import Settings
+from evidence_judge.hooks.record import append
+from evidence_judge.hooks.state import log_head_path
 from evidence_judge.llm.base import LLMConfigError, LLMError
 from evidence_judge.llm.fake import FakeLLM
 from evidence_judge.sessions.extract import SessionClaimExtraction
@@ -127,40 +129,34 @@ def test_require_tamper_evidence_and_evidence_log(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 2
-    log = tmp_path / "evidence.jsonl"
-    log.write_text(
-        json.dumps(
-            {
-                "v": 1,
-                "agent": "claude-code",
-                "ts": "2026-10-15T10:00:00Z",
-                "session_id": "s",
-                "tool": "Bash",
-                "input": {"command": "pytest -q"},
-                "exit_code": 0,
-                "stdout_sha256": None,
-                "stdout_excerpt": "3 passed in 0.01s",
-                "stderr_excerpt": "",
-                "cwd": "/work/toy",
-                "output_truncated": False,
-            }
-        )
-        + "\n"
-    )
-    result = runner.invoke(
-        app,
-        [
-            "session",
-            "judge",
-            "--offline",
-            "--evidence-log",
-            str(log),
-            "--claude-code",
-            str(SUCCESS),
-            "--require-tamper-evidence",
-        ],
-    )
+    entry: dict[str, object] = {
+        "v": 1,
+        "agent": "claude-code",
+        "ts": "2026-10-15T10:00:00Z",
+        "session_id": "s",
+        "tool": "Bash",
+        "input": {"command": "pytest -q"},
+        "exit_code": 0,
+        "stdout_sha256": None,
+        "stdout_excerpt": "3 passed in 0.01s",
+        "stderr_excerpt": "",
+        "cwd": "/work/toy",
+        "output_truncated": False,
+    }
+    plain = append(tmp_path / "plain", entry)
+    state = tmp_path / "state"
+    keyed = append(tmp_path / "keyed", entry, state)
+    base = ["session", "judge", "--offline", "--claude-code", str(SUCCESS)]
+    required = [*base, "--require-tamper-evidence"]
+    verified = ["--evidence-log", str(keyed), "--log-key", str(state / "log-key")]
+    verified += ["--log-anchor", str(log_head_path(state, "s"))]
+    assert runner.invoke(app, [*required, "--evidence-log", str(plain)]).exit_code == 2
+    assert runner.invoke(app, [*required, *verified]).exit_code == 2
+    result = runner.invoke(app, [*required, *verified, "--trusted-log"])
     assert result.exit_code == 0, result.output
+    unanchored = ["--evidence-log", str(keyed), "--log-anchor", str(tmp_path / "missing")]
+    unanchored += ["--log-key", str(state / "log-key"), "--trusted-log"]
+    assert runner.invoke(app, [*required, *unanchored]).exit_code == 3
 
 
 @pytest.mark.parametrize(
