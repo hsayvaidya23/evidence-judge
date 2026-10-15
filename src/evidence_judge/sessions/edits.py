@@ -121,6 +121,19 @@ def is_test_config(path: str) -> bool:
     return _TEST_CONFIG.search(path) is not None
 
 
+_TEST_DEFINITION: Final = re.compile(
+    r"\bdef test|\bclass Test|parametrize|\bparams\s*=|pytest_generate_tests|load_tests|>>>|"
+    r"\b(?:it|test|describe|specify|context)(?:\.each)?\s*[(`]|\bfunc (?:Test|Fuzz|Example)|"
+    r"#\[(?:tokio::)?test|@(?:Test|ParameterizedTest|TestFactory|TestTemplate)\b"
+)
+
+
+def adds_tests(added: list[str] | None) -> bool:
+    """The lines may define tests (a test function or class, a parametrize case, a doctest),
+    or the diff is unknown."""
+    return added is None or any(_TEST_DEFINITION.search(line) for line in added)
+
+
 def is_config_path(path: str) -> bool:
     """A file that can hold test configuration among other settings (pyproject.toml,
     package.json, ...); a shell write to one cannot be told apart from a test-config change."""

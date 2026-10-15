@@ -298,6 +298,7 @@ class EventBuilder:
                 by_user=call.by_user or bool(call.result.get("userModified")),
                 test_file=edits.is_test_path(rel),
                 test_findings=findings,
+                adds_tests=call.status is not CallStatus.DENIED and edits.adds_tests(added),
                 session_store=shell.SESSION_STORE.search(path) is not None,
                 **common,
             )

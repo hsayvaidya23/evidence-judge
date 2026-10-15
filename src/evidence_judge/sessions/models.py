@@ -141,6 +141,11 @@ class CommandAnalysis(BaseModel):
         description="Directories the command changes to before its test run, in order, as "
         "written (`?` for one only the shell knows)",
     )
+    test_paths: list[str] | None = Field(
+        default=None,
+        description="The files and directories a single test run selects when plain paths are "
+        "its only filters ([] for none); None when it filters any other way",
+    )
     cd_targets: list[str] = Field(
         default_factory=list[str],
         description="Directories the shell is left in for later commands (top-level `cd`, "
@@ -210,6 +215,11 @@ class FileEditEvent(_Event):
     test_findings: list[str] = Field(
         default_factory=list[str],
         description="Ways the edit weakens the test suite (skip markers, removed assertions, ...)",
+    )
+    adds_tests: bool = Field(
+        default=False,
+        description="The edit may add tests (a new test function, class or parametrize case), "
+        "or its diff is unknown",
     )
     session_store: bool = False
 

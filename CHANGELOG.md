@@ -359,6 +359,15 @@ the names exported from `evidence_judge`) is defined under
   shrunk by a change the judge cannot see (a new ignore rule, a deleted directory, an
   environment that skips tests) no longer passes as whole. `test_result` predicates take
   `min_tests` for a size the spec knows.
+- Session judge: honest whole-suite runs that were held for review now pass, without opening a
+  way to fake one. `pytest tests/` and `pytest tests pkg_b`, and per-package runs in separate
+  calls (`pytest tests`, then `cd pkg_b && pytest`), prove the whole suite when their paths do
+  not overlap and together they ran exactly as many tests as an earlier whole-suite run, with no
+  edit or command since that run that may have added a test (`CommandAnalysis.test_paths`,
+  `FileEditEvent.adds_tests`). A padded run (new tests standing in for left-out ones),
+  overlapping or repeated paths, node ids and `-k` still cannot. `PYTHONPATH=.` (or `$PWD`) and
+  `-p no:cacheprovider` no longer make a run a subset. Two test runs in one command
+  (`pytest tests && cd pkg_b && pytest`) still need review, since only the last summary is read.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

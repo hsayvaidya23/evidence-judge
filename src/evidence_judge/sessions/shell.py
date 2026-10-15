@@ -438,6 +438,8 @@ _PYTEST_FILTER_FLAGS: Final = {
     "--rootdir": "a different root (--rootdir)",
     "--confcutdir": "--confcutdir",
 }
+_HARMLESS_PLUGIN_SWITCHES: Final = (["no:cacheprovider"],)
+"""`-p` values that change no test's outcome: the cache plugin only stores --lf state."""
 _PYTEST_FILTER_SWITCHES: Final = {
     "--lf": "--lf",
     "--last-failed": "--last-failed",
@@ -681,6 +683,8 @@ class _Classified:
     its arguments."""
     opaque: str | None = None
     """Why the program may write files its command line does not name."""
+    paths: list[str] | None = None
+    """The paths a test run selects when plain paths are its only filters."""
     nested: CommandAnalysis | None = None
 
 
@@ -850,8 +854,14 @@ def _unwrap(words: list[str]) -> list[str]:
     return words
 
 
-def _pytest_filters(args: list[str], env: dict[str, str]) -> tuple[list[str], bool]:
+def _pytest_filters(
+    args: list[str], env: dict[str, str]
+) -> tuple[list[str], bool, list[str] | None]:
+    """(filters, collect only, paths): `paths` are the files and directories the run selects
+    when its only filters are plain paths, else None."""
     filters: list[str] = []
+    paths: list[str] = []
+    plain = True
     collect_only = False
     i = 0
     while i < len(args):
@@ -868,24 +878,36 @@ def _pytest_filters(args: list[str], env: dict[str, str]) -> tuple[list[str], bo
             "--setup-plan",
         ):
             collect_only = True
+        elif arg == "-p" and args[i + 1 : i + 2] in _HARMLESS_PLUGIN_SWITCHES:
+            i += 1
         elif arg.startswith("-") and not eq and arg in _PYTEST_FILTER_FLAGS:
             filters.append(_PYTEST_FILTER_FLAGS[arg])
+            plain = False
             i += 1
         elif eq and name in _PYTEST_FILTER_FLAGS:
             filters.append(_PYTEST_FILTER_FLAGS[name])
+            plain = False
         elif arg in _PYTEST_FILTER_SWITCHES:
             filters.append(_PYTEST_FILTER_SWITCHES[arg])
+            plain = False
+        elif [arg[2:]] in _HARMLESS_PLUGIN_SWITCHES and arg.startswith("-p"):
+            pass
         elif re.fullmatch(r"-k.+|-m.+|-p.+|-c.+|-o.+", arg):
             filters.append(_PYTEST_FILTER_FLAGS[arg[:2]])
+            plain = False
         elif arg.startswith("-"):
             if not eq and arg in _PYTEST_VALUE_FLAGS:
                 i += 1
-        elif arg not in (".", "./"):
-            filters.append(f"only {arg}")
+        else:
+            paths.append(arg)
+            plain = plain and "::" not in arg and not _unspelled(arg)
+            if arg not in (".", "./"):
+                filters.append(f"only {arg}")
         i += 1
     if "PYTEST_ADDOPTS" in env:
         filters.append("PYTEST_ADDOPTS")
-    return filters, collect_only
+        plain = False
+    return filters, collect_only, paths if plain else None
 
 
 def _unittest_filters(args: list[str]) -> tuple[list[str], bool]:
@@ -1235,8 +1257,8 @@ def _classify_program(
             return _Classified(category, prog, nested=nested)
         return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs a script")
     if prog in ("pytest", "py.test"):
-        filters, collect = _pytest_filters(args, env)
-        return _Classified(Category.TEST, prog, "pytest", filters, collect)
+        filters, collect, paths = _pytest_filters(args, env)
+        return _Classified(Category.TEST, prog, "pytest", filters, collect, paths=paths)
     if prog == "unittest":
         filters, collect = _unittest_filters(args)
         return _Classified(Category.TEST, prog, "unittest", filters, collect)
@@ -1579,11 +1601,14 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
     if simple.heredoc and result.category is Category.UNKNOWN:
         result.mutation = result.mutation or "feeds a heredoc to a program"
     if result.runner is not None:
-        result.filters.extend(
-            f"runs with {name} changed"
-            for name in simple.env
-            if is_harness_env(name) and name != "PYTEST_ADDOPTS"
-        )
+        changed = [
+            name
+            for name, value in simple.env.items()
+            if is_harness_env(name) and name != "PYTEST_ADDOPTS" and not _harmless_env(name, value)
+        ]
+        result.filters.extend(f"runs with {name} changed" for name in changed)
+        if changed:
+            result.paths = None
     named = result.touched
     if named is None:
         mutating = result.category is Category.MUTATING
@@ -1613,6 +1638,16 @@ _HARNESS_ENV_PREFIX: Final = re.compile(
 
 def is_harness_env(name: str) -> bool:
     return name in HARNESS_ENV or _HARNESS_ENV_PREFIX.match(name) is not None
+
+
+_PROJECT_DIR: Final = re.compile(
+    r"^(?:\.|\./|\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`)(?::\$\{?PYTHONPATH\}?)?$"
+)
+
+
+def _harmless_env(name: str, value: str) -> bool:
+    """`PYTHONPATH=.` (or `$PWD`) adds the directory `python -m pytest` already imports from."""
+    return name == "PYTHONPATH" and _PROJECT_DIR.match(value) is not None
 
 
 def _sources(simple: _Simple) -> str | None:
@@ -1652,10 +1687,17 @@ def _harness_change(pipelines: list[_Pipeline], command: str) -> str | None:
             if prog == "hash" and "-p" in words:
                 return "hash -p remaps a command"
             if prog in ("export", "declare", "typeset", "readonly", "set"):
-                names = [w.partition("=")[0] for w in words[1:] if "=" in w]
+                assignments = (w.partition("=") for w in words[1:] if "=" in w)
+                names = [n for n, _, v in assignments if not _harmless_env(n, v)]
                 if changed := [n for n in names if is_harness_env(n)]:
                     return f"{prog} {changed[0]}"
-            if not words and (changed := [n for n in simple.env if is_harness_env(n)]):
+            if not words and (
+                changed := [
+                    n
+                    for n, v in simple.env.items()
+                    if is_harness_env(n) and not _harmless_env(n, v)
+                ]
+            ):
                 return f"sets {changed[0]}"
             if why := _sources(simple):
                 return why
@@ -1708,6 +1750,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     opaque: str | None = None
     lasting: str | None = None
     cds: list[str] = []
+    test_paths: list[str] | None = None
     run_cds: list[str] = []
     persisting: list[str] = []
     mutating_at: list[tuple[int, int]] = []
@@ -1745,6 +1788,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 lasting = lasting or nested.lasting_mutation
                 if nested.runners:
                     run_cds = [*cds, *nested.run_cds]
+                    test_paths = nested.test_paths
                 if nested.runners or (classified.category in _CHECKS and not runners):
                     nested_after = nested.mutation_after_check
                     primary = (p_index, c_index)
@@ -1757,6 +1801,11 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 runners.append(classified.runner)
                 filters.extend(classified.filters)
                 run_cds = list(cds)
+                test_paths = (
+                    classified.paths
+                    if classified.paths is not None
+                    else ([] if not classified.filters else None)
+                )
                 collect_only = collect_only or classified.collect_only
                 primary = (p_index, c_index)
                 masked = None
@@ -1829,6 +1878,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         opaque_write=opaque,
         lasting_mutation=lasting,
         run_cds=run_cds,
+        test_paths=test_paths if len(runners) == 1 else None,
         cd_targets=persisting,
         mutation_after_check=mutation_after,
         session_store=SESSION_STORE.search(command) is not None,

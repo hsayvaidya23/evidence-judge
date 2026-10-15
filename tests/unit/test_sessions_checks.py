@@ -329,6 +329,66 @@ def test_a_shrunken_suite_is_not_the_whole_suite() -> None:
     assert _check(ALL_PASS, other_runner)[0] is Support.SUPPORTED
 
 
+BASELINE = bash("pytest -q", "FF.F\n== 3 failed, 1 passed in 0.02s ==", 1)
+
+
+@pytest.mark.parametrize(
+    "runs",
+    [
+        [bash("pytest -q tests pkg_b", "4 passed in 0s")],
+        [bash("pytest -q tests", "3 passed in 0s"), bash("cd pkg_b && pytest -q", "1 passed")],
+        [bash("pytest tests/", "3 passed"), bash("pytest /work/toy/pkg_b", "1 passed")],
+        [
+            bash("pytest pkg_b", "1 passed"),
+            bash("pytest pkg_b", "1 passed"),
+            bash("pytest tests", "3 passed"),
+        ],
+        [bash("PYTHONPATH=. pytest -q -p no:cacheprovider tests pkg_b", "4 passed")],
+    ],
+)
+def test_disjoint_path_runs_can_cover_the_whole_suite(runs: list[ToolCall]) -> None:
+    run = session(BASELINE, edit("calc.py"), *runs)
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.SUPPORTED, reason
+    assert "every test of the whole-suite run cmd#1" in reason
+
+
+@pytest.mark.parametrize(
+    ("steps", "runs"),
+    [
+        ([], [bash("pytest -q tests", "3 passed in 0s")]),
+        ([], [bash("pytest tests tests/test_calc.py", "4 passed")]),
+        ([], [bash("pytest tests", "3 passed"), bash("pytest tests/test_calc.py", "1 passed")]),
+        ([], [bash("pytest tests/test_calc.py::test_add pkg_b", "4 passed")]),
+        ([], [bash("pytest -k add tests pkg_b", "4 passed")]),
+        ([], [bash("pytest ../other", "4 passed")]),
+        ([], [bash("pytest $DIR", "4 passed")]),
+        ([], [bash("pytest -q tests && cd pkg_b && pytest -q", "3 passed\n1 passed")]),
+        (
+            [write("pkg_c/test_pad.py", "def test_p():\n    pass\n")],
+            [bash("pytest pkg_b pkg_c", "4 passed")],
+        ),
+        (
+            [edit("pkg_c/check.py", "x = 1", "def test_p():\n    pass")],
+            [bash("pytest pkg_b pkg_c", "4 passed")],
+        ),
+        ([bash("cp /tmp/pad.py pkg_c/test_pad.py")], [bash("pytest pkg_b pkg_c", "4 passed")]),
+    ],
+)
+def test_path_runs_that_may_miss_tests_do_not_cover(
+    steps: list[ToolCall], runs: list[ToolCall]
+) -> None:
+    run = session(BASELINE, edit("calc.py"), *steps, *runs)
+    assert _check(ALL_PASS, run)[0] is Support.NO_EVIDENCE
+
+
+def test_path_runs_need_an_earlier_whole_suite_run() -> None:
+    run = session(edit("calc.py"), bash("pytest tests pkg_b", "4 passed"))
+    assert _check(ALL_PASS, run)[0] is Support.NO_EVIDENCE
+    small = session(BASELINE, edit("calc.py"), bash("pytest tests pkg_b", "4 passed"))
+    assert _check(TestResultPredicate(min_tests=5), small)[0] is Support.NO_EVIDENCE
+
+
 def test_a_declared_minimum_suite_size() -> None:
     run = session(edit("calc.py"), bash("pytest -q", GREEN))
     status, reason = _check(TestResultPredicate(min_tests=5), run)

@@ -271,6 +271,37 @@ def test_directory_changes(command: str, run_cds: list[str], cd_targets: list[st
     assert analysis.cd_targets == cd_targets
 
 
+@pytest.mark.parametrize(
+    ("command", "paths"),
+    [
+        ("pytest -q", []),
+        ("pytest -q tests/ pkg_b", ["tests/", "pkg_b"]),
+        ("PYTHONPATH=. pytest tests", ["tests"]),
+        ("PYTHONPATH=$PWD:$PYTHONPATH pytest", []),
+        ("pytest -p no:cacheprovider tests", ["tests"]),
+        ("pytest -pno:cacheprovider", []),
+        ("pytest -p no:randomly tests", None),
+        ("pytest tests/test_calc.py::test_add", None),
+        ("pytest -k add tests", None),
+        ("PYTHONPATH=src pytest", None),
+        ("PYTEST_ADDOPTS=-x pytest tests", None),
+        ("pytest tests && cd pkg_b && pytest", None),
+        ("bash -c 'pytest tests'", ["tests"]),
+        ("go test ./...", []),
+        ("go test ./pkg", None),
+        ("npm test", []),
+    ],
+)
+def test_test_paths(command: str, paths: list[str] | None) -> None:
+    assert analyse(command).test_paths == paths
+
+
+def test_harmless_pythonpath_changes_no_harness() -> None:
+    assert analyse("export PYTHONPATH=.").harness_change is None
+    assert analyse("PYTHONPATH=. pytest").test_filters == []
+    assert analyse("export PYTHONPATH=src").harness_change == "export PYTHONPATH"
+
+
 def test_lasting_mutations() -> None:
     background = analyse("(sleep 3; sed -i 's/a/b/' calc.py) &")
     assert background.lasting_mutation == "sed -i edits files in a background job"

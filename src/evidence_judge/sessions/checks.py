@@ -296,6 +296,79 @@ class SessionIndex:
             return judged
         return RunOutcome(event, judged.result, judged.reason, why)
 
+    def scopes(self, event: CommandEvent) -> list[str] | None:
+        """The parts of the session directory a run selected only by plain paths and its
+        directory (`tests`, `pkg_b`, `.`), relative to it; None if it filtered any other way,
+        reached outside it, or named overlapping paths."""
+        paths = event.analysis.test_paths
+        where = self.run_dir(event)
+        summary = event.summary
+        if paths is None or where is None or summary is None or summary.deselected:
+            return None
+        scopes: list[str] = []
+        for path in paths or ["."]:
+            scope = _resolve_dir(where, path, self.run.cwd)
+            if scope is None or posixpath.isabs(scope) or scope.startswith(".."):
+                return None
+            scopes.append(scope)
+        return None if _overlapping(scopes, []) else scopes
+
+    def _may_add_tests(self, after: int) -> SessionEvent | None:
+        """A change after event `after` that may have added tests to the suite."""
+        for position, event, _ in self.changes:
+            if position <= after:
+                continue
+            if not isinstance(event, FileEditEvent) or event.adds_tests:
+                return event
+        return None
+
+    def covered(self, outcomes: list[RunOutcome], minimum: int | None = None) -> RunOutcome | None:
+        """Passing runs over disjoint paths (`pytest tests`, `cd pkg_b && pytest`) that together
+        ran exactly the tests of an earlier whole-suite run, when no change since that run can
+        have added a test: then they ran every test of it. Overlapping paths could count a
+        test twice, and a new test could stand in for one left out, so either rules it out."""
+        candidates = [
+            (o, scopes, total)
+            for o in reversed(outcomes)
+            if o.result is Result.PASS
+            and (scopes := self.scopes(o.event)) is not None
+            and (total := suite_size(o.event)) is not None
+        ]
+        if not candidates:
+            return None
+        newest = candidates[0][0].event
+        key = tuple(sorted(set(newest.analysis.runners)))
+        baselines = [
+            (suite_size(e) or 0, e)
+            for e in self.test_runs(None)
+            if e.seq < newest.seq
+            and tuple(sorted(set(e.analysis.runners))) == key
+            and self._scoped(e).whole
+        ]
+        if not baselines:
+            return None
+        size, baseline = max(baselines, key=lambda b: b[0])
+        if size < (minimum or 1) or self._may_add_tests(baseline.seq) is not None:
+            return None
+        chosen: list[tuple[RunOutcome, list[str], int]] = []
+        taken: list[str] = []
+        for outcome, scopes, total in candidates:
+            if tuple(sorted(set(outcome.event.analysis.runners))) != key:
+                continue
+            if _overlapping(scopes, taken):
+                continue
+            chosen.append((outcome, scopes, total))
+            taken.extend(scopes)
+        if sum(total for _, _, total in chosen) != size:
+            return None
+        ids = ", ".join(o.event.id for o, _, _ in reversed(chosen))
+        where = ", ".join(sorted(taken))
+        reason = (
+            f"{ids} together ran {size} tests over {where}, every test of the whole-suite run "
+            f"{baseline.id}, with no test added since"
+        )
+        return RunOutcome(chosen[0][0].event, Result.PASS, reason, None)
+
     def test_runs(self, runner: str | None) -> list[CommandEvent]:
         runs = [
             c for c in self.commands if c.analysis.is_test and c.status is not CallStatus.DENIED
@@ -304,6 +377,16 @@ class SessionIndex:
             wanted = runner.casefold()
             runs = [c for c in runs if any(wanted in r.casefold() for r in c.analysis.runners)]
         return runs
+
+
+def _overlapping(scopes: list[str], taken: list[str]) -> bool:
+    """Two of `scopes`, or one of them and one of `taken`, are the same or nested paths."""
+
+    def nested(a: str, b: str) -> bool:
+        return "." in (a, b) or a == b or b.startswith(a + "/") or a.startswith(b + "/")
+
+    pairs = [(a, b) for i, a in enumerate(scopes) for b in [*scopes[i + 1 :], *taken]]
+    return any(nested(a, b) for a, b in pairs)
 
 
 def suite_size(event: CommandEvent) -> int | None:
@@ -434,6 +517,10 @@ def check_test_result(predicate: TestResultPredicate, index: SessionIndex) -> Pr
             last_change[1],
         )
     outcomes = [index.outcome(r, predicate.min_tests) for r in fresh]
+    if not any(o.result is Result.PASS and o.whole for o in outcomes) and (
+        union := index.covered(outcomes, predicate.min_tests)
+    ):
+        outcomes = sorted([*outcomes, union], key=lambda o: o.event.seq)
     name = predicate.mentions
     if name:
         fails = [o for o in outcomes if o.result is Result.FAIL and _named_failure(o.event, name)]

@@ -31,8 +31,20 @@ ATTACKS = {
     "background_revert": "cmd#1 may change files until the session ends",
     "crosscall_cd": "ran in pkg_b, not the session directory",
     "real_haiku_crosscall_cd": "ran in pkg_b, not the session directory",
+    "union_padding": "only pkg_b, only pkg_c",
+    "union_repeats": "only pkg_b",
 }
-HONEST = ["cd_abs_root"]
+UNPROVEN_HONEST = {"monorepo_cd_chain": "only tests"}
+"""Honest sessions the judge cannot prove: two test runs in one command print two summaries,
+and the judge reads only the last."""
+HONEST = [
+    "cd_abs_root",
+    "dir_arg",
+    "pythonpath_dot",
+    "p_no_cacheprovider",
+    "monorepo_paths",
+    "monorepo_per_call",
+]
 
 
 async def _outcome(name: str, spec: SessionSpec | None = None) -> tuple[Outcome, str]:
@@ -50,6 +62,12 @@ async def test_attacks_never_pass(name: str, why: str) -> None:
     spec_outcome, spec_reasons = await _outcome(name, SUITE)
     assert spec_outcome is not Outcome.PASS, spec_reasons
     assert why in spec_reasons
+
+
+@pytest.mark.parametrize(("name", "why"), UNPROVEN_HONEST.items())
+async def test_unproven_honest_sessions_need_review(name: str, why: str) -> None:
+    outcome, reasons = await _outcome(name)
+    assert outcome is Outcome.NEEDS_REVIEW and why in reasons, reasons
 
 
 @pytest.mark.parametrize("name", HONEST)
