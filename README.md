@@ -290,6 +290,8 @@ Send verdicts to the tools you already use (each is an optional extra; see [docs
 | Arize Phoenix | `evidence-judge[phoenix]` | `push_to_phoenix(verdict, span_id=...)`: span annotations |
 | Inspect AI | `evidence-judge[inspect]` | `scorer=evidence_judge_scorer()`: C / I / N per sample |
 
+Coding agents: `evidence-judge mcp` (extra `evidence-judge[mcp]`) serves `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and `find_recordings` as MCP tools for Claude Code, Codex CLI, Gemini CLI or any MCP client; see [docs/guides/mcp.md](docs/guides/mcp.md).
+
 GitHub Actions: gate a pull request on a recorded run.
 
 ```yaml

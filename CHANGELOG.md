@@ -54,6 +54,14 @@ the names exported from `evidence_judge`) is defined under
   and honest-edit controls with false REVIEW/FAIL rates.
 - Documentation site: getting started, concepts, a spec cookbook (payment providers, settings
   changes, telemetry), CI, Docker, benchmarking and recording guides, and reference pages.
+- `evidence-judge mcp`: an MCP server (the `mcp` extra) with `judge_run`, `inspect_run`,
+  `explain_verdict`, `validate_spec` and `find_recordings` tools, each with typed input and
+  output schemas, for Claude Code, Codex CLI, Gemini CLI and any MCP client. Stdio by default,
+  streamable HTTP on `127.0.0.1` with `--http`. Files are read and written only inside the
+  `--root` directories (symlinks resolved), judging is offline unless a call asks for a model
+  the server has (`--offline-only` refuses it), and redaction follows `EVJ_REDACT`.
+  `validate_spec` reports each spec error with its line, and `find_recordings` also lists the
+  unzipped traces Playwright MCP writes.
 
 - Every verdict says how much tampering its source could reveal (`tamper_detection`: `full`
   for a Playwright trace, `partial` for a browser-use history, `none` for a HAR alone) and warns

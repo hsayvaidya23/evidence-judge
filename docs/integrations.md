@@ -9,8 +9,11 @@ pip install "evidence-judge[otel]"       # OpenTelemetry API + SDK
 pip install "evidence-judge[langfuse]"   # Langfuse Python SDK
 pip install "evidence-judge[phoenix]"    # arize-phoenix-client (no pandas needed)
 pip install "evidence-judge[inspect]"    # Inspect AI
-pip install "evidence-judge[all]"        # all of the above plus anthropic
+pip install "evidence-judge[all]"        # all of the above plus anthropic and mcp
 ```
+
+To let a coding agent call Evidence Judge as tools, see the [MCP server](guides/mcp.md) guide
+(`evidence-judge[mcp]`).
 
 Using an integration without its extra raises `MissingExtraError` (an `ImportError`) naming the
 extra to install. In the CLI the same problem exits with code 3 before anything is judged.
