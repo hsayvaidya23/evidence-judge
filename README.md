@@ -162,11 +162,12 @@ context.tracing.start(screenshots=True, snapshots=True)
 context.tracing.stop(path="trace.zip")
 ```
 
-2. Describe what success must look like. Optional for read-only tasks, but **required for any
-   task that changes state**: without a spec every state-changing request counts as an
-   unexplained side effect, so the run can at best get `NEEDS_REVIEW`, never `PASS`. Every
-   spec, read-only or not, needs `site` (or `--site`) to `PASS`: otherwise the site is inferred
-   from the first page the agent opened, which the agent chooses.
+2. Name the site and describe what success must look like. **Every run needs a named site to
+   `PASS`**: `site` in a spec, or `--site` without one (a host and, unless it is 80/443, its
+   port). Otherwise the site is inferred from the first page the agent opened, which the agent
+   chooses, so the run gets `NEEDS_REVIEW` at best. A spec is optional for read-only tasks but
+   **required for any task that changes state**: without one every state-changing request
+   counts as an unexplained side effect.
 
 ```yaml
 # spec.yaml
