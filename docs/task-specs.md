@@ -46,9 +46,10 @@ site the run was about. Name it with `site` (a URL or host name, checked when th
 `allowed_hosts`, each with its subdomains and a leading `www.` ignored. With neither, the site is
 inferred from the run's first page: the initial page state, else the first page the agent
 opened. The agent chooses that page, so an agent that opens `https://evil.test/` first and
-posts its "order" to `https://evil.test/api/orders` would prove its own task. A spec whose
-`expect` entries need a state-changing request (`POST`, `PUT`, `PATCH`, `DELETE`) therefore
-never passes on an inferred site: a run that would pass gets
+posts its "order" to `https://evil.test/api/orders` would prove its own task, and one that reads
+its answer off a page on `https://evil.test/` would prove a read-only task. A spec therefore
+never passes on an inferred site, whether its task writes or only reads: a run that would pass
+gets
 
 ```
 NEEDS_REVIEW: the site host (shop.example.com) was inferred from the run's first page, which the
@@ -56,18 +57,23 @@ agent may have chosen; set `site` in the task spec (or pass --site) so evidence 
 host cannot prove the task.
 ```
 
-Read-only specs and runs judged without a spec are not downgraded; set `site` for them too when
-the agent picks its own start page.
+Every spec needs `site` (or `allowed_hosts`, or `--site`) to pass. A run judged without a spec
+infers its site the same way; if its pages and page loads span more than one site (hosts that
+are neither equal nor subdomains of each other, `www.` ignored), a run that would pass gets
+`NEEDS_REVIEW: the run visited several sites (shop.example.com, evil.test); which one is the
+site is ambiguous; pass --site.` A spec-less run that stays on one site is unaffected.
 
-- With `allowed_hosts` set, request, page text, URL and value predicates only match requests
-  and page states on the site's hosts (`site` and `allowed_hosts`) or their subdomains.
-- Without it, a mutation (POST, PUT, PATCH, DELETE) and every page state (page text, URLs,
+- With `site` or `allowed_hosts` set, request, page text, URL and value predicates only match
+  requests and page states on the site's hosts (`site` and `allowed_hosts`) or their
+  subdomains: a `GET` to another host proves nothing either.
+- With the site inferred, a mutation (POST, PUT, PATCH, DELETE) and every page state (page text, URLs,
   values read with `page_regex`) must be on a site host (`site`, else the inferred host) or a
   subdomain of it. A POST to a third party
   (`https://httpbin.org/anything/order`) cannot prove "order placed", and it is reported as a
   side effect; a confirmation shown on another host (a gist or paste page the agent opened)
   cannot prove it either: a `final`-scope predicate on such a final page is `no_evidence`, and
-  an `any`-scope one skips such pages. Other reads (a `GET` request) on any host still count.
+  an `any`-scope one skips such pages. Other reads (a `GET` request) on any host still count
+  until the site is named.
   If the site posts to a sibling host (`api.example.com` from `shop.example.com`), list both in
   `allowed_hosts`.
 - A request that meets every criterion except the host is `no_evidence`, never a contradiction:

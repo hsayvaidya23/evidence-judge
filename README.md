@@ -131,7 +131,9 @@ context.tracing.stop(path="trace.zip")
 
 2. Describe what success must look like. Optional for read-only tasks, but **required for any
    task that changes state**: without a spec every state-changing request counts as an
-   unexplained side effect, so the run can at best get `NEEDS_REVIEW`, never `PASS`.
+   unexplained side effect, so the run can at best get `NEEDS_REVIEW`, never `PASS`. Every
+   spec, read-only or not, needs `site` (or `--site`) to `PASS`: otherwise the site is inferred
+   from the first page the agent opened, which the agent chooses.
 
 ```yaml
 # spec.yaml

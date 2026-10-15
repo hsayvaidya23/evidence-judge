@@ -52,7 +52,7 @@ At least one of `--trace`, `--har` or `--browser-use` is required.
 | Option | Description |
 | --- | --- |
 | `--spec FILE` | Task spec YAML ([reference](task-specs.md)). Without a spec, any state-changing request is a side effect that sends the run to review, so a write task (ordering, booking, submitting) can only PASS with a spec that expects or allows its requests |
-| `--site URL` | The site the task is on, as a URL or host name (`https://shop.example.com`, `shop.example.com`); overrides the spec's `site`. Only evidence from this host, its subdomains and the spec's `allowed_hosts` can prove a claim or an `expect` entry. Without `site` or `allowed_hosts` the site is inferred from the run's first page, which the agent may have chosen, so a spec that expects a state-changing request gets `NEEDS_REVIEW` instead of `PASS` |
+| `--site URL` | The site the task is on, as a URL or host name (`https://shop.example.com`, `shop.example.com`); overrides the spec's `site`. Only evidence from this host, its subdomains and the spec's `allowed_hosts` can prove a claim or an `expect` entry. With `site` named, a request to another host proves nothing. Without `site` or `allowed_hosts` the site is inferred from the run's first page, which the agent may have chosen, so a run judged with any spec gets `NEEDS_REVIEW` instead of `PASS`, and so does a run judged without a spec whose pages span several sites |
 
 ### Output and behaviour
 

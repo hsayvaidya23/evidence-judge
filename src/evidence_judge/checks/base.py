@@ -22,7 +22,8 @@ class EvidenceScope:
     the run's primary host, inferred from the first page the run was on (`inferred`). Mutations
     and page states must be on a site host or a subdomain of it (a leading 'www.' is ignored),
     so a POST to a third party cannot prove "order placed" and neither can a confirmation page
-    on another host. Other reads count on any host unless `allowed_hosts` is set. Only http and
+    on another host. Other requests count on any host only while the site is inferred; once
+    `site` or `allowed_hosts` names it, a request off the site proves nothing. Only http and
     https page states count: data:, about:, view-source:, file:, browser-internal and extension
     pages never do.
     """
@@ -57,7 +58,7 @@ class EvidenceScope:
         return f"{label} ({', '.join(self.site_hosts)})"
 
     def request_allowed(self, event: NetworkEvent) -> bool:
-        if not (event.is_mutation or self.allowed_hosts):
+        if not (event.is_mutation or not self.inferred):
             return True
         hosts = self.site_hosts
         return not hosts or host_allowed(url_host(event.url), hosts)

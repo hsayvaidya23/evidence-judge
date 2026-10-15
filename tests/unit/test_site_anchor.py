@@ -23,12 +23,10 @@ from evidence_judge.engine import Judge, JudgeOptions
 from tests.unit.conftest import (
     CONFIRMATION_TEXT,
     act,
-    final,
     honest_run,
     make_run,
     net,
     shop_spec,
-    snap,
 )
 
 EVIL = "https://evil.test"
@@ -120,23 +118,81 @@ async def test_honest_write_run_needs_a_site_to_pass() -> None:
     )
 
 
-async def test_read_only_spec_does_not_need_a_site() -> None:
-    spec = TaskSpec.model_validate(
+def _read_spec(site: str | None) -> TaskSpec:
+    return TaskSpec.model_validate(
         {
             "id": "r",
-            "task": "Find order A1",
+            "task": "Find the red kettle's price",
+            "site": site,
             "expect": [
                 {"id": "shown", "any": [{"kind": "page_text", "contains": "Red Kettle $24"}]}
             ],
         }
     )
-    run = make_run(
-        actions=[act(1, "goto", url="https://shop.test/"), act(2, "click", "#product-red-kettle")],
-        network=[net(1, "GET", "/"), net(3, "GET", "/p/red-kettle")],
-        snapshots=[snap(1, "/", "Kettles")],
-        final_state=final("/p/red-kettle", "Red Kettle $24.00 Add to cart"),
+
+
+def _read_run(host: str = "https://shop.test") -> Run:
+    return make_run(
+        actions=[act(1, "goto", url=f"{host}/"), act(2, "click", "#product-red-kettle")],
+        network=[net(1, "GET", "/", host=host), net(3, "GET", "/p/red-kettle", host=host)],
+        snapshots=[PageSnapshot(id="snap#1", ts=160, url=f"{host}/", text="Kettles")],
+        final_state=PageState(url=f"{host}/p/red-kettle", text="Red Kettle $24.00 Add to cart"),
     )
-    verdict = await _judge(run, spec)
+
+
+async def test_read_only_spec_needs_a_site_to_pass() -> None:
+    unanchored = await _judge(_read_run(), _read_spec(None))
+    assert unanchored.outcome is Outcome.NEEDS_REVIEW
+    assert unanchored.summary == UNANCHORED.format(host="shop.test")
+    assert all(e.met is True for e in unanchored.expectations)
+    assert (await _judge(_read_run(), _read_spec("shop.test"))).outcome is Outcome.PASS
+    assert (await _judge(_read_run(), _read_spec(None), site="shop.test")).outcome is Outcome.PASS
+
+
+async def test_read_answered_on_the_agents_own_host_does_not_pass() -> None:
+    run = _read_run(EVIL)
+    assert (await _judge(run, _read_spec(None))).outcome is Outcome.NEEDS_REVIEW
+    named = await _judge(run, _read_spec("shop.test"))
+    assert named.outcome is not Outcome.PASS
+    assert named.expectations[0].met is not True
+
+
+def _lookup_run(answer_host: str, start_host: str = "https://shop.test") -> Run:
+    """Opens the start page, then reads order A77's status on `answer_host`."""
+    return make_run(
+        actions=[
+            act(1, "goto", url=f"{start_host}/"),
+            act(2, "click", "#orders", url=f"{start_host}/"),
+        ],
+        network=[
+            net(1, "GET", "/", host=start_host),
+            net(3, "GET", "/orders/A77", host=answer_host, response="Order A77 has shipped"),
+        ],
+        snapshots=[PageSnapshot(id="snap#1", ts=160, url=f"{start_host}/", text="Welcome")],
+        final_state=PageState(url=f"{answer_host}/orders/A77", text="Order A77 has shipped"),
+    ).model_copy(update={"agent_answer": "Order A77 has shipped."})
+
+
+async def test_no_spec_run_on_one_site_can_pass() -> None:
+    verdict = await _judge(_lookup_run("https://shop.test"), None)
+    assert verdict.outcome is Outcome.PASS, verdict.summary
+
+
+async def test_no_spec_run_on_several_sites_needs_a_site_to_pass() -> None:
+    verdict = await _judge(_lookup_run("https://evil.test"), None)
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert verdict.summary == (
+        "NEEDS_REVIEW: the run visited several sites (shop.test, evil.test); which one is the "
+        "site is ambiguous; pass --site."
+    )
+    anchored = await _judge(_lookup_run("https://evil.test"), None, site="shop.test")
+    assert anchored.outcome is not Outcome.PASS
+    assert "several sites" not in anchored.summary
+
+
+@pytest.mark.parametrize("answer_host", ["https://www.shop.test", "https://api.shop.test"])
+async def test_subdomains_and_www_are_one_site(answer_host: str) -> None:
+    verdict = await _judge(_lookup_run(answer_host), None)
     assert verdict.outcome is Outcome.PASS, verdict.summary
 
 
