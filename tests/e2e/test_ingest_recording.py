@@ -107,7 +107,9 @@ def test_form_actions_and_snapshot_decoding(tmp_path: Path) -> None:
         ("uncheck", "#gift", None),
         ("upload", "#file", "receipt.txt"),
         ("hover", "#hover-me", None),
+        ("inject", None, "evaluate(console.warn('careful'))"),
     ]
+    assert [n.synthetic for n in run.network] == [True]
     assert [(c.level, c.text) for c in run.console] == [("warning", "careful")]
     final = run.final_state
     assert final is not None
@@ -157,3 +159,4 @@ def test_final_state_stays_on_the_main_tab(tmp_path: Path) -> None:
     final = run.final_state
     assert final is not None
     assert (final.url, final.text) == ("https://shop.test/cart", "Order #1042 pending")
+

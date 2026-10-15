@@ -305,3 +305,13 @@ def test_non_finite_status_is_dropped(tmp_path: Path, raw: str) -> None:
     assert '"status": 200' in text
     har.write_text(text.replace('"status": 200', f'"status": {raw}'))
     assert load_har(har).network[0].status is None
+
+
+def test_fulfilled_entry_is_synthetic(tmp_path: Path) -> None:
+    har = write_har(
+        tmp_path / "run.har", entry(), entry(url="https://shop.test/api", _wasFulfilled=True)
+    )
+
+    run = load_har(har)
+
+    assert [n.synthetic for n in run.network] == [False, True]

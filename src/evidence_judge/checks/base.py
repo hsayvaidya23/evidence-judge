@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import weakref
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -9,6 +10,7 @@ from typing import Protocol
 from evidence_judge.core.evidence import NetworkEvent, is_web_page_url
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import Predicate
+from evidence_judge.core.provenance import untampered
 from evidence_judge.core.site import Site, on_any
 from evidence_judge.core.verdict import PredicateResult, Usage
 from evidence_judge.llm.base import LLMClient
@@ -67,6 +69,17 @@ def _page_allowed(url: str, sites: tuple[Site, ...]) -> bool:
     return not sites or on_any(url, sites)
 
 
+_UNTAMPERED: weakref.WeakKeyDictionary[EvidenceIndex, EvidenceIndex] = weakref.WeakKeyDictionary()
+
+
+def _untampered_index(index: EvidenceIndex) -> EvidenceIndex:
+    cached = _UNTAMPERED.get(index)
+    if cached is None:
+        run = untampered(index.run)
+        cached = _UNTAMPERED[index] = index if run is index.run else EvidenceIndex(run)
+    return cached
+
+
 @dataclass(slots=True)
 class CheckContext:
     index: EvidenceIndex
@@ -82,6 +95,12 @@ class CheckContext:
     def at_start(self) -> CheckContext:
         """The same context over the evidence before the agent acted (EvidenceIndex.baseline)."""
         return dataclasses.replace(self, index=self.index.baseline, llm=None)
+
+    def untampered(self) -> CheckContext:
+        """The same context over the evidence the site alone made (core.provenance.untampered),
+        without an LLM; itself when the agent injected and mocked nothing."""
+        index = _untampered_index(self.index)
+        return self if index is self.index else dataclasses.replace(self, index=index, llm=None)
 
     def without_agent_input(self, *, short_words: bool = False) -> CheckContext:
         """The same context over the evidence with the agent's own input masked out; with

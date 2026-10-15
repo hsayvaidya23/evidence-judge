@@ -1,0 +1,141 @@
+"""Evidence the agent made rather than the site: code it ran in the page, responses its own route
+handler supplied, and links on pages it wrote itself.
+
+An agent that runs `page.evaluate("document.querySelector('#stock').textContent = 'In stock'")`
+or answers the shop's API with `route.fulfill` records a page or a response that looks like the
+site's. Ingesters record the first as an INJECT action and the second as a `synthetic` network
+event; from the first of them on (`tainted_at`), no page state, response or request is the
+site's alone, so `untampered` cuts the evidence there and `tampering` says why.
+
+A page the agent opened that no site served (data:, blob:, about:, javascript:, file: ...) holds
+whatever the agent wrote into it, links included, so following one of its links is the agent
+choosing the URL. `mark_agent_page_navigations` records such a navigation as a GOTO of its
+target, which makes the target's URL agent input like any URL the agent typed.
+"""
+
+from __future__ import annotations
+
+from typing import Final
+
+from evidence_judge.core.actions import GOTO, INJECT, canonical_action
+from evidence_judge.core.evidence import ActionEvent, Run, is_web_page_url
+
+MAX_NAMED: Final = 2
+"""Injected calls and synthetic requests named in `tampering`'s reason."""
+NAVIGATION_SUFFIX: Final = ".goto"
+"""Suffix of the id of a GOTO that `mark_agent_page_navigations` adds after an action."""
+
+
+def injections(run: Run) -> list[ActionEvent]:
+    """The actions that ran the agent's code in the page or replaced its content."""
+    return [a for a in run.actions if canonical_action(a.name) == INJECT]
+
+
+def tainted_at(run: Run) -> float | None:
+    """When the first injection ran or the first synthetic request started, or None."""
+    times = [a.ts for a in injections(run)] + [n.ts for n in run.network if n.synthetic]
+    return min(times, default=None)
+
+
+def tampering(run: Run) -> str | None:
+    """Why evidence from `tainted_at` on is not the site's, naming the calls, or None."""
+    parts: list[str] = []
+    code = injections(run)
+    if code:
+        named = ", ".join(f"{a.value or a.name} ({a.id})" for a in code[:MAX_NAMED])
+        more = f" and {len(code) - MAX_NAMED} more" if len(code) > MAX_NAMED else ""
+        parts.append(f"the agent ran its own code in the page: {named}{more}")
+    mocked = [n for n in run.network if n.synthetic]
+    if mocked:
+        named = ", ".join(f"{n.method} {n.url} ({n.id})" for n in mocked[:MAX_NAMED])
+        more = f" and {len(mocked) - MAX_NAMED} more" if len(mocked) > MAX_NAMED else ""
+        parts.append(
+            f"the agent's route handler answered or rewrote requests (route.fulfill or "
+            f"route.continue with overrides): {named}{more}"
+        )
+    if not parts:
+        return None
+    return "; ".join(parts) + "; evidence from then on is not the site's"
+
+
+def untampered(run: Run) -> Run:
+    """`run` as the site alone made it: page states, screenshots and requests from `tainted_at`
+    on are dropped, synthetic requests with them, and later actions lose their page URL (it is a
+    page the agent may have written). The actions themselves are kept: they are what the agent
+    did. Unchanged when nothing was injected or mocked."""
+    cut = tainted_at(run)
+    if cut is None:
+        return run
+    snapshots = [s for s in run.snapshots if s.ts < cut]
+    kept = {s.id for s in snapshots}
+    initial = run.initial_state
+    return run.model_copy(
+        update={
+            "actions": [
+                a if a.ts < cut or a.url is None else a.model_copy(update={"url": None})
+                for a in run.actions
+            ],
+            "network": [n for n in run.network if n.ts < cut and not n.synthetic],
+            "snapshots": snapshots,
+            "screenshots": [s for s in run.screenshots if s.ts < cut],
+            "initial_state": initial
+            if initial is not None and initial.snapshot_id in kept
+            else None,
+            "final_state": None,
+        }
+    )
+
+
+def is_agent_page(url: str | None) -> bool:
+    """A page no site served (not http or https), so the agent decided what it shows."""
+    return url is not None and not is_web_page_url(url)
+
+
+def mark_agent_page_navigations(run: Run) -> Run:
+    """`run` with a GOTO before every action taken on a page the agent made (`is_agent_page`)
+    that was followed by a web page: the first http or https URL recorded after it (a page
+    state, a document load or a later action's page), else the final page. The GOTO stands for
+    that action as the navigation it started: it has the action's time, its page URL, the
+    target as its value, and the action's id with NAVIGATION_SUFFIX. GOTO and INJECT actions get none: a GOTO already names its URL, and what
+    follows an injection is not the site's anyway. Idempotent."""
+    marked = {a.id for a in run.actions if a.id.endswith(NAVIGATION_SUFFIX)}
+    actions: list[ActionEvent] = []
+    for action in run.actions:
+        target = (
+            None
+            if not is_agent_page(action.url)
+            or canonical_action(action.name) in (GOTO, INJECT)
+            or action.id.endswith(NAVIGATION_SUFFIX)
+            or action.id + NAVIGATION_SUFFIX in marked
+            else _next_web_url(run, action.ts)
+        )
+        if target is not None:
+            actions.append(
+                ActionEvent(
+                    id=action.id + NAVIGATION_SUFFIX,
+                    ts=action.ts,
+                    name=GOTO,
+                    value=target,
+                    url=action.url,
+                )
+            )
+        actions.append(action)
+    added = len(actions) > len(run.actions)
+    return run.model_copy(update={"actions": actions}) if added else run
+
+
+def _next_web_url(run: Run, after: float) -> str | None:
+    later = [
+        *((s.ts, s.url) for s in run.snapshots),
+        *(
+            (n.ts, n.url)
+            for n in run.network
+            if n.method.upper() == "GET" and (n.resource_type or "").lower() == "document"
+        ),
+        *((a.ts, a.url) for a in run.actions if a.url),
+    ]
+    found = [(ts, url) for ts, url in later if ts > after and url and is_web_page_url(url)]
+    if found:
+        return min(found, key=lambda pair: pair[0])[1]
+    final = run.final_state
+    return final.url if final is not None and is_web_page_url(final.url) else None

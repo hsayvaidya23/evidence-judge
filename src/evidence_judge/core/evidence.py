@@ -126,6 +126,12 @@ class NetworkEvent(_Frozen):
     response_body: str | None = None
     mime_type: str | None = None
     failed: bool = False
+    synthetic: bool = Field(
+        default=False,
+        description="The agent's own route handler answered this request (route.fulfill) or "
+        "rewrote it (route.continue with overrides): the response, or the request the site "
+        "got, is the agent's",
+    )
 
     @property
     def is_mutation(self) -> bool:

@@ -277,6 +277,7 @@ def _fill_gaps(event: NetworkEvent, har_event: NetworkEvent) -> NetworkEvent:
             "response_body": event.response_body or har_event.response_body,
             "mime_type": event.mime_type or har_event.mime_type,
             "failed": event.failed and har_event.failed,
+            "synthetic": event.synthetic or har_event.synthetic,
         }
     )
 

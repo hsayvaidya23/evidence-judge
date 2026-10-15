@@ -4,7 +4,9 @@ Rules, first match wins:
 1. FAIL if a key claim is CONTRADICTED with confidence >= CONFIDENT_CONTRADICTION. Weak
    contradictions never fail a run, however many there are.
 2. FAIL if any expect, forbid or constraint result is not met.
-3. NEEDS_REVIEW if any other claim is CONTRADICTED (a non-key claim, or a key claim refuted only
+3. NEEDS_REVIEW if the agent ran its own code in the page or its route handler answered or
+   rewrote a request (`tampered`, core.provenance): what the run shows from then on is not the
+   site's alone, so it can never pass; if any other claim is CONTRADICTED (a non-key claim, or a key claim refuted only
    weakly: by point-in-time snapshots, a vision model, or conflicting evidence); if the side-effects dimension has findings
    (successful mutations the task spec does not explain, or every mutation when there is no
    spec: a spec-less run that changed state is review-only by design, and the summary says to
@@ -161,7 +163,10 @@ def _review(
     extraction_fallback: bool,
     has_spec: bool,
     unanchored: str | None,
+    tampered: str | None,
 ) -> str | None:
+    if tampered is not None:
+        return f"NEEDS_REVIEW: {_clause(tampered)}, so the run cannot pass."
     if (summary := _contradicted(claims) or _side_effects(dimensions, has_spec)) is not None:
         return summary
     key_claims = [v for v in claims if v.key]
@@ -223,6 +228,7 @@ def decide(
     extraction_fallback: bool = False,
     has_spec: bool = True,
     unanchored: str | None = None,
+    tampered: str | None = None,
 ) -> tuple[Outcome, float, str]:
     key_claims = [v for v in claim_verdicts if v.key]
     value = score(claim_verdicts, dimensions)
@@ -238,6 +244,7 @@ def decide(
             extraction_fallback,
             has_spec,
             unanchored,
+            tampered,
         )
     ) is not None:
         return Outcome.NEEDS_REVIEW, min(value, REVIEW_SCORE_CAP), summary
