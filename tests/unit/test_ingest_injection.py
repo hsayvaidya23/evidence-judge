@@ -176,6 +176,7 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("details_closed", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("css_shown", "out_of_stock", "No, Out of stock.", "fail", [False, True], "not contain"),
         ("two_fields", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
+        ("markup_note", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
     ],
 )
 async def test_agent_made_evidence_never_passes(

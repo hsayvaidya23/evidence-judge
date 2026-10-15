@@ -25,6 +25,7 @@ from evidence_judge.core.actions import (
 )
 from evidence_judge.core.evidence import ActionEvent, Run
 from evidence_judge.core.site import Site
+from evidence_judge.ingest._fragment import fragment_text
 from evidence_judge.textnorm import normalize
 
 _KEY_NAME = re.compile(
@@ -442,8 +443,11 @@ def _page_key(url: str) -> str:
 
 def rendered(text: str) -> tuple[str, ...]:
     """`text`, and how a page that renders it as HTML shows it: character references decoded
-    and tags dropped (inline) or turned into a break (block)."""
-    return text, *(html.unescape(_TAG.sub(gap, text)) for gap in ("", " "))
+    and tags dropped (inline) or turned into a break (block); and, if it has markup, its page
+    text as a fragment of the page (ingest._fragment): comments, scripts, styles and what the
+    markup hides (``hidden``, ``display: none``) left out."""
+    forms = (text, *(html.unescape(_TAG.sub(gap, text)) for gap in ("", " ")))
+    return (*forms, fragment_text(text)) if "<" in text else forms
 
 
 def _is_key_names(value: str) -> bool:

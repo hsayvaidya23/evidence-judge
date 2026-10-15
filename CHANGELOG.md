@@ -206,6 +206,11 @@ the names exported from `evidence_judge`) is defined under
   between them, and the page passed. A `page_text` needle or `response_contains` text whose
   every word lies in echoes of the agent's inputs (any length, one-character inputs included)
   is now masked; an occurrence with a word the agent did not put in still proves.
+- **Typed markup a page renders is an echo of what it shows.** An input was matched as typed
+  and with its tags stripped, so a note "In &lt;!-- zz --&gt; stock" (or with a `hidden` or
+  `display:none` span between the words) previewed as HTML showed "In stock" and passed. Each
+  input with markup now also counts as the text a page shows for it, read by the same rules as
+  a snapshot's page text: comments, scripts, styles, templates and hidden elements left out.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

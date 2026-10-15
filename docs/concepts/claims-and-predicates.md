@@ -143,7 +143,13 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   area, editable element or `<select>` holds in any snapshot of a Playwright trace is input,
   however it got there ("XIn stock" filled, a click before the "X", Delete: the field shows
   "In stock", so "No reviews mention In stock" proves nothing). A value the site prefilled is
-  input as well; that can only send a run to review, never pass one. Every
+  input as well; that can only send a run to review, never pass one. Each input also counts as
+  a page that inserts it as HTML would show it: character references decoded, tags dropped,
+  and, for an input with markup, its text read like a snapshot's page text, with comments,
+  scripts, styles, templates and what the markup hides (`hidden`, `display: none` inline or
+  from its own `<style>`, hiding classes) left out. So a gift note "In &lt;!-- x --&gt; stock"
+  or "In&lt;span hidden&gt;x&lt;/span&gt; stock" that a preview renders as "In stock" is an
+  echo of "In stock". Every
   `page_text`, `url`, `request` and `value` predicate is evaluated again with every occurrence
   of every input masked out of everything the site can repeat it in: page text, page URLs, the
   URLs of requests that are not mutations, and every response body (JSON keeps its structure,

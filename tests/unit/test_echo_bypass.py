@@ -83,6 +83,18 @@ ECHOES = {
         act(2, "fill", "#bio", value="Order&#32;A77 confirmed"),
         "Bio: Order A77 confirmed",
     ),
+    "typed markup with a comment": (
+        act(2, "fill", "#bio", value="Order A77 <!-- x --> confirmed"),
+        "Bio: Order A77 confirmed",
+    ),
+    "typed markup with hidden text": (
+        act(2, "fill", "#bio", value="Order A77<span hidden>x</span> confirmed"),
+        "Bio: Order A77 confirmed",
+    ),
+    "typed markup hidden by its style": (
+        act(2, "fill", "#bio", value="Order A77 <b style=display:none>x</b>confirmed"),
+        "Bio: Order A77 confirmed",
+    ),
     "echo cut short by maxlength": (
         act(2, "fill", "#name", value="Order A77 confirmed!!!!!!"),
         "Hello Order A77 confirmed",

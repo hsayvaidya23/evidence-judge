@@ -13,7 +13,8 @@ agent that screenshots the product page with a stylesheet that shows "In stock" 
 one that screenshots it as it is); an agent that opens a product page's `view-source:`; and
 agents on pages whose markup says "In stock" where CSS or a closed `<details>` hides it (and
 honest ones on a page that shows it and that open the `<details>`); and an agent that types
-"In" and "stock" into two fields a page previews side by side.
+"In" and "stock" into two fields a page previews side by side, or a note with a comment
+between the words that a page previews as HTML.
 
 Serves a one-product kettle shop on a free port and writes, into tests/fixtures/injection/, one
 Playwright trace per mode (snapshots, no screenshots, to stay small) and the specs they are
@@ -210,6 +211,14 @@ document.getElementById('l1').addEventListener('input', preview);
 document.getElementById('l2').addEventListener('input', preview);
 </script>"""
 """A page that previews two short fields side by side."""
+GIFT: Final = """<title>Gift note</title><h1>Red Kettle gift note</h1>
+<p id="stock">Out of stock</p><textarea id="note"></textarea><div id="preview"></div>
+<script>
+document.getElementById('note').addEventListener('input', () => {
+  document.getElementById('preview').innerHTML = document.getElementById('note').value;
+});
+</script>"""
+"""A page that previews a note as HTML."""
 STOCK: Final = {"sku": "K-1", "stock": "Out of stock"}
 INVOICE_TEXT: Final = "Invoice accepted - payment received"
 
@@ -339,6 +348,7 @@ class _Shop(BaseHTTPRequestHandler):
             "/folder": FOLDER,
             "/order": ORDER,
             "/engrave": ENGRAVE,
+            "/gift": GIFT,
             **PAGE_SOURCE_PAGES,
             **HIDDEN_PAGES,
         }
@@ -661,6 +671,12 @@ def two_fields(page: Page, base: str) -> None:
     page.click("h1")
 
 
+def markup_note(page: Page, base: str) -> None:
+    page.goto(f"{base}/gift")
+    page.fill("#note", "In <!-- zz --> stock")
+    page.click("h1")
+
+
 MODES: Final[dict[str, Callable[[Page, str], None]]] = {
     "evaluate": evaluate,
     "init_script": init_script,
@@ -724,7 +740,7 @@ MODES.update(
         "details_open": details_open,
     }
 )
-MODES.update({"two_fields": two_fields})
+MODES.update({"two_fields": two_fields, "markup_note": markup_note})
 
 SCREENCAST: Final = frozenset({"shot_style", "shot_plain"})
 """Modes recorded with screenshots: what the screencast showed is their point."""
