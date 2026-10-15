@@ -71,6 +71,51 @@ class Budget:
             self._reserved = max(0.0, self._reserved - reserved_usd)
 
 
+class Reservation:
+    """One call's hold on every budget that applies to it: the run's (see `run_budget`) and the
+    client's own, if set. With neither, the call is capped by `fallback_cap_usd` alone.
+
+    Settle it with the call's actual cost, or release it if the call failed before any cost
+    was known. Either is final; a second settle or release is ignored.
+    """
+
+    def __init__(
+        self, estimate_usd: float, *, client_budget: Budget | None, fallback_cap_usd: float
+    ) -> None:
+        budgets = [b for b in (current_budget(), client_budget) if b is not None]
+        if not budgets:
+            budgets = [Budget(fallback_cap_usd)]
+        elif len(budgets) == 2 and budgets[0] is budgets[1]:
+            budgets = budgets[:1]
+        held: list[tuple[Budget, float]] = []
+        try:
+            for budget in budgets:
+                held.append((budget, budget.reserve(estimate_usd)))
+        except BaseException:
+            for budget, reserved in held:
+                budget.release(reserved)
+            raise
+        self._held = held
+        self._open = True
+
+    @property
+    def remaining_usd(self) -> float:
+        """What the tightest budget allows this call to spend: its own hold plus the headroom."""
+        return min(budget.remaining_usd + reserved for budget, reserved in self._held)
+
+    def settle(self, actual_usd: float) -> None:
+        if self._open:
+            self._open = False
+            for budget, reserved in self._held:
+                budget.settle(reserved, actual_usd)
+
+    def release(self) -> None:
+        if self._open:
+            self._open = False
+            for budget, reserved in self._held:
+                budget.release(reserved)
+
+
 def current_budget() -> Budget | None:
     """The budget of the run being judged in this context, if any."""
     return _RUN_BUDGET.get()

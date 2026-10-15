@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from evidence_judge.llm.base import BudgetExceededError
-from evidence_judge.llm.budget import Budget, current_budget, run_budget
+from evidence_judge.llm.budget import Budget, Reservation, current_budget, run_budget
 from evidence_judge.llm.pricing import DEFAULT_PRICE, DEFAULT_PRICES, ModelPrice, price_for
 
 
@@ -89,3 +89,51 @@ def test_long_prompt_multiplier_applies_above_threshold():
 def test_unknown_model_falls_back_to_most_expensive_default():
     assert price_for("some-future-model") is DEFAULT_PRICE
     assert DEFAULT_PRICE.input >= max(p.input for p in DEFAULT_PRICES.values())
+
+
+def test_reservation_holds_the_run_and_client_budgets_and_settles_both():
+    run, client = Budget(1.0), Budget(0.5)
+    with run_budget(run):
+        reservation = Reservation(0.2, client_budget=client, fallback_cap_usd=9.0)
+    assert run.remaining_usd == pytest.approx(0.8)
+    assert client.remaining_usd == pytest.approx(0.3)
+    assert reservation.remaining_usd == pytest.approx(0.5)
+    reservation.settle(0.1)
+    reservation.settle(0.1)
+    reservation.release()
+    assert run.spent_usd == pytest.approx(0.1)
+    assert client.spent_usd == pytest.approx(0.1)
+    assert client.remaining_usd == pytest.approx(0.4)
+
+
+def test_reservation_counts_a_shared_budget_once():
+    budget = Budget(1.0)
+    with run_budget(budget):
+        Reservation(0.3, client_budget=budget, fallback_cap_usd=9.0).settle(0.3)
+    assert budget.spent_usd == pytest.approx(0.3)
+
+
+def test_reservation_without_budgets_is_capped_by_the_fallback():
+    assert current_budget() is None
+    assert Reservation(0.1, client_budget=None, fallback_cap_usd=0.25).remaining_usd == (
+        pytest.approx(0.25)
+    )
+    with pytest.raises(BudgetExceededError):
+        Reservation(0.3, client_budget=None, fallback_cap_usd=0.25)
+
+
+def test_a_refused_reservation_releases_what_it_already_held():
+    run, client = Budget(1.0), Budget(0.1)
+    with run_budget(run), pytest.raises(BudgetExceededError):
+        Reservation(0.2, client_budget=client, fallback_cap_usd=9.0)
+    assert run.remaining_usd == pytest.approx(1.0)
+
+
+def test_a_released_reservation_spends_nothing():
+    budget = Budget(1.0)
+    with run_budget(budget):
+        reservation = Reservation(0.4, client_budget=None, fallback_cap_usd=9.0)
+    reservation.release()
+    reservation.settle(0.4)
+    assert budget.spent_usd == 0
+    assert budget.remaining_usd == pytest.approx(1.0)
