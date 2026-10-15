@@ -11767,7 +11767,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock'), so it proves nothing.",
       "error": null
     },
     {
@@ -11806,7 +11806,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock'), so it proves nothing.",
       "error": null
     },
     {
@@ -11845,7 +11845,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'in stock'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'in stock'), so it proves nothing.",
       "error": null
     },
     {
@@ -11871,7 +11871,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock out of stock sold out', 'red-kettle', 'products' and 1 more), so it proves …",
+      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock out of stock sold out', 'red-kettle', 'products' and 1 more), so it…",
       "error": null
     },
     {
@@ -11884,7 +11884,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock out of stock sold out', 'products', 'search'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock out of stock sold out', 'products', 'search'), so it proves nothing.",
       "error": null
     },
     {
@@ -11923,7 +11923,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock out of stock sold out'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock out of stock sold out'), so it proves nothing.",
       "error": null
     },
     {
@@ -11949,7 +11949,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'out of stock in stock sold out', 'red-kettle', 'products' and 1 more), so it proves noth…",
+      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'out of stock in stock sold out', 'red-kettle', 'products' and 1 more), so it pro…",
       "error": null
     },
     {
@@ -11962,7 +11962,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'out of stock in stock sold out', 'products', 'search'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'out of stock in stock sold out', 'products', 'search'), so it proves nothing.",
       "error": null
     },
     {
@@ -12001,7 +12001,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock out of stock sold out'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock out of stock sold out'), so it proves nothing.",
       "error": null
     },
     {
@@ -12040,7 +12040,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock out of stock sold out!!!!!!'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock out of stock sold out!!!!!!'), so it proves nothing.",
       "error": null
     },
     {
@@ -12079,7 +12079,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock out of stock sold out'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock out of stock sold out'), so it proves nothing.",
       "error": null
     },
     {
@@ -12469,7 +12469,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'out of stock not in stock sold out'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'out of stock not in stock sold out'), so it proves nothing.",
       "error": null
     },
     {
@@ -12547,7 +12547,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'out of stock not in stock sold out'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'out of stock not in stock sold out'), so it proves nothing.",
       "error": null
     },
     {
@@ -12807,7 +12807,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'out of stock in stock sold out', 'red-kettle', 'products' and 1 more), so it proves noth…",
+      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'out of stock in stock sold out', 'red-kettle', 'products' and 1 more), so it pro…",
       "error": null
     },
     {
@@ -12820,7 +12820,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'out of stock in stock sold out', 'products', 'search'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'out of stock in stock sold out', 'products', 'search'), so it proves nothing.",
       "error": null
     },
     {
@@ -12846,7 +12846,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock out of stock sold out', 'red-kettle', 'products'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock out of stock sold out', 'red-kettle', 'products'), so it proves not…",
       "error": null
     },
     {
@@ -12859,7 +12859,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'not in stock out of stock sold out', 'red-kettle', 'products'), so it proves nothing; Predicate …",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'not in stock out of stock sold out', 'red-kettle', 'products'), so it proves nothing; Pr…",
       "error": null
     },
     {
@@ -12885,7 +12885,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'out of stock in stock sold out', 'red-kettle', 'products' and 1 more), so it proves noth…",
+      "summary": "NEEDS_REVIEW: expect 'product_page_opened' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'out of stock in stock sold out', 'red-kettle', 'products' and 1 more), so it pro…",
       "error": null
     },
     {
@@ -12898,7 +12898,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed or put in a URL: 'out of stock in stock sold out', 'products', 'search'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: expect 'stock_shown' could not be verified: predicate cannot prove an expectation: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: 'out of stock in stock sold out', 'products', 'search'), so it proves nothing.",
       "error": null
     },
     {

@@ -300,7 +300,7 @@ breaks these rules is refused; the extractors drop such predicates and count the
 `vacuous_predicates` in the claim set's coverage note, and a key claim left without predicates
 is `no_evidence`, so the run goes to review. When a run is judged, a claim predicate that the
 run already met before the agent acted, that only holds on an echo of the agent's own input
-(text it typed or put in a URL), or (for a key outcome claim) that is neither a mutation
+(text it typed, pasted or put in a URL), or (for a key outcome claim) that is neither a mutation
 request nor the final page cannot support the claim either. The same baseline and echo rules
 hold for `expect` entries, whatever wrote the spec: an `expect` predicate the run met before the
 agent acted, or one that only holds where a page, URL or response echoes the agent's input (an

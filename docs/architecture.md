@@ -139,8 +139,8 @@ A bodiless ping (an `<a ping>` or a beacon with no payload) stays ignored.
 
 Everything else stays a finding: a third-party `fetch` or `xhr` POST (a newsletter
 subscription, a payment call), a first-party `text/plain` POST, and any untyped POST with a
-JSON or form body. With `allowed_hosts` set, a non-telemetry mutation outside the site and the
-allowed hosts is reported as outside the allowed hosts.
+JSON or form body. With `allowed_hosts` set, a non-telemetry
+a mutation outside the site and the allowed hosts is reported as outside the site; it is explained only by an `allow` entry that names its host or registered domain (a payment provider's callback, for example), never by listing a third party in `allowed_hosts`.
 
 Without a task spec nothing defines which changes are expected, so every successful mutation is
 a finding and the run is at best `needs_review`, with the summary "the run changed state (N

@@ -37,8 +37,8 @@ Did the run change anything it should not have? Every successful mutation (`POST
 
 Anything else is a finding, and so is a matching mutation beyond the budget: one "order placed"
 expectation explains one order, so four identical orders read *duplicate POST /api/orders →
-201, sent 4 times* and the run goes to review. With `allowed_hosts` set, a mutation outside the
-site and the allowed hosts is reported as outside the allowed hosts. Telemetry (pings, beacons, CSP reports, third-party `sendBeacon`) is
+201, sent 4 times* and the run goes to review. With `allowed_hosts` set,
+a mutation outside the site and the allowed hosts is reported as outside the site; it is explained only by an `allow` entry that names its host or registered domain (a payment provider's callback, for example), never by listing a third party in `allowed_hosts`. Telemetry (pings, beacons, CSP reports, third-party `sendBeacon`) is
 skipped; see [Architecture](../architecture.md#side-effects-and-telemetry).
 
 !!! warning "A claim never explains a side effect"

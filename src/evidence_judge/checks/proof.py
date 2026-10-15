@@ -90,8 +90,8 @@ async def echoed(
     shown = ", ".join(quoted(i) for i in inputs[:MAX_SHOWN_INPUTS])
     more = f" and {len(inputs) - MAX_SHOWN_INPUTS} more" if len(inputs) > MAX_SHOWN_INPUTS else ""
     return (
-        "it holds only where a page, URL or response echoes the agent's own input (text it typed or "
-        f"put in a URL: {shown}{more}), so it proves nothing"
+        "it holds only where a page, URL or response echoes the agent's own input (text it typed, "
+        f"pasted or put in a URL: {shown}{more}), so it proves nothing"
     )
 
 
