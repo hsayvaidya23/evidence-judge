@@ -333,7 +333,7 @@ def test_cli_doc_lists_session_options() -> None:
     assert isinstance(group, TyperGroup)
     sessions = group.commands["session"]
     assert isinstance(sessions, TyperGroup)
-    for name in ("judge", "inspect"):
+    for name in ("judge", "inspect", "rerun"):
         assert re.search(rf"evidence-judge session {name}", doc)
         for param in sessions.commands[name].params:
             for opt in param.opts:

@@ -11,6 +11,7 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | `mcp` | Run an MCP server so coding agents can judge, inspect and explain runs as tools |
 | `session judge` | Judge a coding-agent session (Claude Code, Codex) against its tool-call log |
 | `session inspect` | Summarise a coding-agent session without judging it |
+| `session rerun` | Re-run a spec's test command on a copy of the project and judge the runner's own report |
 | `schema` | Print the JSON Schema of the verdict format |
 | `version` | Print the evidence-judge version |
 
@@ -165,20 +166,44 @@ the final answer when the log lacks them.
 | Option | Description |
 | --- | --- |
 | `--claude-code SESSION` | Claude Code transcript: a `.jsonl` path, a session id (looked up under `~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects`), or `latest` for the newest transcript of `--project` |
-| `--project PATH` | Project directory for `--claude-code latest` (default: the current directory) |
+| `--project PATH` | Project directory: where `--claude-code latest` looks, and the tree `--rerun` copies (default: the current directory) |
 | `--codex FILE` | Codex `exec --json` output saved by the harness, or a rollout file from `~/.codex/sessions` |
 | `--evidence-log FILE` | Evidence-recorder log (format version 1), written by a harness hook after every tool call; the only transcript-independent source. Its `tamper_detection` is `full` only when its HMAC chain and head anchor verify **and** `--trusted-log` is given; otherwise `partial`, with the reason |
 | `--log-key FILE` | The evidence-log key (default: `log-key` in the hooks' state directory, `EVJ_HOOK_STATE_DIR` or `~/.evidence-judge/state`) |
 | `--log-anchor FILE` | The evidence log's head anchor (default: `<state>/<session>/log-head.json`) |
 | `--trusted-log` | Assert that the log, its key and anchor were out of the agent's reach (a sandbox that denies the state directory, a container, another OS user). Without it, an agent running as your user could have read the key and signed a forged log, so a verified log is still `partial`. The spec's `trusted_evidence_log: true` does the same |
 | `--answer TEXT` / `--answer-file FILE` | Judge this final answer instead of the recorded one |
-| `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence` |
+| `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block |
 | `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
 | `--out FILE` | Write the verdict JSON (schema `evidence-judge/run-verdict@1`) here |
 | `--offline` / `--no-offline` | No LLM calls; heuristic claim extraction only |
 | `--no-redact` | Keep secrets in commands, outputs and reports |
 | `--require-tamper-evidence` | Cap the run at needs review unless it comes from an evidence log or a harness stream |
+| `--rerun` | Run the spec's `rerun` command on a copy of `--project` in a clean environment and decide `test_result` predicates from the runner's own report instead of the recorded output; see [Independent re-run](design/coding-agent-sessions.md#independent-re-run) |
+| `--require-rerun` | Refuse a pass unless a re-run decided the suite's result |
+| `--rerun-base REV` | Git revision the runner configuration is compared with (default: the spec's `rerun.base`, else `HEAD`) |
 | `--run-id TEXT` | Override the run id (default: the session id) |
+| `--quiet`, `-q` | Only set the exit code |
+| `--debug` / `--no-debug` | Show tracebacks for internal errors |
+
+### `evidence-judge session rerun`
+
+```text
+evidence-judge session rerun --spec FILE [--project PATH] [--out FILE]
+```
+
+Runs the spec's `rerun` command once, on a copy of the project, in an environment built from
+scratch, and judges the runner's machine-readable report, without a session record: pass when
+the report shows every test passing and the command exited 0, fail when it shows a failure,
+needs review when there is no usable report, the run timed out, or runner configuration differs
+from the base revision. The verdict's `verification.method` is `rerun`.
+
+| Option | Description |
+| --- | --- |
+| `--spec FILE` | Session spec YAML with a `rerun` block |
+| `--project PATH` | The project to copy (default: the current directory) |
+| `--rerun-base REV` | As for `session judge` |
+| `--out FILE` | Write the verdict JSON here |
 | `--quiet`, `-q` | Only set the exit code |
 | `--debug` / `--no-debug` | Show tracebacks for internal errors |
 

@@ -14,8 +14,16 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 
+from evidence_judge import __version__
 from evidence_judge.config import Settings, stable_redaction_key
-from evidence_judge.core.verdict import Outcome, RunVerdict
+from evidence_judge.core.verdict import (
+    Citation,
+    ExpectationResult,
+    Outcome,
+    RunVerdict,
+    Verification,
+    VerificationMethod,
+)
 from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.redact import Redactor
@@ -27,6 +35,7 @@ from evidence_judge.sessions.models import SessionRun
 from evidence_judge.sessions.predicates import SessionClaimSet, SessionSpec
 from evidence_judge.sessions.redaction import redact_claims, redact_session, redact_spec
 from evidence_judge.sessions.report import print_session, summarize
+from evidence_judge.sessions.rerun import RerunResult, RerunSpec, RerunStatus, execute
 
 
 class _Exit(IntEnum):
@@ -75,7 +84,18 @@ _ClaudeCode = Annotated[
 ]
 _Project = Annotated[
     Path | None,
-    typer.Option(help="Project directory for --claude-code latest (default: current directory)"),
+    typer.Option(
+        help="Project directory: where --claude-code latest looks, and the tree --rerun copies "
+        "(default: current directory)"
+    ),
+]
+_RerunBase = Annotated[
+    str | None,
+    typer.Option(
+        "--rerun-base",
+        help="Revision to compare runner configuration with (default: the spec's "
+        "rerun.base, else HEAD)",
+    ),
 ]
 _Codex = Annotated[
     Path | None,
@@ -252,6 +272,21 @@ def judge_command(
             "harness stream",
         ),
     ] = False,
+    rerun: Annotated[
+        bool,
+        typer.Option(
+            "--rerun",
+            help="Run the spec's rerun command on a copy of the project, in a clean "
+            "environment, and decide test results from the runner's own report",
+        ),
+    ] = False,
+    require_rerun: Annotated[
+        bool,
+        typer.Option(
+            "--require-rerun", help="Refuse a pass unless a re-run decided the suite's result"
+        ),
+    ] = False,
+    rerun_base: _RerunBase = None,
     run_id: Annotated[str | None, typer.Option(help="Override the run id")] = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: _Debug = False,
@@ -272,6 +307,11 @@ def judge_command(
             log_key=log_key,
             log_anchor=log_anchor,
         )
+        rerun_result = (
+            _rerun(_rerun_spec(session_spec), project, rerun_base, run.cwd, quiet)
+            if rerun
+            else None
+        )
         llm = _llm(settings, offline)
         if settings.redact and not no_redact:
             redactor = _redactor(settings, persistent=llm is not None)
@@ -291,6 +331,8 @@ def judge_command(
             require_tamper_evidence=require_tamper_evidence,
             run_id=run_id,
             trusted_log=trusted_log,
+            rerun=rerun_result,
+            require_rerun=require_rerun,
         )
         verdict = _run(SessionJudge(llm, max_cost_usd=settings.max_cost_usd), run, options)
         if out:
@@ -308,6 +350,93 @@ def judge_command(
         print_verdict(verdict, Console(highlight=False))
         if out:
             err.print(Text.assemble(("wrote json ", "dim"), str(out)))
+    raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
+
+
+def _rerun_spec(spec: SessionSpec | None) -> RerunSpec:
+    if spec is None or spec.rerun is None:
+        raise _Error("--rerun needs a session spec (--spec) with a rerun: block", _Exit.USAGE)
+    return spec.rerun
+
+
+def _rerun(
+    spec: RerunSpec, project: Path | None, base: str | None, session_cwd: str | None, quiet: bool
+) -> RerunResult:
+    root = (project or Path.cwd()).resolve()
+    if not quiet:
+        _stderr().print(
+            Text(f"re-running {' '.join(spec.command)} on a copy of {root}", style="dim")
+        )
+    return execute(spec, root, base=base or spec.base, session_cwd=session_cwd)
+
+
+def rerun_verdict(result: RerunResult, run_id: str | None = None) -> RunVerdict:
+    """A verdict for a re-run on its own, without a session record: the suite passes, fails,
+    or cannot be decided."""
+    review = [f"runner configuration changed: {c}" for c in result.config_changes]
+    review.extend(f"re-run: {p}" for p in result.problems)
+    met = {RerunStatus.PASS: True, RerunStatus.FAIL: False}.get(result.status)
+    if met is False:
+        outcome = Outcome.FAIL
+    elif met is True and not review:
+        outcome = Outcome.PASS
+    else:
+        outcome = Outcome.NEEDS_REVIEW
+    summary = result.reason + (
+        f". Needs review: {review[0]}." if review and met is not False else "."
+    )
+    citation = Citation(evidence_id="rerun", excerpt=" ".join(result.command)[:160] or None)
+    return RunVerdict(
+        judge_version=__version__,
+        run_id=run_id or "rerun",
+        task=None,
+        outcome=outcome,
+        score={Outcome.PASS: 1.0, Outcome.FAIL: 0.0}.get(outcome, 0.5),
+        summary=summary,
+        expectations=[
+            ExpectationResult(
+                expectation_id="rerun",
+                kind="expect",
+                met=met,
+                reason=result.reason,
+                citations=[citation],
+            )
+        ],
+        verification=Verification(method=VerificationMethod.RERUN, reason=result.reason),
+        warnings=[*review, *(f"re-run: {n}" for n in result.notes)],
+    )
+
+
+@session_app.command("rerun")
+def rerun_command(
+    spec: Annotated[Path, typer.Option(help="Session spec YAML with a rerun: block", **_IN_FILE)],
+    project: _Project = None,
+    rerun_base: _RerunBase = None,
+    out: Annotated[
+        Path | None, typer.Option(help="Write the verdict JSON here", **_OUT_FILE)
+    ] = None,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
+    debug: _Debug = False,
+) -> None:
+    """Re-run the spec's test command on a copy of the project, in a clean environment, and
+    judge the runner's own report, without a session record. Exit code: 0 pass, 1 fail, 2 needs
+    review, 3 bad input, 4 internal."""
+    try:
+        rerun_spec = _rerun_spec(_spec(spec))
+        verdict = rerun_verdict(_rerun(rerun_spec, project, rerun_base, None, quiet))
+        if out:
+            try:
+                write_json(verdict, out)
+            except OSError as e:
+                raise _Error(f"cannot write {out}: {e.strerror or e}", _Exit.USAGE) from e
+    except _Error as e:
+        raise _fail(e) from None
+    except Exception as e:
+        if debug:
+            raise
+        raise _internal(e) from None
+    if not quiet:
+        print_verdict(verdict, Console(highlight=False))
     raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
 
 

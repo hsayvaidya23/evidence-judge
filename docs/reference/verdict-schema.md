@@ -32,6 +32,7 @@ evidence-judge schema --out run-verdict.schema.json
 | `claim_coverage` | number \| null | Share of claim-like sentences that became claims |
 | `deterministic_share` | number \| null | Share of claim verdicts decided without an LLM |
 | `tamper_detection` | object \| null | `{level, reason}`: what the evidence source can show of the agent tampering with the page or its requests. `level` is `full` (Playwright trace), `partial` (browser-use history) or `none` (HAR only); null only in verdicts that did not assess it |
+| `verification` | object \| null | `{method, reason}` for a coding-agent session: `rerun` when the judge ran the suite itself and read the runner's report (`session judge --rerun`), `transcript` when test results come from the output the session recorded; null for browser runs |
 | `warnings` | string[] | E.g. missing channels, dropped hallucinated quotes, extraction fallback |
 | `usage` | object | `llm_calls`, `input_tokens`, `output_tokens`, `cost_usd`, `latency_ms` |
 

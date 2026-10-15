@@ -22,6 +22,8 @@ from evidence_judge.core.verdict import (
     TamperDetection,
     TamperLevel,
     Usage,
+    Verification,
+    VerificationMethod,
 )
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget, run_budget
@@ -40,6 +42,7 @@ from evidence_judge.sessions.predicates import (
     SessionSpec,
     SpecItem,
 )
+from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 
 _HARNESS_TAMPERING = "harness tampering"
 
@@ -54,6 +57,10 @@ class SessionJudgeOptions:
     trusted_log: bool = False
     """The user asserts the evidence log, its key and its anchor were out of the agent's reach;
     also set by the spec's `trusted_evidence_log`."""
+    rerun: RerunResult | None = None
+    """The judge's own re-run of the suite (`rerun.execute`); it decides test results."""
+    require_rerun: bool = False
+    """Refuse a pass unless a re-run decided the suite's result."""
 
 
 @dataclass(slots=True)
@@ -144,6 +151,8 @@ class SessionJudge:
         with run_budget(Budget(self._max_cost_usd)):
             claim_set = await self._claims(run, options, state)
         index = SessionIndex(run, ignore_edits=spec.ignore_edits if spec else None)
+        rerun = self._rerun(index, options, state)
+        index.rerun = rerun
 
         claims = [self._verdict(claim, index) for claim in claim_set.claims]
         expectations = (
@@ -177,9 +186,43 @@ class SessionJudge:
             claim_coverage=None,
             deterministic_share=1.0 if claims else None,
             tamper_detection=tamper,
+            verification=self._verification(rerun),
             warnings=[*state.review, *state.warnings],
             usage=state.usage,
         )
+
+    @staticmethod
+    def _rerun(
+        index: SessionIndex, options: SessionJudgeOptions, state: _State
+    ) -> RerunResult | None:
+        """The re-run, held to the largest whole-suite count the session itself showed, and the
+        reasons it cannot vouch for the run."""
+        rerun = options.rerun
+        if rerun is None:
+            if options.require_rerun:
+                state.review.append("a re-run of the suite is required, but none ran")
+            return None
+        best = index.largest_whole_suite()
+        if best is not None:
+            rerun = rerun.at_least(best[0], f"the session's own whole-suite run {best[1].id}")
+        if options.require_rerun and rerun.status is RerunStatus.UNKNOWN:
+            state.review.append(f"a re-run of the suite is required, but {rerun.reason}")
+        base = f"since {rerun.base[:12]}" if rerun.base else "in the working tree"
+        state.review.extend(
+            f"runner configuration changed {base}: {change}" for change in rerun.config_changes
+        )
+        state.review.extend(f"re-run: {problem}" for problem in rerun.problems)
+        state.warnings.extend(f"re-run: {note}" for note in rerun.notes)
+        return rerun
+
+    @staticmethod
+    def _verification(rerun: RerunResult | None) -> Verification:
+        if rerun is None:
+            return Verification(
+                method=VerificationMethod.TRANSCRIPT,
+                reason="test results come from the output the session recorded",
+            )
+        return Verification(method=VerificationMethod.RERUN, reason=rerun.reason)
 
     @staticmethod
     def _verdict(claim: SessionClaim, index: SessionIndex) -> ClaimVerdict:

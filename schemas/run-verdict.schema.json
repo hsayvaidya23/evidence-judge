@@ -267,6 +267,34 @@
       },
       "title": "Usage",
       "type": "object"
+    },
+    "Verification": {
+      "additionalProperties": false,
+      "description": "Where a coding-agent session's test results come from: the judge's own re-run of the\nsuite, or the test output in the session record.",
+      "properties": {
+        "method": {
+          "$ref": "#/$defs/VerificationMethod",
+          "description": "rerun: the judge ran the suite itself and read the runner's report; transcript: the test output the session recorded"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "reason"
+      ],
+      "title": "Verification",
+      "type": "object"
+    },
+    "VerificationMethod": {
+      "enum": [
+        "rerun",
+        "transcript"
+      ],
+      "title": "VerificationMethod",
+      "type": "string"
     }
   },
   "additionalProperties": false,
@@ -372,6 +400,18 @@
       ],
       "default": null,
       "description": "What the evidence source can show of tampering; None when not assessed"
+    },
+    "verification": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Verification"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Where a coding-agent session's test results come from; None for browser runs"
     },
     "warnings": {
       "items": {

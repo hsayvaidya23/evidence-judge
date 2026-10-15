@@ -44,11 +44,19 @@ from evidence_judge.sessions.predicates import (
     SessionPredicate,
     TestResultPredicate,
 )
+from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import READ_ONLY_PROGRAMS, regenerates_env
 
 CHECKER: Final = "session"
 _EXCERPT: Final = 160
 _TAIL_ONLY: Final = "its output is piped into tail"
+_SHELL_STATE: Final = re.compile(
+    r"\A(?:defines a shell function|(?:un)?alias |hash -p|(?:export|declare|typeset|readonly|set"
+    r"|sets) )"
+)
+"""Harness changes that live only in the agent's shell (aliases, functions, exported
+variables); a re-run in the judge's own environment never sees them. Sourced files and `eval`
+can also write files, so they stay findings."""
 _PER_TEST: Final = frozenset({"go test -v"})
 """Summaries that count test functions where the same runner otherwise counts packages: a run
 is compared only with earlier runs counting the same unit."""
@@ -130,6 +138,8 @@ class SessionIndex:
     def __init__(self, run: SessionRun, *, ignore_edits: list[str] | None = None) -> None:
         self.run = run
         self.ignore_edits = ignore_edits or []
+        self.rerun: RerunResult | None = None
+        """The judge's own re-run of the suite; when set, it decides `test_result` predicates."""
         self.commands = [e for e in run.events if isinstance(e, CommandEvent)]
         self.edits = [
             e
@@ -214,7 +224,9 @@ class SessionIndex:
                     out.append((command, f"changed {path}, which can configure the tests"))
             if analysis.opaque_write:
                 out.append((command, f"may have changed test files: {analysis.opaque_write}"))
-            if analysis.harness_change:
+            if analysis.harness_change and not (
+                self.rerun is not None and _SHELL_STATE.match(analysis.harness_change)
+            ):
                 out.append((command, f"changed how later commands run: {analysis.harness_change}"))
             out.extend((command, finding) for finding in analysis.source_findings)
         return out
@@ -460,6 +472,18 @@ class SessionIndex:
         )
         return RunOutcome(chosen[0][0].event, Result.PASS, reason, None)
 
+    def largest_whole_suite(self) -> tuple[int, CommandEvent] | None:
+        """The most tests a passing whole-suite run in the session ran, and that run."""
+        best: tuple[int, CommandEvent] | None = None
+        for event in self.test_runs(None):
+            total = suite_size(event)
+            outcome = self.outcome(event)
+            if total is None or outcome.result is not Result.PASS or not outcome.whole:
+                continue
+            if best is None or total > best[0]:
+                best = (total, event)
+        return best
+
     def test_runs(self, runner: str | None) -> list[CommandEvent]:
         runs = [
             c for c in self.commands if c.analysis.is_test and c.status is not CallStatus.DENIED
@@ -618,7 +642,65 @@ def _named_failure(event: CommandEvent, name: str) -> bool:
     )
 
 
+def _rerun_applies(predicate: TestResultPredicate, rerun: RerunResult) -> bool:
+    if predicate.runner is None:
+        return True
+    wanted = predicate.runner.casefold()
+    return wanted in (rerun.runner or "").casefold() or any(
+        wanted in part.casefold() for part in rerun.command
+    )
+
+
+def check_rerun(predicate: TestResultPredicate, index: SessionIndex) -> PredicateResult:
+    """Decide a `test_result` predicate from the judge's own re-run of the suite. The session's
+    test output is not read; its test-weakening findings still keep a pass from proving
+    anything, because a re-run of weakened tests passes too."""
+    rerun = index.rerun
+    assert rerun is not None
+    cite = Citation(evidence_id="rerun", excerpt=" ".join(rerun.command)[:_EXCERPT] or None)
+    wants_pass = predicate.expect == "pass"
+
+    def result(status: Support, reason: str) -> PredicateResult:
+        return PredicateResult(status=status, reason=reason, citations=[cite], checker=CHECKER)
+
+    def passed(reason: str) -> PredicateResult:
+        if not wants_pass:
+            return result(Support.CONTRADICTED, reason)
+        if index.tampering:
+            source, finding = index.tampering[0]
+            weakened = f"{reason}, but the suite was weakened: {source.id} {finding}"
+            return PredicateResult(
+                status=Support.NO_EVIDENCE,
+                reason=weakened,
+                citations=[cite, _cite(source, getattr(source, "path", None))],
+                checker=CHECKER,
+            )
+        return result(Support.SUPPORTED, reason)
+
+    def failed(reason: str) -> PredicateResult:
+        return result(Support.CONTRADICTED if wants_pass else Support.SUPPORTED, reason)
+
+    if predicate.mentions and rerun.report_read:
+        needle = predicate.mentions.casefold()
+        if any(needle in name.casefold() for name in rerun.failing):
+            return failed(f"{rerun.reason}; {predicate.mentions} failed")
+        if rerun.status is RerunStatus.PASS:
+            return passed(rerun.reason)
+        if any(needle in name.casefold() for name in rerun.passing):
+            return passed(f"{predicate.mentions} passed in the judge's re-run ({rerun.describe()})")
+        return result(
+            Support.NO_EVIDENCE, f"the judge's re-run did not report {predicate.mentions}"
+        )
+    if rerun.status is RerunStatus.PASS:
+        return passed(rerun.reason)
+    if rerun.status is RerunStatus.FAIL:
+        return failed(rerun.reason)
+    return result(Support.NO_EVIDENCE, rerun.reason)
+
+
 def check_test_result(predicate: TestResultPredicate, index: SessionIndex) -> PredicateResult:
+    if index.rerun is not None and _rerun_applies(predicate, index.rerun):
+        return check_rerun(predicate, index)
     runs = index.test_runs(predicate.runner)
     what = f"{predicate.runner} " if predicate.runner else ""
     if not runs:

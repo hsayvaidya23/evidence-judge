@@ -24,6 +24,7 @@ from pydantic import (
 from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.ingest._json import as_object
+from evidence_judge.sessions.rerun import RerunSpec
 
 MIN_TEXT = 3
 _GLOB_LITERAL = re.compile(r"[^*?/.\[\]{}]")
@@ -214,6 +215,11 @@ class SessionSpec(BaseModel):
         description="The evidence log, its key and head anchor were out of the agent's reach "
         "(sandbox, container or another OS user); only then can a verified log be full tamper "
         "evidence",
+    )
+    rerun: RerunSpec | None = Field(
+        default=None,
+        description="Run the suite again under the judge's control (`session judge --rerun`) "
+        "and decide test results from its report instead of the session record",
     )
 
     @model_validator(mode="after")

@@ -8,7 +8,13 @@ from rich.text import Text
 
 from evidence_judge.core.evidence import Channel, Run
 from evidence_judge.core.provenance import injections
-from evidence_judge.core.verdict import Dimension, Outcome, RunVerdict, Support
+from evidence_judge.core.verdict import (
+    Dimension,
+    Outcome,
+    RunVerdict,
+    Support,
+    VerificationMethod,
+)
 
 _OUTCOME_STYLE = {
     Outcome.PASS: ("PASS", "bold white on green"),
@@ -40,6 +46,14 @@ def print_verdict(verdict: RunVerdict, console: Console) -> None:
     if verdict.task:
         console.print(Text.assemble(("task ", "dim"), verdict.task))
     console.print(Text(verdict.summary))
+    if verdict.verification is not None:
+        rerun = verdict.verification.method is VerificationMethod.RERUN
+        label = "tests verified by re-run" if rerun else "tests from the transcript"
+        console.print(
+            Text.assemble(
+                (label, "bold" if rerun else "dim"), ": ", (verdict.verification.reason, "dim")
+            )
+        )
 
     if verdict.claims:
         table = Table(title="Claims", title_justify="left", expand=True, show_lines=False)

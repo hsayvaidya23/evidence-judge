@@ -51,6 +51,24 @@ class TamperDetection(BaseModel):
     reason: str
 
 
+class VerificationMethod(StrEnum):
+    RERUN = "rerun"
+    TRANSCRIPT = "transcript"
+
+
+class Verification(BaseModel):
+    """Where a coding-agent session's test results come from: the judge's own re-run of the
+    suite, or the test output in the session record."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    method: VerificationMethod = Field(
+        description="rerun: the judge ran the suite itself and read the runner's report; "
+        "transcript: the test output the session recorded"
+    )
+    reason: str
+
+
 class Citation(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -141,6 +159,10 @@ class RunVerdict(BaseModel):
     tamper_detection: TamperDetection | None = Field(
         default=None,
         description="What the evidence source can show of tampering; None when not assessed",
+    )
+    verification: Verification | None = Field(
+        default=None,
+        description="Where a coding-agent session's test results come from; None for browser runs",
     )
     warnings: list[str] = Field(default_factory=list[str])
     usage: Usage = Field(default_factory=Usage)
