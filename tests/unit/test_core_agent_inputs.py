@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from evidence_judge.core.echo import MASK
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent
-from evidence_judge.core.index import MASK, EvidenceIndex
+from evidence_judge.core.index import EvidenceIndex
 from tests.unit.conftest import HOST, act, final, honest_run, make_run, net, snap
 
 

@@ -53,8 +53,9 @@ from evidence_judge.checks.matching import (
     url_path,
 )
 from evidence_judge.checks.request import RequestMatcher, matching_requests
+from evidence_judge.core.echo import MASK
 from evidence_judge.core.evidence import Channel, NetworkEvent
-from evidence_judge.core.index import MASK, EvidenceIndex
+from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import Predicate, ValuePredicate
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 

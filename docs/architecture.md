@@ -186,6 +186,8 @@ shape the pipeline:
 | `ingest/_dom.py` | Playwright frame snapshots → visible page text |
 | `core/evidence.py` | `Run` and its events |
 | `core/index.py` | `EvidenceIndex`, the read side every checker uses |
+| `core/agent_input.py` | What the agent put into the run: typed and replayed field values, copied page text, uploads, URL values |
+| `core/echo.py` | Finding and masking echoes of agent input in evidence (`MASK`) |
 | `core/site.py` | `Site`: hosts and ports a spec names and a page or request is on |
 | `core/provenance.py` | Evidence the agent made rather than the site |
 | `redact.py` | `Redactor`: secret and PII detection and replacement |
