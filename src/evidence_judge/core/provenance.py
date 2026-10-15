@@ -12,6 +12,13 @@ storage and cookie writes, CDP sessions, WebSocket routes, ...).
 Opening a `javascript:` or `vbscript:` URL runs its code in the page the way `evaluate` does;
 ingesters record that navigation as an INJECT (`is_script_url`).
 
+A file the agent uploads by path or stream (or a binary one) is not in the recording, and the
+page may show its contents: page text after such an upload (`unseen_uploads`) may be the
+agent's. `untampered` also drops page states, screenshots and response bodies from the first of
+them on, and `doubt` names it. Unlike an injection it does not stop the run from passing: the
+requests the browser sent and their statuses are still the site's, and a predicate that holds on
+them still proves.
+
 A script the spec's author vouched for is not the agent writing the page: `trust_scripts`
 records an INJECT whose `script_sha256` the spec's `trusted_scripts` lists as OTHER.
 
@@ -29,8 +36,8 @@ import re
 from collections.abc import Iterable
 from typing import Final
 
-from evidence_judge.core.actions import GOTO, INJECT, OTHER, canonical_action
-from evidence_judge.core.evidence import ActionEvent, Run, is_web_page_url
+from evidence_judge.core.actions import GOTO, INJECT, OTHER, UPLOAD, canonical_action
+from evidence_judge.core.evidence import ActionEvent, NetworkEvent, Run, is_web_page_url
 
 MAX_NAMED: Final = 2
 """Injected calls and synthetic requests named in `tampering`'s reason."""
@@ -57,8 +64,8 @@ def script_hash(api: str, code: str, arg: object = None) -> str:
     (keys sorted, no spaces, non-ASCII kept). `api` is the call as the INJECT action names it
     (evaluate, evaluateHandle, $eval, $$eval, waitForFunction, addInitScript, addScriptTag,
     addStyleTag, setContent, and goto for a `javascript:` URL), `code` its code (the whole URL
-    for goto) exactly as recorded and `arg` its argument in
-    Playwright's wire form as the trace records it (`{"n": 500}` for 500), None for none."""
+    for goto) exactly as recorded and `arg` its argument in Playwright's wire form as the trace
+    records it (`{"n": 500}` for 500), None for none."""
     canonical = json.dumps(arg, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(f"{api}\n{code}\n{canonical}".encode()).hexdigest()
 
@@ -121,14 +128,58 @@ def _named(action: ActionEvent) -> str:
     return f"{action.value or action.name} ({action.id}{sha})"
 
 
+def unseen_uploads(run: Run) -> list[ActionEvent]:
+    """The uploads whose files' text the recording does not hold (`file_text`): sent by path or
+    stream, or binary."""
+    return [
+        a for a in run.actions if canonical_action(a.name) == UPLOAD and a.value and not a.file_text
+    ]
+
+
+def unseen_upload(run: Run) -> str | None:
+    """Why page text from the first `unseen_uploads` on may be the agent's, naming the files,
+    or None."""
+    unseen = unseen_uploads(run)
+    if not unseen:
+        return None
+    named = ", ".join(f"{a.value} ({a.id})" for a in unseen[:MAX_NAMED])
+    more = f" and {len(unseen) - MAX_NAMED} more" if len(unseen) > MAX_NAMED else ""
+    return (
+        f"the agent uploaded {named}{more} whose contents are not in the recording; page text "
+        "and response bodies from then on may show them"
+    )
+
+
+def doubt(run: Run) -> str | None:
+    """Why some evidence is not the site's (`tampering`, `unseen_upload`), or None: what
+    `untampered` drops."""
+    parts = [p for p in (tampering(run), unseen_upload(run)) if p is not None]
+    return "; ".join(parts) or None
+
+
 def untampered(run: Run) -> Run:
     """`run` as the site alone made it: page states, screenshots and requests from `tainted_at`
     on are dropped, synthetic requests with them, and later actions lose their page URL (it is a
     page the agent may have written). The actions themselves are kept: they are what the agent
-    did. Unchanged when nothing was injected or mocked."""
+    did. From the first `unseen_uploads` on, page states, screenshots and page URLs go the same
+    way and requests lose their response bodies. Unchanged when there is neither."""
     cut = tainted_at(run)
-    if cut is None:
-        return run
+    if cut is not None:
+        run = _cut(run, cut, network=[n for n in run.network if n.ts < cut and not n.synthetic])
+    unseen = [a.ts for a in unseen_uploads(run)]
+    if unseen:
+        at = min(unseen)
+        network = [
+            n
+            if n.ts < at or n.response_body is None
+            else n.model_copy(update={"response_body": None})
+            for n in run.network
+        ]
+        run = _cut(run, at, network=network)
+    return run
+
+
+def _cut(run: Run, cut: float, *, network: list[NetworkEvent]) -> Run:
     snapshots = [s for s in run.snapshots if s.ts < cut]
     kept = {s.id for s in snapshots}
     initial = run.initial_state
@@ -138,7 +189,7 @@ def untampered(run: Run) -> Run:
                 a if a.ts < cut or a.url is None else a.model_copy(update={"url": None})
                 for a in run.actions
             ],
-            "network": [n for n in run.network if n.ts < cut and not n.synthetic],
+            "network": network,
             "snapshots": snapshots,
             "screenshots": [s for s in run.screenshots if s.ts < cut],
             "initial_state": initial

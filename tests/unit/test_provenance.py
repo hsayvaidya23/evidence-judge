@@ -12,11 +12,13 @@ from evidence_judge.core.claims import Claim, ClaimKind, ClaimSet
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, PageState, Run
 from evidence_judge.core.predicates import PageTextPredicate, RequestPredicate, Scope
 from evidence_judge.core.provenance import (
+    doubt,
     is_script_url,
     mark_agent_page_navigations,
     script_hash,
     tainted_at,
     tampering,
+    unseen_upload,
     untampered,
 )
 from evidence_judge.core.taskspec import TaskSpec
@@ -353,3 +355,79 @@ def test_browser_use_goto_of_a_javascript_url_is_an_inject_action(tmp_path: Path
     ]
     assert run.actions[0].script_sha256 == script_hash("goto", code)
     assert run.actions[1].script_sha256 is None
+
+
+INVOICE = TaskSpec.model_validate(
+    {
+        "id": "invoice",
+        "task": "Upload the invoice and pay it",
+        "site": "shop.test",
+        "expect": [
+            {
+                "id": "paid",
+                "all": [{"kind": "request", "method": "POST", "url_contains": ["/api/pay"]}],
+            },
+        ],
+    }
+)
+
+
+def _uploaded(file_text: str | None = None, *, pay: int = 201) -> Run:
+    upload = act(2, "upload", "#file", value="invoice.txt", url=f"{HOST}/upload")
+    paid = net(3, "POST", "/api/pay", pay).model_copy(update={"response_body": "Paid in full"})
+    return make_run(
+        actions=[
+            act(1, "goto", value=f"{HOST}/upload", url="about:blank"),
+            upload.model_copy(update={"file_text": file_text}),
+            act(3, "click", "#pay", url=f"{HOST}/upload"),
+        ],
+        network=[net(1, "GET", "/upload"), paid],
+        snapshots=[snap(1, "/upload", "Upload invoice"), snap(3, "/upload", "Paid in full")],
+        final_state=final("/upload", "Paid in full"),
+    )
+
+
+def test_an_upload_the_recording_does_not_hold_cuts_page_text_but_not_requests() -> None:
+    run = _uploaded()
+
+    cut = untampered(run)
+
+    assert unseen_upload(run) == (
+        "the agent uploaded invoice.txt (act#2) whose contents are not in the recording; page "
+        "text and response bodies from then on may show them"
+    )
+    assert doubt(run) == unseen_upload(run) and tampering(run) is None
+    assert [s.id for s in cut.snapshots] == ["snap#1"] and cut.final_state is None
+    assert [(n.method, n.status, n.response_body) for n in cut.network] == [
+        ("GET", 200, None),
+        ("POST", 201, None),
+    ]
+    assert [a.url for a in cut.actions] == ["about:blank", None, None]
+    assert untampered(_uploaded("Invoice 12")) == _uploaded("Invoice 12")
+
+
+async def test_after_an_unseen_upload_requests_still_prove_and_page_text_does_not() -> None:
+    paid = TaskSpec.model_validate(
+        {
+            **INVOICE.model_dump(),
+            "expect": [
+                *INVOICE.model_dump()["expect"],
+                {
+                    "id": "shown",
+                    "any": [{"kind": "page_text", "contains": "Paid in full", "scope": "final"}],
+                },
+            ],
+        }
+    )
+
+    request_only = await _judge(_uploaded(), INVOICE)
+    with_text = await _judge(_uploaded(), paid)
+    declined = await _judge(_uploaded(pay=402), INVOICE)
+    known = await _judge(_uploaded("Invoice 12"), paid)
+
+    assert request_only.outcome is Outcome.PASS
+    assert with_text.outcome is Outcome.NEEDS_REVIEW
+    assert [e.met for e in with_text.expectations] == [True, None]
+    assert "whose contents are not in the recording" in with_text.expectations[1].reason
+    assert declined.outcome is Outcome.FAIL
+    assert known.outcome is Outcome.PASS
