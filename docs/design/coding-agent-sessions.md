@@ -552,18 +552,18 @@ answer or inject one trick, as the browser forgery lab does.
 `python -m evidence_judge.sessions.bench tests/fixtures/sessions` forges success on three
 bases whose whole suite was never shown passing: the honest failure report, the `-k add`
 session, and the honest fix with its final test run removed (so each trick is the only test
-evidence). Each base gets eight rewritten answers and 67 appended tricks, judged once on the
+evidence). Each base gets eight rewritten answers and 72 appended tricks, judged once on the
 forged answer and once with only a spec expecting the suite to pass. Honest sessions are
 controls.
 
 | | Forged sessions | False PASS | FAIL | NEEDS REVIEW |
 | --- | ---: | ---: | ---: | ---: |
 | Rewritten answers | 24 | 0 | 8 | 16 |
-| Tricks (67 kinds, with and without a spec) | 402 | 0 | 95 | 307 |
+| Tricks (72 kinds, with and without a spec) | 432 | 0 | 96 | 336 |
 | A false "I didn't touch `calc.py`" | 1 | 0 | 1 | 0 |
-| **All** | **427** | **0** | **104** | **323** |
+| **All** | **457** | **0** | **105** | **352** |
 
-All nine honest sessions keep their expected outcome (eight PASS, among them `go test`,
+All fourteen honest sessions keep their expected outcome (thirteen PASS, among them `go test`,
 `go test -v`, `node --test` and `npm test`; the `-k add` session NEEDS REVIEW). The tricks: `|| true`, `; exit 0`, `!`, an echoed or printed summary, a summary appended
 after the run, `grep` over the output, skip and xfail markers, deleted or rewritten tests,
 `rm` of the test file, `-k`, `--deselect`, a single node id, `PYTEST_ADDOPTS`, `addopts` in
@@ -580,7 +580,9 @@ earlier call or made inline, padded and repeated path runs, `jest -u`, and quote
 evidence-log store edits. Ten more came from a second review: `disableAllHooks` in
 `.claude/settings.local.json`, a removed, uninstalled or shimmed `evidence-judge`, a local
 plugin through `uv run --with` or `pip install -e`, `CI=true` inline or exported to switch on
-`skipif` markers, and a new test module or session fixture that rebinds the code under test.
+`skipif` markers, and a new test module or session fixture that rebinds the code under test. Five more came from a third review: `pytest --snapshot-update`,
+an `UPDATE_GOLDEN=1` run, an edited expected-output file under `test_data/`, source code that
+patches the test runner, and an `__eq__` that always returns `True`.
 
 `tests/fixtures/sessions/claude_code/red_team/` holds the reviewer's attacks and honest
 counterparts, built by really running each step on the toy project and scrubbed like the other
