@@ -28,7 +28,7 @@ from evidence_judge.checks._common import (
     result,
     state_id,
 )
-from evidence_judge.checks.base import CheckContext
+from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.matching import (
     MISSING,
@@ -66,10 +66,12 @@ def format_value(value: object) -> str:
     return quoted(as_text(value))
 
 
-def _candidates(predicate: ValuePredicate, index: EvidenceIndex) -> list[NetworkEvent]:
+def _candidates(
+    predicate: ValuePredicate, index: EvidenceIndex, scope: EvidenceScope | None
+) -> list[NetworkEvent]:
     if predicate.in_request is not None:
-        return matching_requests(predicate.in_request, index)
-    return [e for e in index.mutations() if e.ok]
+        return matching_requests(predicate.in_request, index, scope)
+    return [e for e in index.mutations() if e.ok and (scope is None or scope.request_allowed(e))]
 
 
 def _read_bodies(event: NetworkEvent, path: str) -> Observation | None:
@@ -107,14 +109,19 @@ def _missing_json_reason(
     return "No mutating request that took effect (2xx or 3xx) was captured"
 
 
-def _from_pages(regex_source: str, index: EvidenceIndex) -> tuple[list[Observation], list[str]]:
-    """Every match on every page state, and the ids of states whose text was not fully read."""
+def _from_pages(
+    regex_source: str, index: EvidenceIndex, scope: EvidenceScope | None
+) -> tuple[list[Observation], list[str]]:
+    """Every match on every page state in `scope`, and the ids of states whose text was not
+    fully read."""
     regex = compile_regex(regex_source)
     if regex.groups != 1:
         raise InvalidPredicateError(f"page_regex /{regex_source}/ needs exactly one group")
     observations: list[Observation] = []
     partial: list[str] = []
     for state in index.page_states():
+        if scope is not None and not scope.page_allowed(state.url):
+            continue
         evidence_id = state_id(state, index)
         found = regex_findall(regex, state.text)
         if not found.complete:
@@ -135,7 +142,7 @@ def _partial_reason(state_ids: list[str]) -> str:
 
 
 def _observe(
-    predicate: ValuePredicate, index: EvidenceIndex
+    predicate: ValuePredicate, index: EvidenceIndex, scope: EvidenceScope | None
 ) -> tuple[list[Observation], str, str | None]:
     if predicate.json_path is None and predicate.page_regex is None:
         raise InvalidPredicateError("value predicate needs 'json_path' or 'page_regex'")
@@ -143,7 +150,7 @@ def _observe(
     gaps: list[str] = []
     unread: str | None = None
     if predicate.json_path is not None:
-        candidates = _candidates(predicate, index)
+        candidates = _candidates(predicate, index, scope)
         found = [o for e in candidates if (o := _read_bodies(e, predicate.json_path)) is not None]
         observations.extend(found)
         truncated = [e for e in candidates if _truncated_without(e, predicate.json_path)]
@@ -153,7 +160,7 @@ def _observe(
         elif not found:
             gaps.append(_missing_json_reason(predicate, predicate.json_path, candidates, index))
     if predicate.page_regex is not None:
-        pages, partial = _from_pages(predicate.page_regex, index)
+        pages, partial = _from_pages(predicate.page_regex, index, scope)
         observations.extend(pages)
         if partial:
             reason = _partial_reason(partial)
@@ -164,8 +171,10 @@ def _observe(
     return observations, "; ".join(gaps), unread
 
 
-def check_value(predicate: ValuePredicate, index: EvidenceIndex) -> PredicateResult:
-    observations, gaps, unread = _observe(predicate, index)
+def check_value(
+    predicate: ValuePredicate, index: EvidenceIndex, scope: EvidenceScope | None = None
+) -> PredicateResult:
+    observations, gaps, unread = _observe(predicate, index, scope)
     field = predicate.field
     expected = f"{predicate.op} {as_text(predicate.value)}"
     if not observations:
@@ -234,4 +243,4 @@ class ValueChecker:
     deterministic = True
 
     async def evaluate(self, predicate: Predicate, ctx: CheckContext) -> PredicateResult:
-        return check_value(require(predicate, ValuePredicate, self.kind), ctx.index)
+        return check_value(require(predicate, ValuePredicate, self.kind), ctx.index, ctx.scope)

@@ -152,8 +152,10 @@ def _body_misses(body: str | None, needles: list[str], label: str) -> list[Miss]
     return [Miss(f"{label} lacks {quoted(n)}") for n in absent]
 
 
-def matching_requests(predicate: RequestPredicate, index: EvidenceIndex) -> list[NetworkEvent]:
-    matcher = RequestMatcher(predicate)
+def matching_requests(
+    predicate: RequestPredicate, index: EvidenceIndex, scope: EvidenceScope | None = None
+) -> list[NetworkEvent]:
+    matcher = RequestMatcher(predicate, scope)
     return [e for e in index.requests() if matcher.matches(e)]
 
 

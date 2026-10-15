@@ -13,11 +13,18 @@ from evidence_judge.config import Settings
 from evidence_judge.core.claims import Claim, ClaimKind, ClaimSet
 from evidence_judge.core.evidence import PageState, Run, is_web_page_url
 from evidence_judge.core.index import EvidenceIndex
-from evidence_judge.core.predicates import PageTextPredicate, RequestPredicate, Scope, UrlPredicate
+from evidence_judge.core.predicates import (
+    PageTextPredicate,
+    RequestPredicate,
+    Scope,
+    UrlPredicate,
+    ValuePredicate,
+)
 from evidence_judge.core.taskspec import Expectation, TaskSpec
 from evidence_judge.core.verdict import Outcome, Support
 from evidence_judge.engine import Judge, JudgeOptions
 from tests.unit.conftest import (
+    CONFIRMATION_TEXT,
     act,
     ctx,
     final,
@@ -44,7 +51,9 @@ def _third_party_order() -> Run:
     return run.model_copy(update={"network": [*run.network, order]})
 
 
-async def _check(pred: RequestPredicate | PageTextPredicate | UrlPredicate, c: CheckContext):
+async def _check(
+    pred: RequestPredicate | PageTextPredicate | UrlPredicate | ValuePredicate, c: CheckContext
+):
     return await default_registry().evaluate(pred, c)
 
 
@@ -100,10 +109,82 @@ def test_only_http_and_https_pages_are_web_pages(url: str) -> None:
     assert not EvidenceScope(primary_host="shop.test").page_allowed(url)
 
 
-@pytest.mark.parametrize("url", ["https://shop.test/order", "http://127.0.0.1:8000/order"])
-def test_site_pages_on_http_and_https_are_allowed(url: str) -> None:
+@pytest.mark.parametrize(
+    ("host", "url"),
+    [
+        ("shop.test", "https://shop.test/order"),
+        ("shop.test", "https://www.shop.test/order"),
+        ("www.shop.test", "https://checkout.shop.test/order"),
+        ("127.0.0.1", "http://127.0.0.1:8000/order"),
+    ],
+)
+def test_site_pages_on_http_and_https_are_allowed(host: str, url: str) -> None:
     assert is_web_page_url(url)
-    assert EvidenceScope(primary_host="shop.test").page_allowed(url)
+    assert EvidenceScope(primary_host=host).page_allowed(url)
+
+
+@pytest.mark.parametrize("url", ["https://gist.test/u/7f3a", "https://shop.test.evil/order"])
+def test_pages_off_the_site_are_not_allowed(url: str) -> None:
+    assert not EvidenceScope(primary_host="shop.test").page_allowed(url)
+
+
+def _gist_run(answer: str) -> Run:
+    gist = "https://gist.test"
+    return make_run(
+        actions=[
+            act(1, "goto", url="https://shop.test/"),
+            act(2, "click", "#product-red-kettle"),
+            act(3, "goto", url=f"{gist}/u/7f3a"),
+        ],
+        network=[
+            net(1, "GET", "/"),
+            net(2, "GET", "/p/red-kettle"),
+            net(4, "GET", "/u/7f3a", host=gist),
+        ],
+        snapshots=[snap(1, "/", "Kettles Red Kettle $24.00")],
+        final_state=PageState(url=f"{gist}/u/7f3a", text=CONFIRMATION_TEXT),
+    ).model_copy(update={"agent_answer": answer})
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Order A1 confirmed.",
+        "Your order is complete.",
+        "Success! Thank you for your order.",
+    ],
+)
+async def test_confirmation_on_a_third_party_page_does_not_pass(answer: str) -> None:
+    judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
+    verdict = await judge.judge(_gist_run(answer), JudgeOptions(offline=True))
+    assert verdict.outcome is Outcome.NEEDS_REVIEW, verdict.summary
+    assert not any(
+        c.status is Support.SUPPORTED and c.citations[0].evidence_id == "final"
+        for c in verdict.claims
+    )
+
+
+async def test_confirmation_claim_on_a_third_party_final_page_has_no_evidence() -> None:
+    claim = Claim(
+        id="c1",
+        text="A confirmation was shown",
+        quote="Order A1 confirmed",
+        kind=ClaimKind.OUTCOME,
+        key=True,
+        predicates=[PageTextPredicate(contains="Thank you for your order", scope=Scope.FINAL)],
+    )
+    verdict = await judge_claim(
+        claim, _scoped(_gist_run("Order A1 confirmed.")), default_registry()
+    )
+    assert verdict.status is Support.NO_EVIDENCE
+    assert "gist.test is outside the run's host (shop.test)" in verdict.reason
+
+
+async def test_page_value_on_a_third_party_page_proves_nothing() -> None:
+    total = ValuePredicate(field="total", page_regex=r"total \$([\d.]+)", op="<=", value=30)
+    run = _gist_run("Paid $24.00.")
+    assert (await _check(total, _scoped(run))).status is Support.NO_EVIDENCE
+    assert (await _check(total, ctx(run))).status is Support.SUPPORTED
 
 
 @pytest.mark.parametrize("url", NON_WEB_PAGES[:2])

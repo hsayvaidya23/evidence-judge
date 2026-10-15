@@ -18,10 +18,11 @@ class EvidenceScope:
     """Which hosts may prove a claim or an `expect` entry.
 
     With `allowed_hosts` set, only requests and page states on those hosts (or their subdomains)
-    count. Without it, a mutation must go to the run's primary host or a subdomain of it (a
-    leading 'www.' is ignored), so a POST to a third party cannot prove "order placed"; reads
-    and page states on any host still count. Only http and https page states count: data:,
-    about:, view-source:, file:, browser-internal and extension pages never do.
+    count. Without it, mutations and page states must be on the run's primary host or a
+    subdomain of it (a leading 'www.' is ignored), so a POST to a third party cannot prove
+    "order placed" and neither can a confirmation page on another host; other reads on any host
+    still count. Only http and https page states count: data:, about:, view-source:, file:,
+    browser-internal and extension pages never do.
     """
 
     allowed_hosts: tuple[str, ...] = ()
@@ -50,7 +51,8 @@ class EvidenceScope:
     def page_allowed(self, url: str) -> bool:
         if not is_web_page_url(url):
             return False
-        return not self.allowed_hosts or host_allowed(url_host(url), list(self.allowed_hosts))
+        hosts = self.site_hosts
+        return not hosts or host_allowed(url_host(url), hosts)
 
 
 @dataclass(slots=True)

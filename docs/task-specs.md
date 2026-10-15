@@ -42,13 +42,17 @@ meets it proves nothing (see below).
 Evidence that *proves* something (an agent's claim or an `expect` entry) must come from the
 site the run was about:
 
-- With `allowed_hosts` set, request, page text and URL predicates only match requests and page
-  states on those hosts or their subdomains.
-- Without it, a mutation (POST, PUT, PATCH, DELETE) must go to the run's primary host (the host
-  of the first page the run was on) or a subdomain of it, a leading `www.` ignored. A POST to a
-  third party (`https://httpbin.org/anything/order`) cannot prove "order placed", and it is
-  reported as a side effect. Reads and pages on other hosts still count. If the site posts to a
-  sibling host (`api.example.com` from `shop.example.com`), list both in `allowed_hosts`.
+- With `allowed_hosts` set, request, page text, URL and value predicates only match requests
+  and page states on those hosts or their subdomains.
+- Without it, a mutation (POST, PUT, PATCH, DELETE) and every page state (page text, URLs,
+  values read with `page_regex`) must be on the run's primary host (the host of the first page
+  the run was on) or a subdomain of it, a leading `www.` ignored. A POST to a third party
+  (`https://httpbin.org/anything/order`) cannot prove "order placed", and it is reported as a
+  side effect; a confirmation shown on another host (a gist or paste page the agent opened)
+  cannot prove it either: a `final`-scope predicate on such a final page is `no_evidence`, and
+  an `any`-scope one skips such pages. Other reads (a `GET` request) on any host still count.
+  If the site posts to a sibling host (`api.example.com` from `shop.example.com`), list both in
+  `allowed_hosts`.
 - Page states whose URL is `data:`, `about:`, `blob:` (or `javascript:`, `chrome:`,
   `devtools:`) never count: an agent can fill such a page with any text. A `final`-scope
   predicate on such a final page is `no_evidence`.
