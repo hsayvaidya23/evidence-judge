@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import time
 
 import pytest
@@ -15,7 +16,6 @@ from evidence_judge.checks.matching import (
     compile_regex,
     contains,
     excerpt,
-    json_path_get,
     normalize,
     parse_body,
     parse_number,
@@ -217,9 +217,10 @@ def test_status_matches_rejects_malformed_spec(spec: str) -> None:
         ("", {"items": [{"price": 45.0, "sku": "K-1"}], "total": None}),
     ],
 )
-def test_json_path_get(path: str, expected: object) -> None:
+def test_body_values_follow_a_path(path: str, expected: object) -> None:
     obj = {"items": [{"price": 45.0, "sku": "K-1"}], "total": None}
-    assert json_path_get(obj, path) == expected
+    found = body_values(json.dumps(obj), path, form=False)
+    assert found == ([] if expected is MISSING else [expected])
 
 
 @pytest.mark.parametrize(

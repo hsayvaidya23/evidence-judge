@@ -60,12 +60,13 @@ def test_a_host_idna_cannot_encode_is_kept_lower_cased() -> None:
 )
 def test_what_a_site_covers(site: str, url: str, covered: bool) -> None:
     named = Site.parse(site, wildcard=True)
-    assert named.covers_url(url) is covered
+    visited = Site.of_url(url)
+    assert visited is not None and named.covers(visited) is covered
     assert on_any(url, [Site("other.test"), named]) is covered
 
 
 def test_nothing_covers_a_url_without_a_host() -> None:
-    assert not Site("shop.test").covers_url("about:blank")
+    assert Site.of_url("about:blank") is None
     assert not on_any("about:blank", [Site("shop.test")])
 
 
