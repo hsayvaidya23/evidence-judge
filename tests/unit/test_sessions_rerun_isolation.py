@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import os
 import py_compile
+import shutil
+import sys
 import tempfile
 from importlib.util import cache_from_source
 from pathlib import Path
@@ -86,3 +88,82 @@ def test_planted_bytecode_is_never_loaded(tmp_path: Path) -> None:
     os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns))
     result = execute(RerunSpec(command=PYTEST), root)
     assert result.status is RerunStatus.PASS, result.reason
+
+
+REPORT_PROBE = """\
+import os
+import sys
+from pathlib import Path
+
+
+def test_report_location():
+    report = Path(next(a for a in sys.argv if a.startswith("--junitxml=")).partition("=")[2])
+    assert not report.is_relative_to(Path.cwd().parent)
+    assert report.parent.stat().st_mode & 0o777 == 0o700
+"""
+
+
+def test_the_report_directory_is_apart_from_the_copy(tmp_path: Path) -> None:
+    root = toy(tmp_path)
+    (root / "tests" / "test_report.py").write_text(REPORT_PROBE)
+    result = execute(RerunSpec(command=PYTEST), root)
+    assert result.status is RerunStatus.PASS, result.reason
+    assert result.passed == 4
+
+
+SANDBOX_PROBE = """\
+import os
+
+
+def test_sandboxed():
+    assert os.environ["EVJ_SANDBOX_TREE"] == os.getcwd()
+    assert os.environ["EVJ_SANDBOX_HOME"] == os.environ["HOME"]
+"""
+
+
+def test_the_command_runs_under_the_sandbox_prefix(tmp_path: Path) -> None:
+    root = toy(tmp_path)
+    (root / "tests" / "test_sandbox.py").write_text(SANDBOX_PROBE)
+    sandbox = ["env", "EVJ_SANDBOX_TREE={tree}", "EVJ_SANDBOX_HOME={home}"]
+    result = execute(RerunSpec(command=PYTEST, sandbox=sandbox), root)
+    assert result.status is RerunStatus.PASS, result.reason
+    assert result.passed == 4
+    unsandboxed = execute(RerunSpec(command=PYTEST), root)
+    assert unsandboxed.status is RerunStatus.FAIL
+
+
+def test_a_missing_sandbox_program_needs_review(tmp_path: Path) -> None:
+    spec = RerunSpec(command=PYTEST, sandbox=["evj-no-such-sandbox", "--"])
+    result = execute(spec, toy(tmp_path))
+    assert result.status is RerunStatus.UNKNOWN
+    assert "evj-no-such-sandbox" in result.reason
+
+
+ESCAPE_PROBE = """\
+from pathlib import Path
+
+
+def test_escape():
+    target = Path({target!r})
+    try:
+        target.write_text("escaped")
+    except PermissionError:
+        return
+    raise AssertionError("wrote outside the copy")
+"""
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("sandbox-exec") is None,
+    reason="sandbox-exec is macOS only",
+)
+def test_a_sandbox_exec_profile_keeps_the_run_out_of_the_real_tree(tmp_path: Path) -> None:
+    root = toy(tmp_path)
+    target = root.resolve() / "escaped.txt"
+    (root / "tests" / "test_escape.py").write_text(ESCAPE_PROBE.format(target=str(target)))
+    profile = f'(version 1)(allow default)(deny file-write* (subpath "{root.resolve()}"))'
+    result = execute(RerunSpec(command=PYTEST, sandbox=["sandbox-exec", "-p", profile]), root)
+    assert result.status is RerunStatus.PASS, result.reason
+    assert not target.exists()
+    assert execute(RerunSpec(command=PYTEST), root).status is RerunStatus.FAIL
+    assert target.exists()

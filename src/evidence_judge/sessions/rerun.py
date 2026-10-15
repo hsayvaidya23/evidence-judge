@@ -88,11 +88,18 @@ class RerunSpec(BaseModel):
         description="Paths or glob patterns, relative to the project, copied even when "
         "`.gitignore` ignores them (a generated `_version.py`)",
     )
+    sandbox: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        description="An argv prefix the command runs under (bwrap, sandbox-exec, docker run "
+        "...); {tree}, {report_dir}, {home} and {tmp} stand for the copy, the report "
+        "directory, and the run's HOME and TMPDIR",
+    )
 
-    @field_validator("command")
+    @field_validator("command", "sandbox")
     @classmethod
-    def _argv(cls, value: list[str]) -> list[str]:
-        if any(not part or "\0" in part for part in value):
+    def _argv(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and any(not part or "\0" in part for part in value):
             raise ValueError("command arguments must be non-empty and contain no NUL")
         return value
 
@@ -1016,6 +1023,20 @@ def _resolve_program(argv: list[str], copy: Path, path: str) -> list[str] | None
     return [found, *argv[1:]] if found else None
 
 
+def _command(
+    spec: RerunSpec, argv: list[str], copy: Path, env: dict[str, str], places: dict[str, Path]
+) -> list[str] | None:
+    """The argv to start: the command, or the spec's sandbox prefix with its placeholders filled
+    in followed by the command, which the sandbox then finds on its own."""
+    if spec.sandbox is None:
+        return _resolve_program(argv, copy, env["PATH"])
+    prefix = list(spec.sandbox)
+    for name, place in places.items():
+        prefix = [part.replace(f"{{{name}}}", str(place)) for part in prefix]
+    resolved = _resolve_program(prefix, copy, env["PATH"])
+    return None if resolved is None else [*resolved, *argv]
+
+
 def _same_dir(a: str | None, b: Path) -> bool:
     if a is None:
         return True
@@ -1079,11 +1100,13 @@ def execute(
             "the re-run needs a runner that writes a machine-readable report; set rerun.runner "
             "(pytest, go, jest, vitest, cargo, node or unittest)",
         )
-    with tempfile.TemporaryDirectory(prefix="evj-rerun-") as tmp:
+    with (
+        tempfile.TemporaryDirectory(prefix="evj-rerun-") as tmp,
+        tempfile.TemporaryDirectory() as reports,
+    ):
         scratch = Path(tmp).resolve()
-        workspace = scratch / "judge"
+        workspace = Path(reports).resolve()
         copy = scratch / "tree"
-        workspace.mkdir()
         copy.mkdir()
         env = environment(spec, runner, scratch)
         resolved = resolve_base(root, base or "HEAD", env)
@@ -1106,11 +1129,14 @@ def execute(
             plan = _plan(spec.command, runner, workspace)
         except ReportError as exc:
             return done(RerunStatus.UNKNOWN, f"the re-run could not ask for a report: {exc}")
-        argv = _resolve_program(plan.argv, copy, env["PATH"])
+        places = {"tree": copy, "report_dir": workspace, "home": Path(env["HOME"]),
+                  "tmp": Path(env["TMPDIR"])}  # fmt: skip
+        argv = _command(spec, plan.argv, copy, env, places)
         if argv is None:
+            program = (spec.sandbox or spec.command)[0]
             return done(
                 RerunStatus.UNKNOWN,
-                f"the re-run could not find {spec.command[0]!r} on the judge's PATH",
+                f"the re-run could not find {program!r} on the judge's PATH",
                 config_changes=changes,
                 base=sha,
                 notes=notes,
