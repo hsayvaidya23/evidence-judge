@@ -1,0 +1,10 @@
+{
+  "name": "evidence-judge",
+  "version": "0.1.0",
+  "description": "Check a browser agent's final answer against the Playwright trace it recorded, and keep it working when the evidence contradicts the answer.",
+  "author": { "name": "Yash Vaidya", "url": "https://github.com/hsayvaidya23" },
+  "homepage": "https://hsayvaidya23.github.io/evidence-judge/guides/claude-code/",
+  "repository": "https://github.com/hsayvaidya23/evidence-judge",
+  "license": "MIT",
+  "keywords": ["playwright", "browser-agents", "evals", "verification", "hooks", "mcp"]
+}

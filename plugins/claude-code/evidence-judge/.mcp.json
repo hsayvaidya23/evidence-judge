@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "evidence-judge": {
+      "command": "evidence-judge",
+      "args": ["mcp"]
+    }
+  }
+}

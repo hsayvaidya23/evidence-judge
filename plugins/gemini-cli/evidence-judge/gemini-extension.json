@@ -1,0 +1,11 @@
+{
+  "name": "evidence-judge",
+  "version": "0.1.0",
+  "description": "Check a browser agent's final answer against the Playwright trace it recorded, and record every tool call to an evidence log.",
+  "mcpServers": {
+    "evidence-judge": {
+      "command": "evidence-judge",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -103,6 +103,8 @@ include = [
   "demo",
   "docs",
   "schemas",
+  "plugins",
+  ".claude-plugin",
   "README.md",
   "CHANGELOG.md",
   "LICENSE",

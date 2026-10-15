@@ -1,0 +1,72 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-stop --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "timeout": 90,
+            "statusMessage": "Evidence Judge: checking the answer against the browser trace"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-stop --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "timeout": 90,
+            "statusMessage": "Evidence Judge: checking the answer against the browser trace"
+          }
+        ]
+      }
+    ]
+  }
+}
