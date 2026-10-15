@@ -10,6 +10,7 @@ from evidence_judge.checks.matching import (
     MAX_REGEX_INPUT,
     MAX_REGEX_MATCHES,
     MISSING,
+    body_values,
     compare,
     compile_regex,
     contains,
@@ -93,6 +94,34 @@ def test_excerpt_centres_on_match() -> None:
         ("1.500.000,5,0", None),
         ("+-3", None),
         ("1e5", None),
+        ("1e3", None),
+        ("1E3", None),
+        (1e3, 1000.0),
+        ("NaN", None),
+        ("nan", None),
+        ("Infinity", None),
+        ("-inf", None),
+        (float("inf"), None),
+        ("24,00 €", 24.0),
+        ("1,024.00", 1024.0),
+        ("1.024,00", 1024.0),
+        ("-24", -24.0),
+        ("(24.00)", None),
+        ("30.00 USD", 30.0),
+        ("$9¹", 9.0),
+        ("$9¹ ", 9.0),
+        ("24.00€²", None),
+        ("24.00²", 24.0),
+        ("2²", 2.0),
+        ("2₂", 2.0),
+        ("2²5", None),
+        ("²5", None),
+        ("20 m²", None),
+        ("½", None),
+        ("1½", None),
+        ("①", None),
+        (f"{chr(0xFF11)}{chr(0xFF12)}", 12.0),
+        ("٢٤", 24.0),
         ("-", None),
         ("N/A", None),
         ("", None),
@@ -206,6 +235,39 @@ def test_json_path_get(path: str, expected: object) -> None:
 )
 def test_parse_body(body: str | None, expected: object) -> None:
     assert parse_body(body) == expected
+
+
+@pytest.mark.parametrize(
+    ("body", "path", "expected"),
+    [
+        ('{"price": 20}', "price", [20]),
+        ('{"price": 999, "price": 20}', "price", [999, 20]),
+        ('{"price": 1, "price": 2, "price": 3}', "price", [1, 2, 3]),
+        ("price=999&price=20", "price", ["999", "20"]),
+        ('{"items": [{"price": 1, "price": 2}]}', "items.0.price", [1, 2]),
+        ('{"a": {"p": 1}, "a": {"p": 2}}', "a.p", [1, 2]),
+        ('{"a": {"p": 1}, "a": {"q": 2}}', "a.p", [1]),
+        ('{"price": [1, 2]}', "price", [[1, 2]]),
+        ('{"price": 20}', "nope", []),
+        ("not json", "price", []),
+        (None, "price", []),
+        ('{"a": 1}', "", [{"a": 1}]),
+    ],
+)
+def test_body_values_reads_every_value_of_a_repeated_key(
+    body: str | None, path: str, expected: list[object]
+) -> None:
+    assert body_values(body, path) == expected
+
+
+def test_body_values_reads_forms_only_when_asked() -> None:
+    assert body_values("price=20", "price", form=False) == []
+    assert body_values('{"price": 20}', "price", form=False) == [20]
+
+
+def test_parse_body_keeps_the_last_value_of_a_repeated_key() -> None:
+    assert parse_body("a=1&a=2") == {"a": "2"}
+    assert parse_body('{"a": 1, "a": 2}') == {"a": 2}
 
 
 def test_url_helpers() -> None:

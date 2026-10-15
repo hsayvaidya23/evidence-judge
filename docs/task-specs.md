@@ -459,11 +459,29 @@ leads to review, not failure.
 ```yaml
 - kind: value
   field: price
-  json_path: items.0.price          # dotted path into a JSON request/response body
+  json_path: items.0.price          # dotted path into the request and the response body
   in_request: {kind: request, method: POST, url_contains: [/api/orders]}
   op: "<="                          # ==, !=, <, <=, >, >=, contains
   value: 30
 ```
+
+`json_path` is read from **both** bodies of every candidate request: the request body (JSON or
+form-encoded) and the response body (JSON, or form-encoded when the response's MIME type says
+so; an HTML answer is never read as `key=value` pairs). Every value it reads must satisfy the
+comparison, so a request that asked for a total of 20 and a response that charged 999 violate
+`total <= 30`. Choose a path that means the same field in both bodies: a response's
+`items.0.price` after a discount is fine when it is lower, and a violation when it is higher.
+Where the request sent a plain value, an object or array at the same path of the response
+(`plan: "team"` answered with `plan: {"id": "p_1", "name": "Team"}`) is another field under the
+same name and is not read. A plain response value in another format still counts: a request's
+`check_in: "2026-11-03"` answered with `"2026-11-03T00:00:00Z"` violates `== "2026-11-03"`, so
+use `contains` for such a field.
+
+A body that repeats a key (`price=999&price=20`, or `{"price": 999, "price": 20}`) names every
+one of its values, because servers differ on which one they use. If every value violates the
+comparison, the predicate is `contradicted`; if only some do, it is `no_evidence` (the record
+does not show which value took effect), and an `==` claim on a key whose values differ is never
+proven.
 
 Instead of `json_path`, `page_regex` extracts the value from page text with exactly one capture
 group:
@@ -483,6 +501,11 @@ Numbers are read from JSON numbers and from strings as prices are usually writte
 symbols or codes (`$24.00`, `1500 EUR`), thousands grouped with commas, dots, spaces or
 apostrophes (`24,000.50`, `1 500`, `1'500`, `1.500,00 €`), a decimal comma before one or two
 digits (`24,5`) and a `k`/`m`/`b` suffix. Ambiguous strings such as `1.500` are not numbers.
+A superscript or subscript right after the last digit is a footnote and ignored (`$25¹` is 25);
+anywhere else, and any other character that only looks like a digit (`20 m²`, `½`, `①`), makes
+the string not a number rather than more digits. Strings in scientific notation (`1e3`), `NaN`,
+`Infinity` and accounting negatives (`(24.00)`) are not numbers either; a JSON number is one
+whatever its notation.
 `<`, `<=`, `>` and `>=` need numbers on both sides; if either side is not one, the predicate is
 `no_evidence` ("cannot compare ... numerically"), never a text comparison. `==` and `!=` fall
 back to comparing normalised text.
@@ -490,9 +513,10 @@ back to comparing normalised text.
 Without `in_request`, the value is looked up in every state-changing request that took effect
 (answered 2xx or 3xx and not failed); a rejected or failed attempt does not count. With
 `in_request`, its own `status` decides (the default `ok` likewise skips failed attempts).
-If a candidate request's body was truncated before `json_path`, the value cannot be shown to
-hold for every observation, so the predicate is `no_evidence` unless a recorded observation
-already violates it.
+If either body of a candidate request was truncated, the value cannot be shown to hold for every
+observation (the cut part could hold a violating or repeated value), so the predicate is
+`no_evidence` unless a recorded observation already violates it. A truncated response recorded
+as HTML or XML is the exception: `json_path` never reads one.
 
 ### `screenshot`: a yes/no question for a vision model
 

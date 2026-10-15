@@ -210,6 +210,12 @@ async def test_what_the_agent_submitted_and_what_the_site_answered_still_prove(
     assert await _support(run, predicate) is Support.SUPPORTED
 
 
+async def test_a_value_only_the_response_echoes_proves_nothing() -> None:
+    run = _noted_order({"order": "A77", "message": "Gift for mom"})
+    echoed = ValuePredicate(field="message", json_path="message", op="==", value="Gift for mom")
+    assert await _support(run, echoed) is Support.NO_EVIDENCE
+
+
 async def test_a_response_read_the_agent_did_not_type_still_proves() -> None:
     predicate = RequestPredicate(
         method="GET", url_contains=["/api/products/"], response_contains=["Out of stock"]

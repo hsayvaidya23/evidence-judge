@@ -146,7 +146,9 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   on its own; another predicate (a mutation request, text the agent did not type) has to. What
   the agent submitted is not an echo: a mutation's URL and request body are never masked, so a
   `POST /api/orders` carrying the typed note, or a value read from it (`json_path`), still
-  proves the submission. A response that repeats the typed value back is masked like any other.
+  proves the submission. A response that repeats the typed value back is masked like any other:
+  a `json_path` value that is a masked echo is not read at all, so it neither proves the value
+  nor contradicts the request that carried it.
 - **Short words and partial echoes.** An input that is a single word shorter than six characters without a digit ("Your" typed
   into a name field, `/cart` opened by URL) is only masked for a predicate that could be that
   word alone: a needle that is itself one short word (`Paid`, `/cart`), a short string `value`,

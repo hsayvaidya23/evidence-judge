@@ -6,6 +6,7 @@ import functools
 import json
 import math
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import Enum
 from typing import Final, Literal, cast
@@ -84,6 +85,13 @@ def parse_number(value: object) -> float | None:
     spaces) or apostrophes ('24,000.50', '1 500', "1'500", '1.500,00 €'). A comma followed by
     one or two digits is a decimal comma ('24,5'). Ambiguous forms such as '1.500' (1.5 or
     1500) and malformed grouping ('1,50,000') are rejected.
+
+    Superscript or subscript marks right after the last digit are a footnote and dropped
+    ('$9¹' is 9); anywhere else, or any other character that only folds into a digit ('20 m²',
+    '½', '①'), makes the text not a number, so it never reads as more digits ('2²' is not 22).
+    Text is never read in scientific notation ('1e3'), as NaN or infinity, or as an
+    accounting negative ('(24.00)'): those are not numbers. A JSON number is a number whatever
+    its notation.
     """
     if isinstance(value, bool):
         return None
@@ -91,7 +99,10 @@ def parse_number(value: object) -> float | None:
         return float(value) if math.isfinite(value) else None
     if not isinstance(value, str):
         return None
-    match = _NUMBER.match(normalize(value))
+    text = _without_footnote(value)
+    if text is None:
+        return None
+    match = _NUMBER.match(normalize(text))
     if match is None or (match["sign"] and match["sign2"]):
         return None
     number = _parse_digits(match["core"])
@@ -100,6 +111,30 @@ def parse_number(value: object) -> float | None:
     if match["suffix"]:
         number *= _SUFFIX_SCALE[match["suffix"]]
     return -number if "-" in (match["sign"], match["sign2"]) else number
+
+
+def _is_mark(char: str) -> bool:
+    return unicodedata.decomposition(char).startswith(("<super>", "<sub>"))
+
+
+def _without_footnote(text: str) -> str | None:
+    """`text` without superscript or subscript marks that follow its last digit, or None if any
+    character other than a decimal digit would fold into one under NFKC."""
+    if text.isascii():
+        return text
+    end = len(text.rstrip())
+    start = end
+    while start > 0 and _is_mark(text[start - 1]):
+        start -= 1
+    if 0 < start < end and text[start - 1].isdecimal():
+        text = text[:start]
+    if any(not c.isdecimal() and _folds_to_digit(c) for c in text):
+        return None
+    return text
+
+
+def _folds_to_digit(char: str) -> bool:
+    return any(d.isdigit() for d in unicodedata.normalize("NFKC", char))
 
 
 def _grouped(digits: str, separator: str) -> str | None:
@@ -216,13 +251,15 @@ def status_matches(status: int | None, spec: str | None, *, failed: bool = False
     return status == int(value)
 
 
+def _segments(path: str) -> list[str]:
+    normalized = _INDEX_BRACKETS.sub(r".\1", path.strip()).removeprefix("$").strip(".")
+    return normalized.split(".") if normalized else []
+
+
 def json_path_get(obj: object, path: str) -> object:
     """Follow a dotted path ('items.0.price', 'items[0].price', '$.total') or return MISSING."""
-    normalized = _INDEX_BRACKETS.sub(r".\1", path.strip()).removeprefix("$").strip(".")
-    if not normalized:
-        return obj
     current: object = obj
-    for segment in normalized.split("."):
+    for segment in _segments(path):
         current = _step(current, segment)
         if current is MISSING:
             return MISSING
@@ -242,18 +279,65 @@ def _step(current: object, segment: str) -> object:
     return MISSING
 
 
-def parse_body(body: str | None) -> object:
-    """Parse a JSON or form-encoded body into Python data, or return MISSING."""
+class _Repeated(list[object]):
+    """Every value of a key that one JSON object or form body names more than once, in order."""
+
+
+def _merge_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    merged: dict[str, object] = {}
+    for key, value in pairs:
+        if key not in merged:
+            merged[key] = value
+            continue
+        prior = merged[key]
+        merged[key] = _Repeated([*prior, value] if isinstance(prior, _Repeated) else [prior, value])
+    return merged
+
+
+def _parse(body: str | None, *, form: bool, repeated: bool) -> object:
     if body is None or not body.strip():
         return MISSING
     try:
-        return json.loads(body)
+        return json.loads(body, object_pairs_hook=_merge_pairs if repeated else None)
     except (json.JSONDecodeError, RecursionError):
         pass
-    if "=" not in body:
+    if not form or "=" not in body:
         return MISSING
     pairs = parse_qsl(body.strip(), keep_blank_values=True)
-    return dict(pairs) if pairs else MISSING
+    if not pairs:
+        return MISSING
+    return _merge_pairs(list[tuple[str, object]](pairs)) if repeated else dict(pairs)
+
+
+def parse_body(body: str | None) -> object:
+    """Parse a JSON or form-encoded body into Python data, or return MISSING.
+
+    A repeated key keeps its last value; body_values reads every one.
+    """
+    return _parse(body, form=True, repeated=False)
+
+
+def _step_all(current: object, segment: str) -> list[object]:
+    value = _step(current, segment)
+    if value is MISSING:
+        return []
+    return list(value) if isinstance(value, _Repeated) else [value]
+
+
+def body_values(body: str | None, path: str, *, form: bool = True) -> list[object]:
+    """Every value `path` names in a JSON body, or with `form` also in a form-encoded one.
+
+    Where parse_body keeps the last value of a repeated key, this reads them all: 'a=1&a=2' and
+    '{"a": 1, "a": 2}' both name two values of 'a', and servers differ on which one they use. A
+    body that does not parse, or lacks the path, names none.
+    """
+    tree = _parse(body, form=form, repeated=True)
+    if tree is MISSING:
+        return []
+    values = [tree]
+    for segment in _segments(path):
+        values = [found for current in values for found in _step_all(current, segment)]
+    return values
 
 
 def url_contains(url: str, needle: str) -> bool:
