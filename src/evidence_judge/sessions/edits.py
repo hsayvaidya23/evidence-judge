@@ -757,35 +757,63 @@ def _constant_body(body: list[ast.stmt]) -> bool:
     )
 
 
+def _ignores_self(args: ast.arguments, body: list[ast.stmt] | ast.expr) -> bool:
+    """An equality method whose code never reads the object it is called on (`self`, or
+    `super()`): its answer cannot depend on the value being compared."""
+    params = [*args.posonlyargs, *args.args]
+    if not params:
+        return True
+    me = params[0].arg
+    for part in body if isinstance(body, list) else [body]:
+        for node in ast.walk(part):
+            if isinstance(node, ast.Name) and node.id == me:
+                return False
+            if isinstance(node, ast.Call) and _dotted(node.func) == "super":
+                return False
+    return True
+
+
 def constant_comparisons(source: str, name: str) -> list[str]:
-    """`__eq__`, `__ne__`, `__hash__` or `__bool__` defined to return a constant: an object that
+    """`__eq__`, `__ne__`, `__hash__` or `__bool__` defined to return a constant, or `__eq__` or
+    `__ne__` that never reads the object itself (`return other is not None`): an object that
     equals everything makes `assert add(2, 3) == 5` pass whatever `add` computes."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return []
-    found: list[str] = []
+    constant: list[str] = []
+    blind: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
         for stmt in node.body:
             if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+                what = f"{node.name}.{stmt.name}"
                 if stmt.name in _COMPARISONS and _constant_body(stmt.body):
-                    found.append(f"{node.name}.{stmt.name}")
-            elif (
-                isinstance(stmt, ast.Assign)
-                and isinstance(stmt.value, ast.Lambda)
-                and isinstance(stmt.value.body, ast.Constant)
-            ):
-                found.extend(
-                    f"{node.name}.{t.id}"
-                    for t in stmt.targets
-                    if isinstance(t, ast.Name) and t.id in _COMPARISONS
-                )
+                    constant.append(what)
+                elif stmt.name in ("__eq__", "__ne__") and _ignores_self(stmt.args, stmt.body):
+                    blind.append(what)
+            elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Lambda):
+                lam = stmt.value
+                for target in stmt.targets:
+                    if not isinstance(target, ast.Name) or target.id not in _COMPARISONS:
+                        continue
+                    what = f"{node.name}.{target.id}"
+                    if isinstance(lam.body, ast.Constant):
+                        constant.append(what)
+                    elif target.id in ("__eq__", "__ne__") and _ignores_self(lam.args, lam.body):
+                        blind.append(what)
     return [
-        f"defines {what} returning a constant in {name}, so its objects can compare equal "
-        "to any expected value"
-        for what in dict.fromkeys(found)
+        *(
+            f"defines {what} returning a constant in {name}, so its objects can compare equal "
+            "to any expected value"
+            for what in dict.fromkeys(constant)
+        ),
+        *(
+            f"defines {what} without reading the object itself in {name}, so its objects can "
+            "compare equal to any expected value"
+            for what in dict.fromkeys(blind)
+        ),
     ]
 
 
