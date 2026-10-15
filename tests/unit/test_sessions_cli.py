@@ -416,7 +416,10 @@ def test_a_browser_spec_given_to_a_session_command_gets_a_hint() -> None:
 
 
 def test_session_judge_help_fits_80_columns(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("COLUMNS", "80")
+    for name, value in {"COLUMNS": "80", "NO_COLOR": "1", "TERM": "dumb"}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
     result = runner.invoke(app, ["session", "judge", "--help"], terminal_width=80)
-    assert "--require-tamper-evidence" in result.output
-    assert "…" not in result.output
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "--require-tamper-evidence" in output
+    assert "…" not in output
