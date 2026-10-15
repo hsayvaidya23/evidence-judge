@@ -90,6 +90,20 @@ _Project = Annotated[
         "(default: current directory)"
     ),
 ]
+_InspectProject = Annotated[
+    Path | None,
+    typer.Option(
+        "--project",
+        help="Project directory where --claude-code latest looks (default: current directory)",
+    ),
+]
+_RerunProject = Annotated[
+    Path | None,
+    typer.Option(
+        "--project",
+        help="Project directory the re-run copies (default: current directory)",
+    ),
+]
 _RerunBase = Annotated[
     str | None,
     typer.Option(
@@ -433,7 +447,7 @@ def rerun_verdict(result: RerunResult, run_id: str | None = None) -> RunVerdict:
 @session_app.command("rerun")
 def rerun_command(
     spec: Annotated[Path, typer.Option(help="Session spec YAML with a rerun: block", **_IN_FILE)],
-    project: _Project = None,
+    project: _RerunProject = None,
     rerun_base: _RerunBase = None,
     rerun_baseline: _RerunBaseline = None,
     out: Annotated[
@@ -478,7 +492,7 @@ def _run(judge: SessionJudge, run: SessionRun, options: SessionJudgeOptions) -> 
 @session_app.command("inspect")
 def inspect_command(
     claude_code: _ClaudeCode = None,
-    project: _Project = None,
+    project: _InspectProject = None,
     codex: _Codex = None,
     evidence_log: _EvidenceLog = None,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable JSON")] = False,

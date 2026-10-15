@@ -267,8 +267,8 @@ def execute(
     problems: list[str] = []
     if not _same_dir(session_cwd, root):
         problems.append(
-            f"the session ran in {session_cwd}, but the re-run copied {root}; the suite that "
-            "passed may not be the one the agent changed"
+            f"the session ran in {session_cwd}, but the re-run copied {root}; the suite the "
+            "judge ran may not be the one the agent changed"
         )
 
     def done(status: RerunStatus, reason: str, **extra: object) -> RerunResult:
