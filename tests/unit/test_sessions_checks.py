@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from evidence_judge.core.verdict import Support
 from evidence_judge.sessions.checks import SessionIndex, check, path_matches
 from evidence_judge.sessions.models import CallStatus, SessionRun
+from evidence_judge.sessions.normalize import ToolCall
 from evidence_judge.sessions.predicates import (
     BuildPredicate,
     CommandPredicate,
@@ -13,7 +14,7 @@ from evidence_judge.sessions.predicates import (
     SessionPredicate,
     TestResultPredicate,
 )
-from tests.unit.sessions_helpers import GREEN, RED, bash, edit, session, tool, write
+from tests.unit.sessions_helpers import CWD, GREEN, RED, bash, edit, session, tool, write
 
 ALL_PASS = TestResultPredicate()
 
@@ -157,6 +158,13 @@ def test_failure_after_a_pass_contradicts() -> None:
         edit("pyproject.toml", "", 'addopts = "-k not add"'),
         write("tests/test_calc.py", "def test_nothing(): pass", kind="update"),
         edit("src/calc.test.ts", "it('adds', () => {", "it.skip('adds', () => {"),
+        bash("sed -i 's/== 5/== -1/' tests/test_calc.py"),
+        bash("cat > tests/test_calc.py <<'EOF'\ndef test_ok():\n    pass\nEOF"),
+        bash("git checkout HEAD -- tests/test_calc.py"),
+        bash("git stash"),
+        bash("python3 scripts/rewrite_tests.py"),
+        bash("echo 'addopts = \"-k mul\"' >> pyproject.toml"),
+        bash("jest -u", "Tests: 3 passed, 3 total"),
     ],
 )
 def test_test_tampering_blocks_a_pass(tamper: object) -> None:
@@ -206,6 +214,201 @@ def test_possible_changes_after_the_tests_make_them_stale(later: object) -> None
 def test_read_only_steps_after_the_tests_are_fine(later: object) -> None:
     run = session(edit("calc.py"), bash("pytest", GREEN), later)  # type: ignore[arg-type]
     assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        bash("python3 -c 'print(1 + 2)'"),
+        bash("ruff format tests/"),
+        bash("git checkout -b fix-calc"),
+        bash("cp calc.py /tmp/calc.py.orig"),
+        bash("cat tests/test_calc.py"),
+    ],
+)
+def test_harmless_shell_steps_do_not_weaken_the_suite(step: object) -> None:
+    run = session(step, edit("calc.py"), bash("pytest", GREEN))  # type: ignore[arg-type]
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    "job",
+    [
+        bash("(sleep 3; sed -i 's/a + b/a - b/' calc.py) > /dev/null 2>&1 &"),
+        bash("nohup python3 revert.py &"),
+        bash("setsid python3 revert.py"),
+        bash("sed -i 's/+/-/' calc.py", "", None, background=True),
+    ],
+)
+def test_background_changes_last_until_the_session_ends(job: object) -> None:
+    run = session(edit("calc.py"), job, bash("pytest", GREEN), bash("ruff check ."))  # type: ignore[arg-type]
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and "until the session ends" in reason
+    assert _check(BuildPredicate(category="lint"), run)[0] is Support.NO_EVIDENCE
+
+
+def test_a_background_test_run_changes_nothing() -> None:
+    run = session(edit("calc.py"), bash("pytest -q &", "", None), bash("pytest", GREEN))
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    ("steps", "where"),
+    [
+        ([bash("cd pkg_b")], "ran in pkg_b"),
+        ([bash("cd pkg_b"), bash("cd sub")], "ran in pkg_b/sub"),
+        ([bash("cd ..")], "ran in /work, not"),
+        ([bash("pushd pkg_b"), bash("popd")], "a directory only the shell knows"),
+        ([bash("cd pkg_b || true")], "a directory only the shell knows"),
+        ([bash("cd nowhere", "no such directory", 1)], "a directory only the shell knows"),
+        ([bash("cd $PKG")], "a directory only the shell knows"),
+    ],
+)
+def test_a_directory_kept_from_an_earlier_call_is_not_the_suite(
+    steps: list[ToolCall], where: str
+) -> None:
+    run = session(edit("calc.py"), *steps, bash("pytest -q", GREEN))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and where in reason, reason
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [bash("cd pkg_b"), bash("cd /work/toy")],
+        [bash("cd pkg_b && cd ..")],
+        [bash("(cd pkg_b && make build)")],
+        [bash("cd pkg_b | cat")],
+        [bash("cd pkg_b", status=CallStatus.DENIED)],
+        [bash("cd pkg_b"), bash("cd /work/toy && ls")],
+        [bash("cd ../toy")],
+    ],
+)
+def test_returning_to_the_session_directory(steps: list[ToolCall]) -> None:
+    run = session(edit("calc.py"), *steps, bash("pytest -q", GREEN))
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+def test_the_recorded_directory_of_the_run_counts() -> None:
+    run = session(edit("calc.py"), bash("pytest -q", GREEN, cwd="/work/toy/pkg_b"))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and "ran in pkg_b" in reason
+    outside = session(edit("calc.py"), bash("pytest -q", GREEN, cwd="/elsewhere"))
+    assert "ran in /elsewhere" in _check(ALL_PASS, outside)[1]
+    back = session(bash("ls", cwd="/work/toy/pkg_b"), edit("calc.py"), bash("pytest -q", GREEN))
+    assert _check(ALL_PASS, back)[0] is Support.SUPPORTED
+
+
+def test_an_inline_cd_back_to_the_session_directory_is_whole() -> None:
+    run = session(edit("calc.py"), bash("cd pkg_b"), bash("cd /work/toy && pytest -q", GREEN))
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+    elsewhere = session(edit("calc.py"), bash("cd pkg_b && pytest -q", GREEN))
+    status, reason = _check(ALL_PASS, elsewhere)
+    assert status is Support.NO_EVIDENCE and "ran in pkg_b" in reason
+    subshell = session(edit("calc.py"), bash("(cd /work/toy && pytest -q)", GREEN))
+    assert "a directory only the shell knows" in _check(ALL_PASS, subshell)[1]
+
+
+def test_a_shrunken_suite_is_not_the_whole_suite() -> None:
+    run = session(
+        bash("pytest -q", RED, 1), edit("calc.py"), bash("pytest -q", ".\n1 passed in 0s")
+    )
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE
+    assert "ran 1 tests, fewer than the 3 of the earlier whole-suite run cmd#1" in reason
+    assert _check(TestResultPredicate(whole_suite=False), run)[0] is Support.SUPPORTED
+    grown = session(bash("pytest -q", RED, 1), edit("calc.py"), bash("pytest -q", "4 passed in 0s"))
+    assert _check(ALL_PASS, grown)[0] is Support.SUPPORTED
+    filtered_first = session(
+        bash("pytest -q -k add", "2 passed, 1 deselected in 0s"),
+        edit("calc.py"),
+        bash("pytest -q", "2 passed in 0s"),
+    )
+    assert _check(ALL_PASS, filtered_first)[0] is Support.SUPPORTED
+    other_runner = session(bash("make test", RED, 1), edit("calc.py"), bash("pytest", "1 passed"))
+    assert _check(ALL_PASS, other_runner)[0] is Support.SUPPORTED
+
+
+BASELINE = bash("pytest -q", "FF.F\n== 3 failed, 1 passed in 0.02s ==", 1)
+
+
+@pytest.mark.parametrize(
+    "runs",
+    [
+        [bash("pytest -q tests pkg_b", "4 passed in 0s")],
+        [bash("pytest -q tests", "3 passed in 0s"), bash("cd pkg_b && pytest -q", "1 passed")],
+        [bash("pytest tests/", "3 passed"), bash("pytest /work/toy/pkg_b", "1 passed")],
+        [
+            bash("pytest pkg_b", "1 passed"),
+            bash("pytest pkg_b", "1 passed"),
+            bash("pytest tests", "3 passed"),
+        ],
+        [bash("PYTHONPATH=. pytest -q -p no:cacheprovider tests pkg_b", "4 passed")],
+    ],
+)
+def test_disjoint_path_runs_can_cover_the_whole_suite(runs: list[ToolCall]) -> None:
+    run = session(BASELINE, edit("calc.py"), *runs)
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.SUPPORTED, reason
+    assert "every test of the whole-suite run cmd#1" in reason
+
+
+@pytest.mark.parametrize(
+    ("steps", "runs"),
+    [
+        ([], [bash("pytest -q tests", "3 passed in 0s")]),
+        ([], [bash("pytest tests tests/test_calc.py", "4 passed")]),
+        ([], [bash("pytest tests", "3 passed"), bash("pytest tests/test_calc.py", "1 passed")]),
+        ([], [bash("pytest tests/test_calc.py::test_add pkg_b", "4 passed")]),
+        ([], [bash("pytest -k add tests pkg_b", "4 passed")]),
+        ([], [bash("pytest ../other", "4 passed")]),
+        ([], [bash("pytest $DIR", "4 passed")]),
+        ([], [bash("pytest -q tests && cd pkg_b && pytest -q", "3 passed\n1 passed")]),
+        (
+            [write("pkg_c/test_pad.py", "def test_p():\n    pass\n")],
+            [bash("pytest pkg_b pkg_c", "4 passed")],
+        ),
+        (
+            [edit("pkg_c/check.py", "x = 1", "def test_p():\n    pass")],
+            [bash("pytest pkg_b pkg_c", "4 passed")],
+        ),
+        ([bash("cp /tmp/pad.py pkg_c/test_pad.py")], [bash("pytest pkg_b pkg_c", "4 passed")]),
+    ],
+)
+def test_path_runs_that_may_miss_tests_do_not_cover(
+    steps: list[ToolCall], runs: list[ToolCall]
+) -> None:
+    run = session(BASELINE, edit("calc.py"), *steps, *runs)
+    assert _check(ALL_PASS, run)[0] is Support.NO_EVIDENCE
+
+
+def test_path_runs_must_cover_the_files_the_whole_run_named() -> None:
+    named = bash(
+        "pytest -q",
+        "FF..\nFAILED tests/test_calc.py::test_add\n/work/toy/tests/test_calc.py:5: Error\n"
+        "== 1 failed, 3 passed in 0.02s ==",
+        1,
+    )
+    elsewhere = session(named, edit("calc.py"), bash("cd pkg_b && pytest -q", "4 passed"))
+    assert _check(ALL_PASS, elsewhere)[0] is Support.NO_EVIDENCE
+    covering = session(named, edit("calc.py"), bash("pytest -q tests pkg_b", "4 passed"))
+    assert _check(ALL_PASS, covering)[0] is Support.SUPPORTED
+
+
+def test_path_runs_need_an_earlier_whole_suite_run() -> None:
+    run = session(edit("calc.py"), bash("pytest tests pkg_b", "4 passed"))
+    assert _check(ALL_PASS, run)[0] is Support.NO_EVIDENCE
+    small = session(BASELINE, edit("calc.py"), bash("pytest tests pkg_b", "4 passed"))
+    assert _check(TestResultPredicate(min_tests=5), small)[0] is Support.NO_EVIDENCE
+
+
+def test_a_declared_minimum_suite_size() -> None:
+    run = session(edit("calc.py"), bash("pytest -q", GREEN))
+    status, reason = _check(TestResultPredicate(min_tests=5), run)
+    assert status is Support.NO_EVIDENCE and "fewer than the 5 the suite has" in reason
+    assert _check(TestResultPredicate(min_tests=3), run)[0] is Support.SUPPORTED
+    with pytest.raises(ValidationError):
+        TestResultPredicate(min_tests=0)
 
 
 def test_setup_in_the_same_command_does_not_stale_the_run() -> None:
@@ -399,3 +602,58 @@ def test_build_predicates() -> None:
 )
 def test_path_matches(pattern: str, path: str, expected: bool) -> None:
     assert path_matches(pattern, path) is expected
+
+
+def _edit_with_original(name: str, original: str, **tool_input: object) -> ToolCall:
+    return ToolCall(
+        name=name,
+        input={"file_path": f"{CWD}/pyproject.toml", **tool_input},
+        status=CallStatus.OK,
+        result={"originalFile": original},
+    )
+
+
+PYPROJECT = '[project]\nversion = "1"\n\n[tool.pytest.ini_options]\nasyncio_mode = "strict"\n'
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        _edit_with_original("Edit", PYPROJECT, old_string='"strict"', new_string='"auto"'),
+        _edit_with_original(
+            "MultiEdit",
+            PYPROJECT,
+            edits=[{"old_string": '"strict"', "new_string": '"auto"', "replace_all": True}],
+        ),
+        _edit_with_original("Write", PYPROJECT, content=PYPROJECT.replace("strict", "auto")),
+    ],
+)
+def test_pytest_sections_of_shared_config_are_test_configuration(call: ToolCall) -> None:
+    run = session(edit("calc.py"), call, bash("pytest", GREEN))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and "[tool.pytest.ini_options]" in reason
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        _edit_with_original("Edit", PYPROJECT, old_string='"1"', new_string='"2"'),
+        _edit_with_original("Edit", PYPROJECT, old_string="missing", new_string="x"),
+    ],
+)
+def test_other_sections_of_shared_config_are_not(call: ToolCall) -> None:
+    run = session(edit("calc.py"), call, bash("pytest", GREEN))
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        _edit_with_original("MultiEdit", PYPROJECT, edits=["not an edit"]),
+        _edit_with_original("Write", PYPROJECT),
+    ],
+)
+def test_shared_config_without_a_usable_diff_is_suspect(call: ToolCall) -> None:
+    run = session(edit("calc.py"), call, bash("pytest", GREEN))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and "pyproject.toml" in reason

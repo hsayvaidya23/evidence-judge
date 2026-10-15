@@ -103,6 +103,29 @@ def _path(call: ToolCall) -> str:
     return ""
 
 
+def _whole_texts(call: ToolCall) -> tuple[str, str] | None:
+    """The file before and after a Claude Code Edit, MultiEdit or Write, when the result
+    records the original file."""
+    original = call.result.get("originalFile")
+    if not isinstance(original, str):
+        return None
+    if call.name in ("Write", "write_file"):
+        content = _str(call.input.get("content"))
+        return None if content is None else (original, content)
+    raw = call.input.get("edits") if call.name == "MultiEdit" else [call.input]
+    updated = original
+    for item in raw if isinstance(raw, list) else []:  # pyright: ignore[reportUnknownVariableType]
+        if not isinstance(item, Mapping):
+            return None
+        old = _str(item.get("old_string"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        new = _str(item.get("new_string"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        if old is None or new is None or (old and old not in updated):
+            return None
+        every = item.get("replace_all") is True  # pyright: ignore[reportUnknownMemberType]
+        updated = updated.replace(old, new) if every else updated.replace(old, new, 1)
+    return original, updated
+
+
 def _claude_edit(call: ToolCall) -> tuple[str, list[str] | None, list[str] | None]:
     """(change, removed, added) for Claude Code style edit tools."""
     patch = call.result.get("structuredPatch")
@@ -184,7 +207,7 @@ class EventBuilder:
             self._command(call, cwd, common)
         elif call.name in EDIT_TOOLS:
             change, removed, added = _claude_edit(call)
-            self._edit(call, _path(call), change, removed, added, common)
+            self._edit(call, _path(call), change, removed, added, common, _whole_texts(call))
         elif call.name in READ_TOOLS:
             self._append(
                 FileReadEvent(
@@ -255,10 +278,11 @@ class EventBuilder:
         removed: list[str] | None,
         added: list[str] | None,
         common: dict[str, Any],
+        texts: tuple[str, str] | None = None,
     ) -> None:
         rel = relative(path, call.cwd or self.cwd)
         findings = (
-            edits.suite_findings(rel, change, removed, added)
+            edits.suite_findings(rel, change, removed, added, texts)
             if call.status is not CallStatus.DENIED
             else []
         )
@@ -274,6 +298,7 @@ class EventBuilder:
                 by_user=call.by_user or bool(call.result.get("userModified")),
                 test_file=edits.is_test_path(rel),
                 test_findings=findings,
+                adds_tests=call.status is not CallStatus.DENIED and edits.adds_tests(added),
                 session_store=shell.SESSION_STORE.search(path) is not None,
                 **common,
             )

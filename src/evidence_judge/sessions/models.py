@@ -128,6 +128,31 @@ class CommandAnalysis(BaseModel):
     touched_paths: list[str] = Field(
         default_factory=list[str], description="Paths a known file-changing program names"
     )
+    opaque_write: str | None = Field(
+        default=None,
+        description="Why the command may write files its command line does not name (a script, "
+        "a git checkout of the whole tree, a glob); None when every target is named",
+    )
+    lasting_mutation: str | None = Field(
+        default=None,
+        description="Why a change the command may make can happen at any later time (a "
+        "background job, a detached or scheduled process)",
+    )
+    run_cds: list[str] = Field(
+        default_factory=list[str],
+        description="Directories the command changes to before its test run, in order, as "
+        "written (`?` for one only the shell knows)",
+    )
+    test_paths: list[str] | None = Field(
+        default=None,
+        description="The files and directories a single test run selects when plain paths are "
+        "its only filters ([] for none); None when it filters any other way",
+    )
+    cd_targets: list[str] = Field(
+        default_factory=list[str],
+        description="Directories the shell is left in for later commands (top-level `cd`, "
+        "`pushd`, `popd`), in order, as written (`?` for one only the shell knows)",
+    )
     mutation_after_check: bool = Field(
         default=False,
         description="A command that may change files runs after the test, build or lint step",
@@ -192,6 +217,11 @@ class FileEditEvent(_Event):
     test_findings: list[str] = Field(
         default_factory=list[str],
         description="Ways the edit weakens the test suite (skip markers, removed assertions, ...)",
+    )
+    adds_tests: bool = Field(
+        default=False,
+        description="The edit may add tests (a new test function, class or parametrize case), "
+        "or its diff is unknown",
     )
     session_store: bool = False
 

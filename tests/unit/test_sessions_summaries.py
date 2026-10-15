@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from evidence_judge.sessions.edits import (
+    changed_sections,
     is_test_config,
     is_test_path,
     line_diff,
@@ -181,6 +182,17 @@ def test_summary_properties() -> None:
         "spec/calc_spec.rb",
         "__tests__/calc.js",
         "src/test/java/CalcTest.java",
+        "tests.py",
+        "polls/tests.py",
+        "test.py",
+        "testcalc.py",
+        "calc_test.rb",
+        "calc_spec.ts",
+        "src/calc.test.mjs",
+        "tests",
+        "pkg/tests/",
+        "spec",
+        "__tests__",
     ],
 )
 def test_test_paths(path: str) -> None:
@@ -229,6 +241,13 @@ def test_findings_for_test_tampering() -> None:
     ]
     xit = suite_findings("src/calc.test.ts", "modify", [], ["  xit('adds', () => {"])
     assert any("skip" in f for f in xit)
+    data = suite_findings("tests/test_calc.py", "modify", ["    (2, 3, 5),"], ["    (2, 3, -1),"])
+    assert data == [
+        "removed or changed 1 existing line in test file test_calc.py (test data, fixtures or "
+        "helpers can decide what passes)"
+    ]
+    helper = suite_findings("tests/helpers.py", "modify", ["EXPECTED = 5", "x = 1"], ["x = 1"])
+    assert len(helper) == 1 and "1 existing line" in helper[0]
 
 
 def test_findings_allow_honest_edits() -> None:
@@ -251,5 +270,56 @@ def test_findings_for_test_configuration() -> None:
     ]
     assert suite_findings("pyproject.toml", "modify", ['version = "1"'], ['version = "2"']) == []
     assert suite_findings("package.json", "unknown", None, None) == [
-        "rewrote package.json, which can hold test configuration, without a diff"
+        "rewrote package.json, which says how tests run, without a diff"
     ]
+    assert suite_findings("pyproject.toml", "unknown", None, None) == [
+        "rewrote pyproject.toml, which can hold test configuration, without a diff"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("path", "change", "removed", "added", "finding"),
+    [
+        ("pytest.ini", "add", [], ["[pytest]", "addopts = --ignore=tests"], "created test"),
+        ("Makefile", "modify", ["\tpytest -q"], ["\tpytest -q tests/test_mul.py"], "changed test"),
+        ("justfile", "modify", ["test:"], ["test: lint"], "changed test configuration justfile"),
+        (".env", "add", [], ["PYTEST_ADDOPTS=--ignore=tests"], "created test configuration .env"),
+        ("pyproject.toml", "add", [], ["[tool.pytest.ini_options]"], "created test configuration"),
+        ("package.json", "modify", ['"test": "jest"'], ['"test": "true"'], "beyond dependency"),
+        ("package.json", "modify", [], ['    "pretest": "echo ok",'], "beyond dependency"),
+        ("package.json", "modify", [], ['  "jest": {"roots": ["<rootDir>/src"]}'], "beyond"),
+    ],
+)
+def test_findings_for_harness_files(
+    path: str, change: str, removed: list[str], added: list[str], finding: str
+) -> None:
+    findings = suite_findings(path, change, removed, added)
+    assert len(findings) == 1 and finding in findings[0], findings
+
+
+def test_dependency_bumps_are_not_harness_changes() -> None:
+    bump = (['    "lodash": "^4.17.20",'], ['    "lodash": "^4.17.21",', "  },", "{"])
+    assert suite_findings("package.json", "modify", *bump) == []
+    local = ([], ['    "shared": "workspace:*"'])
+    assert suite_findings("package.json", "modify", *local) == []
+
+
+def test_sections_decide_shared_config_changes() -> None:
+    original = '[project]\nversion = "1"\n\n[tool.pytest.ini_options]\nasyncio_mode = "strict"\n'
+    pytest_change = original.replace('"strict"', '"auto"')
+    assert changed_sections(original, pytest_change) == {"tool.pytest.ini_options"}
+    texts = (original, pytest_change)
+    findings = suite_findings(
+        "pyproject.toml", "modify", ['asyncio_mode = "strict"'], ['asyncio_mode = "auto"'], texts
+    )
+    assert findings == ["changed test configuration in pyproject.toml ([tool.pytest.ini_options])"]
+    version = original.replace('"1"', '"2"')
+    assert (
+        suite_findings(
+            "pyproject.toml", "modify", ['version = "1"'], ['version = "2"'], (original, version)
+        )
+        == []
+    )
+    cfg = "[metadata]\nname = x\n[tool:pytest]\n"
+    assert changed_sections(cfg, cfg + "addopts = -x\n") == {"tool:pytest"}
+    assert changed_sections("a = 1\n", "a = 2\n") == {""}

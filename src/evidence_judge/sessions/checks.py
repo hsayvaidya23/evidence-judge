@@ -10,6 +10,7 @@ in the session.
 
 from __future__ import annotations
 
+import math
 import posixpath
 import re
 from dataclasses import dataclass
@@ -19,7 +20,12 @@ from typing import Final
 
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
-from evidence_judge.sessions.edits import is_harness_path, is_test_config, is_test_path
+from evidence_judge.sessions.edits import (
+    is_config_path,
+    is_harness_path,
+    is_test_config,
+    is_test_path,
+)
 from evidence_judge.sessions.models import (
     CallStatus,
     Category,
@@ -30,6 +36,7 @@ from evidence_judge.sessions.models import (
     SessionRun,
     SubagentEvent,
 )
+from evidence_judge.sessions.normalize import relative
 from evidence_judge.sessions.predicates import (
     BuildPredicate,
     CommandPredicate,
@@ -55,7 +62,12 @@ class RunOutcome:
     event: CommandEvent
     result: Result
     reason: str
-    whole: bool
+    partial: str | None = None
+    """Why the run is not the whole suite, or None when it is."""
+
+    @property
+    def whole(self) -> bool:
+        return self.partial is None
 
 
 def glob_regex(pattern: str) -> re.Pattern[str]:
@@ -142,7 +154,14 @@ class SessionIndex:
                     c in (Category.BUILD, Category.LINT, Category.TYPECHECK, Category.FORMAT)
                     for c in analysis.categories
                 )
-                before = checks and not analysis.mutation_after_check and not event.background
+                lasting = analysis.lasting_mutation or (
+                    f"{analysis.mutation} in a background command" if event.background else None
+                )
+                if lasting:
+                    reason = f"{event.id} may change files until the session ends ({lasting})"
+                    out.append((math.inf, event, reason))
+                    continue
+                before = checks and not analysis.mutation_after_check
                 position = event.seq - 0.5 if before else event.seq + 0.5
                 out.append(
                     (position, event, f"{event.id} may have changed files ({analysis.mutation})")
@@ -159,7 +178,7 @@ class SessionIndex:
 
     @property
     def last_change(self) -> tuple[float, SessionEvent, str] | None:
-        return self.changes[-1] if self.changes else None
+        return max(self.changes, key=lambda change: change[0]) if self.changes else None
 
     def fresh(self, event: SessionEvent) -> bool:
         last = self.last_change
@@ -181,6 +200,12 @@ class SessionIndex:
             for path in analysis.touched_paths:
                 if is_harness_path(path) or is_test_config(path):
                     out.append((command, f"changed test harness file {path}"))
+                elif is_test_path(path):
+                    out.append((command, f"wrote test file {path} from the shell"))
+                elif is_config_path(path):
+                    out.append((command, f"changed {path}, which can configure the tests"))
+            if analysis.opaque_write:
+                out.append((command, f"may have changed test files: {analysis.opaque_write}"))
             if analysis.harness_change:
                 out.append((command, f"changed how later commands run: {analysis.harness_change}"))
         return out
@@ -194,6 +219,159 @@ class SessionIndex:
             or (isinstance(e, OtherToolEvent) and e.may_mutate)
         ]
 
+    @cached_property
+    def run_dirs(self) -> dict[str, str | None]:
+        """Where each command started, relative to the session directory (`.`), or None when
+        only the shell knows. The shell keeps its directory between tool calls, but a
+        transcript may record the session directory for every call, so a top-level `cd` is
+        followed across calls as well as the recorded directory."""
+        root = self.run.cwd
+        shell: str | None = "."
+        dirs: dict[str, str | None] = {}
+        for command in self.commands:
+            recorded = _relative_dir(command.cwd, root)
+            here = shell if recorded == "." else recorded
+            dirs[command.id] = here
+            targets = command.analysis.cd_targets
+            if command.status is CallStatus.DENIED or not targets:
+                continue
+            if command.status is not CallStatus.OK:
+                shell = None
+                continue
+            for target in targets:
+                here = _resolve_dir(here, target, root)
+            shell = here
+        return dirs
+
+    def run_dir(self, event: CommandEvent) -> str | None:
+        """The directory the command's test run ran in, relative to the session directory."""
+        here = self.run_dirs.get(event.id, ".")
+        for target in event.analysis.run_cds:
+            here = _resolve_dir(here, target, self.run.cwd)
+        return here
+
+    def _scoped(self, event: CommandEvent) -> RunOutcome:
+        judged = judge_test_run(event)
+        where = self.run_dir(event)
+        if where == ".":
+            return judged
+        place = f"in {where}" if where is not None else "in a directory only the shell knows"
+        why = f"ran {place}, not the session directory"
+        return RunOutcome(
+            event, judged.result, judged.reason, ", ".join(filter(None, [judged.partial, why]))
+        )
+
+    @cached_property
+    def _largest_earlier(self) -> dict[str, tuple[int, CommandEvent]]:
+        """For each test run, the most tests an earlier whole-suite run of the same runner
+        ran, and that run."""
+        largest: dict[tuple[str, ...], tuple[int, CommandEvent]] = {}
+        out: dict[str, tuple[int, CommandEvent]] = {}
+        for event in self.test_runs(None):
+            key = tuple(sorted(set(event.analysis.runners)))
+            if key in largest:
+                out[event.id] = largest[key]
+            total = suite_size(event)
+            bigger = total is not None and (key not in largest or total > largest[key][0])
+            if bigger and total is not None and self._scoped(event).whole:
+                largest[key] = (total, event)
+        return out
+
+    def outcome(self, event: CommandEvent, minimum: int | None = None) -> RunOutcome:
+        """`judge_test_run`, with a run outside the session directory, or one that ran fewer
+        tests than an earlier whole-suite run (or than `minimum`), counted as partial."""
+        judged = self._scoped(event)
+        total = suite_size(event)
+        if not judged.whole or total is None:
+            return judged
+        earlier = self._largest_earlier.get(event.id)
+        if earlier is not None and total < earlier[0]:
+            why = (
+                f"ran {total} tests, fewer than the {earlier[0]} of the earlier whole-suite run "
+                f"{earlier[1].id}"
+            )
+        elif minimum is not None and total < minimum:
+            why = f"ran {total} tests, fewer than the {minimum} the suite has"
+        else:
+            return judged
+        return RunOutcome(event, judged.result, judged.reason, why)
+
+    def scopes(self, event: CommandEvent) -> list[str] | None:
+        """The parts of the session directory a run selected only by plain paths and its
+        directory (`tests`, `pkg_b`, `.`), relative to it; None if it filtered any other way,
+        reached outside it, or named overlapping paths."""
+        paths = event.analysis.test_paths
+        where = self.run_dir(event)
+        summary = event.summary
+        if paths is None or where is None or summary is None or summary.deselected:
+            return None
+        scopes: list[str] = []
+        for path in paths or ["."]:
+            scope = _resolve_dir(where, path, self.run.cwd)
+            if scope is None or posixpath.isabs(scope) or scope.startswith(".."):
+                return None
+            scopes.append(scope)
+        return None if _overlapping(scopes, []) else scopes
+
+    def _may_add_tests(self, after: int) -> SessionEvent | None:
+        """A change after event `after` that may have added tests to the suite."""
+        for position, event, _ in self.changes:
+            if position <= after:
+                continue
+            if not isinstance(event, FileEditEvent) or event.adds_tests:
+                return event
+        return None
+
+    def covered(self, outcomes: list[RunOutcome], minimum: int | None = None) -> RunOutcome | None:
+        """Passing runs over disjoint paths (`pytest tests`, `cd pkg_b && pytest`) that together
+        ran exactly the tests of an earlier whole-suite run, when no change since that run can
+        have added a test: then they ran every test of it. Overlapping paths could count a
+        test twice, and a new test could stand in for one left out, so either rules it out."""
+        candidates = [
+            (o, scopes, total)
+            for o in reversed(outcomes)
+            if o.result is Result.PASS
+            and (scopes := self.scopes(o.event)) is not None
+            and (total := suite_size(o.event)) is not None
+        ]
+        if not candidates:
+            return None
+        newest = candidates[0][0].event
+        key = tuple(sorted(set(newest.analysis.runners)))
+        baselines = [
+            (suite_size(e) or 0, e)
+            for e in self.test_runs(None)
+            if e.seq < newest.seq
+            and tuple(sorted(set(e.analysis.runners))) == key
+            and self._scoped(e).whole
+        ]
+        if not baselines:
+            return None
+        size, baseline = max(baselines, key=lambda b: b[0])
+        if size < (minimum or 1) or self._may_add_tests(baseline.seq) is not None:
+            return None
+        chosen: list[tuple[RunOutcome, list[str], int]] = []
+        taken: list[str] = []
+        for outcome, scopes, total in candidates:
+            if tuple(sorted(set(outcome.event.analysis.runners))) != key:
+                continue
+            if _overlapping(scopes, taken):
+                continue
+            chosen.append((outcome, scopes, total))
+            taken.extend(scopes)
+        if sum(total for _, _, total in chosen) != size:
+            return None
+        named = [relative(path, self.run.cwd) for path in _NAMED_TEST_FILE.findall(baseline.output)]
+        if not all(any(_inside(path, scope) for scope in taken) for path in named):
+            return None
+        ids = ", ".join(o.event.id for o, _, _ in reversed(chosen))
+        where = ", ".join(sorted(taken))
+        reason = (
+            f"{ids} together ran {size} tests over {where}, every test of the whole-suite run "
+            f"{baseline.id}, with no test added since"
+        )
+        return RunOutcome(chosen[0][0].event, Result.PASS, reason, None)
+
     def test_runs(self, runner: str | None) -> list[CommandEvent]:
         runs = [
             c for c in self.commands if c.analysis.is_test and c.status is not CallStatus.DENIED
@@ -202,6 +380,53 @@ class SessionIndex:
             wanted = runner.casefold()
             runs = [c for c in runs if any(wanted in r.casefold() for r in c.analysis.runners)]
         return runs
+
+
+_NAMED_TEST_FILE: Final = re.compile(r"([\w./-]+\.\w+)(?:::|:\d+:)")
+"""A test file a run's output names: in a node id (`tests/x.py::test_a`) or a traceback line
+(`tests/x.py:5: AssertionError`)."""
+
+
+def _inside(path: str, scope: str) -> bool:
+    path = posixpath.normpath(path)
+    return scope == "." or path == scope or path.startswith(scope + "/")
+
+
+def _overlapping(scopes: list[str], taken: list[str]) -> bool:
+    """Two of `scopes`, or one of them and one of `taken`, are the same or nested paths."""
+
+    def nested(a: str, b: str) -> bool:
+        return "." in (a, b) or a == b or b.startswith(a + "/") or a.startswith(b + "/")
+
+    pairs = [(a, b) for i, a in enumerate(scopes) for b in [*scopes[i + 1 :], *taken]]
+    return any(nested(a, b) for a, b in pairs)
+
+
+def suite_size(event: CommandEvent) -> int | None:
+    """How many tests the run collected and ran (skipped included, deselected not), or None."""
+    summary = event.summary
+    if summary is None or summary.no_tests:
+        return None
+    return summary.passed + summary.failed + summary.errors + summary.skipped
+
+
+def _relative_dir(path: str | None, root: str | None) -> str | None:
+    if path is None or root is None:
+        return "." if path is None or path == root else None
+    rel = relative(path, root)
+    return rel if not posixpath.isabs(rel) and not rel.startswith("../") else path
+
+
+def _resolve_dir(here: str | None, target: str, root: str | None) -> str | None:
+    """The directory a `cd target` from `here` reaches, relative to `root`, or None."""
+    if target == "?" or (here is None and not posixpath.isabs(target)):
+        return None
+    joined = posixpath.normpath(posixpath.join(here or "", target))
+    if not posixpath.isabs(joined) and not joined.startswith(".."):
+        return joined
+    if root is None:
+        return None
+    return _relative_dir(posixpath.normpath(posixpath.join(root, joined)), root)
 
 
 def _exit_reliable(event: CommandEvent) -> bool:
@@ -217,10 +442,12 @@ def judge_test_run(event: CommandEvent) -> RunOutcome:
     """Whether one test command passed, failed, or cannot tell, and whether it was whole."""
     analysis = event.analysis
     summary = event.summary
-    whole = not analysis.test_filters and not (summary and summary.deselected)
+    partial = ", ".join(analysis.test_filters) or (
+        f"{summary.deselected} deselected" if summary and summary.deselected else None
+    )
 
     def outcome(result: Result, reason: str) -> RunOutcome:
-        return RunOutcome(event, result, reason, whole)
+        return RunOutcome(event, result, reason, partial)
 
     if event.status is CallStatus.NO_RESULT:
         return outcome(Result.UNKNOWN, f"{event.id} has no recorded result")
@@ -302,7 +529,11 @@ def check_test_result(predicate: TestResultPredicate, index: SessionIndex) -> Pr
             runs[-1],
             last_change[1],
         )
-    outcomes = [judge_test_run(r) for r in fresh]
+    outcomes = [index.outcome(r, predicate.min_tests) for r in fresh]
+    if not any(o.result is Result.PASS and o.whole for o in outcomes) and (
+        union := index.covered(outcomes, predicate.min_tests)
+    ):
+        outcomes = sorted([*outcomes, union], key=lambda o: o.event.seq)
     name = predicate.mentions
     if name:
         fails = [o for o in outcomes if o.result is Result.FAIL and _named_failure(o.event, name)]
@@ -358,9 +589,7 @@ def _undecided(outcomes: list[RunOutcome], predicate: TestResultPredicate) -> Pr
     partial = [o for o in outcomes if o.result is Result.PASS and not o.whole]
     if partial and predicate.whole_suite:
         o = partial[-1]
-        why = ", ".join(o.event.analysis.test_filters) or (
-            f"{o.event.summary.deselected} deselected" if o.event.summary else "filtered"
-        )
+        why = o.partial
         return _result(
             Support.NO_EVIDENCE,
             f"only a subset of the suite ran after the last change ({o.event.id}: {why}); a "
