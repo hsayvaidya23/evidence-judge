@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -422,6 +424,34 @@ def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert result.stdout.strip() == f"evidence-judge {__version__}"
+
+
+@pytest.mark.parametrize("args", [["--version"], ["--version", "judge"], ["judge", "--version"]])
+def test_version_option(args: list[str]) -> None:
+    result = runner.invoke(app, args)
+    if args[0] == "judge":
+        assert result.exit_code == ExitCode.USAGE
+        return
+    assert result.exit_code == 0
+    assert result.stdout.strip() == f"evidence-judge {__version__}"
+
+
+@pytest.mark.parametrize("read_lines", [0, 1])
+def test_a_closed_stdout_keeps_the_verdict_exit_code(read_lines: int) -> None:
+    run = Path(__file__).resolve().parents[1] / "fixtures" / "runs" / "honest_success"
+    args = ["judge", "--har", str(run / "run.har"), "--spec", str(run / "spec.yaml")]
+    process = subprocess.Popen(
+        [sys.executable, "-m", "evidence_judge", *args, "--offline"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    for _ in range(read_lines):
+        process.stdout.readline()
+    process.stdout.close()
+    _, err = process.communicate(timeout=60)
+    assert process.returncode == ExitCode.NEEDS_REVIEW
+    assert b"Traceback" not in err and b"BrokenPipe" not in err
 
 
 def test_redaction_key_is_stable_across_invocations(tmp_path: Path) -> None:

@@ -28,7 +28,7 @@ from evidence_judge.core.verdict import (
 from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.redact import Redactor
-from evidence_judge.report.console import print_verdict
+from evidence_judge.report.console import StdoutConsole, print_verdict
 from evidence_judge.report.json_report import write_json
 from evidence_judge.sessions.ingest import load_session, locate
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
@@ -361,7 +361,7 @@ def judge_command(
             raise
         raise _internal(e) from None
     if not quiet:
-        print_verdict(verdict, Console(highlight=False))
+        print_verdict(verdict, StdoutConsole())
         if out:
             err.print(Text.assemble(("wrote json ", "dim"), str(out)))
     raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
@@ -458,7 +458,7 @@ def rerun_command(
             raise
         raise _internal(e) from None
     if not quiet:
-        print_verdict(verdict, Console(highlight=False))
+        print_verdict(verdict, StdoutConsole())
     raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
 
 
@@ -498,4 +498,4 @@ def inspect_command(
     if as_json:
         typer.echo(json.dumps(summarize(run), indent=2, ensure_ascii=False))
     else:
-        print_session(run, Console(highlight=False))
+        print_session(run, StdoutConsole())

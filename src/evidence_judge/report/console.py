@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass, field
 
 from rich.console import Console
@@ -30,6 +32,20 @@ _SUPPORT_STYLE = {
 
 def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{round(value * 100)}%"
+
+
+class StdoutConsole(Console):
+    """Stops writing once stdout's reader has gone (``| head``) instead of exiting 1, so the
+    command still exits with its verdict's code."""
+
+    def __init__(self) -> None:
+        super().__init__(highlight=False)
+
+    def on_broken_pipe(self) -> None:
+        self.quiet = True
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
 
 
 def print_verdict(verdict: RunVerdict, console: Console) -> None:

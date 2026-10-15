@@ -33,6 +33,7 @@ from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget
 from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import (
+    StdoutConsole,
     print_evidence_summary,
     print_verdict,
     summarize_evidence,
@@ -101,11 +102,34 @@ class _Group(TyperGroup):
 app = typer.Typer(
     cls=_Group,
     name="evidence-judge",
-    help="Grade browser-agent runs by checking every claim against recorded evidence.",
+    help="Grade browser-agent runs and coding-agent sessions against the evidence.",
     no_args_is_help=True,
     add_completion=False,
     pretty_exceptions_enable=False,
 )
+
+
+def _print_version(value: bool) -> None:
+    if value:
+        typer.echo(f"evidence-judge {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    _version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version",
+            help="Print the version and exit",
+            callback=_print_version,
+            is_eager=True,
+        ),
+    ] = None,
+) -> None:
+    pass
+
+
 app.add_typer(hook_app)
 app.add_typer(session_app, name="session")
 
@@ -498,7 +522,7 @@ def judge(
         raise _internal(e) from None
 
     if not quiet:
-        print_verdict(verdict, Console(highlight=False))
+        print_verdict(verdict, StdoutConsole())
         _print_written(err, (("json", out), ("html", html)))
         for warning in export_warnings:
             err.print(Text(warning, style="yellow"))
@@ -533,7 +557,7 @@ def inspect(
     if as_json:
         typer.echo(json.dumps(summary.to_dict(), indent=2, ensure_ascii=False))
     else:
-        print_evidence_summary(summary, Console(highlight=False))
+        print_evidence_summary(summary, StdoutConsole())
 
 
 @app.command()
