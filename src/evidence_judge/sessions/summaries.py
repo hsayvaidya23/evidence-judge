@@ -32,6 +32,11 @@ _GO_FAIL: Final = re.compile(
 )
 _GO_NO_FILES: Final = re.compile(r"^\?\s+\S+\s+\[no test files\]")
 _GO_PANIC: Final = re.compile(r"^panic: ")
+_GO_BUILD_FAIL: Final = re.compile(r"^FAIL\s+\S+\s+\[(?:build|setup) failed\]")
+_NODE_COUNT: Final = re.compile(
+    r"^(?:\u2139|#)\s*(?P<key>tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)\s+"
+    r"(?P<n>\d+)(?:\.\d+)?\s*$"
+)
 _CARGO: Final = re.compile(
     r"^test result: (?P<status>ok|FAILED)\. (?P<passed>\d+) passed; (?P<failed>\d+) failed; "
     r"(?P<ignored>\d+) ignored; \d+ measured; (?P<filtered>\d+) filtered out"
@@ -149,6 +154,8 @@ def _mocha(lines: list[str]) -> TestSummary | None:
 
 
 def _go(lines: list[str]) -> TestSummary | None:
+    """Packages (`ok pkg`, `FAIL pkg`), or test functions when the run printed every result
+    (`go test -v`: `--- PASS:`, `--- FAIL:`, `--- SKIP:`), so two runs compare like units."""
     ok = sum(1 for line in lines if _GO_OK.match(line))
     failed = sum(1 for line in lines if _GO_FAIL.match(line) and not line.startswith("--- "))
     failed_tests = sum(1 for line in lines if line.startswith("--- FAIL: "))
@@ -156,12 +163,46 @@ def _go(lines: list[str]) -> TestSummary | None:
     no_files = sum(1 for line in lines if _GO_NO_FILES.match(line))
     if not (ok or failed or failed_tests or panics or no_files):
         return None
+    passed_tests = sum(1 for line in lines if line.startswith("--- PASS: "))
+    skipped_tests = sum(1 for line in lines if line.startswith("--- SKIP: "))
+    if passed_tests or skipped_tests:
+        build = sum(1 for line in lines if _GO_BUILD_FAIL.match(line))
+        return TestSummary(
+            framework="go test -v",
+            passed=passed_tests,
+            failed=failed_tests,
+            errors=panics + build,
+            skipped=skipped_tests,
+            no_tests=not (passed_tests or failed_tests or skipped_tests or panics or build),
+        )
     return TestSummary(
         framework="go test",
         passed=ok,
-        failed=max(failed, failed_tests),
+        failed=max(failed, 1 if failed_tests else 0),
         errors=panics,
         no_tests=not (ok or failed or failed_tests or panics),
+    )
+
+
+def _node(lines: list[str]) -> TestSummary | None:
+    """The `node --test` totals: the spec reporter's `tests 2` block (after an information sign) or TAP's `# tests 2`."""
+    counts: dict[str, int] = {}
+    for line in reversed(lines):
+        m = _NODE_COUNT.match(line)
+        if m is None:
+            if counts:
+                break
+            continue
+        counts.setdefault(m.group("key"), int(m.group("n")))
+    if "tests" not in counts or "pass" not in counts:
+        return None
+    return TestSummary(
+        framework="node --test",
+        passed=counts["pass"],
+        failed=counts.get("fail", 0),
+        errors=counts.get("cancelled", 0),
+        skipped=counts.get("skipped", 0) + counts.get("todo", 0),
+        no_tests=counts["tests"] == 0,
     )
 
 
@@ -246,6 +287,7 @@ _BY_RUNNER: Final[dict[str, _Parser]] = {
     "bun test": _jest,
     "mocha": _mocha,
     "go test": _go,
+    "node --test": _node,
     "cargo test": _cargo,
     "cargo nextest": _cargo,
     "rspec": _others,
@@ -255,7 +297,7 @@ _BY_RUNNER: Final[dict[str, _Parser]] = {
     "mvn": _others,
     "mvnw": _others,
 }
-_ALL: Final[tuple[_Parser, ...]] = (_pytest, _unittest, _jest, _mocha, _go, _cargo, _others)
+_ALL: Final[tuple[_Parser, ...]] = (_pytest, _unittest, _jest, _mocha, _go, _node, _cargo, _others)
 
 
 def _combine(found: list[TestSummary]) -> TestSummary | None:

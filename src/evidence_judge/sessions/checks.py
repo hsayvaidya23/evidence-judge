@@ -49,6 +49,9 @@ from evidence_judge.sessions.shell import READ_ONLY_PROGRAMS
 CHECKER: Final = "session"
 _EXCERPT: Final = 160
 _TAIL_ONLY: Final = "its output is piped into tail"
+_PER_TEST: Final = frozenset({"go test -v"})
+"""Summaries that count test functions where the same runner otherwise counts packages: a run
+is compared only with earlier runs counting the same unit."""
 
 
 class Result(StrEnum):
@@ -288,7 +291,8 @@ class SessionIndex:
         largest: dict[tuple[str, ...], tuple[int, CommandEvent]] = {}
         out: dict[str, tuple[int, CommandEvent]] = {}
         for event in self.test_runs(None):
-            key = tuple(sorted(set(event.analysis.runners)))
+            per_test = event.summary is not None and event.summary.framework in _PER_TEST
+            key = (*sorted(set(event.analysis.runners)), *(["per test"] if per_test else []))
             if key in largest:
                 out[event.id] = largest[key]
             total = suite_size(event)

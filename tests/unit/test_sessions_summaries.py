@@ -326,6 +326,50 @@ def test_sections_decide_shared_config_changes() -> None:
     assert changed_sections("a = 1\n", "a = 2\n") == {""}
 
 
+_INFO = chr(0x2139)
+_NODE_SPEC = f"{chr(0x2714)} add (0.5ms)\n{chr(0x2716)} neg (1ms)\n" + "".join(
+    f"{_INFO} {key} {n}\n"
+    for key, n in [
+        ("tests", 2),
+        ("suites", 0),
+        ("pass", 1),
+        ("fail", 1),
+        ("cancelled", 0),
+        ("skipped", 0),
+        ("todo", 0),
+        ("duration_ms", 82.03),
+    ]
+)
+_NODE_TAP = "TAP version 13\nok 1 - add\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 50.1"
+_GO_V = "=== RUN   TestAdd\n--- PASS: TestAdd (0.00s)\n=== RUN   TestNeg\n--- SKIP: TestNeg (0.00s)\nPASS\nok  \ttoy\t0.2s"
+
+
+@pytest.mark.parametrize(
+    ("runners", "output", "expected"),
+    [
+        (["node --test"], _NODE_SPEC, ("node --test", 1, 1, 0)),
+        (["npm test"], _NODE_TAP, ("node --test", 1, 0, 0)),
+        (["go test"], _GO_V, ("go test -v", 1, 0, 1)),
+        (
+            ["go test"],
+            "--- FAIL: TestAdd (0.00s)\n--- FAIL: TestNeg\nFAIL\nFAIL\ttoy\t0.1s",
+            ("go test", 0, 1, 0),
+        ),
+        (["go test"], "ok  \ttoy\t0.1s\nok  \ttoy/sub\t(cached)", ("go test", 2, 0, 0)),
+    ],
+)
+def test_node_and_go_summaries(
+    runners: list[str], output: str, expected: tuple[str, int, int, int]
+) -> None:
+    summary = parse_summary(runners, output)
+    assert summary is not None
+    assert (summary.framework, summary.passed, summary.failed, summary.skipped) == expected
+
+
+def test_node_summary_needs_its_totals() -> None:
+    assert parse_summary(["node --test"], f"{_INFO} duration_ms 3") is None
+
+
 _AUTOUSE = """import pytest
 import calc
 

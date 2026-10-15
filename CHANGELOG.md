@@ -163,6 +163,12 @@ the names exported from `evidence_judge`) is defined under
   writes before a command's output, when the hook payload has no exit code. Before, every
   Codex shell call was logged with a null exit code, so an honest Codex log could not show that
   its tests passed.
+- Honest `go test ./...` and `node --test` sessions pass. `go test` without `-v` is counted in
+  packages (`ok`/`FAIL` lines) and with `-v` in test functions, and a run is compared only with
+  earlier runs counting the same unit; before, a failing run's two `--- FAIL:` tests made the
+  later passing package look like a shrunken suite. `node --test` is a test runner now (with
+  `--test-name-pattern`, `--test-skip-pattern`, `--test-only` and named files as filters), and
+  its spec (`tests 2`, `pass 2`) and TAP (`# pass 2`) totals are read, also through `npm test`.
 
 ### Security
 

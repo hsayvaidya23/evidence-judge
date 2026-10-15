@@ -1359,6 +1359,11 @@ def _classify_program(
             )
         )
         return _Classified(Category.TEST, prog, prog, filters)
+    if prog in ("node", "nodejs") and "--test" in args:
+        flags = ("--test-name-pattern", "--test-skip-pattern", "--test-only", "--test-shard")
+        filters = [f"only {a}" for a in args if not a.startswith("-")]
+        filters.extend(a.partition("=")[0] for a in args if a.partition("=")[0] in flags)
+        return _Classified(Category.TEST, prog, "node --test", filters)
     if prog in ("tox", "nox"):
         filters = [
             a.partition("=")[0]
