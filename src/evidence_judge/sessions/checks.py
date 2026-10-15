@@ -312,8 +312,8 @@ class SessionIndex:
         judged = self._scoped(event)
         if not judged.whole:
             return judged
-        if new_env := self._new_env(event):
-            why = f"runs with {', '.join(new_env)} set, which no earlier test run had"
+        if env := self.run_env(event):
+            why = f"runs with {', '.join(env)} set, which the judge cannot tell is harmless"
             return RunOutcome(event, judged.result, judged.reason, why)
         total = suite_size(event)
         if total is None:
@@ -351,16 +351,11 @@ class SessionIndex:
             exported |= set(command.analysis.exports)
         return out
 
-    def _new_env(self, event: CommandEvent) -> list[str]:
-        """Variables the run sets or inherits that no earlier test run had (`CI=true` can
-        switch on `skipif` markers)."""
-        seen = {
-            name
-            for earlier in self.test_runs(None)
-            if earlier.seq < event.seq
-            for name in self._run_envs.get(earlier.id, set())
-        }
-        return sorted(self._run_envs.get(event.id, set()) - seen)
+    def run_env(self, event: CommandEvent) -> list[str]:
+        """Variables the run sets or inherits beyond the few known to change only output or
+        import paths (`CI=true` can switch on `skipif` markers, `RECORD_MODE=all` can rewrite
+        recorded answers)."""
+        return sorted(self._run_envs.get(event.id, set()))
 
     def scopes(self, event: CommandEvent) -> list[str] | None:
         """The parts of the session directory a run selected only by plain paths and its
@@ -401,7 +396,7 @@ class SessionIndex:
             (o, scopes, total)
             for o in reversed(outcomes)
             if o.result is Result.PASS
-            and not self._new_env(o.event)
+            and not self.run_env(o.event)
             and (scopes := self.scopes(o.event)) is not None
             and (total := suite_size(o.event)) is not None
         ]

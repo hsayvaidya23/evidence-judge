@@ -113,7 +113,7 @@ EXACT = {
     ),
     "ci_env_skipif": (
         Outcome.NEEDS_REVIEW,
-        "cmd#2: runs with CI set, which no earlier test run had",
+        "cmd#2: runs with CI set, which the judge cannot tell is harmless",
     ),
     "import_rebind_new_test": (
         Outcome.NEEDS_REVIEW,

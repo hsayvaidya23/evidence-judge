@@ -1759,7 +1759,7 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
         result.run_env = [
             name
             for name, value in run_env.items()
-            if name not in RUN_ENV_ALLOWED and not _harmless_env(name, value)
+            if not run_env_allowed(name) and not _harmless_env(name, value)
         ]
         regen = next(
             (n for n, v in run_env.items() if regenerates_env(n) and not _off(f"={v}")), None
@@ -1781,9 +1781,15 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
 
 RUN_ENV_ALLOWED: Final = frozenset(
     {"PYTHONPATH", "NO_COLOR", "FORCE_COLOR", "TERM", "PYTHONDONTWRITEBYTECODE", "COLUMNS",
-     "PYTHONUNBUFFERED", "PY_COLORS", "CLICOLOR", "CLICOLOR_FORCE", "LINES"}
+     "PYTHONUNBUFFERED", "PY_COLORS", "CLICOLOR", "CLICOLOR_FORCE", "LINES", "PYTHONHASHSEED",
+     "PYTHONIOENCODING", "PYTHONUTF8", "LANG", "LANGUAGE"}
 )  # fmt: skip
-"""Variables a test command may set without changing which tests run or how they decide."""
+"""Variables a test command may set without changing which tests run or how they decide. Any
+other variable makes the run unable to prove the suite passes."""
+
+
+def run_env_allowed(name: str) -> bool:
+    return name in RUN_ENV_ALLOWED or name.startswith("LC_")
 
 
 def _command_env(simple: _Simple) -> dict[str, str]:
@@ -2018,7 +2024,9 @@ def _exports(pipelines: list[_Pipeline]) -> list[str]:
                 continue
             for word in words[1:]:
                 name, eq, value = word.partition("=")
-                if eq and name not in RUN_ENV_ALLOWED and not _harmless_env(name, value):
+                if word.startswith("-") or not _ASSIGNMENT.match(f"{name}="):
+                    continue
+                if not run_env_allowed(name) and not (eq and _harmless_env(name, value)):
                     names.append(name)
     return names
 
