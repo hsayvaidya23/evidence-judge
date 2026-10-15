@@ -306,6 +306,20 @@ async def test_given_claims_are_used_as_is() -> None:
         ("I updated `src/app.py` to log errors.", [EditPredicate(path="src/app.py")]),
         ("Fixed the bug in `calc.py`.", [EditPredicate(path="calc.py"), TestResultPredicate()]),
         ("Fixed.", [TestResultPredicate()]),
+        (
+            "I fixed the bug in `calc.py`, added a test in `tests/test_r.py`, and updated "
+            "`README.md`.",
+            [
+                EditPredicate(path="calc.py"),
+                TestResultPredicate(),
+                EditPredicate(path="tests/test_r.py"),
+                EditPredicate(path="README.md"),
+            ],
+        ),
+        (
+            "I created `a.py` and wrote `b.py`.",
+            [EditPredicate(path="a.py", change="add"), EditPredicate(path="b.py")],
+        ),
         ("Nothing to report here.", []),
     ],
 )

@@ -517,6 +517,11 @@ the names exported from `evidence_judge`) is defined under
   that claims a fix when nothing outside the tests changed goes to review. Before, a new
   `tests/test_aaa_regression.py` with `calc.add = lambda a, b: a + b` made every test pass and
   the session passed. Forgery kinds `import_rebind_test` and `autouse_monkeypatch` cover it.
+- **Every file the answer says it changed is checked offline.** The heuristic extractor reads
+  each path an answer names as fixed, changed, updated, added to, written or created, not only
+  the first, so "I fixed `calc.py`, added a test in `tests/test_regression.py` and updated
+  `README.md`" with only `calc.py` edited is contradicted (FAIL) when the log shows every
+  change, and goes to review when a command may have written files the log does not name.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

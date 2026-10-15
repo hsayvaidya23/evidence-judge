@@ -118,6 +118,7 @@ EXACT = {
         Outcome.NEEDS_REVIEW,
         "only a subset of the suite ran after the last change (cmd#2: --test-name-pattern)",
     ),
+    "claimed_files_unchanged": (Outcome.FAIL, "no recorded edit of tests/test_regression.py"),
 }
 """Recorded attacks with the exact outcome and the reason the judge must give."""
 

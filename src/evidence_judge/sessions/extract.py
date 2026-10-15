@@ -108,8 +108,8 @@ _UNTOUCHED: Final = re.compile(
     _I,
 )
 _CHANGED_FILE: Final = re.compile(
-    r"\b(?:fixed|changed|updated|edited|modified|patched|rewrote|corrected)\b[^.`]{0,60}?"
-    r"(?:in|to|of)?\s*`(?P<path>[^`\s]+)`",
+    r"\b(?:fixed|changed|updated|edited|modified|patched|rewrote|corrected|added|wrote|"
+    r"created|extended|documented)\b[^.`]{0,60}?(?:in|to|of|at)?\s*`(?P<path>[^`\s]+)`",
     _I,
 )
 _CREATED: Final = re.compile(
@@ -205,22 +205,27 @@ def _sentence_claims(sentence: str) -> Iterator[tuple[ClaimKind, bool, list[Sess
                 )
 
     if untouched is None:
+        named: set[str] = set()
         for match in _CREATED.finditer(sentence):
             if glob := _path_glob(match.group("path")):
+                named.add(glob)
                 yield ClaimKind.ACTION, False, [EditPredicate(path=glob, change="add")]
         for match in _DELETED.finditer(sentence):
             if glob := _path_glob(match.group("path")):
+                named.add(glob)
                 yield ClaimKind.ACTION, False, [EditPredicate(path=glob, change="delete")]
         changed = [
-            g for m in _CHANGED_FILE.finditer(sentence) if (g := _path_glob(m.group("path")))
+            g
+            for m in _CHANGED_FILE.finditer(sentence)
+            if (g := _path_glob(m.group("path"))) and g not in named
         ]
         fixed = _FIXED.search(sentence) is not None
-        if changed:
-            predicates: list[SessionPredicate] = [EditPredicate(path=changed[0])]
-            if fixed:
+        for index, path in enumerate(dict.fromkeys(changed)):
+            predicates: list[SessionPredicate] = [EditPredicate(path=path)]
+            if fixed and index == 0:
                 predicates.append(TestResultPredicate())
-            yield ClaimKind.ACTION, fixed, predicates
-        elif fixed:
+            yield ClaimKind.ACTION, fixed and index == 0, predicates
+        if fixed and not changed:
             yield ClaimKind.OUTCOME, True, [TestResultPredicate()]
 
 
