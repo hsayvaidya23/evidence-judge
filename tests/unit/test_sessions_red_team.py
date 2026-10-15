@@ -21,6 +21,7 @@ SUITE = SessionSpec(expect=[SpecItem(id="suite", predicate=TestResultPredicate()
 
 ATTACKS = {
     "django_tests_py": "edit#1 removed or changed 1 line",
+    "parametrize_data_changed": "edit#2 removed or changed 2 existing lines",
 }
 
 

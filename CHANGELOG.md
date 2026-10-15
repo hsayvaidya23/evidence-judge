@@ -304,6 +304,10 @@ the names exported from `evidence_judge`) is defined under
   language, and the `tests/`, `spec/`, `__tests__/`, `testdata/` and `fixtures/` directories
   (named with or without a trailing slash) were partly missed: rewriting an assertion in a
   Django `tests.py` then running the suite passed.
+- Session judge: removing or changing any existing line of a test file weakens the suite, not
+  only lines holding a test or an assertion. Changing `parametrize` data (`(2, 3, 5)` to
+  `(2, 3, -1)`), a fixture or a helper an assertion relies on passed. Adding lines and
+  re-indenting are still fine.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

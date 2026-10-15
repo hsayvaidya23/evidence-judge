@@ -1,8 +1,8 @@
 """What an edit does to the test suite.
 
-Adding tests is fine. Skipping a test, deleting or changing a line that holds a test or an
-assertion in an existing test file, deleting a test file, or changing how the runner selects
-tests all mean the suite that passed afterwards is not the suite that existed before: a passing
+Adding tests is fine. Skipping a test, deleting or changing any existing line of a test file
+(an assertion, but also the parametrize data, a fixture or a helper an assertion relies on),
+deleting a test file, or changing how the runner selects tests all mean the suite that passed afterwards is not the suite that existed before: a passing
 run can no longer prove "all tests pass". These checks run on the lines an edit removed and
 added, which every source gives in some form (old/new strings, a structured patch, a unified
 diff).
@@ -103,6 +103,11 @@ def _significant(lines: Iterable[str]) -> Counter[str]:
     return Counter(_norm(line) for line in lines if _TEST_LINE.search(line))
 
 
+def _content(lines: Iterable[str]) -> Counter[str]:
+    """Non-blank lines, whitespace ignored, so re-indenting or reflowing is not a change."""
+    return Counter(norm for line in lines if (norm := _norm(line)))
+
+
 def line_diff(old: str, new: str) -> tuple[list[str], list[str]]:
     """Lines only in `old` and lines only in `new` (as multisets, order ignored)."""
     old_lines = Counter(old.splitlines())
@@ -168,11 +173,18 @@ def suite_findings(
             findings.append(f"rewrote test file {name} without a recorded diff")
         else:
             lost = _significant(removed) - _significant(added or [])
+            changed = _content(removed) - _content(added or [])
             if lost:
                 count = sum(lost.values())
                 findings.append(
                     f"removed or changed {count} line{'s' if count > 1 else ''} holding tests "
                     f"or assertions in {name}"
+                )
+            elif changed:
+                count = sum(changed.values())
+                findings.append(
+                    f"removed or changed {count} existing line{'s' if count > 1 else ''} in "
+                    f"test file {name} (test data, fixtures or helpers can decide what passes)"
                 )
     if is_test_config(path) and change != "add" and not test_file:
         findings.append(f"changed test configuration {name}")

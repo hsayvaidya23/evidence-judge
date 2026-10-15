@@ -240,6 +240,13 @@ def test_findings_for_test_tampering() -> None:
     ]
     xit = suite_findings("src/calc.test.ts", "modify", [], ["  xit('adds', () => {"])
     assert any("skip" in f for f in xit)
+    data = suite_findings("tests/test_calc.py", "modify", ["    (2, 3, 5),"], ["    (2, 3, -1),"])
+    assert data == [
+        "removed or changed 1 existing line in test file test_calc.py (test data, fixtures or "
+        "helpers can decide what passes)"
+    ]
+    helper = suite_findings("tests/helpers.py", "modify", ["EXPECTED = 5", "x = 1"], ["x = 1"])
+    assert len(helper) == 1 and "1 existing line" in helper[0]
 
 
 def test_findings_allow_honest_edits() -> None:
