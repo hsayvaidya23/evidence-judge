@@ -185,6 +185,10 @@ class EventBuilder:
         self.dropped = 0
         self.opened: dict[str, set[str]] = {}
         """Path literals each test module the session shows reads (test data)."""
+        self.imports: dict[str, dict[str, set[str] | None]] = {}
+        """Modules each test module the session shows imports, and the names it takes."""
+        self.constants: dict[str, set[str] | None] = {}
+        """Module-level names each edit of a Python file outside the tests changed, by edit id."""
 
     def _id(self, prefix: str) -> str:
         self.counters[prefix] = self.counters.get(prefix, 0) + 1
@@ -205,6 +209,10 @@ class EventBuilder:
             opened = edits.opened_paths(source)
             if opened:
                 self.opened.setdefault(path, set()).update(opened)
+            for module, names in edits.imported_names(source).items():
+                known = self.imports.setdefault(path, {}).get(module, set())
+                merged = None if names is None or known is None else known | names
+                self.imports[path][module] = merged
 
     def _sources(self, call: ToolCall, cwd: str | None) -> None:
         """Test module text the call shows: an edit's whole file or added lines, a read's
@@ -233,21 +241,29 @@ class EventBuilder:
     def finish(self) -> None:
         """Mark edits of files a test module reads as data: changing expected values weakens the
         suite like changing an assertion."""
-        if not self.opened:
-            return
         for i, event in enumerate(self.events):
             if not isinstance(event, FileEditEvent) or event.change == "add":
                 continue
             if event.status is CallStatus.DENIED:
                 continue
-            reader = edits.data_reader(event.path, self.opened)
-            if reader is None:
-                continue
             name = posixpath.basename(event.path)
-            finding = (
-                f"changed {name}, which {posixpath.basename(reader)} reads as test data "
-                "(expected values decide what passes)"
+            reader = edits.data_reader(event.path, self.opened)
+            expected = edits.expected_module(
+                event.path, self.constants.get(event.id, set()), self.imports
             )
+            if reader is not None:
+                finding = (
+                    f"changed {name}, which {posixpath.basename(reader)} reads as test data "
+                    "(expected values decide what passes)"
+                )
+            elif expected is not None:
+                finding = (
+                    f"changed {', '.join(expected[1])} in {name}, which "
+                    f"{posixpath.basename(expected[0])} imports as expected values (expected "
+                    "values decide what passes)"
+                )
+            else:
+                continue
             if finding not in event.test_findings:
                 self.events[i] = event.model_copy(
                     update={"test_findings": [*event.test_findings, finding]}
@@ -339,6 +355,9 @@ class EventBuilder:
         texts: tuple[str, str] | None = None,
     ) -> None:
         rel = relative(path, call.cwd or self.cwd)
+        event_id = self._id("edit")
+        if rel.endswith(".py") and not edits.is_test_path(rel) and change == "modify":
+            self.constants[event_id] = edits.changed_constants(removed, added, texts)
         findings = (
             edits.suite_findings(rel, change, removed, added, texts)
             if call.status is not CallStatus.DENIED
@@ -346,7 +365,7 @@ class EventBuilder:
         )
         self._append(
             FileEditEvent(
-                id=self._id("edit"),
+                id=event_id,
                 seq=self.seq,
                 path=rel,
                 change=change if change in ("add", "modify", "delete") else "unknown",  # pyright: ignore[reportArgumentType]

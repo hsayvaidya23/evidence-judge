@@ -469,28 +469,43 @@ _CODE_SUFFIX: Final = re.compile(
 )
 
 
+def _string(node: ast.AST) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _pieces(node: ast.AST) -> list[str]:
+    """The string pieces of a path built with `/` (`HERE / "data" / "cases.json"`) or
+    `os.path.join`/`joinpath`, in order."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return [*_pieces(node.left), *_pieces(node.right)]
+    if isinstance(node, ast.Call):
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name in ("join", "joinpath"):
+            return [piece for arg in node.args for piece in _pieces(arg)]
+    value = _string(node)
+    return [value.strip().strip("/")] if value is not None and value.strip() else []
+
+
 def _literals(tree: ast.AST) -> set[str]:
     found: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-        if not _OPENERS.match(name):
-            continue
-        for sub in ast.walk(node):
-            if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
-                value = sub.value.strip()
-                if 0 < len(value) < 200 and _DATA_LITERAL.match(value):
-                    found.add(value)
+        candidates: list[str] = []
+        if (value := _string(node)) is not None:
+            candidates.append(value.strip())
+        elif isinstance(node, ast.BinOp | ast.Call) and len(pieces := _pieces(node)) > 1:
+            candidates.append("/".join(pieces))
+        found.update(
+            c for c in candidates if 0 < len(c) < 200 and _DATA_LITERAL.match(c) is not None
+        )
     return found
 
 
 def opened_paths(source: str) -> set[str]:
-    """Path literals a test module reads: arguments of `open()`, `Path(...)`,
-    `.read_text()`/`.read_bytes()`/`.open()`, `json.load`, `np.load`, `pd.read_*` and
-    `importlib.resources`. A source that does not parse as a whole (several files `cat` together)
-    is read line by line."""
+    """Path-like string literals anywhere in a test module, and paths it builds from pieces
+    (`Path(__file__).parent / "data" / "cases.json"`, `os.path.join(HERE, "data", "x.json")`):
+    the files it may read as data. A source that does not parse as a whole (several files `cat`
+    together) is read line by line."""
     try:
         return _literals(ast.parse(source))
     except (SyntaxError, ValueError):
@@ -513,7 +528,7 @@ def _strip_up(literal: str) -> str:
 def data_reader(path: str, opened: dict[str, set[str]]) -> str | None:
     """The test module that reads `path` as data (expected values, cases, recorded answers),
     or None. Code files are left to the other checks."""
-    if is_test_path(path) or _CODE_SUFFIX.search(path):
+    if is_test_path(path) or _CODE_SUFFIX.search(path) or is_config_path(path):
         return None
     for module, literals in opened.items():
         for literal in literals:
@@ -525,6 +540,109 @@ def data_reader(path: str, opened: dict[str, set[str]]) -> str | None:
                     return module
             elif path == lit or path.endswith("/" + lit):
                 return module
+    return None
+
+
+def imported_names(source: str) -> dict[str, set[str] | None]:
+    """Modules a test module imports, outside test tooling, and the names it takes from each:
+    `from m import A` takes A, `import m` takes each `m.A` it reads, `from m import *` takes
+    every name (None)."""
+    try:
+        return _imported_names(ast.parse(source))
+    except (SyntaxError, ValueError):
+        pass
+    merged: dict[str, set[str] | None] = {}
+    for line in source.splitlines():
+        try:
+            found = _imported_names(ast.parse(line.strip()))
+        except (SyntaxError, ValueError):
+            continue
+        for module, names in found.items():
+            known = merged.get(module, set())
+            merged[module] = None if names is None or known is None else known | names
+    return merged
+
+
+def _imported_names(tree: ast.Module) -> dict[str, set[str] | None]:
+    taken: dict[str, set[str] | None] = {}
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            if _TEST_MODULES.match(node.module):
+                continue
+            names = {a.name for a in node.names}
+            known = taken.get(node.module, set())
+            taken[node.module] = None if "*" in names or known is None else known | names
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if not _TEST_MODULES.match(alias.name):
+                    aliases[alias.asname or alias.name] = alias.name
+                    taken.setdefault(alias.name, set())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and (module := aliases.get(_dotted(node.value))):
+            names = taken.get(module)
+            if names is not None:
+                names.add(node.attr)
+    return taken
+
+
+def _module_constants(source: str) -> dict[str, str] | None:
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    out: dict[str, str] = {}
+    for stmt in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(stmt, ast.Assign):
+            targets = stmt.targets
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            targets = [stmt.target]
+        value = getattr(stmt, "value", None)
+        for target in targets:
+            for name in ast.walk(target):
+                if isinstance(name, ast.Name) and value is not None:
+                    out[name.id] = ast.dump(value)
+    return out
+
+
+def changed_constants(
+    removed: list[str] | None, added: list[str] | None, texts: tuple[str, str] | None
+) -> set[str] | None:
+    """Module-level names whose assigned value the edit changed (`EXPECTED = 5` to `-1`), or
+    None when that cannot be told."""
+    if texts is not None:
+        before, after = _module_constants(texts[0]), _module_constants(texts[1])
+        if before is not None and after is not None:
+            return {n for n in before.keys() | after.keys() if before.get(n) != after.get(n)}
+    if removed is None or added is None:
+        return None
+    found: set[str] = set()
+    for line in [*removed, *added]:
+        if line[:1].isspace():
+            continue
+        found.update((_module_constants(line) or {}).keys())
+    return found
+
+
+def expected_module(
+    path: str, changed: set[str] | None, imports: dict[str, dict[str, set[str] | None]]
+) -> tuple[str, list[str]] | None:
+    """The test module that imports values from `path` the edit changed, and those names;
+    None when no shown test module takes a changed value from it."""
+    if is_test_path(path) or not path.endswith(".py"):
+        return None
+    for reader, modules in imports.items():
+        for module, names in modules.items():
+            stem = module.replace(".", "/")
+            files = (f"{stem}.py", f"{stem}/__init__.py")
+            if not any(path == f or path.endswith("/" + f) for f in files):
+                continue
+            if changed is None:
+                continue
+            hit = sorted(changed if names is None else changed & names)
+            if hit:
+                return reader, hit
     return None
 
 
