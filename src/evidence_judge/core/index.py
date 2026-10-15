@@ -42,8 +42,13 @@ _KEY_NAME = re.compile(
     r"|f\d{1,2}|key[a-z]|digit\d|numpad\w+)",
     re.IGNORECASE,
 )
+_DIGIT = re.compile(r"\d")
 _TAG = re.compile(r"</?[a-z][^<>]*>", re.IGNORECASE)
 _REDACTION_TOKEN = re.compile(TOKEN_RE.pattern, re.IGNORECASE)
+MIN_ECHO_WORD: Final = 6
+"""Shortest single word without a digit that the agent can echo in every predicate's evidence.
+Shorter ones ("your", "cart") are common words of honest page text; they only mask text that is
+itself a single short word."""
 MIN_ECHO_PREFIX: Final = 8
 """Shortest prefix of an agent input that counts as a cut-short echo of it. Shorter shared
 prefixes are mostly common word stems ("confirm" in "confirmation" and "confirmed")."""
@@ -58,7 +63,7 @@ class EvidenceIndex:
     def __init__(self, run: Run) -> None:
         self.run = run
         self._normalized: dict[str, str] = {}
-        self._inputs_by_site: dict[str | None, tuple[str, ...]] = {}
+        self._inputs_by_site: dict[tuple[str | None, bool], tuple[str, ...]] = {}
 
     def has(self, channel: Channel) -> bool:
         return channel in self.run.captured
@@ -229,19 +234,21 @@ class EvidenceIndex:
         kept = [(t, site) for t, site in found if len(t) >= MIN_PAGE_TEXT and WORD.search(t)]
         return tuple(sorted(kept, key=lambda i: (-len(i[0]), i[0], i[1] or "")))
 
-    def _inputs_for(self, url: str | None) -> tuple[str, ...]:
-        """The inputs that can be echoed on `url`: typed ones, and URL ones from its site."""
+    def _inputs_for(self, url: str | None, *, short_words: bool) -> tuple[str, ...]:
+        """The inputs that can be echoed on `url`: typed ones, and URL ones from its site;
+        single short words (is_short_word) only with `short_words`."""
         site = _site(url)
-        cached = self._inputs_by_site.get(site)
+        cached = self._inputs_by_site.get((site, short_words))
         if cached is None:
             cached = tuple(
                 dict.fromkeys(
                     text
                     for text, origin in self._scoped_inputs
-                    if origin is None or (site is not None and _same_site(origin, site))
+                    if (origin is None or (site is not None and _same_site(origin, site)))
+                    and (short_words or not is_short_word(text))
                 )
             )
-            self._inputs_by_site[site] = cached
+            self._inputs_by_site[site, short_words] = cached
         return cached
 
     @cached_property
@@ -257,27 +264,50 @@ class EvidenceIndex:
         response is masked like any other: a site that answers a POST by repeating the typed
         value proves nothing by doing so.
 
+        Inputs that are a single short word (is_short_word) are not masked here: "Your" typed
+        into a name field must not mask "Thank you for your order". Only text that is itself a
+        single short word can be produced by one; `without_short_word_input` masks them too.
+
         Masked page text and non-JSON bodies are normalised; JSON bodies keep their structure,
         with each echoing string (key or value) masked. Evidence without an echo is unchanged.
         """
-        if not self.agent_inputs():
+        return self._masked(short_words=False)
+
+    @cached_property
+    def without_short_word_input(self) -> EvidenceIndex:
+        """`without_agent_input` that also masks inputs that are a single short word."""
+        return self._masked(short_words=True)
+
+    def _masked(self, *, short_words: bool) -> EvidenceIndex:
+        if not any(short_words or not is_short_word(text) for text, _ in self._scoped_inputs):
             return self
         run = self.run
+
+        def inputs(url: str | None) -> tuple[str, ...]:
+            return self._inputs_for(url, short_words=short_words)
+
         return EvidenceIndex(
             run.model_copy(
                 update={
-                    "actions": [_masked_url(a, self._inputs_for(a.url)) for a in run.actions],
-                    "network": [_masked_request(n, self._inputs_for(n.url)) for n in run.network],
-                    "snapshots": [_masked_page(s, self._inputs_for(s.url)) for s in run.snapshots],
+                    "actions": [_masked_url(a, inputs(a.url)) for a in run.actions],
+                    "network": [_masked_request(n, inputs(n.url)) for n in run.network],
+                    "snapshots": [_masked_page(s, inputs(s.url)) for s in run.snapshots],
                     "initial_state": None
                     if run.initial_state is None
-                    else _masked_page(run.initial_state, self._inputs_for(run.initial_state.url)),
+                    else _masked_page(run.initial_state, inputs(run.initial_state.url)),
                     "final_state": None
                     if run.final_state is None
-                    else _masked_page(run.final_state, self._inputs_for(run.final_state.url)),
+                    else _masked_page(run.final_state, inputs(run.final_state.url)),
                 }
             )
         )
+
+
+def is_short_word(text: str) -> bool:
+    """True if `text` is a single word shorter than MIN_ECHO_WORD characters, without a digit:
+    a common word ("your", "cart", "paid") that honest page text often contains."""
+    words = WORD.findall(text)
+    return len(words) == 1 and len(words[0]) < MIN_ECHO_WORD and not _DIGIT.search(words[0])
 
 
 def _site(url: str | None) -> str | None:
