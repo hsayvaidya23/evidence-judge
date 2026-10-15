@@ -49,9 +49,17 @@ ECHOES = {
         act(2, "upload_file", "#file", value="/tmp/run/Order A77 confirmed.pdf"),
         "Your document Order A77 confirmed was received",
     ),
+    "pressed text (browser-use send_keys)": (
+        act(2, "send_keys", "#q", value="Order A77 confirmed"),
+        "You wrote Order A77 confirmed",
+    ),
 }
 
 GENUINE = {
+    "key chord press": (
+        act(2, "press", "#q", value="Control+Enter"),
+        "Order A77 confirmed",
+    ),
     "unrelated upload": (
         act(2, "upload", "#file", value="receipt.pdf"),
         "Order A77 confirmed",

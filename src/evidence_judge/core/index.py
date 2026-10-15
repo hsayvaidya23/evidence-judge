@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import bisect
 import math
+import re
 from collections.abc import Iterable, Iterator
 from functools import cached_property
 from pathlib import PureWindowsPath
@@ -22,6 +23,13 @@ from evidence_judge.core.predicates import MIN_PAGE_TEXT, WORD
 from evidence_judge.textnorm import normalize
 
 FINAL_KEY = "final"
+_KEY_NAME = re.compile(
+    r"(?:.|shift|control|ctrl|alt|option|meta|command|cmd|controlormeta|enter|return|tab|space"
+    r"|escape|esc|backspace|delete|del|insert|home|end|pageup|pagedown|capslock|numlock"
+    r"|scrolllock|pause|printscreen|contextmenu|arrow(?:up|down|left|right)|up|down|left|right"
+    r"|f\d{1,2}|key[a-z]|digit\d|numpad\w+)",
+    re.IGNORECASE,
+)
 MASK: Final = "\x00"
 """Stands in for agent input in masked evidence; it is never part of a predicate."""
 
@@ -169,6 +177,7 @@ class EvidenceIndex:
         """Normalised text the agent put into the run itself, longest first.
 
         That is the value of every typing action, each run of single-key presses on one target,
+        every press of text that is not key names (browser-use ``send_keys``),
         the name (with and without extension) of every uploaded file, the decoded path segments and query values of every URL the agent opened, and the
         decoded query values of every GET request (a form the agent submitted, or a navigation
         a HAR cannot attribute). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit
@@ -225,7 +234,9 @@ def _raw_inputs(run: Run) -> Iterator[str]:
         if keys:
             yield "".join(keys)
             keys.clear()
-        if name == FILL and action.value:
+        if (name == FILL and action.value) or (
+            name == PRESS and action.value and not _is_key_names(action.value)
+        ):
             yield action.value
         elif name == UPLOAD and action.value:
             yield from _file_names(action.value)
@@ -236,6 +247,14 @@ def _raw_inputs(run: Run) -> Iterator[str]:
     for event in run.network:
         if event.method.upper() == "GET":
             yield from _url_inputs(event.url, with_path=False)
+
+
+def _is_key_names(value: str) -> bool:
+    """`value` is a key or chord ("Enter", "Control+Shift+T"), or several separated by spaces."""
+    return all(
+        all(not key or _KEY_NAME.fullmatch(key) for key in chord.split("+"))
+        for chord in value.split()
+    )
 
 
 def _file_names(value: str) -> Iterator[str]:

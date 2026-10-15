@@ -50,6 +50,18 @@ def test_goto_paths_and_queries_and_get_queries_are_inputs() -> None:
     assert inputs == ("order a77 confirmed", "payment=success", "receipt", "orders", "a 77")
 
 
+def test_pressed_text_is_input_but_key_names_and_chords_are_not() -> None:
+    keys = ["Enter", "Control+A", "Shift+Tab", "Control+Shift+T", "ArrowDown ArrowDown Enter"]
+    actions = [
+        *[act(1 + i, "press", "#q", value=key) for i, key in enumerate(keys)],
+        act(10, "press", "#q", value="Control++"),
+        act(11, "press", "#q", value="F12"),
+        act(12, "send_keys", "#q", value="Order A77 confirmed"),
+        act(13, "press", "#q", value="London"),
+    ]
+    assert _inputs(actions=actions) == ("order a77 confirmed", "london")
+
+
 def test_uploaded_file_names_with_and_without_extension_are_inputs() -> None:
     actions = [
         act(1, "upload", "#a", value=r"C:\fakepath\Order A77.pdf"),
