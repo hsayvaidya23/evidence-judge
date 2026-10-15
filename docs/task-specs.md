@@ -34,7 +34,8 @@ Each entry in `expect` and `forbid` is an expectation:
 
 An expectation needs at least one predicate in `all` or `any`. When both are given, both
 conditions apply. In the verdict each one becomes an `ExpectationResult` with `met: true`,
-`false`, or `null` when the channel it needs was not captured.
+`false`, or `null` when it cannot be decided: the channel it needs was not captured, or what
+meets it proves nothing (see below).
 
 ### Which hosts can prove something
 
@@ -147,7 +148,13 @@ breaks these rules is refused; the extractors drop such predicates and count the
 is `no_evidence`, so the run goes to review. When a run is judged, a claim predicate that the
 run already met before the agent acted, that only holds on an echo of the agent's own input
 (text it typed or put in a URL), or (for a key outcome claim) that is neither a mutation
-request nor the final page cannot support the claim either; see [evidence that proves nothing](concepts/claims-and-predicates.md#evidence-that-proves-nothing).
+request nor the final page cannot support the claim either. The same baseline and echo rules
+hold for `expect` entries, whatever wrote the spec: an `expect` predicate the run met before the
+agent acted, or one that only holds where a page or URL echoes the agent's input (an agent that
+opens `/order/A77/confirmed` itself, or searches for "Order A77 shipped"), leaves the entry
+unknown (`met: null`) and the run goes to review. `forbid` entries and `constraints` are not
+masked: forbidden text the agent typed or that was already shown still breaks the rule. See
+[evidence that proves nothing](concepts/claims-and-predicates.md#evidence-that-proves-nothing).
 
 ### `request`: a network request was observed
 
