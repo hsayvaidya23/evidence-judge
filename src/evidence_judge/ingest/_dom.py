@@ -16,30 +16,44 @@ filter must not read as the page saying the product is in stock. Button labels, 
 authors, are kept.
 
 Each piece of text is shown, hidden, or of unsure visibility, and only certainty hides it
-(`_css`). Hidden: ``<script>``, ``<style>``, ``<template>`` and the like, an SVG ``<title>`` or
-``<desc>`` (a tooltip), the body of a closed ``<details>``, light-DOM children of a shadow host
-that no ``<slot>`` shows, and what the cascade certainly hides: the ``hidden`` attribute and a
-closed ``<dialog>`` unless the page's own styles show them, and ``display: none``,
-``visibility: hidden`` or ``content-visibility: hidden`` from inline styles, ``<style>``
-elements, constructed stylesheets and the ``<link rel=stylesheet>`` and ``@import`` sheets the
-recording holds. Each shadow root is its own scope: its sheets style only its tree, and the
-page's sheets do not reach into it. Unsure: text whose visibility depends on what the reader
-does not model (see `_css`), and all text of a scope whose stylesheets the recording does not
-fully hold. An empty custom element may hold a closed shadow root the snapshot cannot see, so a
-page with one may show text the reader never saw (`RenderedPage.opaque`).
+(`_css`). Hidden: ``<script>``, ``<style>``, ``<template>`` and the like, the body of a closed
+``<details>``, light-DOM children of a shadow host that no ``<slot>`` shows, what the browser's
+own stylesheets hide unless the page's styles show it (``ua_hiding.css``, vendored from the HTML,
+SVG and MathML specifications: the ``hidden`` attribute, a closed ``<dialog>``, ``<rp>``,
+``<noembed>``, SVG ``<defs>``, ``<symbol>``, ``<mask>`` and the other never-rendered elements,
+a ``<semantics>`` annotation, ``<mphantom>``, ...), text in an SVG element other than
+``<text>``, and what the page's cascade certainly hides: ``display: none``, ``visibility:
+hidden`` or ``content-visibility: hidden`` from inline styles, SVG presentation attributes,
+``<style>`` elements, constructed stylesheets and the ``<link rel=stylesheet>`` and ``@import``
+sheets the recording holds. Each shadow root is its own scope: its sheets style only its tree,
+and the page's sheets do not reach into it. Unsure: text whose visibility depends on what the
+reader does not model (see `_css`), including a ``popover`` (snapshots do not record whether it
+is open), the content of a never-rendered SVG element something refers to (a ``<use>`` copy, a
+pattern fill, a mask), a ``<switch>`` child other than an unconditional first one, and SVG text
+placed past its canvas; and all text of a scope whose stylesheets the recording does not fully
+hold. An empty custom element may hold a closed shadow root the snapshot cannot see, and a
+shown frame of the site's own holds a document of its own, so a page with either may show text
+the reader never saw (`RenderedPage.opaque`); a frame at most a pixel in size, parked
+off-screen, or holding another site's page does not count.
 """
 
 from __future__ import annotations
 
+import re
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import Any, Final
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
+from evidence_judge.core.site import registrable_domain
 from evidence_judge.ingest._css import (
     HIDDEN,
+    HTML,
+    MATHML,
+    REMOVED,
     ROOT,
     SHOWN,
+    SVG,
     UNSURE,
     Computed,
     Element,
@@ -109,6 +123,14 @@ _INLINE_TAGS = frozenset(
         "SLOT",
     }
 )
+_SVG_TEXT: Final = frozenset({"TEXT", "FOREIGNOBJECT"})
+"""SVG elements whose text renders: a text node elsewhere in an ``<svg>`` never does."""
+_SVG_CONDITIONS: Final = frozenset({"requiredextensions", "requiredfeatures", "systemlanguage"})
+"""Attributes that decide whether a ``<switch>`` renders a child."""
+_MATH_TEXT: Final = frozenset({"MI", "MN", "MO", "MS", "MTEXT", "ANNOTATION-XML"})
+"""MathML elements whose children may be HTML."""
+_FRAGMENT_REF = re.compile(r"""url\(\s*['"]?#([^'")\s]+)""")
+_NUMBER = re.compile(r"^\s*([+-]?(?:\d+\.?\d*|\.\d+))(?:px)?(?:[\s,]|$)")
 _NON_TEXT_INPUTS = frozenset({"hidden", "password", "file", "checkbox", "radio", "image"})
 _BUTTON_INPUTS = frozenset({"submit", "button", "reset"})
 _SHADOW_ROOT_ATTR = "__playwright_shadow_root_"
@@ -290,6 +312,9 @@ class _Renderer:
         self._unsure: list[str] = []
         self._opaque = False
         self._fixed = ""
+        self._referenced: set[str] = set()
+        """Ids a ``<use>`` or a ``url(#id)`` refers to: what an SVG paint server, mask, marker or
+        symbol copies onto the page."""
 
     def render(self, index: int) -> RenderedPage:
         root = self._store.root(self._frame_id, index)
@@ -351,9 +376,8 @@ class _Renderer:
         stack: list[_Item],
     ) -> None:
         if tag in _SKIPPED_TAGS or (tag == "TEMPLATE" and _SHADOW_ROOT_ATTR not in attrs):
-            if tag in _FRAMES and _loads_content(attrs):
-                style = scope.sheets.style(element, inherited, ua_hide=_ua_hide(tag, attrs))
-                self._opaque = self._opaque or (not style.removed and style.text != HIDDEN)
+            if tag in _FRAMES and not self._opaque:
+                self._opaque = self._frame_shows(element, inherited, scope, attrs)
             return
         children = self._resolved(node, snapshot_index, parent=element)
         shadow = next(
@@ -371,15 +395,14 @@ class _Renderer:
         if shadow is not None and isinstance(shadow.node, list):
             proxy = Element(tag, element.attrs, None, host=element)
             inner = self._shadow_scope(shadow, children, scope)
-        style = scope.sheets.style(
-            element,
-            inherited,
-            ua_hide=_ua_hide(tag, attrs),
-            host=inner.sheets if inner is not None else None,
-            proxy=proxy,
-        )
+        host = inner.sheets if inner is not None else None
+        style = scope.sheets.style(element, inherited, host=host, proxy=proxy)
+        if style.removed and element.namespace == SVG and self._referenced:
+            style = self._copied(node, snapshot_index, element, inherited, scope, host, proxy)
         if style.removed:
             return
+        if element.namespace == SVG and tag == "TEXT" and _off_canvas(element, style):
+            style = replace(style, unsure=True)
         if scope.parts and "part" in element.attrs and not style.unsure:
             style = replace(style, unsure=True)
         if ("-" in tag and not children) or (
@@ -411,7 +434,68 @@ class _Renderer:
                 (c.node, c.index, c.element, passed, False, scope.outer) for c in reversed(assigned)
             )
             return
-        stack.extend((c.node, c.index, c.element, style, closed, scope) for c in reversed(children))
+        stack.extend(
+            (c.node, c.index, c.element, s, closed, scope)
+            for c, s in reversed(
+                list(zip(children, _child_styles(element, style, children), strict=True))
+            )
+        )
+
+    def _frame_shows(
+        self, element: Element, inherited: Computed, scope: _Scope, attrs: JsonObject
+    ) -> bool:
+        """A frame may show text of the site's own that this snapshot does not hold: it loads
+        a document of the same site into a box bigger than a pixel that is not off-screen. A
+        third-party frame (a payment field, a video, an analytics beacon) holds the third
+        party's page, not the site's."""
+        if not _loads_content(attrs) or _tiny(attrs) or not self._same_site(attrs):
+            return False
+        style = scope.sheets.style(element, inherited)
+        return not style.removed and style.text != HIDDEN and not scope.sheets.collapsed(element)
+
+    def _same_site(self, attrs: JsonObject) -> bool:
+        if as_str(attrs.get("srcdoc")) or self._url is None:
+            return True
+        try:
+            frame = urlsplit(urljoin(self._document or self._url, as_str(attrs.get("src")) or ""))
+            page = urlsplit(self._url)
+        except ValueError:
+            return True
+        if not frame.hostname or not page.hostname or frame.scheme not in ("http", "https"):
+            return True
+        return registrable_domain(frame.hostname) == registrable_domain(page.hostname)
+
+    def _copied(
+        self,
+        node: list[Any],
+        snapshot_index: int,
+        element: Element,
+        inherited: Computed,
+        scope: _Scope,
+        host: StyleSheets | None,
+        proxy: Element | None,
+    ) -> Computed:
+        """The style of an SVG element the browser's own rules remove (``<symbol>``,
+        ``<defs>``, ``<pattern>``, ``<mask>``, ...): unsure when something on the page refers
+        to it or into it, as a ``<use>`` copy, a fill or a mask shows its content."""
+        own = scope.sheets.style(element, inherited, ua=False, host=host, proxy=proxy)
+        if own.removed or not self._refers_into(node, snapshot_index):
+            return REMOVED
+        return replace(own, unsure=True)
+
+    def _refers_into(self, node: list[Any], snapshot_index: int) -> bool:
+        stack: list[tuple[object, int]] = [(node, snapshot_index)]
+        while stack:
+            child, index = stack.pop()
+            self._tick()
+            resolved = self._deref(child, index)
+            target = None if resolved is None else _element(resolved[0])
+            if resolved is None or target is None:
+                continue
+            if as_str(_tag_and_attrs(target)[1].get("id")) in self._referenced:
+                return True
+            stack.extend((c, resolved[1]) for c in _children(target))
+        return False
 
     @staticmethod
     def _assigned(node: list[Any], attrs: JsonObject, scope: _Scope) -> list[_Child] | None:
@@ -451,7 +535,7 @@ class _Renderer:
                 out.append(_Child(target, index, None))
                 continue
             tag, attrs = _tag_and_attrs(target)
-            element = Element(tag, _text_attrs(attrs), parent)
+            element = Element(tag, _text_attrs(attrs), parent, namespace=_namespace(tag, parent))
             if tag != "TEMPLATE" or (
                 _SHADOW_ROOT_ATTR not in attrs and _STYLE_SHEET_ATTR not in attrs
             ):
@@ -529,9 +613,12 @@ class _Renderer:
             tag, attrs = _tag_and_attrs(element)
             if _is_shadow_root(element):
                 continue
+            self._references(tag, attrs)
             sheet = self._sheet(element, tag, attrs, snapshot_index)
             if sheet is not None:
                 text, url = sheet
+                if text:
+                    self._referenced.update(_FRAGMENT_REF.findall(text))
                 holds = media_holds(as_str(attrs.get("media")) or "", self._viewport)
                 if text is None and holds is not False:
                     unknown = True
@@ -544,6 +631,17 @@ class _Renderer:
             if tag not in ("STYLE", "SCRIPT", "NOSCRIPT", "TEMPLATE"):
                 stack.extend((child, snapshot_index) for child in reversed(_children(element)))
         return tuple(found), unknown
+
+    def _references(self, tag: str, attrs: JsonObject) -> None:
+        """Note the ids an element refers to: a ``<use>`` its ``href``, any attribute its
+        ``url(#id)`` values."""
+        for name, value in attrs.items():
+            if not isinstance(value, str) or name.startswith("__playwright"):
+                continue
+            if tag == "USE" and name.lower() in ("href", "xlink:href") and value.startswith("#"):
+                self._referenced.add(value[1:])
+            elif "url(" in value:
+                self._referenced.update(_FRAGMENT_REF.findall(value))
 
     def _sheet(
         self, node: list[Any], tag: str, attrs: JsonObject, snapshot_index: int
@@ -721,18 +819,89 @@ def _is_shadow_root(node: object) -> bool:
     return tag == "TEMPLATE" and _SHADOW_ROOT_ATTR in attrs
 
 
-def _ua_hide(tag: str, attrs: JsonObject) -> str | None:
-    """The property the browser's own styles hide an element with, if they do."""
-    if "hidden" in attrs:
-        hidden = (as_str(attrs.get("hidden")) or "").strip().lower()
-        return "content-visibility" if hidden == "until-found" else "display"
-    if tag == "DIALOG" and "open" not in attrs and _DIALOG_OPEN_ATTR not in attrs:
-        return "display"
-    return None
+def _namespace(tag: str, parent: Element | None) -> str:
+    """The namespace an element with `tag` under `parent` is in, as an HTML parser decides."""
+    above = HTML if parent is None else parent.namespace
+    if above == SVG and parent is not None and parent.tag != "FOREIGNOBJECT":
+        return SVG
+    if above == MATHML and parent is not None and parent.tag not in _MATH_TEXT:
+        return MATHML
+    return {"SVG": SVG, "MATH": MATHML}.get(tag, HTML)
+
+
+def _child_styles(element: Element, style: Computed, children: list[_Child]) -> list[Computed]:
+    """What each child of `element` inherits: text in an SVG element other than ``<text>``
+    never renders, and a ``<switch>`` renders one child: its first, when that has no
+    conditions (``systemLanguage``, ...), for certain; any other maybe."""
+    if element.namespace != SVG:
+        return [style] * len(children)
+    text_style = style if _in_svg_text(element) else replace(style, visibility=HIDDEN)
+    styles = [text_style if c.element is None else style for c in children]
+    if element.tag == "SWITCH":
+        first = True
+        for at, child in enumerate(children):
+            if child.element is None:
+                continue
+            attrs = child.element.attrs
+            if not first or not _SVG_CONDITIONS.isdisjoint(k.lower() for k in attrs):
+                styles[at] = replace(style, unsure=True)
+            first = False
+    return styles
+
+
+def _in_svg_text(element: Element) -> bool:
+    found: Element | None = element
+    while found is not None and found.namespace == SVG:
+        if found.tag in _SVG_TEXT:
+            return True
+        found = found.parent
+    return False
+
+
+def _off_canvas(text: Element, style: Computed) -> bool:
+    """An SVG ``<text>`` placed past the right or bottom edge of its ``<svg>``'s box (its
+    ``viewBox``, else its ``width`` and ``height``)."""
+    svg = text.parent
+    while svg is not None and svg.tag != "SVG":
+        svg = svg.parent
+    if svg is None:
+        return False
+    view_box = svg.attrs.get("viewBox") or svg.attrs.get("viewbox") or ""
+    box = [n for v in view_box.replace(",", " ").split() if (n := _svg_number(v)) is not None]
+    if len(box) == 4:
+        right, bottom = box[0] + box[2], box[1] + box[3]
+    else:
+        width, height = _svg_number(svg.attrs.get("width")), _svg_number(svg.attrs.get("height"))
+        if width is None or height is None:
+            return False
+        right, bottom = width, height
+    x, y = _svg_number(text.attrs.get("x")), _svg_number(text.attrs.get("y"))
+    return (x is not None and x >= right) or (
+        y is not None and y >= bottom + (style.font_px or 16.0)
+    )
+
+
+def _svg_number(value: str | None) -> float | None:
+    """The first number of an SVG length or list (``"12"``, ``"12px"``, ``"12 30"``)."""
+    found = _NUMBER.match(value or "")
+    return None if found is None else float(found.group(1))
+
+
+def _tiny(attrs: JsonObject) -> bool:
+    """A frame whose ``width`` or ``height`` attribute is at most a pixel."""
+    return any(
+        (size := _svg_number(as_str(attrs.get(name)))) is not None and size <= 1
+        for name in ("width", "height")
+    )
 
 
 def _text_attrs(attrs: JsonObject) -> dict[str, str]:
-    return {k: v for k, v in attrs.items() if isinstance(v, str)}
+    """The string attributes the cascade sees; a dialog the recording says is open has
+    ``open`` (a modal one shown by script)."""
+    found = {k: v for k, v in attrs.items() if isinstance(v, str)}
+    if _DIALOG_OPEN_ATTR in attrs:
+        found.setdefault("open", "")
+    return found
 
 
 def _is_editable(attrs: JsonObject) -> bool:

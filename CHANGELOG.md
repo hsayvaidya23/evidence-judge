@@ -480,6 +480,24 @@ the names exported from `evidence_judge`) is defined under
   five honest controls unchanged. Path-scoped runs that together match an earlier whole-suite
   run must also cover every test file that run's output named, so a run elsewhere whose count
   happens to match cannot stand in for the tests that failed.
+- Page text: elements a browser never renders no longer read as page text. The reader now
+  applies the browser's own hiding rules, vendored from the HTML Standard's Rendering section,
+  MathML Core's user-agent stylesheet and SVG 2's never-rendered elements into
+  `ingest/ua_hiding.css` (`scripts/vendor_ua_hiding.py` regenerates it and `--check` reports
+  upstream changes; attribution in `ua_hiding.NOTICE`), beneath every page's own styles and by
+  namespace: `<rp>`, `<noembed>`, `<noframes>`, `<param>`, a table's stray `<form>`, SVG
+  `<defs>`, `<symbol>`, `<mask>`, `<clipPath>`, `<pattern>`, `<marker>`, gradients, `<filter>`,
+  a `<semantics>` annotation, `<maction>`'s other children and `<mphantom>`. A `popover` is
+  unsure (snapshots do not record whether it is open), as is `hidden=until-found`, the content
+  of a never-rendered SVG element that a `<use>`, a `url(#id)` fill or a mask refers to, a
+  `<switch>` child other than an unconditional first one, and SVG text placed past its canvas.
+  SVG presentation attributes (`display`, `visibility`, `opacity`, `fill`, `fill-opacity`)
+  feed the cascade beneath the page's styles, and text in an SVG element other than `<text>`
+  never shows.
+- Page text: a frame no longer makes a page opaque when it is at most a pixel in size (by
+  attribute or style), parked off-screen, or loads another site's page: a third-party frame
+  holds the third party's document, not the site's own text, so it cannot hide the site
+  saying something. Honest pages with an analytics beacon frame are no longer held for review.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

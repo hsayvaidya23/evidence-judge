@@ -380,21 +380,21 @@ def test_inline_styles_win_over_sheets_unless_important() -> None:
 
 
 @pytest.mark.parametrize(
-    ("css", "ua", "state"),
+    ("css", "hidden", "state"),
     [
-        ("", "display", HIDDEN),
-        ("[hidden]{display:inline !important}", "display", SHOWN),
-        (".x{display:flex}", "display", SHOWN),
-        (".x:hover{display:flex}", "display", UNSURE),
-        ("", "content-visibility", HIDDEN),
-        (".x{display:block}", "content-visibility", HIDDEN),
-        (".x{content-visibility:visible}", "content-visibility", SHOWN),
+        ("", "", HIDDEN),
+        ("[hidden]{display:inline !important}", "", SHOWN),
+        (".x{display:flex}", "", SHOWN),
+        (".x:hover{display:flex}", "", UNSURE),
+        ("", "until-found", UNSURE),
+        (".x{display:block}", "until-found", UNSURE),
+        (".x{content-visibility:visible}", "until-found", SHOWN),
     ],
 )
-def test_the_browsers_own_hiding_yields_to_the_page(css: str, ua: str, state: int) -> None:
+def test_the_browsers_own_hiding_yields_to_the_page(css: str, hidden: str, state: int) -> None:
     sheets = _sheets(css)
-    element = Element("P", {"class": "x", "hidden": ""}, None)
-    style = sheets.style(element, ROOT, ua_hide=ua)
+    element = Element("P", {"class": "x", "hidden": hidden}, None)
+    style = sheets.style(element, ROOT)
 
     assert (HIDDEN if style.removed else style.text) == state
 
