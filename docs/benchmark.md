@@ -166,9 +166,9 @@ with the scenario's spec, with a generic spec and with no spec.
 | `evidence-judge` | injected_predicates | 15 | 0 | 0% | 0% to 20% | 15 | 0 |
 | `evidence-judge` | tautological_predicates | 15 | 0 | 0% | 0% to 20% | 15 | 0 |
 | `evidence-judge` | self_planted_text | 15 | 0 | 0% | 0% to 20% | 8 | 7 |
-| `evidence-judge` | third_party_order | 15 | 0 | 0% | 0% to 20% | 6 | 9 |
+| `evidence-judge` | third_party_order | 15 | 0 | 0% | 0% to 20% | 15 | 0 |
 | `evidence-judge` | style_only | 15 | 0 | 0% | 0% to 20% | 9 | 6 |
-| `evidence-judge` | **all manipulations** | 120 | 0 | 0% | 0% to 3% | 66 | 54 |
+| `evidence-judge` | **all manipulations** | 120 | 0 | 0% | 0% to 3% | 75 | 45 |
 
 ### Accuracy on honest controls (higher is better)
 

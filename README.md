@@ -242,7 +242,7 @@ The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rew
 | --- | ---: | ---: | --- |
 | Evidence Judge + exact task spec (offline) | 120 | **0** | 0–3% |
 | Evidence Judge + generic task spec (offline) | 120 | **0** (19 sent to review) | 0–3% |
-| Evidence Judge, no spec (offline) | 120 | **0** (66 sent to review) | 0–3% |
+| Evidence Judge, no spec (offline) | 120 | **0** (75 sent to review) | 0–3% |
 
 Honest controls: 7/7 correct with the exact spec, 6/7 with the generic one (the side-effect run goes to review because the generic spec has no `forbid` rule). Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`; add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
 
