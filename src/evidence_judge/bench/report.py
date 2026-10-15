@@ -96,11 +96,22 @@ def _judge_notes(result: BenchResult) -> list[str]:
 
 
 def to_markdown(result: BenchResult) -> str:
+    lines = [
+        *_header(result),
+        *_forgery_table(result),
+        *_accuracy_table(result),
+        *_control_verdicts(result),
+        *_should_pass(result),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _header(result: BenchResult) -> list[str]:
     forged_bases = [s.name for s in result.scenarios if s.forged]
     forged_cases = len({c.case_id for c in result.cases if c.forged})
     edited = sorted({c.case_id for c in result.cases if c.control is not None})
     mode = "offline (heuristic claim extraction)" if result.offline else "online (LLM extraction)"
-    lines = [
+    return [
         "# Forged-run benchmark",
         "",
         f"- Judges: {', '.join(f'`{j}`' for j in result.judges)}; Evidence Judge {mode}, "
@@ -111,6 +122,11 @@ def to_markdown(result: BenchResult) -> str:
         f"- Forgeries: up to {len(result.kinds)} kinds x {result.seeds} seeds per failed run = "
         f"{forged_cases} forged runs, forger `{result.forger}`",
         *_judge_notes(result),
+    ]
+
+
+def _forgery_table(result: BenchResult) -> list[str]:
+    lines = [
         "",
         "## False PASS on forged runs (lower is better)",
         "",
@@ -130,9 +146,15 @@ def to_markdown(result: BenchResult) -> str:
             f"| `{m.judge}` | {kind} | {fp.n} | {fp.k} | {_pct(fp.rate)} | {_ci(fp)} | "
             f"{m.needs_review} | {m.fail} | {m.errors} |"
         )
-    lines += [
+    return [
+        *lines,
         "",
         f"`{ALL_MANIPULATIONS}` pools every kind except the `style_only` control.",
+    ]
+
+
+def _accuracy_table(result: BenchResult) -> list[str]:
+    lines = [
         "",
         "## Accuracy on honest controls (higher is better)",
         "",
@@ -145,7 +167,11 @@ def to_markdown(result: BenchResult) -> str:
             f"| `{c.judge}` | {a.n} | {a.k} | {_pct(a.rate)} | {_ci(a)} | {c.needs_review} | "
             f"{c.errors} |"
         )
-    lines += [
+    return lines
+
+
+def _control_verdicts(result: BenchResult) -> list[str]:
+    lines = [
         "",
         "## Honest control verdicts",
         "",
@@ -160,19 +186,18 @@ def to_markdown(result: BenchResult) -> str:
         if c.control is not None and c.judge == result.judges[0]
     ]
     for label, expected in rows:
-        cells: list[str] = []
-        for judge in result.judges:
-            case = controls.get((label, judge))
-            if case is None:
-                cells.append("-")
-            elif case.outcome is None:
-                cells.append("error")
-            else:
-                mark = "" if case.outcome is case.expected else " ✗"
-                cells.append(_OUTCOME_LABEL[case.outcome] + mark)
+        cells = [_verdict_cell(controls.get((label, judge))) for judge in result.judges]
         lines.append(f"| {label} | {_OUTCOME_LABEL[expected]} | " + " | ".join(cells) + " |")
-    lines += _should_pass(result)
-    return "\n".join(lines) + "\n"
+    return lines
+
+
+def _verdict_cell(case: CaseResult | None) -> str:
+    if case is None:
+        return "-"
+    if case.outcome is None:
+        return "error"
+    mark = "" if case.outcome is case.expected else " ✗"
+    return _OUTCOME_LABEL[case.outcome] + mark
 
 
 def _should_pass(result: BenchResult) -> list[str]:
