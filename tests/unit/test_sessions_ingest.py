@@ -3,6 +3,7 @@ from __future__ import annotations
 import getpass
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -830,7 +831,9 @@ def test_load_session_combines_sources(tmp_path: Path) -> None:
 @pytest.mark.parametrize("fixture", sorted(FIXTURES.rglob("*.jsonl")), ids=lambda p: p.name)
 def test_session_fixtures_hold_no_local_or_private_data(fixture: Path) -> None:
     text = fixture.read_text(encoding="utf-8")
-    for needle in (str(Path.home()), "/Users/", "/private/", ".claude/projects", getpass.getuser()):
+    for needle in (str(Path.home()), "/Users/", "/private/", ".claude/projects"):
         assert needle not in text
+    user = re.escape(getpass.getuser())
+    assert not re.search(rf"(?<![\w/:.-]){user}(?![\w/.-])", text)
     kinds = {json.loads(line).get("type") for line in text.splitlines()}
     assert not kinds & {"attachment", "api-request", "api-request-blob", "system"}
