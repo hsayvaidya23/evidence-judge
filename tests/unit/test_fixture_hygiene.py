@@ -7,7 +7,6 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 from scripts.fixture_hygiene import scrub_text
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
