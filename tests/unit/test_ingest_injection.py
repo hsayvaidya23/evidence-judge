@@ -175,6 +175,12 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("css_link", "stock", "Yes, it is In stock.", "needs_review", [None, True], "may hide"),
         ("details_closed", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("css_shown", "out_of_stock", "No, Out of stock.", "fail", [False, True], "not contain"),
+        ("css_faded", "stock", "Yes, it is In stock.", "needs_review", [None, True], "may hide"),
+        ("css_var", "stock", "Yes, it is In stock.", "needs_review", [None, True], "may hide"),
+        ("css_sibling", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("css_shadow", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("css_layered", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("css_unhidden", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
     ],
 )
 async def test_agent_made_evidence_never_passes(
@@ -554,6 +560,29 @@ def test_page_text_leaves_out_what_the_page_hides(mode: str, text: str) -> None:
     assert [a.name for a in run.actions][-1] in ("goto", "click")
 
 
+@pytest.mark.parametrize(
+    ("mode", "unsure"),
+    [
+        ("css_faded", "In stock"),
+        ("css_var", "In stock"),
+        ("css_sibling", ""),
+        ("css_shadow", ""),
+        ("css_supports", ""),
+        ("css_layered", ""),
+        ("css_unhidden", ""),
+    ],
+)
+def test_text_a_page_may_hide_is_kept_apart(mode: str, unsure: str) -> None:
+    run = load_playwright_trace(FIXTURES / f"{mode}.zip")
+
+    assert run.final_state is not None
+    assert (run.final_state.text, run.final_state.unsure_text) == (
+        "Red Kettle Out of stock",
+        unsure,
+    )
+    assert not run.final_state.opaque
+
+
 UNSURE_WITHOUT_SHEET = ("", "Red Kettle In stockIn stock In stockIn stock Out of stock")
 """css_link's (text, unsure_text) when the trace does not hold kettle.css: the page's styles
 are unknown, so all of its text may be hidden."""
@@ -639,6 +668,13 @@ def test_a_stylesheet_over_the_resource_limit_is_skipped(tmp_path: Path) -> None
         ("details_closed", "out_of_stock", "No, it is Out of stock."),
         ("css_shown", "stock", "Yes, it is In stock."),
         ("details_open", "stock", "Yes, it ships once In stock."),
+        ("css_faded", "out_of_stock", "No, it is Out of stock."),
+        ("css_var", "out_of_stock", "No, it is Out of stock."),
+        ("css_sibling", "out_of_stock", "No, it is Out of stock."),
+        ("css_shadow", "out_of_stock", "No, it is Out of stock."),
+        ("css_supports", "out_of_stock", "No, it is Out of stock."),
+        ("css_layered", "out_of_stock", "No, it is Out of stock."),
+        ("css_unhidden", "out_of_stock", "No, it is Out of stock."),
     ],
 )
 async def test_honest_answers_on_pages_with_hidden_text_pass(
