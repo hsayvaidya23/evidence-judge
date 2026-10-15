@@ -66,7 +66,7 @@ _AGENT_SUMMARY_TEXT: Final = re.compile(
     re.IGNORECASE,
 )
 
-_READ_ONLY: Final = frozenset(
+READ_ONLY_PROGRAMS: Final = frozenset(
     {
         "ls",
         "cat",
@@ -1402,7 +1402,7 @@ def _classify_program(
         return _Classified(Category.MUTATING, prog, mutation=f"{prog} changes files")
     if prog in ("xargs", "parallel", "watch", "eval", "source", "."):
         return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs other commands")
-    if prog in _READ_ONLY:
+    if prog in READ_ONLY_PROGRAMS:
         return _Classified(Category.READ_ONLY, prog)
     return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} is not a known read-only program")
 
