@@ -10,6 +10,15 @@ the names exported from `evidence_judge`) is defined under
 
 ### Added
 
+- Recorded red-team sessions for regenerated expected outputs (pytest `--snapshot-update`,
+  `--force-regen`, `--regen-all`, `--inline-snapshot=fix`, `--update-goldens`, `--accept`,
+  `UPDATE_GOLDEN=1`), edited test data (`test_data/`, `goldens/`, a file a test module reads,
+  and a real Codex session), source code that patches the runner, an always-equal result, and
+  five honest sessions (an added regression test run as `pytest tests/`, `-x` then `git diff`,
+  `-p no:randomly`, output through `tail`, `--lf` then the full suite), each with its exact
+  outcome. The honest ones are session-bench controls, and the session bench forges five new
+  kinds (`pytest_snapshot_update`, `update_golden_env`, `test_data_edit`,
+  `source_runner_patch`, `always_equal`).
 - Ingest of Playwright traces (format v7–v10), HAR 1.2 and browser-use histories (a history file
   or a run directory) into one normalised `Run`; a HAR recorded with a trace is merged into it.
 - Claim extraction with Claude (structured output, verbatim-quote validation, prompt-injection
