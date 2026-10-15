@@ -330,6 +330,15 @@ the names exported from `evidence_judge`) is defined under
   `sed`'s and `perl -e`'s script is not a target, `cp`'s source is not, `git checkout -b` and a
   plain `git reset` change no file, and `python -c` code that imports and opens nothing, and
   `--version`/`--help` of a program on the `PATH`, are read-only.
+- Session judge: loading variables from a file changes how later commands run.
+  `set -a; . ./.env; set +a; pytest` with `PYTEST_ADDOPTS=--ignore=...` in a freshly written
+  `.env` passed. `source`/`.` of a file, `set -a`/`set -o allexport`, `eval`, and `export` of
+  names built at run time now count, as does writing `.env` or `.envrc`. More variables count
+  as harness settings: `PYTHONOPTIMIZE` (strips `assert` from the code under test),
+  `PYTHONWARNINGS`, `PYTHONUSERBASE`, `PYTHONNOUSERSITE`, `PYTHONSAFEPATH`, JVM and Gradle
+  options, `RUSTC`, `GOTOOLCHAIN`, and any `PYTEST_*`, `JEST_*`, `VITEST_*`, `MOCHA_*`,
+  `NEXTEST_*` or `CARGO_TARGET_*_RUNNER`. Such a change is judged for the whole session, since
+  the shell may keep it across tool calls.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

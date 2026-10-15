@@ -1572,7 +1572,7 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
         result.filters.extend(
             f"runs with {name} changed"
             for name in simple.env
-            if name in HARNESS_ENV and name != "PYTEST_ADDOPTS"
+            if is_harness_env(name) and name != "PYTEST_ADDOPTS"
         )
     named = result.touched
     if named is None:
@@ -1591,9 +1591,39 @@ HARNESS_ENV: Final = frozenset(
     {"PATH", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTEST_ADDOPTS", "PYTEST_PLUGINS",
      "NODE_OPTIONS", "NODE_PATH", "GOFLAGS", "RUSTFLAGS", "RUSTC_WRAPPER", "LD_PRELOAD",
      "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "VIRTUAL_ENV", "BASH_ENV",
-     "ENV", "JEST_CONFIG", "VITEST_CONFIG"}
+     "ENV", "JEST_CONFIG", "VITEST_CONFIG", "PYTHONOPTIMIZE", "PYTHONWARNINGS", "PYTHONUSERBASE",
+     "PYTHONNOUSERSITE", "PYTHONSAFEPATH", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS",
+     "MAVEN_OPTS", "GRADLE_OPTS", "RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "GOTOOLCHAIN"}
 )  # fmt: skip
 """Variables that change which program runs, or how a test runner behaves."""
+_HARNESS_ENV_PREFIX: Final = re.compile(
+    r"^(?:PYTEST_|_PYTEST|JEST_|VITEST_|MOCHA_|NODE_TEST|CARGO_TARGET_\w+_RUNNER$|NEXTEST_)"
+)
+
+
+def is_harness_env(name: str) -> bool:
+    return name in HARNESS_ENV or _HARNESS_ENV_PREFIX.match(name) is not None
+
+
+def _sources(simple: _Simple) -> str | None:
+    """Why a simple command sets variables the command line does not name, or None."""
+    words = simple.words
+    prog = program_name(words[0]) if words else ""
+    if prog in ("source", ".") and words[1:]:
+        return f"{prog} {words[1]} sets whatever variables the file holds"
+    if prog == "eval":
+        return "eval runs text built at run time"
+    if prog == "set" and (
+        "allexport" in words or any(re.fullmatch(r"-[a-z]*a[a-z]*", w) for w in words[1:])
+    ):
+        return "set -a exports every variable set afterwards"
+    if prog in ("export", "declare", "typeset", "readonly") and any(
+        _unspelled(w.partition("=")[0]) for w in words[1:] if not w.startswith("-")
+    ):
+        return f"{prog} sets variables named at run time"
+    return None
+
+
 _FUNCTION_DEF: Final = re.compile(
     r"(?:^|[;&|\n(]\s*)(?:function\s+[\w.:-]+|[\w.:-]+\s*\(\s*\))\s*\{"
 )
@@ -1613,10 +1643,12 @@ def _harness_change(pipelines: list[_Pipeline], command: str) -> str | None:
                 return "hash -p remaps a command"
             if prog in ("export", "declare", "typeset", "readonly", "set"):
                 names = [w.partition("=")[0] for w in words[1:] if "=" in w]
-                if changed := [n for n in names if n in HARNESS_ENV]:
+                if changed := [n for n in names if is_harness_env(n)]:
                     return f"{prog} {changed[0]}"
-            if not words and (changed := [n for n in simple.env if n in HARNESS_ENV]):
+            if not words and (changed := [n for n in simple.env if is_harness_env(n)]):
                 return f"sets {changed[0]}"
+            if why := _sources(simple):
+                return why
     return None
 
 

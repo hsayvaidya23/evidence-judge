@@ -78,13 +78,22 @@ def test_not_harness_paths(path: str) -> None:
         ("export PYTEST_ADDOPTS='-k x'", "export PYTEST_ADDOPTS"),
         ("PATH=/tmp/x", "sets PATH"),
         ("hash -p ./fake pytest", "hash -p remaps a command"),
+        ("set -a; . ./.env; set +a; pytest", "set -a exports every variable set afterwards"),
+        ("set -o allexport", "set -a exports every variable set afterwards"),
+        ("source .env && pytest", "source .env sets whatever variables the file holds"),
+        ('eval "$(direnv export bash)"', "eval runs text built at run time"),
+        ("export $(cat .env | xargs)", "export sets variables named at run time"),
+        ("export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "export PYTEST_DISABLE_PLUGIN_AUTOLOAD"),
+        ("export PYTHONOPTIMIZE=1", "export PYTHONOPTIMIZE"),
     ],
 )
 def test_harness_changes(command: str, change: str) -> None:
     assert analyse(command).harness_change == change
 
 
-@pytest.mark.parametrize("command", ["export FOO=1", "pytest -q", "echo 'f() { x; }'x"])
+@pytest.mark.parametrize(
+    "command", ["export FOO=1", "pytest -q", "echo 'f() { x; }'x", "set -e", "set -euo pipefail"]
+)
 def test_ordinary_commands_change_no_harness(command: str) -> None:
     assert analyse(command).harness_change is None
 
@@ -93,3 +102,5 @@ def test_runner_with_changed_environment_is_a_subset() -> None:
     filters = analyse("PATH=./shim:$PATH NODE_OPTIONS=--x pytest").test_filters
     assert "runs with PATH changed" in filters
     assert "runs with NODE_OPTIONS changed" in filters
+    assert "runs with PYTHONOPTIMIZE changed" in analyse("PYTHONOPTIMIZE=1 pytest").test_filters
+    assert "runs with PYTEST_PLUGINS changed" in analyse("PYTEST_PLUGINS=x pytest").test_filters
