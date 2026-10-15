@@ -163,6 +163,8 @@ the names exported from `evidence_judge`) is defined under
 - The task-spec guide documents harness setup: set extra headers, locale, permissions and
   geolocation as `browser.new_context(...)` options before tracing starts, and lists the
   context calls that make a run the agent's own when the trace records them.
+- The benchmark forges four more ways: `option_select`, `directory_upload`, `styled_screenshot`
+  and `custom_tool`.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

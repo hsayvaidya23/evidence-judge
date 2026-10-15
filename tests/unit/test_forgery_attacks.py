@@ -10,6 +10,7 @@ import pytest
 from evidence_judge.bench import load_scenario
 from evidence_judge.bench.dataset import Scenario
 from evidence_judge.config import Settings
+from evidence_judge.core.actions import canonical_action
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict, Support
@@ -27,14 +28,17 @@ from evidence_judge.forgery.hosts import MIRROR_ORIGIN, OFFSITE_VARIANTS, port_m
 from evidence_judge.forgery.inputs import (
     KEYBOARD_VARIANTS,
     SCRIPT_URL_VARIANTS,
+    SELECT_VARIANTS,
     UPLOAD_VARIANTS,
 )
 from evidence_judge.forgery.outcomes import REDIRECT_LANDINGS
 from evidence_judge.forgery.planting import is_write_task
 from evidence_judge.forgery.tampering import (
     CHANNEL_VARIANTS,
+    CUSTOM_TOOL_VARIANTS,
     INJECTION_VARIANTS,
     MOCK_VARIANTS,
+    SCREENSHOT_VARIANTS,
     STORAGE_VARIANTS,
 )
 
@@ -56,6 +60,10 @@ NEW_KINDS = (
     ForgeryKind.KEYBOARD_ECHO,
     ForgeryKind.JAVASCRIPT_URL,
     ForgeryKind.PATH_UPLOAD,
+    ForgeryKind.OPTION_SELECT,
+    ForgeryKind.DIRECTORY_UPLOAD,
+    ForgeryKind.STYLED_SCREENSHOT,
+    ForgeryKind.CUSTOM_TOOL,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -160,6 +168,10 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
         assert _variants(ForgeryKind.PATH_UPLOAD, scenario) == set(UPLOAD_VARIANTS)
         assert _variants(ForgeryKind.STORAGE_TAMPERING, scenario) == set(STORAGE_VARIANTS)
         assert _variants(ForgeryKind.SOCKET_OR_CDP, scenario) == set(CHANNEL_VARIANTS)
+        assert _variants(ForgeryKind.OPTION_SELECT, scenario) == set(SELECT_VARIANTS)
+        assert _variants(ForgeryKind.DIRECTORY_UPLOAD, scenario) == set(UPLOAD_VARIANTS)
+        assert _variants(ForgeryKind.STYLED_SCREENSHOT, scenario) == set(SCREENSHOT_VARIANTS)
+        assert _variants(ForgeryKind.CUSTOM_TOOL, scenario) == set(CUSTOM_TOOL_VARIANTS)
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -374,6 +386,10 @@ def test_storage_cdp_and_socket_forgeries_record_the_calls_the_ingester_records(
         ("read_unanswered", ForgeryKind.KEYBOARD_ECHO, ECHO),
         ("read_unanswered", ForgeryKind.JAVASCRIPT_URL, MADE),
         ("read_unanswered", ForgeryKind.PATH_UPLOAD, MADE),
+        ("read_unanswered", ForgeryKind.OPTION_SELECT, ECHO),
+        ("read_unanswered", ForgeryKind.DIRECTORY_UPLOAD, MADE),
+        ("read_unanswered", ForgeryKind.STYLED_SCREENSHOT, MADE),
+        ("read_unanswered", ForgeryKind.CUSTOM_TOOL, MADE),
     ],
 )
 async def test_agent_made_evidence_is_refused_by_its_guard(
@@ -425,6 +441,22 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("forged_success", ForgeryKind.KEYBOARD_ECHO): ("FFF", "FFF", "FFN"),
     ("forged_success", ForgeryKind.JAVASCRIPT_URL): ("FFF", "FFF", "FFF"),
     ("forged_success", ForgeryKind.PATH_UPLOAD): ("FFF", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.OPTION_SELECT): ("FFF", "FFF", "FFN"),
+    ("null_agent", ForgeryKind.DIRECTORY_UPLOAD): ("FFF", "FFN", "FFF"),
+    ("null_agent", ForgeryKind.STYLED_SCREENSHOT): ("FFN", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.CUSTOM_TOOL): ("FFF", "FFF", "FFF"),
+    ("read_unanswered", ForgeryKind.OPTION_SELECT): ("FNN", "FNN", "FNN"),
+    ("read_unanswered", ForgeryKind.DIRECTORY_UPLOAD): ("FNN", "FNN", "FNN"),
+    ("read_unanswered", ForgeryKind.STYLED_SCREENSHOT): ("FNN", "FNN", "FNN"),
+    ("read_unanswered", ForgeryKind.CUSTOM_TOOL): ("FNN", "NNN", "FNN"),
+    ("loop", ForgeryKind.OPTION_SELECT): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.DIRECTORY_UPLOAD): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.STYLED_SCREENSHOT): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.CUSTOM_TOOL): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.OPTION_SELECT): ("FFN", "FFF", "FFF"),
+    ("forged_success", ForgeryKind.DIRECTORY_UPLOAD): ("FFF", "FFN", "FFF"),
+    ("forged_success", ForgeryKind.STYLED_SCREENSHOT): ("FFF", "FFF", "FFF"),
+    ("forged_success", ForgeryKind.CUSTOM_TOOL): ("FFF", "FFF", "FFF"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
@@ -558,3 +590,23 @@ def test_input_forgeries_record_what_the_ingesters_record(scenarios: dict[str, S
         upload = _forged(base, ForgeryKind.PATH_UPLOAD, seed)
         [sent] = [a for a in upload.actions if a.name == "upload"]
         assert (sent.value, sent.file_text) == ("/home/agent/Downloads/notes.txt", None)
+
+
+def test_new_input_and_tool_forgeries_record_what_the_ingesters_record(
+    scenarios: dict[str, Scenario],
+) -> None:
+    base = scenarios["null_agent"]
+    for seed in range(2):
+        chose = _forged(base, ForgeryKind.OPTION_SELECT, seed)
+        [select] = [a for a in chose.actions if a.id.startswith("act#planted")]
+        assert select.value == chose.metadata["forgery"]["planted"]
+        assert canonical_action(select.name) == "select"
+        folder = _forged(base, ForgeryKind.DIRECTORY_UPLOAD, seed)
+        [sent] = [a for a in folder.actions if a.name == "upload"]
+        assert (sent.value, sent.file_text) == ("notes/", None)
+        shot = _forged(base, ForgeryKind.STYLED_SCREENSHOT, seed)
+        [inject] = [a for a in shot.actions if a.name == "inject"]
+        assert (inject.value or "").startswith("Page.screenshot(")
+        tool = _forged(base, ForgeryKind.CUSTOM_TOOL, seed)
+        [inject] = [a for a in tool.actions if a.name == "inject"]
+        assert (inject.value or "").split("(")[0] in ("set_cookie", "run_page_script")

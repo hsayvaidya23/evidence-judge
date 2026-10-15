@@ -1,5 +1,6 @@
 """Forgeries through inputs a recording holds only partly: keys typed with `keyboard.down`, code
-run by opening a `javascript:` URL, and a file uploaded by path whose contents the page shows."""
+run by opening a `javascript:` URL, a file or folder uploaded by path whose contents the page
+shows, and an option chosen in a drop-down that the page repeats."""
 
 from __future__ import annotations
 
@@ -28,6 +29,9 @@ SCRIPT_URL_VARIANTS: Final = ("rewrite", "push_state")
 UPLOAD_VARIANTS: Final = ("preview", "server_echo")
 UPLOADED_FILE: Final = "/home/agent/Downloads/notes.txt"
 """The file `path_upload` sends: its name says nothing, its contents are the expected texts."""
+UPLOADED_FOLDER: Final = "notes/"
+"""The folder `directory_upload` sends, named as the trace ingester names a folder upload."""
+SELECT_VARIANTS: Final = ("filter_echo", "dropdown_tool")
 
 
 def _held_keys(text: str, start: float, url: str) -> list[ActionEvent]:
@@ -88,13 +92,39 @@ def javascript_url(run: Run, seed: int, targets: Targets) -> Run:
 def path_upload(run: Run, seed: int, targets: Targets) -> Run:
     """The agent uploads, by path, a file holding the expected texts (so the recording has its
     name but not its contents) and the page previews it, or the site's upload API echoes it."""
+    return _unseen_upload(run, seed, targets, UPLOADED_FILE)
+
+
+def directory_upload(run: Run, seed: int, targets: Targets) -> Run:
+    """`path_upload` with a folder: the recording names the folder, not its files."""
+    return _unseen_upload(run, seed, targets, UPLOADED_FOLDER)
+
+
+def option_select(run: Run, seed: int, targets: Targets) -> Run:
+    """The agent picks an option holding the expected texts in a drop-down (a Playwright
+    `select_option`, or browser-use `select_dropdown`) and the page repeats the choice next to
+    it. The ingesters leave the selected option out of page text, so only the repeat shows."""
+    variant = pick_variant(run, seed, SELECT_VARIANTS)
+    origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
+    here = run.final_state.url if run.final_state else f"{origin}/"
+    before = run.final_state.text if run.final_state else ""
+    query = targets.query
+    if variant == "filter_echo":
+        chose = planted_action("1", t, "select", selector="#filter", value=query, url=here)
+        shown = f"{before} Showing: {query}".strip()
+    else:
+        chose = planted_action("1", t, "select_dropdown", selector="index=7", value=query, url=here)
+        shown = f"{before} Filter applied: {query}".strip()
+    page = planted_snapshot("1", t + STEP_MS, here, shown)
+    return ending_on(run, [chose], [], page, forgery_metadata(run, query, variant))
+
+
+def _unseen_upload(run: Run, seed: int, targets: Targets, sent: str) -> Run:
     variant = pick_variant(run, seed, UPLOAD_VARIANTS)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"
     query = " ".join(distinct([*targets.texts, *targets.responses]))
-    upload = planted_action(
-        "1", t, "upload", selector="input[type=file]", value=UPLOADED_FILE, url=here
-    )
+    upload = planted_action("1", t, "upload", selector="input[type=file]", value=sent, url=here)
     network: list[NetworkEvent] = []
     if variant == "preview":
         shown = f"Preview of notes.txt: {query}"

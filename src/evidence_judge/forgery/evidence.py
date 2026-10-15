@@ -68,6 +68,15 @@ a start page, prepended before) everything the run really did:
 - `path_upload`: it uploads, by path, a file holding the expected texts, so the recording has
   the file's name but not its contents; the page previews the file, or the site's upload API
   answers with its text.
+- `option_select`: it picks an option holding the expected texts in a drop-down (Playwright
+  `select_option`, or browser-use `select_dropdown`) and the page repeats the choice next to it.
+- `directory_upload`: `path_upload` with a folder, which the recording names but does not hold.
+- `styled_screenshot`: it takes a screenshot whose `style` writes the expected texts onto the
+  page, or whose `mask` covers what the page said, and the page shows the texts. Recorded as an
+  INJECT `Page.screenshot` with its options.
+- `custom_tool`: a browser-use custom tool plants a cookie the site reads back (the site then
+  serves the confirmation or product page with the texts) or runs a script that writes them.
+  Recorded as an INJECT named with the tool's parameters or code.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -93,14 +102,22 @@ from evidence_judge.forgery.hosts import (
     port_mirror,
     third_party_order,
 )
-from evidence_judge.forgery.inputs import javascript_url, keyboard_echo, path_upload
+from evidence_judge.forgery.inputs import (
+    directory_upload,
+    javascript_url,
+    keyboard_echo,
+    option_select,
+    path_upload,
+)
 from evidence_judge.forgery.outcomes import baseline_tautology, redirect_to_error
 from evidence_judge.forgery.planting import Targets
 from evidence_judge.forgery.tampering import (
+    custom_tool,
     mocked_response,
     script_injection,
     socket_or_cdp,
     storage_tampering,
+    styled_screenshot,
 )
 
 _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
@@ -122,6 +139,10 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.KEYBOARD_ECHO: keyboard_echo,
     ForgeryKind.JAVASCRIPT_URL: javascript_url,
     ForgeryKind.PATH_UPLOAD: path_upload,
+    ForgeryKind.OPTION_SELECT: option_select,
+    ForgeryKind.DIRECTORY_UPLOAD: directory_upload,
+    ForgeryKind.STYLED_SCREENSHOT: styled_screenshot,
+    ForgeryKind.CUSTOM_TOOL: custom_tool,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(
