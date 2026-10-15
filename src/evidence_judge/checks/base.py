@@ -69,6 +69,10 @@ class CheckContext:
         """The same context over the evidence before the agent acted (EvidenceIndex.baseline)."""
         return dataclasses.replace(self, index=self.index.baseline, llm=None)
 
+    def without_agent_input(self) -> CheckContext:
+        """The same context over the evidence with the agent's own input masked out."""
+        return dataclasses.replace(self, index=self.index.without_agent_input, llm=None)
+
 
 class PredicateChecker(Protocol):
     """Evaluates one predicate kind. `deterministic` checkers never call an LLM."""
