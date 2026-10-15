@@ -1,4 +1,4 @@
-"""``evidence-judge hook ...``: entry points coding agents run after tool calls and on stop."""
+"""`evidence-judge hook ...`: entry points coding agents run after tool calls and on stop."""
 
 from __future__ import annotations
 
@@ -79,8 +79,8 @@ def decide(
     adapter: Adapter, stream: TextIO, log_dir: Path | None = None, state_dir: Path | None = None
 ) -> Decision:
     """The decision for one hook call. Fails open: any error allows the stop with a notice.
-    With ``log_dir``, the stop and the agent's final answer are also appended to the session's
-    evidence log; ``state_dir`` holds the spec the turn-start hook saved."""
+    With `log_dir`, the stop and the agent's final answer are also appended to the session's
+    evidence log; `state_dir` holds the spec the turn-start hook saved."""
     try:
         settings = HookSettings()
     except ValidationError as exc:
@@ -156,8 +156,9 @@ def turn_start(stream: TextIO, state_dir: Path) -> None:
 
 @hook_app.command("claude-code-turn-start")
 def claude_code_turn_start(state_dir: _StateDir = None) -> None:
-    """Claude Code UserPromptSubmit hook (synchronous): save the task spec the turn starts with,
-    print nothing."""
+    """Claude Code UserPromptSubmit hook: save the turn's task spec, print nothing.
+
+    Runs synchronously, before the turn starts."""
     turn_start(sys.stdin, resolve_state_dir(state_dir))
 
 
@@ -169,7 +170,7 @@ def codex_turn_start(state_dir: _StateDir = None) -> None:
 
 @hook_app.command("gemini-turn-start")
 def gemini_turn_start(state_dir: _StateDir = None) -> None:
-    """Gemini CLI BeforeAgent hook: save the task spec the turn starts with, print ``{}``."""
+    """Gemini CLI BeforeAgent hook: save the task spec the turn starts with, print {}."""
     turn_start(sys.stdin, resolve_state_dir(state_dir))
     sys.stdout.write("{}\n")
 
@@ -192,8 +193,9 @@ def _record(agent: Agent, log_dir: str | None, state_dir: str | None) -> None:
 
 @hook_app.command("claude-code-record")
 def claude_code_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
-    """Claude Code PostToolUse, PostToolUseFailure, PermissionDenied and UserPromptSubmit
-    hook: log the call or prompt, print nothing."""
+    """Claude Code record hook: log the tool call or prompt, print nothing.
+
+    Runs on PostToolUse, PostToolUseFailure, PermissionDenied and UserPromptSubmit."""
     _record("claude-code", log_dir, state_dir)
 
 
@@ -205,7 +207,7 @@ def codex_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
 
 @hook_app.command("gemini-record")
 def gemini_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
-    """Gemini CLI AfterTool and BeforeAgent hook: log the call or prompt, print ``{}``."""
+    """Gemini CLI AfterTool and BeforeAgent hook: log the call or prompt, print {}."""
     _record("gemini", log_dir, state_dir)
     sys.stdout.write("{}\n")
 
@@ -247,9 +249,11 @@ def _pre_tool_deny(message: str) -> dict[str, object]:
 
 @hook_app.command("claude-code-guard")
 def claude_code_guard() -> None:
-    """Claude Code PreToolUse hook: deny writes that would switch off the hooks or the judge
-    (agent settings, hook files, the evidence-judge install, evidence logs); print nothing to
-    allow."""
+    """Claude Code PreToolUse hook: deny writes that would switch off the hooks or the judge.
+
+    Guards agent settings, hook files, the evidence-judge install and evidence logs.
+
+    Prints nothing to allow."""
     if message := guard_decision(sys.stdin):
         sys.stdout.write(json.dumps(_pre_tool_deny(message)) + "\n")
 
@@ -263,7 +267,7 @@ def codex_guard() -> None:
 
 @hook_app.command("gemini-guard")
 def gemini_guard() -> None:
-    """Gemini CLI BeforeTool hook: as claude-code-guard, printing ``{}`` to allow."""
+    """Gemini CLI BeforeTool hook: as claude-code-guard, printing {} to allow."""
     message = guard_decision(sys.stdin)
     output = {"decision": "deny", "reason": message} if message else {}
     sys.stdout.write(json.dumps(output) + "\n")

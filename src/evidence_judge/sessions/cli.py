@@ -305,8 +305,9 @@ def judge_command(
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: _Debug = False,
 ) -> None:
-    """Judge a coding-agent session. Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input,
-    4 internal."""
+    """Judge a coding-agent session.
+
+    Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
     err = _stderr()
     try:
         settings = _settings()
@@ -438,9 +439,9 @@ def rerun_command(
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: _Debug = False,
 ) -> None:
-    """Re-run the spec's test command on a copy of the project, in a clean environment, and
-    judge the runner's own report, without a session record. Exit code: 0 pass, 1 fail, 2 needs
-    review, 3 bad input, 4 internal."""
+    """Re-run the spec's tests on a clean copy of the project and judge the runner's report.
+
+    Needs no session record. Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
     try:
         rerun_spec = _rerun_spec(_spec(spec))
         verdict = rerun_verdict(
