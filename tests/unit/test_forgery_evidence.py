@@ -58,6 +58,8 @@ def test_evidence_kinds() -> None:
         ForgeryKind.SCRIPT_INJECTION,
         ForgeryKind.MOCKED_RESPONSE,
         ForgeryKind.DATA_URL_LINK,
+        ForgeryKind.STORAGE_TAMPERING,
+        ForgeryKind.SOCKET_OR_CDP,
     } == EVIDENCE_KINDS
 
 
