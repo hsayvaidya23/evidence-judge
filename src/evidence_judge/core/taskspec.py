@@ -110,7 +110,7 @@ class TaskSpec(BaseModel):
         default=None,
         description=(
             "The site the task is on, as a URL or host name, with a port when it is not the "
-            "default. Evidence that proves a claim or an expect entry must come from it (with "
+            "default; a whole host, never a path or a public suffix. Evidence that proves a claim or an expect entry must come from it (with "
             "or without 'www.', on its port) or the allowed hosts; without it or allowed_hosts, "
             "no run can pass"
         ),

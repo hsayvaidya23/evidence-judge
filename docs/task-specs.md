@@ -57,13 +57,19 @@ A site is a host and a port, whatever the scheme:
   wildcard: `*.example.com` covers `api.example.com` and `a.b.example.com`, but not
   `example.com` itself. Wildcards are only allowed in `allowed_hosts`.
 - `site`, `--site` and every `allowed_hosts` entry are checked when the spec loads (an invalid
-  `--site` exits with code 3): the scheme must be http or https; user names and passwords
-  (`https://user:pw@shop.example.com`) are refused; so are public suffixes and single-label
-  names other than `localhost` (`com`, `co.uk`, `github.io`, `intranet`), which anyone can
-  register a site under. Hosts are lower-cased, a trailing dot is dropped, and international
-  names are IDNA-encoded: `shöp.example` is stored as `xn--shp-tna.example` and matches pages
-  recorded under either form. The public-suffix check uses a short bundled list of common
-  suffixes; it never fetches anything.
+  spec or `--site` exits with code 3): the scheme must be http or https; user names and
+  passwords (`https://user:pw@shop.example.com`) are refused. A site is a whole host, so a
+  path, query or fragment is refused too (`github.com/myorg`): every page on a host can prove
+  the task, so a site cannot be narrowed to part of one. Name the host alone only when all of
+  it belongs to the site under test, and require the pages you mean with `url` predicates in
+  `expect`. Public suffixes and single-label names other than `localhost` (`com`, `co.uk`,
+  `github.io`, `myshopify.com`, `fly.dev`, `s3.amazonaws.com`, `intranet`) are refused,
+  because anyone can register a site under them; `my-store.myshopify.com` is a site. Hosts are
+  lower-cased, a trailing dot is dropped, and international names are IDNA-encoded:
+  `shöp.example` is stored as `xn--shp-tna.example` and matches pages recorded under either
+  form. The public-suffix check uses the full [Public Suffix List](https://publicsuffix.org/)
+  (ICANN and private sections) bundled with the `publicsuffixlist` package; it never fetches
+  anything at run time, and upgrading that package refreshes the list.
 
 With neither `site` nor `allowed_hosts` (nor `--site`), the site is inferred from the run's
 first page, host and port: the initial page state, else the first page the agent opened. The

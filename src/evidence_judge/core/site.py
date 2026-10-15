@@ -5,156 +5,41 @@ default port, so `https://shop.test:8443` is another site. Ports 80 and 443 are 
 port. A site covers its own host and the same host with or without a leading `www.`, on its
 port only; it never covers subdomains. `allowed_hosts` may name every subdomain of a host
 with a wildcard (`*.shop.test`), which covers `api.shop.test` and `a.b.shop.test`, not
-`shop.test` itself. Hosts are IDNA-encoded and lower-cased, without a trailing dot.
+`shop.test` itself. Hosts are IDNA-encoded and lower-cased, without a trailing dot. A site
+is never part of a host (no path, query or fragment) and never a public suffix, checked
+against the full Public Suffix List bundled offline (`is_public_suffix`).
 """
 
 from __future__ import annotations
 
+import functools
 import ipaddress
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 from urllib.parse import urlsplit
 
+from publicsuffixlist import PublicSuffixList
+
 DEFAULT_PORTS: Final = frozenset({80, 443})
 WILDCARD: Final = "*."
-PUBLIC_SUFFIXES: Final = frozenset(
-    {
-        "ac.id",
-        "ac.il",
-        "ac.in",
-        "ac.jp",
-        "ac.kr",
-        "ac.nz",
-        "ac.th",
-        "ac.uk",
-        "ac.za",
-        "appspot.com",
-        "azurewebsites.net",
-        "blogspot.com",
-        "cloudfront.net",
-        "co.id",
-        "co.il",
-        "co.in",
-        "co.jp",
-        "co.kr",
-        "co.nz",
-        "co.th",
-        "co.uk",
-        "co.za",
-        "com.ar",
-        "com.au",
-        "com.br",
-        "com.cn",
-        "com.hk",
-        "com.mx",
-        "com.my",
-        "com.ng",
-        "com.pk",
-        "com.sg",
-        "com.tr",
-        "com.tw",
-        "com.ua",
-        "edu.ar",
-        "edu.au",
-        "edu.br",
-        "edu.cn",
-        "edu.hk",
-        "edu.mx",
-        "edu.my",
-        "edu.ng",
-        "edu.pk",
-        "edu.sg",
-        "edu.tr",
-        "edu.tw",
-        "edu.ua",
-        "firebaseapp.com",
-        "github.io",
-        "gitlab.io",
-        "glitch.me",
-        "go.id",
-        "go.il",
-        "go.in",
-        "go.jp",
-        "go.kr",
-        "go.nz",
-        "go.th",
-        "go.za",
-        "gov.ar",
-        "gov.au",
-        "gov.br",
-        "gov.cn",
-        "gov.hk",
-        "gov.mx",
-        "gov.my",
-        "gov.ng",
-        "gov.pk",
-        "gov.sg",
-        "gov.tr",
-        "gov.tw",
-        "gov.ua",
-        "gov.uk",
-        "herokuapp.com",
-        "ltd.uk",
-        "me.uk",
-        "ne.id",
-        "ne.il",
-        "ne.in",
-        "ne.jp",
-        "ne.kr",
-        "ne.nz",
-        "ne.th",
-        "ne.za",
-        "net.ar",
-        "net.au",
-        "net.br",
-        "net.cn",
-        "net.hk",
-        "net.mx",
-        "net.my",
-        "net.ng",
-        "net.pk",
-        "net.sg",
-        "net.tr",
-        "net.tw",
-        "net.ua",
-        "net.uk",
-        "netlify.app",
-        "ngrok-free.app",
-        "ngrok.io",
-        "onrender.com",
-        "or.id",
-        "or.il",
-        "or.in",
-        "or.jp",
-        "or.kr",
-        "or.nz",
-        "or.th",
-        "or.za",
-        "org.ar",
-        "org.au",
-        "org.br",
-        "org.cn",
-        "org.hk",
-        "org.mx",
-        "org.my",
-        "org.ng",
-        "org.pk",
-        "org.sg",
-        "org.tr",
-        "org.tw",
-        "org.ua",
-        "org.uk",
-        "pages.dev",
-        "plc.uk",
-        "sch.uk",
-        "vercel.app",
-        "web.app",
-        "workers.dev",
-    }
-)
-"""Multi-label public suffixes refused as a site. Single-label names other than `localhost` are
-refused too; the list is a bundled sample of the common ones, never fetched."""
+LOCALHOST: Final = "localhost"
+
+
+@functools.cache
+def _public_suffixes() -> PublicSuffixList:
+    """The full Public Suffix List (ICANN and private sections, so `myshopify.com`, `fly.dev`
+    and `s3.amazonaws.com` too), as bundled with the `publicsuffixlist` package: read from its
+    data file, never fetched. Unknown top-level names (`intranet`, `test`) count as suffixes."""
+    return PublicSuffixList()
+
+
+def is_public_suffix(host: str) -> bool:
+    """Whether `host` (IDNA-encoded, lower-case) is a public suffix or a single-label name other
+    than `localhost`: a name anyone can register sites under, so never one site."""
+    if host == LOCALHOST:
+        return False
+    return "." not in host or _public_suffixes().is_public(host)
 
 
 class InvalidSiteError(ValueError):
@@ -173,8 +58,9 @@ class Site:
     def parse(cls, value: str, *, what: str = "site", wildcard: bool = False) -> Site:
         """The site `value` names, as a URL ('https://shop.test/') or host ('shop.test:8000').
 
-        Raises InvalidSiteError for anything else, for user info, for a public suffix ('com',
-        'co.uk') and for a wildcard ('*.shop.test') unless `wildcard` allows one.
+        Raises InvalidSiteError for anything else, for user info, for a path, query or fragment
+        ('github.com/myorg': a site is a whole host), for a public suffix ('com', 'co.uk',
+        'myshopify.com') and for a wildcard ('*.shop.test') unless `wildcard` allows one.
         """
         text = value.strip()
         invalid = InvalidSiteError(f"{what} {value!r} is not an http(s) URL or a host name")
@@ -200,6 +86,19 @@ class Site:
             raise invalid
         if parts.username is not None or parts.password is not None:
             raise InvalidSiteError(f"{what} {value!r} must not contain a user name or password")
+        if (
+            parts.path not in ("", "/")
+            or parts.query
+            or parts.fragment
+            or text.endswith(("?", "#"))
+        ):
+            raise InvalidSiteError(
+                f"{what} {value!r} has a path, query or fragment, but a site is a whole host "
+                "(and port): every page on it can prove the task, so it cannot be narrowed to "
+                f"part of one. Name the host alone ({_display(host, _port(port))}) only if all of it "
+                "belongs to the site under test, and require the pages you mean with url "
+                "predicates in `expect`"
+            )
         try:
             host = _idna(host)
         except UnicodeError:
@@ -245,8 +144,7 @@ class Site:
     def is_public_suffix(self) -> bool:
         if self.is_ip:
             return False
-        bases = {self.host, _base(self.host)}
-        return any(("." not in h and h != "localhost") or h in PUBLIC_SUFFIXES for h in bases)
+        return any(is_public_suffix(h) for h in {self.host, _base(self.host)})
 
     def covers(self, other: Site) -> bool:
         """Whether a page or request on `other` (never a wildcard) is on this site."""
@@ -264,6 +162,10 @@ class Site:
         host = f"[{self.host}]" if ":" in self.host else self.host
         port = "" if self.port is None else f":{self.port}"
         return f"{WILDCARD if self.wildcard else ''}{host}{port}"
+
+
+def _display(host: str, port: int | None) -> str:
+    return f"{host}:{port}" if port is not None else host
 
 
 def on_any(url: str, sites: Iterable[Site]) -> bool:

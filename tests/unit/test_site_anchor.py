@@ -74,7 +74,7 @@ async def _judge(run: Run, spec: TaskSpec | None, site: str | None = None) -> Ru
         ("http://127.0.0.1:8000", "127.0.0.1:8000"),
         ("127.0.0.1:8000", "127.0.0.1:8000"),
         ("https://shop.test:443", "shop.test"),
-        ("http://shop.test:80/cart", "shop.test"),
+        ("http://shop.test:80/", "shop.test"),
         ("https://shop.test:8443", "shop.test:8443"),
         ("Shop.Example.com", "shop.example.com"),
         (" shop.example.com. ", "shop.example.com"),
@@ -104,6 +104,16 @@ def test_site_is_a_url_or_host(value: str, site: str) -> None:
         ("https://www.co.uk/", "is a public suffix or a single-label name"),
         ("github.io", "is a public suffix or a single-label name"),
         ("intranet", "is a public suffix or a single-label name"),
+        ("myshopify.com", "is a public suffix or a single-label name"),
+        ("https://fly.dev", "is a public suffix or a single-label name"),
+        ("repl.co", "is a public suffix or a single-label name"),
+        ("s3.amazonaws.com", "is a public suffix or a single-label name"),
+        ("www.herokuapp.com", "is a public suffix or a single-label name"),
+        ("github.com/myorg", "has a path, query or fragment, but a site is a whole host"),
+        ("http://shop.test:80/cart", "has a path, query or fragment"),
+        ("shop.test/?q=1", "has a path, query or fragment"),
+        ("shop.test?", "has a path, query or fragment"),
+        ("https://shop.test/#top", "has a path, query or fragment"),
         ("*.shop.test", "cannot be a wildcard"),
         ("shop.*.test", "has a '\\*' that is not a leading"),
         ("https://user:pw@shop.test/", "must not contain a user name or password"),
@@ -123,6 +133,8 @@ def test_allowed_hosts_are_validated_and_may_be_wildcards() -> None:
     assert [str(s) for s in spec.sites()] == ["shop.test", "*.shop.test", "api.x.test:8443"]
     for bad, message in [
         ("*.com", "allowed host '\\*.com' is a public suffix"),
+        ("*.myshopify.com", "allowed host '\\*.myshopify.com' is a public suffix"),
+        ("api.shop.test/v1", "allowed host 'api.shop.test/v1' has a path, query or fragment"),
         ("*.127.0.0.1", "is a wildcard of an IP address"),
         ("u@shop.test", "must not contain a user name or password"),
     ]:
@@ -221,6 +233,23 @@ async def test_port_mirror_of_the_site_cannot_pass() -> None:
     )
 
 
+def test_a_path_refusal_explains_a_site_is_a_whole_host() -> None:
+    with pytest.raises(InvalidSiteError) as caught:
+        Site.parse("https://github.com/myorg")
+    assert str(caught.value) == (
+        "site 'https://github.com/myorg' has a path, query or fragment, but a site is a whole "
+        "host (and port): every page on it can prove the task, so it cannot be narrowed to part "
+        "of one. Name the host alone (github.com) only if all of it belongs to the site under "
+        "test, and require the pages you mean with url predicates in `expect`"
+    )
+
+
+def test_a_subdomain_of_a_private_suffix_is_a_site() -> None:
+    assert str(Site.parse("my-store.myshopify.com")) == "my-store.myshopify.com"
+    assert str(Site.parse("bucket.s3.amazonaws.com")) == "bucket.s3.amazonaws.com"
+    assert str(Site.parse("*.my-store.myshopify.com", wildcard=True)) == "*.my-store.myshopify.com"
+
+
 async def test_public_suffix_site_option_is_refused() -> None:
     """Reviewer repro A5: --site com would make every .com host the site."""
     with pytest.raises(InvalidSiteError, match="--site 'com' is a public suffix"):
@@ -240,6 +269,7 @@ def _har(tmp_path: Path) -> Path:
         ("com", "--site 'com' is a public suffix or a single-label name"),
         ("*.shop.test", "--site '*.shop.test' cannot be a wildcard"),
         ("https://u:p@shop.test", "must not contain a user name or password"),
+        ("github.com/myorg", "--site 'github.com/myorg' has a path, query or fragment"),
     ],
 )
 def test_cli_rejects_an_invalid_site(tmp_path: Path, site: str, message: str) -> None:
