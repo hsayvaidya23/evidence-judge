@@ -360,9 +360,10 @@ def judge(
         str | None,
         typer.Option(
             help=(
-                "Site the task is on, as a URL or host (a port, when given, must match); "
-                "overrides the spec's site. A PASS needs a named site, from this flag or the "
-                "spec's site. Subdomains are not included unless listed in allowed_hosts"
+                "Site the task is on, as a URL or host (a port, when given, must match; no "
+                "path); overrides the spec's site. A PASS needs a named site: this flag, or "
+                "the spec's site or allowed_hosts. Subdomains are not included unless listed "
+                "in allowed_hosts"
             )
         ),
     ] = None,

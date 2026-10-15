@@ -473,3 +473,17 @@ async def test_any_scope_text_with_no_page_on_the_site_has_no_evidence() -> None
         "No recorded page state is on the site (shop.test), so none can show "
         "'Thank you for your order'"
     )
+
+
+async def test_allowed_hosts_alone_name_the_site() -> None:
+    """A PASS needs a named site, and `allowed_hosts` without `site` names one."""
+    run = honest_run().model_copy(update={"agent_answer": "I placed order A1 for $24.00."})
+    verdict = await _judge(run, shop_spec(site=None, allowed_hosts=["shop.test"]))
+    assert verdict.outcome is Outcome.PASS, verdict.summary
+
+
+def test_cli_help_names_every_way_to_name_a_site() -> None:
+    result = CliRunner().invoke(app, ["judge", "--help"], env={"COLUMNS": "400"})
+    assert "A PASS needs a named site: this flag, or the spec's site or allowed_hosts" in (
+        " ".join(result.output.split())
+    )
