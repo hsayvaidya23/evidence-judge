@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ValidationError
 
+from evidence_judge._extras import needs_extra
 from evidence_judge.config import Settings
 from evidence_judge.core.verdict import Usage
 from evidence_judge.llm._repair import (
@@ -115,7 +116,7 @@ def _load_sdk_client(settings: Settings) -> AsyncAnthropic:
         from anthropic import AsyncAnthropic
     except ImportError as exc:
         raise LLMConfigError(
-            "The Anthropic SDK is not installed; install with `pip install evidence-judge[anthropic]`"
+            f"The Anthropic SDK is not installed; {needs_extra('anthropic')}"
         ) from exc
     if settings.anthropic_api_key is None:
         raise LLMConfigError("ANTHROPIC_API_KEY is not set")

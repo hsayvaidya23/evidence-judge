@@ -18,6 +18,7 @@ from typer._click.exceptions import UsageError  # pyright: ignore[reportPrivateU
 from typer.core import TyperGroup
 
 from evidence_judge import __version__, engine, ingest
+from evidence_judge._extras import needs_extra
 from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
@@ -619,7 +620,7 @@ def mcp_server(
         _stderr().print(
             Text.assemble(
                 ("error: ", "bold red"),
-                f"the MCP server needs the mcp extra: pip install 'evidence-judge[mcp]' ({e})",
+                f"the MCP server is not installed ({e}); {needs_extra('mcp')}",
             )
         )
         raise typer.Exit(int(ExitCode.USAGE)) from None

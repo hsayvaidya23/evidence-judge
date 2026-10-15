@@ -75,7 +75,9 @@ def test_mcp_without_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "evidence_judge.mcp", None)
     result = runner.invoke(app, ["mcp"])
     assert result.exit_code == ExitCode.USAGE
-    assert "evidence-judge[mcp]" in result.output
+    text = " ".join(result.output.split())
+    assert 'uv tool install --reinstall "evidence-judge[mcp] @ git+https://' in text
+    assert "pip install 'evidence-judge" not in text
 
 
 @pytest.mark.parametrize(

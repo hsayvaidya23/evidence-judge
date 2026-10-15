@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from evidence_judge._extras import needs_extra
 from evidence_judge.core.verdict import RunVerdict
 
 OUTCOME_EVALUATION = "evidence_judge.outcome"
@@ -18,7 +19,7 @@ class MissingExtraError(ImportError):
     def __init__(self, integration: str, extra: str, cause: ImportError) -> None:
         super().__init__(
             f"the {integration} integration needs optional dependencies that are not installed "
-            f"({cause}); install them with: pip install 'evidence-judge[{extra}]'"
+            f"({cause}); {needs_extra(extra)}"
         )
         self.extra = extra
 

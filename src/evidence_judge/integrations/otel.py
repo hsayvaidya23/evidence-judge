@@ -11,6 +11,7 @@ import os
 from typing import TYPE_CHECKING
 
 from evidence_judge import __version__
+from evidence_judge._extras import needs_extra
 from evidence_judge.core.verdict import RunVerdict
 from evidence_judge.integrations._common import (
     OUTCOME_EVALUATION,
@@ -212,7 +213,7 @@ def _provider_from_env() -> tuple[TracerProvider | None, str | None]:
     except ImportError:
         return None, (
             "no OpenTelemetry tracer provider is configured and opentelemetry-sdk is not "
-            "installed; verdict not exported (pip install 'evidence-judge[otel]')"
+            f"installed; verdict not exported ({needs_extra('otel')})"
         )
     protocol = os.environ.get(
         "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "")
@@ -225,8 +226,8 @@ def _provider_from_env() -> tuple[TracerProvider | None, str | None]:
     except ImportError:
         return None, (
             "no OpenTelemetry tracer provider is configured and opentelemetry-exporter-otlp is "
-            "not installed; verdict not exported (pip install 'evidence-judge[otel]', plus "
-            "opentelemetry-exporter-otlp-proto-grpc for gRPC)"
+            f"not installed; verdict not exported ({needs_extra('otel')}; for gRPC also "
+            "install opentelemetry-exporter-otlp-proto-grpc)"
         )
     provider = TracerProvider()
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
