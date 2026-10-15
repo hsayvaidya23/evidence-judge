@@ -13,6 +13,11 @@ class HookSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="EVJ_HOOK_", extra="ignore")
 
     enabled: bool = Field(default=True, description="Set false to turn every hook into a no-op")
+    guard: bool = Field(
+        default=True,
+        description="The guard hooks deny writes to agent configuration, hook definitions, the "
+        "evidence-judge install and evidence logs; set false to allow them",
+    )
     timeout_s: float = Field(
         default=60.0, gt=0, le=600, description="Wall-clock limit for one judgement"
     )

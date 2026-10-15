@@ -522,6 +522,21 @@ the names exported from `evidence_judge`) is defined under
   the first, so "I fixed `calc.py`, added a test in `tests/test_regression.py` and updated
   `README.md`" with only `calc.py` edited is contradicted (FAIL) when the log shows every
   change, and goes to review when a command may have written files the log does not name.
+- **Guard hooks refuse to switch the hooks off.** New `evidence-judge hook claude-code-guard`
+  (Claude Code `PreToolUse`, registered by the plugin), `codex-guard` (Codex `PreToolUse`) and
+  `gemini-guard` (Gemini CLI `BeforeTool`, registered by the extension) deny Write, Edit,
+  MultiEdit, NotebookEdit, `apply_patch`, `write_file`, `replace` and shell calls that write
+  agent configuration, the `evidence-judge` install or the evidence logs, reusing the session
+  judge's write-target analysis (about 0.3 s a call). They allow anything they cannot read;
+  `EVJ_HOOK_GUARD=false` turns them off. Live-checked: a Claude Code session told to write
+  `{"disableAllHooks": true}` with Write and then with `echo >` was denied both times.
+- **The hook shim pins the CLI and fails closed without it.** With `--state-dir`, the plugin's
+  `run-hook.sh` pins the `evidence-judge` path and checksum on first use. If the CLI later
+  disappears or changes, the Stop hook sends the agent back once and then stops the session
+  instead of allowing an unchecked answer; `EVJ_HOOK_ALLOW_MISSING_JUDGE=1` in the harness's
+  environment restores the notice. The guides recommend Claude Code managed settings
+  (`allowManagedHooksOnly`, the plugin in managed `enabledPlugins`) and explain that a
+  same-user agent can otherwise disable hooks.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

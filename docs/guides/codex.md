@@ -12,6 +12,7 @@ a continuation turn with `reason` as the prompt. Evidence Judge ships two Codex 
 | --- | --- | --- |
 | `evidence-judge hook codex-stop` | `Stop` | Judges the newest trace recorded during the turn; blocks on FAIL |
 | `evidence-judge hook codex-record` | `PostToolUse`, `UserPromptSubmit` | Appends the call or prompt to the session's evidence log |
+| `evidence-judge hook codex-guard` | `PreToolUse` | Denies writes to agent configuration, the `evidence-judge` install and evidence logs |
 
 Codex's older `notify` program is not needed: it fires only on `agent-turn-complete`, is
 fire-and-forget and cannot block.
@@ -63,6 +64,17 @@ hooks load only when the project is trusted):
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "evidence-judge hook codex-guard",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "hooks": [
@@ -101,6 +113,16 @@ stop hook judges with the spec the turn started with even if the agent edits it.
 
 Drop `--log-dir` from the `codex-stop` command if you do not want the final answer written to
 the evidence log; the stop decision does not depend on it.
+
+`codex-guard` denies shell commands and `apply_patch` calls that write agent configuration
+(`~/.codex/`, `.codex/`, `.claude/settings*.json`, `.mcp.json`, hook files), the
+`evidence-judge` install or the evidence logs: an agent running as your OS user could
+otherwise delete these hooks from `~/.codex/hooks.json` and finish unchecked. Codex lets a
+`PreToolUse` hook that fails or times out through, so the guard decides from the call alone
+and allows anything it cannot read; the session judge still reports such a write as harness
+tampering. Hooks an administrator puts in the managed `requirements.toml` are the stronger
+control, because the agent cannot edit them
+([`pre_tool_use.rs`](https://github.com/openai/codex/blob/main/codex-rs/hooks/src/events/pre_tool_use.rs)).
 
 ## What `codex-stop` does
 

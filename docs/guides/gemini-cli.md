@@ -12,6 +12,7 @@ the equivalent of Claude Code's `Stop` hook, and Evidence Judge ships an adapter
 | --- | --- | --- |
 | `evidence-judge hook gemini-after-agent` | `AfterAgent` | Judges the newest trace recorded during the turn; denies the response on FAIL |
 | `evidence-judge hook gemini-record` | `AfterTool`, `BeforeAgent` | Appends the call or prompt to the session's evidence log |
+| `evidence-judge hook gemini-guard` | `BeforeTool` | Denies writes to agent configuration, the `evidence-judge` install and evidence logs |
 
 The adapters are tested against JSON fixtures built from Gemini's documented hook schemas, not
 against a live Gemini CLI.
@@ -56,6 +57,19 @@ In `~/.gemini/settings.json` or a project's `.gemini/settings.json`:
         ]
       }
     ],
+    "BeforeTool": [
+      {
+        "matcher": "run_shell_command|write_file|replace",
+        "hooks": [
+          {
+            "name": "evidence-judge-guard",
+            "type": "command",
+            "command": "evidence-judge hook gemini-guard",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
     "AfterTool": [
       {
         "matcher": "*",
@@ -88,6 +102,13 @@ In `~/.gemini/settings.json` or a project's `.gemini/settings.json`:
 
 Gemini hook timeouts are in **milliseconds** (default 60,000). `gemini mcp add evidence-judge
 evidence-judge mcp` registers the server from a shell instead.
+
+`gemini-guard` denies shell commands and file writes that touch agent configuration
+(`~/.gemini/`, `.gemini/settings.json`, `.claude/`, `.codex/`, `.mcp.json`, hook files), the
+`evidence-judge` install or the evidence logs: an agent running as your OS user could
+otherwise set `hooksConfig.enabled` to `false` and finish unchecked. It allows anything it
+cannot read, and the session judge still reports such a write as harness tampering. System
+settings an administrator owns are the stronger control, because the agent cannot edit them.
 
 ## What `gemini-after-agent` does
 

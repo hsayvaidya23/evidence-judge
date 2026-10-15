@@ -124,9 +124,13 @@ def test_plugin_hooks_use_documented_events_and_real_commands() -> None:
         assert command.startswith('sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" ')
         adapter = _adapter(command)
         assert adapter in commands
-        if adapter != "claude-code-turn-start":
+        if adapter not in ("claude-code-turn-start", "claude-code-guard"):
             assert '--log-dir "${CLAUDE_PLUGIN_DATA}/evidence"' in command
-        if event in ("Stop", "SubagentStop"):
+        if adapter == "claude-code-guard":
+            assert event == "PreToolUse"
+            assert "async" not in handler
+            assert int(str(handler["timeout"])) <= 30
+        elif event in ("Stop", "SubagentStop"):
             assert adapter == "claude-code-stop"
             assert "async" not in handler
             assert 60 < int(str(handler["timeout"])) <= 600
@@ -172,7 +176,12 @@ def test_gemini_extension_manifest() -> None:
 def test_gemini_extension_hooks() -> None:
     hooks = _json(GEMINI_EXTENSION / "hooks" / "hooks.json")
     handlers = _handlers(hooks["hooks"])  # type: ignore[arg-type]
-    assert {event for event, _ in handlers} == {"BeforeAgent", "AfterTool", "AfterAgent"}
+    assert {event for event, _ in handlers} == {
+        "BeforeTool",
+        "BeforeAgent",
+        "AfterTool",
+        "AfterAgent",
+    }
     assert {event for event, _ in handlers} <= GEMINI_EVENTS
     commands = _hook_commands()
     for event, handler in handlers:
@@ -186,6 +195,7 @@ def test_gemini_extension_hooks() -> None:
             "AfterAgent": {"gemini-after-agent"},
             "BeforeAgent": {"gemini-turn-start", "gemini-record"},
             "AfterTool": {"gemini-record"},
+            "BeforeTool": {"gemini-guard"},
         }
         assert adapter in expected[event]
         assert 1000 <= int(str(handler["timeout"])) <= 600_000
@@ -234,6 +244,61 @@ def test_the_shim_hands_over_to_the_cli(tmp_path: Path) -> None:
     assert done.stdout == "hook|claude-code-stop|--log-dir|/a b|IN"
 
 
+@pytest.mark.parametrize(
+    ("adapter", "stdout"), [("claude-code-guard", ""), ("gemini-guard", "{}\n")]
+)
+def test_a_missing_cli_guards_nothing(tmp_path: Path, adapter: str, stdout: str) -> None:
+    done = _shim([adapter], f"{tmp_path}:/usr/bin:/bin")
+    assert (done.returncode, done.stdout) == (0, stdout)
+
+
+def _fake_cli(directory: Path) -> Path:
+    directory.mkdir(exist_ok=True)
+    fake = directory / "evidence-judge"
+    fake.write_text('#!/bin/sh\nprintf "%s|" "$@"\ncat\n')
+    fake.chmod(0o755)
+    return fake
+
+
+def test_the_shim_pins_the_cli_and_fails_closed_when_it_goes(tmp_path: Path) -> None:
+    fake = _fake_cli(tmp_path / "bin")
+    state = tmp_path / "state"
+    path = f"{fake.parent}:/usr/bin:/bin"
+    stop = ["claude-code-stop", "--state-dir", str(state)]
+    assert _shim(stop, path, "IN").stdout.startswith("hook|claude-code-stop|")
+    assert (state / "evidence-judge-pin").read_text().splitlines()[0] == str(fake)
+    fake.write_text("#!/bin/sh\ncat >/dev/null\n")
+    done = _shim(stop, path)
+    assert done.returncode == 2
+    assert "changed since it was pinned" in done.stderr
+    fake.unlink()
+    done = _shim(stop, f"{_fake_cli(tmp_path / 'other').parent}:/usr/bin:/bin")
+    assert done.returncode == 2 and "is gone" in done.stderr
+    again = _shim(stop, path, '{"stop_hook_active": true}')
+    assert again.returncode == 0 and json.loads(again.stdout)["continue"] is False
+    record = _shim(["claude-code-record", "--state-dir", str(state)], path)
+    assert (record.returncode, record.stdout) == (0, "")
+
+
+def test_the_pin_can_be_waived_by_the_harness(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "evidence-judge-pin").write_text(f"{tmp_path}/gone\n1 2\n")
+    sh = shutil.which("sh")
+    assert sh is not None
+    done = subprocess.run(
+        [sh, str(SHIMS[0]), "codex-stop", "--state-dir", str(state)],
+        input="{}",
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "EVJ_HOOK_ALLOW_MISSING_JUDGE": "1"},
+        check=False,
+        timeout=30,
+    )
+    assert done.returncode == 0
+    assert "missing or changed" in json.loads(done.stdout)["systemMessage"]
+
+
 CODEX_EVENTS = {
     "PreToolUse", "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact",
     "UserPromptSubmit", "SubagentStop", "Stop", "Interrupt", "SessionStart", "SubagentStart",
@@ -254,7 +319,7 @@ def test_guide_hook_snippets_are_valid(guide: str, events: set[str], prefix: str
     assert {event for event, _ in handlers} <= events
     commands = _hook_commands()
     for _, handler in handlers:
-        match = re.match(r"evidence-judge hook ([a-z-]+) ", str(handler["command"]))
+        match = re.match(r"evidence-judge hook ([a-z-]+)(?: |$)", str(handler["command"]))
         assert match, handler["command"]
         assert match.group(1) in commands
         assert match.group(1).startswith(prefix)

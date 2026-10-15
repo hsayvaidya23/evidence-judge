@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from evidence_judge.hooks.adapters import CLAUDE_CODE, CODEX, GEMINI, Adapter, HookInput
 from evidence_judge.hooks.core import NOTICE_PREFIX, Decision, allow, evaluate, find_spec
+from evidence_judge.hooks.guard import deny_message, guard_reason
 from evidence_judge.hooks.record import (
     Agent,
     append,
@@ -178,6 +179,65 @@ def gemini_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Gemini CLI AfterTool and BeforeAgent hook: log the call or prompt, print ``{}``."""
     _record("gemini", log_dir, state_dir)
     sys.stdout.write("{}\n")
+
+
+def guard_decision(stream: TextIO) -> str | None:
+    """The deny message for one pre-tool hook call, or None to allow it. Fails open: unreadable
+    input, a disabled guard or an internal error allows the call (the session judge still
+    reports the write)."""
+    try:
+        settings = HookSettings()
+        if not settings.enabled or not settings.guard:
+            return None
+        data = _read_input(stream)
+        tool = data.get("tool_name")
+        tool_input = data.get("tool_input")
+        cwd = data.get("cwd")
+        if not isinstance(tool, str) or not isinstance(tool_input, dict):
+            return None
+        why = guard_reason(
+            tool,
+            cast(dict[str, object], tool_input),
+            cwd if isinstance(cwd, str) else None,
+        )
+        return deny_message(why) if why else None
+    except Exception as exc:
+        sys.stderr.write(f"{NOTICE_PREFIX}guard could not check the call ({type(exc).__name__})\n")
+        return None
+
+
+def _pre_tool_deny(message: str) -> dict[str, object]:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": message,
+        }
+    }
+
+
+@hook_app.command("claude-code-guard")
+def claude_code_guard() -> None:
+    """Claude Code PreToolUse hook: deny writes that would switch off the hooks or the judge
+    (agent settings, hook files, the evidence-judge install, evidence logs); print nothing to
+    allow."""
+    if message := guard_decision(sys.stdin):
+        sys.stdout.write(json.dumps(_pre_tool_deny(message)) + "\n")
+
+
+@hook_app.command("codex-guard")
+def codex_guard() -> None:
+    """Codex CLI PreToolUse hook: as claude-code-guard."""
+    if message := guard_decision(sys.stdin):
+        sys.stdout.write(json.dumps(_pre_tool_deny(message)) + "\n")
+
+
+@hook_app.command("gemini-guard")
+def gemini_guard() -> None:
+    """Gemini CLI BeforeTool hook: as claude-code-guard, printing ``{}`` to allow."""
+    message = guard_decision(sys.stdin)
+    output = {"decision": "deny", "reason": message} if message else {}
+    sys.stdout.write(json.dumps(output) + "\n")
 
 
 @hook_app.command("codex-stop")
