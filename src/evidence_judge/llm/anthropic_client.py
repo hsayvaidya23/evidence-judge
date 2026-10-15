@@ -29,6 +29,12 @@ from pydantic import BaseModel, ValidationError
 
 from evidence_judge.config import Settings
 from evidence_judge.core.verdict import Usage
+from evidence_judge.llm._repair import (
+    MAX_ERROR_CHARS,
+    InvalidOutputError,
+    format_validation_error,
+    with_error,
+)
 from evidence_judge.llm.base import (
     Image,
     LLMAuthError,
@@ -38,7 +44,7 @@ from evidence_judge.llm.base import (
     T,
     Tier,
 )
-from evidence_judge.llm.budget import Budget, current_budget
+from evidence_judge.llm.budget import Budget, Reservation
 from evidence_judge.llm.pricing import DEFAULT_PRICES, ModelPrice, PriceTable, price_for
 
 if TYPE_CHECKING:
@@ -55,7 +61,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TOOL_NAME = "submit_result"
-_MAX_ERROR_CHARS = 2_000
 _CHARS_PER_TOKEN_ESTIMATE = 3.0
 _IMAGE_TOKEN_ESTIMATE = 1_600
 _IMAGE_MEDIA_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
@@ -103,10 +108,6 @@ class TokenTotals:
     cache_write_tokens: int = 0
     cache_read_tokens: int = 0
     cost_usd: float = 0.0
-
-
-class _InvalidOutputError(Exception):
-    pass
 
 
 def _load_sdk_client(settings: Settings) -> AsyncAnthropic:
@@ -159,8 +160,8 @@ class AnthropicClient:
             usage.add(call_usage)
             try:
                 return self._parse(message, schema, request, structured=structured), usage
-            except _InvalidOutputError as exc:
-                error = str(exc)[:_MAX_ERROR_CHARS]
+            except InvalidOutputError as exc:
+                error = str(exc)[:MAX_ERROR_CHARS]
                 logger.debug("structured output invalid for %s, retrying once", schema.__name__)
         raise LLMError(f"Model output did not satisfy {schema.__name__} after a retry: {error}")
 
@@ -175,24 +176,21 @@ class AnthropicClient:
         structured: bool,
     ) -> tuple[Message, Usage]:
         prompt = (
-            request.prompt
-            if previous_error is None
-            else _with_error(request.prompt, previous_error)
+            request.prompt if previous_error is None else with_error(request.prompt, previous_error)
         )
-        reservations = self._reserve(self._estimate(price, request, prompt, json_schema))
+        reservation = Reservation(
+            self._estimate(price, request, prompt, json_schema),
+            client_budget=self.budget,
+            fallback_cap_usd=self._settings.max_cost_usd,
+        )
         started = time.perf_counter()
-        settled = False
         try:
             message = await self._send(model, request, prompt, json_schema, structured=structured)
             latency_ms = (time.perf_counter() - started) * 1000
             usage = self._record(message, price, latency_ms)
-            for budget, reserved in reservations:
-                budget.settle(reserved, usage.cost_usd)
-            settled = True
+            reservation.settle(usage.cost_usd)
         finally:
-            if not settled:
-                for budget, reserved in reservations:
-                    budget.release(reserved)
+            reservation.release()
         logger.debug(
             "anthropic call model=%s in=%d out=%d cost=%.6f latency_ms=%.0f",
             model,
@@ -271,27 +269,6 @@ class AnthropicClient:
             return LLMError(f"Anthropic API error {exc.status_code} (request_id={exc.request_id})")
         return LLMError(f"Anthropic SDK error: {type(exc).__name__}")
 
-    def _budgets(self) -> list[Budget]:
-        """The run's budget (see `run_budget`) and this client's own, if set. With neither, each
-        call is capped at `settings.max_cost_usd` on its own."""
-        budgets = [b for b in (current_budget(), self.budget) if b is not None]
-        if not budgets:
-            return [Budget(self._settings.max_cost_usd)]
-        if len(budgets) == 2 and budgets[0] is budgets[1]:
-            return budgets[:1]
-        return budgets
-
-    def _reserve(self, estimate: float) -> list[tuple[Budget, float]]:
-        reservations: list[tuple[Budget, float]] = []
-        try:
-            for budget in self._budgets():
-                reservations.append((budget, budget.reserve(estimate)))
-        except BaseException:
-            for budget, reserved in reservations:
-                budget.release(reserved)
-            raise
-        return reservations
-
     def _record(self, message: Message, price: ModelPrice, latency_ms: float) -> Usage:
         raw = message.usage
         cache_write = raw.cache_creation_input_tokens or 0
@@ -334,8 +311,8 @@ class AnthropicClient:
                 try:
                     return schema.model_validate(block.input)
                 except ValidationError as exc:
-                    raise _InvalidOutputError(_format_validation_error(exc)) from exc
-        raise _InvalidOutputError(
+                    raise InvalidOutputError(format_validation_error(exc)) from exc
+        raise InvalidOutputError(
             f"No {TOOL_NAME} tool call in the response (stop_reason={message.stop_reason}); "
             f"you must call {TOOL_NAME}"
         )
@@ -426,14 +403,6 @@ def _image_block(image: Image) -> ImageBlockParam:
     }
 
 
-def _with_error(prompt: str, error: str) -> str:
-    return (
-        f"{prompt}\n\n<previous_attempt_error>\n{error}\n</previous_attempt_error>\n"
-        "Your previous attempt was rejected for the reason above. "
-        "Answer again with corrected output."
-    )
-
-
 def _output_config(
     model: str, request: LLMRequest, json_schema: dict[str, Any], *, structured: bool
 ) -> OutputConfigParam:
@@ -448,18 +417,10 @@ def _output_config(
 def _parse_json(message: Message, schema: type[T]) -> T:
     text = "".join(block.text for block in message.content if block.type == "text").strip()
     if not text:
-        raise _InvalidOutputError(
+        raise InvalidOutputError(
             f"No JSON output in the response (stop_reason={message.stop_reason})"
         )
     try:
         return schema.model_validate_json(text)
     except ValidationError as exc:
-        raise _InvalidOutputError(_format_validation_error(exc)) from exc
-
-
-def _format_validation_error(exc: ValidationError) -> str:
-    parts = [
-        f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['msg']}"
-        for err in exc.errors(include_url=False, include_input=False)
-    ]
-    return "Schema validation failed: " + "; ".join(parts)
+        raise InvalidOutputError(format_validation_error(exc)) from exc

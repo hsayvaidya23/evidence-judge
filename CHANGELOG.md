@@ -67,6 +67,13 @@ the names exported from `evidence_judge`) is defined under
   for a Playwright trace, `partial` for a browser-use history, `none` for a HAR alone) and warns
   when it is not `full`; `--require-tamper-evidence` (or the spec's `require_tamper_evidence`)
   caps such runs at `NEEDS_REVIEW`.
+- LLM backends for the coding-agent CLI you are already logged into: `EVJ_LLM_BACKEND` (or
+  `--llm` on `judge` and `bench`) picks `anthropic` (the default), `claude-code`, `codex` or
+  `gemini`. Each call runs the CLI headless with every tool, MCP server, hook and plugin off, in
+  an empty temporary directory, with the prompt on stdin and the reply validated against the
+  schema; Claude Code's reported cost is charged to the run budget. Screenshots reach Claude Code
+  and Codex; with Gemini, screenshot checks report no evidence. `EVJ_CLI_MODEL_FAST`,
+  `EVJ_CLI_MODEL_STRONG` and `EVJ_CLI_TIMEOUT_S` configure them. See the LLM backends guide.
 
 ### Changed
 
