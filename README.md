@@ -293,7 +293,7 @@ Send verdicts to the tools you already use (each is an optional extra; see [docs
 GitHub Actions: gate a pull request on a recorded run.
 
 ```yaml
-- uses: hsayvaidya23/evidence-judge@main
+- uses: hsayvaidya23/evidence-judge@v0.1.0 # or pin the full commit SHA with a `# v0.1.0` comment
   with:
     trace: runs/checkout/trace.zip
     har: runs/checkout/run.har
@@ -303,6 +303,8 @@ GitHub Actions: gate a pull request on a recorded run.
 ```
 
 The step fails on FAIL (and optionally NEEDS_REVIEW), writes the verdict to the job summary, and exposes `outcome`, `score` and `report` outputs.
+
+Pin a release, never `@main`: the action installs evidence-judge from the ref you pin, so a moving branch changes your verdicts under you. v0.1.0 is not tagged yet; until it is, pin a full commit SHA from `main`.
 
 Docker: `docker build -t evidence-judge . && docker run --rm -v "$PWD:/work:ro" evidence-judge judge --trace trace.zip --answer-file answer.txt --offline`
 
