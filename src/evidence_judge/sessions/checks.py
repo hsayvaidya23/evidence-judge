@@ -36,6 +36,7 @@ from evidence_judge.sessions.models import (
     SessionRun,
     SubagentEvent,
 )
+from evidence_judge.sessions.normalize import relative
 from evidence_judge.sessions.predicates import (
     BuildPredicate,
     CommandPredicate,
@@ -61,7 +62,12 @@ class RunOutcome:
     event: CommandEvent
     result: Result
     reason: str
-    whole: bool
+    partial: str | None = None
+    """Why the run is not the whole suite, or None when it is."""
+
+    @property
+    def whole(self) -> bool:
+        return self.partial is None
 
 
 def glob_regex(pattern: str) -> re.Pattern[str]:
@@ -213,6 +219,49 @@ class SessionIndex:
             or (isinstance(e, OtherToolEvent) and e.may_mutate)
         ]
 
+    @cached_property
+    def run_dirs(self) -> dict[str, str | None]:
+        """Where each command started, relative to the session directory (`.`), or None when
+        only the shell knows. The shell keeps its directory between tool calls, but a
+        transcript may record the session directory for every call, so a top-level `cd` is
+        followed across calls as well as the recorded directory."""
+        root = self.run.cwd
+        shell: str | None = "."
+        dirs: dict[str, str | None] = {}
+        for command in self.commands:
+            recorded = _relative_dir(command.cwd, root)
+            here = shell if recorded == "." else recorded
+            dirs[command.id] = here
+            targets = command.analysis.cd_targets
+            if command.status is CallStatus.DENIED or not targets:
+                continue
+            if command.status is not CallStatus.OK:
+                shell = None
+                continue
+            for target in targets:
+                here = _resolve_dir(here, target, root)
+            shell = here
+        return dirs
+
+    def run_dir(self, event: CommandEvent) -> str | None:
+        """The directory the command's test run ran in, relative to the session directory."""
+        here = self.run_dirs.get(event.id, ".")
+        for target in event.analysis.run_cds:
+            here = _resolve_dir(here, target, self.run.cwd)
+        return here
+
+    def outcome(self, event: CommandEvent) -> RunOutcome:
+        """`judge_test_run`, with a run outside the session directory counted as partial."""
+        judged = judge_test_run(event)
+        where = self.run_dir(event)
+        if where == ".":
+            return judged
+        place = f"in {where}" if where is not None else "in a directory only the shell knows"
+        why = f"ran {place}, not the session directory"
+        return RunOutcome(
+            event, judged.result, judged.reason, ", ".join(filter(None, [judged.partial, why]))
+        )
+
     def test_runs(self, runner: str | None) -> list[CommandEvent]:
         runs = [
             c for c in self.commands if c.analysis.is_test and c.status is not CallStatus.DENIED
@@ -221,6 +270,25 @@ class SessionIndex:
             wanted = runner.casefold()
             runs = [c for c in runs if any(wanted in r.casefold() for r in c.analysis.runners)]
         return runs
+
+
+def _relative_dir(path: str | None, root: str | None) -> str | None:
+    if path is None or root is None:
+        return "." if path is None or path == root else None
+    rel = relative(path, root)
+    return rel if not posixpath.isabs(rel) and not rel.startswith("../") else path
+
+
+def _resolve_dir(here: str | None, target: str, root: str | None) -> str | None:
+    """The directory a `cd target` from `here` reaches, relative to `root`, or None."""
+    if target == "?" or (here is None and not posixpath.isabs(target)):
+        return None
+    joined = posixpath.normpath(posixpath.join(here or "", target))
+    if not posixpath.isabs(joined) and not joined.startswith(".."):
+        return joined
+    if root is None:
+        return None
+    return _relative_dir(posixpath.normpath(posixpath.join(root, joined)), root)
 
 
 def _exit_reliable(event: CommandEvent) -> bool:
@@ -236,10 +304,12 @@ def judge_test_run(event: CommandEvent) -> RunOutcome:
     """Whether one test command passed, failed, or cannot tell, and whether it was whole."""
     analysis = event.analysis
     summary = event.summary
-    whole = not analysis.test_filters and not (summary and summary.deselected)
+    partial = ", ".join(analysis.test_filters) or (
+        f"{summary.deselected} deselected" if summary and summary.deselected else None
+    )
 
     def outcome(result: Result, reason: str) -> RunOutcome:
-        return RunOutcome(event, result, reason, whole)
+        return RunOutcome(event, result, reason, partial)
 
     if event.status is CallStatus.NO_RESULT:
         return outcome(Result.UNKNOWN, f"{event.id} has no recorded result")
@@ -321,7 +391,7 @@ def check_test_result(predicate: TestResultPredicate, index: SessionIndex) -> Pr
             runs[-1],
             last_change[1],
         )
-    outcomes = [judge_test_run(r) for r in fresh]
+    outcomes = [index.outcome(r) for r in fresh]
     name = predicate.mentions
     if name:
         fails = [o for o in outcomes if o.result is Result.FAIL and _named_failure(o.event, name)]
@@ -377,9 +447,7 @@ def _undecided(outcomes: list[RunOutcome], predicate: TestResultPredicate) -> Pr
     partial = [o for o in outcomes if o.result is Result.PASS and not o.whole]
     if partial and predicate.whole_suite:
         o = partial[-1]
-        why = ", ".join(o.event.analysis.test_filters) or (
-            f"{o.event.summary.deselected} deselected" if o.event.summary else "filtered"
-        )
+        why = o.partial
         return _result(
             Support.NO_EVIDENCE,
             f"only a subset of the suite ran after the last change ({o.event.id}: {why}); a "

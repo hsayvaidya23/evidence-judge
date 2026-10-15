@@ -658,6 +658,7 @@ class _Simple:
     writes: list[str] = field(default_factory=list[str])
     heredoc: bool = False
     negated: bool = False
+    subshell: bool = False
 
 
 @dataclass(slots=True)
@@ -724,6 +725,7 @@ def _parse(tokens: list[str]) -> list[_Pipeline]:
     current = _Simple()
     heredoc_end: str | None = None
     pending_heredoc: str | None = None
+    depth = 0
     i = 0
     while i < len(tokens):
         tok = tokens[i]
@@ -751,6 +753,8 @@ def _parse(tokens: list[str]) -> list[_Pipeline]:
             i += 2
             continue
         if tok in ("(", ")"):
+            depth = depth + 1 if tok == "(" else max(depth - 1, 0)
+            current.subshell = current.subshell or depth > 0
             i += 1
             continue
         if tok in _PIPES or tok in _SEPARATORS:
@@ -761,6 +765,7 @@ def _parse(tokens: list[str]) -> list[_Pipeline]:
                 pipelines.append(_Pipeline())
             i += 1
             continue
+        current.subshell = current.subshell or depth > 0
         if not current.words and tok == "!":
             current.negated = True
         elif not current.words and _ASSIGNMENT.match(tok):
@@ -1667,12 +1672,15 @@ def _empty(reason: str) -> CommandAnalysis:
     )
 
 
-def _same_dir(target: str, cwd: str | None) -> bool:
-    if target in (".", "./", ""):
-        return True
-    if cwd is None:
-        return False
-    return posixpath.normpath(target) == posixpath.normpath(cwd)
+def _cd_step(simple: _Simple) -> str:
+    """Where a `cd`, `pushd` or `popd` goes: its target as written, or `?` when only the shell
+    knows (`popd`, `cd -`, `cd` alone, a variable)."""
+    words = simple.words
+    args = [w for w in words[1:] if not (w.startswith("-") and w != "-")]
+    if program_name(words[0]) == "popd" or len(args) != 1:
+        return "?"
+    target = args[0]
+    return "?" if target == "-" or target.startswith("~") or _unspelled(target) else target
 
 
 def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
@@ -1695,11 +1703,13 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     primary: tuple[int, int] | None = None
     masked: str | None = None
     output_filter: str | None = None
-    cd_elsewhere: str | None = None
 
     touched: list[str] = []
     opaque: str | None = None
     lasting: str | None = None
+    cds: list[str] = []
+    run_cds: list[str] = []
+    persisting: list[str] = []
     mutating_at: list[tuple[int, int]] = []
     nested_after = False
     for p_index, pipeline in enumerate(pipelines):
@@ -1716,9 +1726,12 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
             categories.append(classified.category)
             if classified.program:
                 programs.append(classified.program)
-            if classified.program in ("cd", "pushd") and simple.words[1:2]:
-                target = simple.words[1]
-                cd_elsewhere = None if _same_dir(target, cwd) else target
+            if classified.program in ("cd", "pushd", "popd"):
+                step = _cd_step(simple)
+                alone = len(pipeline.commands) == 1 and not simple.subshell
+                cds.append(step if alone else "?")
+                if alone:
+                    persisting.append(step)
             nested = classified.nested
             if nested is not None:
                 runners.extend(nested.runners)
@@ -1730,6 +1743,8 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 touched.extend(nested.touched_paths)
                 opaque = opaque or nested.opaque_write
                 lasting = lasting or nested.lasting_mutation
+                if nested.runners:
+                    run_cds = [*cds, *nested.run_cds]
                 if nested.runners or (classified.category in _CHECKS and not runners):
                     nested_after = nested.mutation_after_check
                     primary = (p_index, c_index)
@@ -1741,8 +1756,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
             if classified.runner is not None:
                 runners.append(classified.runner)
                 filters.extend(classified.filters)
-                if cd_elsewhere is not None:
-                    filters.append(f"runs in {cd_elsewhere}")
+                run_cds = list(cds)
                 collect_only = collect_only or classified.collect_only
                 primary = (p_index, c_index)
                 masked = None
@@ -1752,6 +1766,8 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 masked = None
                 output_filter = None
 
+    if any(p.op_after in ("||", "&") for p in pipelines):
+        persisting = ["?" for _ in persisting]
     if lasting is None and mutation is not None and any(p.op_after == "&" for p in pipelines):
         lasting = f"{mutation} in a background job"
     mutation_after = primary is not None and (
@@ -1812,6 +1828,8 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         touched_paths=list(dict.fromkeys(touched)),
         opaque_write=opaque,
         lasting_mutation=lasting,
+        run_cds=run_cds,
+        cd_targets=persisting,
         mutation_after_check=mutation_after,
         session_store=SESSION_STORE.search(command) is not None,
         harness_change=_harness_change(pipelines, command),

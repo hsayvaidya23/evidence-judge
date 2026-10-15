@@ -55,7 +55,6 @@ def test_recognises_test_runners(command: str, runner: str) -> None:
         ("pytest -o addopts=''", "a config override (-o)"),
         ("pytest --ignore=tests/slow", "--ignore"),
         ("PYTEST_ADDOPTS='-k add' pytest", "PYTEST_ADDOPTS"),
-        ("cd sub && pytest", "runs in sub"),
         ("jest -t 'adds'", "-t"),
         ("jest src/calc.test.ts", "only src/calc.test.ts"),
         ("vitest run --changed", "--changed"),
@@ -247,6 +246,29 @@ def test_named_write_targets(command: str, touched: list[str]) -> None:
 def test_writes_the_command_line_does_not_name(command: str, fragment: str) -> None:
     analysis = analyse(command)
     assert analysis.opaque_write is not None and fragment in analysis.opaque_write, analysis
+
+
+@pytest.mark.parametrize(
+    ("command", "run_cds", "cd_targets"),
+    [
+        ("cd pkg_b", [], ["pkg_b"]),
+        ("cd pkg_b && pytest", ["pkg_b"], ["pkg_b"]),
+        ("(cd pkg_b && pytest)", ["?"], []),
+        ("cd a; cd b || true", [], ["?", "?"]),
+        ("pushd a && popd", [], ["a", "?"]),
+        ("cd /x/y && pytest -q tests", ["/x/y"], ["/x/y"]),
+        ("bash -c 'cd sub && pytest'", ["sub"], []),
+        ("cd $HOME", [], ["?"]),
+        ("cd ~/src", [], ["?"]),
+        ("cd -", [], ["?"]),
+        ("cd", [], ["?"]),
+        ("cd -P real", [], ["real"]),
+    ],
+)
+def test_directory_changes(command: str, run_cds: list[str], cd_targets: list[str]) -> None:
+    analysis = analyse(command)
+    assert analysis.run_cds == run_cds
+    assert analysis.cd_targets == cd_targets
 
 
 def test_lasting_mutations() -> None:

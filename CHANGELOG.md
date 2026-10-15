@@ -345,6 +345,15 @@ the names exported from `evidence_judge`) is defined under
   files and runs with `&`, in a `run_in_background` tool call, or under `setsid`, `tmux`,
   `screen`, `at`, `crontab`, `systemd-run`, a file watcher and the like now changes the
   workspace until the session ends (`CommandAnalysis.lasting_mutation`).
+- Session judge: a test run outside the session directory is a subset of the suite, wherever
+  the directory came from. Claude Code's shell keeps its directory between Bash calls while the
+  transcript can record the session directory for each call, so `cd pkg_b` in one call and
+  `pytest -q` in the next passed as the whole suite (reproduced with a real Claude Code
+  session). Top-level `cd`/`pushd`/`popd` are now followed across calls (`cd_targets`), as is
+  the directory a transcript records; a `cd` in a subshell or pipeline does not carry over, and
+  one the judge cannot resolve (`popd`, `cd -`, a variable, a failed call, `cd x || true`)
+  leaves the directory unknown until an absolute `cd` back. A `cd` inside the test command
+  (`run_cds`) is resolved from there, so `cd /abs/project && pytest` is the whole suite.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

@@ -252,6 +252,63 @@ def test_a_background_test_run_changes_nothing() -> None:
     assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
 
 
+@pytest.mark.parametrize(
+    ("steps", "where"),
+    [
+        ([bash("cd pkg_b")], "ran in pkg_b"),
+        ([bash("cd pkg_b"), bash("cd sub")], "ran in pkg_b/sub"),
+        ([bash("cd ..")], "ran in /work, not"),
+        ([bash("pushd pkg_b"), bash("popd")], "a directory only the shell knows"),
+        ([bash("cd pkg_b || true")], "a directory only the shell knows"),
+        ([bash("cd nowhere", "no such directory", 1)], "a directory only the shell knows"),
+        ([bash("cd $PKG")], "a directory only the shell knows"),
+    ],
+)
+def test_a_directory_kept_from_an_earlier_call_is_not_the_suite(
+    steps: list[ToolCall], where: str
+) -> None:
+    run = session(edit("calc.py"), *steps, bash("pytest -q", GREEN))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and where in reason, reason
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [bash("cd pkg_b"), bash("cd /work/toy")],
+        [bash("cd pkg_b && cd ..")],
+        [bash("(cd pkg_b && make build)")],
+        [bash("cd pkg_b | cat")],
+        [bash("cd pkg_b", status=CallStatus.DENIED)],
+        [bash("cd pkg_b"), bash("cd /work/toy && ls")],
+        [bash("cd ../toy")],
+    ],
+)
+def test_returning_to_the_session_directory(steps: list[ToolCall]) -> None:
+    run = session(edit("calc.py"), *steps, bash("pytest -q", GREEN))
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+def test_the_recorded_directory_of_the_run_counts() -> None:
+    run = session(edit("calc.py"), bash("pytest -q", GREEN, cwd="/work/toy/pkg_b"))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and "ran in pkg_b" in reason
+    outside = session(edit("calc.py"), bash("pytest -q", GREEN, cwd="/elsewhere"))
+    assert "ran in /elsewhere" in _check(ALL_PASS, outside)[1]
+    back = session(bash("ls", cwd="/work/toy/pkg_b"), edit("calc.py"), bash("pytest -q", GREEN))
+    assert _check(ALL_PASS, back)[0] is Support.SUPPORTED
+
+
+def test_an_inline_cd_back_to_the_session_directory_is_whole() -> None:
+    run = session(edit("calc.py"), bash("cd pkg_b"), bash("cd /work/toy && pytest -q", GREEN))
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+    elsewhere = session(edit("calc.py"), bash("cd pkg_b && pytest -q", GREEN))
+    status, reason = _check(ALL_PASS, elsewhere)
+    assert status is Support.NO_EVIDENCE and "ran in pkg_b" in reason
+    subshell = session(edit("calc.py"), bash("(cd /work/toy && pytest -q)", GREEN))
+    assert "a directory only the shell knows" in _check(ALL_PASS, subshell)[1]
+
+
 def test_setup_in_the_same_command_does_not_stale_the_run() -> None:
     run = session(edit("calc.py"), bash("uv sync && pytest", GREEN))
     assert _check(ALL_PASS, run)[0] is Support.SUPPORTED

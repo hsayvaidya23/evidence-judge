@@ -136,6 +136,16 @@ class CommandAnalysis(BaseModel):
         description="Why a change the command may make can happen at any later time (a "
         "background job, a detached or scheduled process)",
     )
+    run_cds: list[str] = Field(
+        default_factory=list[str],
+        description="Directories the command changes to before its test run, in order, as "
+        "written (`?` for one only the shell knows)",
+    )
+    cd_targets: list[str] = Field(
+        default_factory=list[str],
+        description="Directories the shell is left in for later commands (top-level `cd`, "
+        "`pushd`, `popd`), in order, as written (`?` for one only the shell knows)",
+    )
     mutation_after_check: bool = Field(
         default=False,
         description="A command that may change files runs after the test, build or lint step",
