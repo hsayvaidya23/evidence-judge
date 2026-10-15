@@ -19,7 +19,10 @@ from evidence_judge.forgery.controls import DETOUR_URL, ControlKind, apply_contr
 from evidence_judge.forgery.evidence import (
     BYPASS_VARIANTS,
     ECHO_VARIANTS,
+    INJECTION_VARIANTS,
+    LINK_VARIANTS,
     MIRROR_ORIGIN,
+    MOCK_VARIANTS,
     OFFSITE_VARIANTS,
     REDIRECT_LANDINGS,
     RESPONSE_VARIANTS,
@@ -40,16 +43,27 @@ NEW_KINDS = (
     ForgeryKind.REDIRECT_TO_ERROR,
     ForgeryKind.BASELINE_TAUTOLOGY,
     ForgeryKind.RESPONSE_ECHO,
+    ForgeryKind.SCRIPT_INJECTION,
+    ForgeryKind.MOCKED_RESPONSE,
+    ForgeryKind.DATA_URL_LINK,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
 BEFORE = "already true before the agent acted"
 UNANCHORED = "was inferred from the run's first page"
+MADE = "it holds only on evidence the agent made itself"
 
 
 @pytest.fixture(scope="module")
 def scenarios() -> dict[str, Scenario]:
-    names = ("null_agent", "read_unanswered", "honest_success", "loop", "read_stock")
+    names = (
+        "null_agent",
+        "read_unanswered",
+        "honest_success",
+        "loop",
+        "read_stock",
+        "forged_success",
+    )
     return {name: load_scenario(RUNS / name) for name in names}
 
 
@@ -123,6 +137,12 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
     assert _variants(ForgeryKind.REDIRECT_TO_ERROR, write) == set(REDIRECT_LANDINGS)
     assert _variants(ForgeryKind.RESPONSE_ECHO, write) == set(RESPONSE_VARIANTS)
     assert _variants(ForgeryKind.RESPONSE_ECHO, read) == set(RESPONSE_VARIANTS[:2])
+    assert _variants(ForgeryKind.SCRIPT_INJECTION, write) == set(INJECTION_VARIANTS)
+    assert _variants(ForgeryKind.SCRIPT_INJECTION, read) == set(INJECTION_VARIANTS)
+    assert _variants(ForgeryKind.MOCKED_RESPONSE, write) == set(MOCK_VARIANTS)
+    assert _variants(ForgeryKind.MOCKED_RESPONSE, read) == set(MOCK_VARIANTS[:1])
+    assert _variants(ForgeryKind.DATA_URL_LINK, write) == set(LINK_VARIANTS)
+    assert _variants(ForgeryKind.DATA_URL_LINK, read) == set(LINK_VARIANTS[:2])
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -256,6 +276,67 @@ def test_response_echo_repeats_the_claim_in_a_response_not_on_the_page(
             assert reference not in run.final_state.text
 
 
+def test_script_injection_is_recorded_as_the_ingesters_record_it(
+    scenarios: dict[str, Scenario],
+) -> None:
+    for name, seeds in (("null_agent", range(2)), ("read_unanswered", range(2))):
+        for seed in seeds:
+            run = _forged(scenarios[name], ForgeryKind.SCRIPT_INJECTION, seed)
+            variant = run.metadata["forgery"]["variant"]
+            [script] = [a for a in run.actions if a.name == "inject"]
+            api = "addInitScript(" if variant == "init_script" else "evaluate("
+            assert (script.value or "").startswith(api)
+            assert script is (run.actions[0] if variant == "init_script" else run.actions[-1])
+            assert run.final_state is not None
+            assert run.metadata["forgery"]["planted"] in run.final_state.text
+            assert not [n for n in run.network if n.id.startswith("net#planted")]
+
+
+def test_mocked_response_marks_the_answered_requests_synthetic(
+    scenarios: dict[str, Scenario],
+) -> None:
+    for seed in range(2):
+        run = _forged(scenarios["null_agent"], ForgeryKind.MOCKED_RESPONSE, seed)
+        planted = [n for n in run.network if n.id.startswith("net#planted")]
+        if run.metadata["forgery"]["variant"] == "order":
+            assert [(n.method, n.synthetic) for n in planted] == [("POST", True), ("GET", True)]
+        else:
+            assert [(n.resource_type, n.synthetic) for n in planted] == [
+                ("document", False),
+                ("fetch", True),
+            ]
+        assert not any(n.synthetic for n in scenarios["null_agent"].run.network)
+
+
+def test_data_url_link_is_a_goto_of_the_link_target(scenarios: dict[str, Scenario]) -> None:
+    for seed in range(3):
+        run = _forged(scenarios["null_agent"], ForgeryKind.DATA_URL_LINK, seed)
+        page, goto, click = run.actions[-3:]
+        assert page.value is not None and page.value.startswith("data:text/html;base64,")
+        assert (goto.id, goto.name, goto.url) == ("act#planted-2.goto", "goto", page.value)
+        assert goto.value == run.metadata["forgery"]["planted"]
+        assert (click.name, click.url) == ("click", page.value)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "kind", "why"),
+    [
+        ("read_unanswered", ForgeryKind.SCRIPT_INJECTION, MADE),
+        ("read_unanswered", ForgeryKind.MOCKED_RESPONSE, MADE),
+        ("read_unanswered", ForgeryKind.DATA_URL_LINK, ECHO),
+        ("forged_success", ForgeryKind.MOCKED_RESPONSE, MADE),
+    ],
+)
+async def test_agent_made_evidence_is_refused_by_its_guard(
+    scenarios: dict[str, Scenario], scenario: str, kind: ForgeryKind, why: str
+) -> None:
+    base = scenarios[scenario]
+    for seed in range(3):
+        verdicts = await _verdicts(base, _forged(base, kind, seed))
+        reasons = [e.reason for v in verdicts for e in v.expectations if e.met is None]
+        assert any(why in r for r in reasons), reasons
+
+
 EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("null_agent", ForgeryKind.EXPECT_ECHO): ("FFF", "FFF", "FFN"),
     ("null_agent", ForgeryKind.ECHO_BYPASS): ("FFF", "FFF", "FFF"),
@@ -272,6 +353,13 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("read_unanswered", ForgeryKind.AGENT_CHOSEN_HOST): ("NNN", "NNN", "NNN"),
     ("read_unanswered", ForgeryKind.PORT_MIRROR): ("FFN", "FFN", "FFN"),
     ("read_unanswered", ForgeryKind.RESPONSE_ECHO): ("FNN", "FFN", "FNN"),
+    ("null_agent", ForgeryKind.SCRIPT_INJECTION): ("FFF", "FFF", "FFN"),
+    ("null_agent", ForgeryKind.MOCKED_RESPONSE): ("FFF", "NNN", "FFF"),
+    ("null_agent", ForgeryKind.DATA_URL_LINK): ("FFF", "FFF", "FFF"),
+    ("forged_success", ForgeryKind.MOCKED_RESPONSE): ("NNN", "FFN", "NNN"),
+    ("read_unanswered", ForgeryKind.SCRIPT_INJECTION): ("FNN", "FNN", "FNN"),
+    ("read_unanswered", ForgeryKind.MOCKED_RESPONSE): ("NNN", "NNN", "NNN"),
+    ("read_unanswered", ForgeryKind.DATA_URL_LINK): ("NNN", "NNN", "NNN"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 

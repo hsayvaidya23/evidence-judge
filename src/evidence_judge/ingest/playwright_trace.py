@@ -22,7 +22,7 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import IO, Final, cast
 
-from evidence_judge.core.actions import OTHER, known_action
+from evidence_judge.core.actions import INJECT, OTHER, injected, known_action
 from evidence_judge.core.evidence import (
     ActionEvent,
     BlobLoader,
@@ -36,6 +36,7 @@ from evidence_judge.core.evidence import (
     Screenshot,
     is_web_page_url,
 )
+from evidence_judge.core.provenance import mark_agent_page_navigations
 from evidence_judge.ingest._dom import FrameSnapshotStore, SnapshotDecodeError
 from evidence_judge.ingest._json import (
     JsonObject,
@@ -126,6 +127,27 @@ _OTHER_METHODS: Final = frozenset(
     }
 )
 """Trace methods recorded as user actions without a canonical name of their own."""
+
+
+_INJECTED_CODE: Final[dict[str, tuple[str, str]]] = {
+    "evaluateExpression": ("evaluate", "expression"),
+    "evaluateExpressionHandle": ("evaluateHandle", "expression"),
+    "evalOnSelector": ("$eval", "expression"),
+    "evalOnSelectorAll": ("$$eval", "expression"),
+    "waitForFunction": ("waitForFunction", "expression"),
+    "addInitScript": ("addInitScript", "source"),
+    "addScriptTag": ("addScriptTag", "content"),
+    "addStyleTag": ("addStyleTag", "content"),
+    "setContent": ("setContent", "html"),
+    "exposeBinding": ("exposeBinding", "name"),
+}
+"""Trace methods that run the agent's code in the page or replace its content (INJECT): the
+API the agent called, and the parameter holding the code."""
+_ROUTE_CLASS: Final = "Route"
+_ROUTE_OVERRIDES: Final = ("url", "method", "headers", "postData")
+"""``Route.continue`` parameters that rewrite the request the site gets."""
+_MOCKED_ROUTE: Final = "Route"
+"""Method of the INJECT action recorded for a route call no request is marked for."""
 
 
 def _action_name(method: str) -> str | None:
@@ -276,6 +298,15 @@ class _RawConsole:
 
 
 @dataclass(slots=True)
+class _RawRoute:
+    """A ``Route.fulfill`` or ``Route.continue`` call of the agent's route handler."""
+
+    time: float
+    call: str
+    overrides: bool
+
+
+@dataclass(slots=True)
 class _Origin:
     monotonic: float
     wall: float | None
@@ -301,6 +332,8 @@ class _TraceReader:
     warnings: list[str] = field(default_factory=list[str])
     store: FrameSnapshotStore = field(default_factory=FrameSnapshotStore)
     form_values: int = 0
+    fulfills: list[_RawRoute] = field(default_factory=list["_RawRoute"])
+    continues: list[_RawRoute] = field(default_factory=list["_RawRoute"])
 
     def read_all(self) -> None:
         prefixes = _trace_prefixes(self.archive)
@@ -409,6 +442,9 @@ class _TraceReader:
         call_id = as_str(event.get("callId"))
         method = as_str(event.get("method"))
         start = as_float(event.get("startTime"))
+        if event.get("class") == _ROUTE_CLASS and start is not None:
+            self._on_route(method, as_object(event.get("params")), start)
+            return
         if call_id is None or method is None or _action_name(method) is None or start is None:
             return
         params = as_object(event.get("params"))
@@ -416,6 +452,15 @@ class _TraceReader:
         page_id = as_str(event.get("pageId"))
         if page_id is not None:
             self.action_pages[self._key(call_id)] = page_id
+
+    def _on_route(self, method: str | None, params: JsonObject, start: float) -> None:
+        if method == "fulfill":
+            body = as_str(params.get("body")) or ""
+            self.fulfills.append(_RawRoute(start, f"route.fulfill({body[:80]})", overrides=True))
+        elif method == "continue" and params.get("isFallback") is not True:
+            changed = [k for k in _ROUTE_OVERRIDES if params.get(k) not in (None, [], "")]
+            call = f"route.continue({', '.join(changed)})"
+            self.continues.append(_RawRoute(start, call, overrides=bool(changed)))
 
     def _key(self, call_id: str) -> _CallKey:
         return (self.context_index, call_id)
@@ -496,11 +541,12 @@ class _TraceReader:
             captured.add(Channel.SCREENSHOTS)
         if final_state is not None:
             captured.add(Channel.FINAL_STATE)
-        return Run(
+        network = self._build_network()
+        run = Run(
             run_id=run_id,
             source=SOURCE,
-            actions=self._build_actions(),
-            network=self._build_network(),
+            actions=self._build_actions(network),
+            network=network,
             snapshots=snapshots,
             screenshots=screenshots,
             console=self._build_console(),
@@ -514,15 +560,25 @@ class _TraceReader:
             blobs=BlobStore(loaders=loaders),
             metadata=self._metadata(),
         )
+        return mark_agent_page_navigations(run)
 
     def _ts(self, monotonic: float) -> float:
         assert self.origin is not None
         return round(monotonic - self.origin.monotonic, 3)
 
-    def _build_actions(self) -> list[ActionEvent]:
+    def _build_actions(self, network: list[NetworkEvent]) -> list[ActionEvent]:
+        """The recorded actions, plus an INJECT for every route call that answered or rewrote a
+        request when no recorded request is marked synthetic (no network file, or a format
+        without the marker), so the run still shows it was mocked."""
         snapshot_times = [s.time for s in self.snapshots]
         out: list[ActionEvent] = []
-        ordered = sorted(self.actions.items(), key=lambda item: item[1].time)
+        actions = dict(self.actions)
+        if not any(n.synthetic for n in network):
+            for n, route in enumerate(r for r in [*self.fulfills, *self.continues] if r.overrides):
+                actions[(-1, f"route{n}")] = _RawAction(
+                    f"route{n}", route.time, _MOCKED_ROUTE, {"call": route.call}
+                )
+        ordered = sorted(actions.items(), key=lambda item: item[1].time)
         for number, (key, raw) in enumerate(ordered, 1):
             url = self.action_urls.get(key)
             if url is None:
@@ -532,7 +588,9 @@ class _TraceReader:
                 ActionEvent(
                     id=f"act#{number}",
                     ts=self._ts(raw.time),
-                    name=_action_name(raw.method) or OTHER,
+                    name=INJECT
+                    if raw.method == _MOCKED_ROUTE
+                    else _action_name(raw.method) or OTHER,
                     selector=as_str(raw.params.get("selector")),
                     value=_action_value(raw.method, raw.params),
                     url=url,
@@ -545,6 +603,7 @@ class _TraceReader:
     def _build_network(self) -> list[NetworkEvent]:
         timed = [(self._resource_time(entry), entry) for entry in self.resources]
         timed.sort(key=lambda pair: pair[0])
+        rewritten = self._rewritten([entry for _, entry in timed])
         out: list[NetworkEvent] = []
         for time, entry in timed:
             event = network_event(
@@ -557,8 +616,20 @@ class _TraceReader:
             if event is None:
                 self.warnings.append("skipped a network entry without method or URL")
                 continue
+            if id(entry) in rewritten:
+                event = event.model_copy(update={"synthetic": True})
             out.append(event)
         return out
+
+    def _rewritten(self, entries: list[JsonObject]) -> set[int]:
+        """Ids of the entries the agent's ``route.continue`` rewrote. The continued entries
+        (``_wasContinued``) pair, in order, with the ``Route.continue`` calls; when the counts
+        differ, every continued entry counts as rewritten if any call had overrides."""
+        continued = [e for e in entries if e.get("_wasContinued") is True]
+        calls = sorted(self.continues, key=lambda r: r.time)
+        if len(calls) != len(continued):
+            return {id(e) for e in continued} if any(r.overrides for r in calls) else set()
+        return {id(e) for e, r in zip(continued, calls, strict=True) if r.overrides}
 
     def _resource_time(self, entry: JsonObject) -> float:
         assert self.origin is not None
@@ -682,7 +753,9 @@ class _TraceReader:
     def _main_page(self, candidates: set[str]) -> str | None:
         if not candidates:
             return None
-        for key, _ in sorted(self.actions.items(), key=lambda item: item[1].time, reverse=True):
+        for key, raw in sorted(self.actions.items(), key=lambda i: i[1].time, reverse=True):
+            if raw.method in _INJECTED_CODE:
+                continue
             page = self.action_pages.get(key)
             if page in candidates:
                 return page
@@ -750,7 +823,13 @@ def _trace_prefixes(archive: zipfile.ZipFile) -> list[str]:
 
 
 def _action_value(method: str, params: JsonObject) -> str | None:
+    if method in _INJECTED_CODE:
+        api, key = _INJECTED_CODE[method]
+        code = as_str(params.get(key)) or as_str(params.get("url"))
+        return injected(api, code)
     match method:
+        case "Route":
+            return as_str(params.get("call"))
         case "goto":
             return as_str(params.get("url"))
         case "fill":

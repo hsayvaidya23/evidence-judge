@@ -400,3 +400,14 @@ def test_load_run_reports_dropped_har_mutations(tmp_path: Path) -> None:
     assert not any(n.url.endswith("/api/refunds") for n in run.network)
     assert run.metadata["har_only_requests"] == []
     assert any("HAR-only" in w for w in run.metadata["merge_warnings"])
+
+
+def test_attach_har_keeps_a_synthetic_mark_from_either_side() -> None:
+    trace = network_run("trace", "https://a.test/0", "https://a.test/1")
+    har = network_run("har", "https://a.test/0", "https://a.test/1")
+    marked = har.network[0].model_copy(update={"synthetic": True})
+    har = har.model_copy(update={"network": [marked, har.network[1]]})
+
+    merged = attach_har(trace, har)
+
+    assert [n.synthetic for n in merged.network] == [True, False]

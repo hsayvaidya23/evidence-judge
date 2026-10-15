@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-from evidence_judge.core.actions import OTHER, known_action
+from evidence_judge.core.actions import INJECT, OTHER, injected, known_action
 from evidence_judge.core.evidence import (
     ActionEvent,
     Channel,
@@ -25,6 +25,7 @@ from evidence_judge.core.evidence import (
     Screenshot,
     is_web_page_url,
 )
+from evidence_judge.core.provenance import mark_agent_page_navigations
 from evidence_judge.ingest._json import (
     JsonObject,
     as_float,
@@ -39,6 +40,8 @@ SOURCE: Final = "browser-use"
 HISTORY_FILE: Final = "history.json"
 
 _VALUE_KEYS: Final = ("url", "text", "keys", "query", "path")
+_CODE_KEYS: Final = ("code", "script", "expression", "js")
+"""Parameters holding the code of a JavaScript action (browser-use ``evaluate``)."""
 _DONE = "done"
 _REASONING_FIELDS: Final = (
     ("thinking", "Thinking"),
@@ -168,13 +171,20 @@ class _HistoryBuilder:
         ts: float,
         state: JsonObject,
     ) -> None:
+        canonical = known_action(name) or OTHER
+        if canonical == INJECT:
+            value = injected(
+                name, next((v for k in _CODE_KEYS if (v := as_str(params.get(k)))), None)
+            )
+        else:
+            value = next((v for k in _VALUE_KEYS if (v := as_str(params.get(k)))), None)
         self.actions.append(
             ActionEvent(
                 id=f"act#{len(self.actions) + 1}",
                 ts=ts,
-                name=known_action(name) or OTHER,
+                name=canonical,
                 selector=_selector(element, params),
-                value=next((v for k in _VALUE_KEYS if (v := as_str(params.get(k)))), None),
+                value=value,
                 url=as_str(state.get("url")),
                 error=as_str(result.get("error")),
             )
@@ -277,7 +287,7 @@ class _HistoryBuilder:
             metadata["synthetic_timestamps"] = True
         if self.warnings:
             metadata["warnings"] = list(self.warnings)
-        return Run(
+        run = Run(
             run_id=run_id,
             source=SOURCE,
             agent_answer=self.answer,
@@ -289,6 +299,7 @@ class _HistoryBuilder:
             blobs=self.blobs,
             metadata=metadata,
         )
+        return mark_agent_page_navigations(run)
 
     def _final_state(self) -> PageState | None:
         url = as_str(self.last_state.get("url"))

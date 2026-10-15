@@ -153,9 +153,28 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   by a mutation request (`POST`, `PUT`, `PATCH`, `DELETE`) or by the final page: `final`-scope
   `page_text`, `url` or `screenshot`. A click on *Place order* or text seen on some earlier page
   does not prove the order went through.
+- **Evidence the agent made in the browser.** An agent that runs its own code in the page
+  (`page.evaluate`, `$eval`, `wait_for_function`, `add_init_script`, `add_script_tag`,
+  `add_style_tag`, `set_content`, `expose_binding`; browser-use's `evaluate`) can write any text
+  and push any URL; one whose route handler answers a request (`route.fulfill`) or rewrites it
+  (`route.continue` with a new URL, method, headers or body) makes the response, or the request
+  the site got, its own. Ingesters record the first as an `inject` action (its value is the API
+  and the code, cut to 200 characters) and mark the second `synthetic`. Everything from the first
+  of them on is set aside: page states, screenshots and requests from then on, and the page URLs
+  of later actions. A predicate that only holds on what was set aside cannot support a claim,
+  and the reason names the call (`evaluate(document.querySelector('#stock').textContent = 'In
+  stock') (act#3)`). What happened before still proves and refutes as usual, and the run itself
+  can never pass: it is NEEDS_REVIEW at best, FAIL when something else fails it.
+- **Links on a page the agent wrote.** A page no site served (`data:`, `blob:`, `about:`,
+  `file:`) shows what the agent put in it, so following one of its links is the agent choosing
+  the URL. Ingesters record such a navigation as a `goto` of the link's target (id
+  `<action>.goto`, just before the action), so its path and query are agent input, as if typed:
+  `/orders/A77` reached through `data:text/html,<a href=https://shop.test/orders/A77>` proves
+  no visit to an order the agent found.
 
 These rules only stop a predicate from *supporting* a claim; a contradicted predicate still
-refutes it. The first two apply to a task spec's `expect` entries as well (every predicate there
+refutes it. The baseline, echo and agent-made-evidence rules apply to a task spec's `expect`
+entries as well (every predicate there
 is checked against the baseline, as for an outcome claim): such a predicate leaves the entry
 unknown (`met: null`, *predicate cannot prove an expectation*), so the run goes to review.
 `forbid` entries and `constraints` read the evidence as recorded. Evidence must also come from the site itself; see

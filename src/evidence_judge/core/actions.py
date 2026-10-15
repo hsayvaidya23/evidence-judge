@@ -15,6 +15,9 @@ CHECK: Final = "check"
 UNCHECK: Final = "uncheck"
 HOVER: Final = "hover"
 UPLOAD: Final = "upload"
+INJECT: Final = "inject"
+"""The agent ran its own code in the page or replaced its content: what the page shows after
+it is the agent's, not the site's."""
 OTHER: Final = "other"
 
 _SPELLINGS: Final[dict[str, tuple[str, ...]]] = {
@@ -43,6 +46,25 @@ _SPELLINGS: Final[dict[str, tuple[str, ...]]] = {
     UNCHECK: ("uncheck",),
     HOVER: ("hover",),
     UPLOAD: ("upload", "setInputFiles", "upload_file"),
+    INJECT: (
+        "inject",
+        "evaluate",
+        "evaluateHandle",
+        "evaluateExpression",
+        "evaluateExpressionHandle",
+        "evalOnSelector",
+        "evalOnSelectorAll",
+        "waitForFunction",
+        "addInitScript",
+        "addScriptTag",
+        "addStyleTag",
+        "setContent",
+        "exposeBinding",
+        "exposeFunction",
+        "execute_javascript",
+        "execute_js",
+        "run_javascript",
+    ),
 }
 
 
@@ -68,3 +90,16 @@ def canonical_action(name: str) -> str:
     """The canonical name of `name`; an unknown name is only normalised."""
     key = _key(name)
     return ACTION_NAMES.get(key, key)
+
+
+MAX_INJECTED_CHARS: Final = 200
+"""Longest piece of injected code kept on an INJECT action's value."""
+
+
+def injected(api: str, code: str | None) -> str:
+    """An INJECT action's value: the API the agent called and its code, cut to
+    MAX_INJECTED_CHARS (`evaluate(document.title = 'x')`)."""
+    text = " ".join((code or "").split())
+    if len(text) > MAX_INJECTED_CHARS:
+        text = text[: MAX_INJECTED_CHARS - 1] + "…"
+    return f"{api}({text})"

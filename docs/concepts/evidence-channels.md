@@ -30,6 +30,13 @@ history lacks.
 
 Check what a recording holds with `evidence-judge inspect` before judging it.
 
+Only a trace and a browser-use history show whether the agent made evidence itself: a trace
+records code it ran in the page (`evaluate`, `add_init_script`, `set_content`, ...) as `inject`
+actions and marks responses its route handler supplied (`route.fulfill`) or requests it rewrote
+(`route.continue` with overrides) as `synthetic`; a browser-use history records its `evaluate`
+action. A HAR alone shows neither, so a HAR-only run cannot reveal it. See
+[evidence that proves nothing](claims-and-predicates.md#evidence-that-proves-nothing).
+
 ### Page text and the final page
 
 Snapshot and final-state text is what the page itself shows. Text typed into `<input>` and
@@ -38,7 +45,8 @@ search box holding "Order #1042 confirmed" is not the page confirming the order.
 and the selected `<option>` are kept. The number of values left out is in the trace's
 `metadata["form_values_excluded"]`.
 
-`final_state` comes from the **main page**: the tab of the agent's last action, or the first tab
+`final_state` comes from the **main page**: the tab of the agent's last action (other than code it
+ran in a page), or the first tab
 opened when no action can be placed on one. Tabs opened after the last action (popups, ads) do
 not count, and neither do `about:blank`, `data:`, `blob:`, `devtools:` or other browser-internal
 pages: the final state is the last snapshot of the main page that a site served, with that tab's

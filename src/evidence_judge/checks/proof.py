@@ -1,8 +1,9 @@
 """Guards on evidence that proves something: a claim or an `expect` entry.
 
-A predicate that is supported on the run can still prove nothing about what the agent did: the
-run already met it before the agent acted (the baseline), or it only holds where a page, a URL
-or a response echoes the agent's own input. Claims and `expect` entries share these guards;
+A predicate that is supported on the run can still prove nothing about what the agent did: it
+only holds on evidence from after the agent ran its own code in the page or mocked a response
+(core.provenance), the run already met it before the agent acted (the baseline), or it only
+holds where a page, a URL or a response echoes the agent's own input. Claims and `expect` entries share these guards;
 `forbid` entries and constraints do not use them, since masking or a baseline could hide a real
 violation.
 """
@@ -24,6 +25,7 @@ from evidence_judge.core.predicates import (
     UrlPredicate,
     ValuePredicate,
 )
+from evidence_judge.core.provenance import tampering
 from evidence_judge.core.verdict import PredicateResult, Support
 from evidence_judge.textnorm import normalize
 
@@ -99,6 +101,21 @@ def _cited_inputs(inputs: tuple[str, ...], supported: PredicateResult) -> tuple[
     return tuple(i for i in inputs if i in cited) or inputs
 
 
+async def tampered(
+    predicate: Predicate, ctx: CheckContext, registry: CheckerRegistry
+) -> str | None:
+    """Why `predicate`, supported on the evidence, only holds on evidence the agent made: after
+    it ran code in the page or its route handler answered a request (core.provenance), or None.
+    The predicate is evaluated again on the evidence from before that; if it no longer holds,
+    the agent's own code or responses supported it."""
+    why = tampering(ctx.index.run)
+    if why is None:
+        return None
+    if (await registry.evaluate(predicate, ctx.untampered())).status is Support.SUPPORTED:
+        return None
+    return f"it holds only on evidence the agent made itself ({why}), so it proves nothing"
+
+
 def _anywhere(predicate: Predicate) -> Predicate:
     """`predicate` read on every page before the agent acted, not only the last one: a page the
     agent opened first and comes back to at the end was on screen before it did anything."""
@@ -120,8 +137,11 @@ async def unproving(
     check_start: bool = True,
 ) -> str | None:
     """Why `predicate`, `supported` on the evidence, still proves nothing in this run, or None:
-    with `check_start`, a deterministic predicate the run met before the agent acted; and a
+    a predicate that only holds on evidence the agent made (`tampered`); with `check_start`, a
+    deterministic predicate the run met before the agent acted; and a
     predicate that only holds on an echo of the agent's own input."""
+    if (reason := await tampered(predicate, ctx, registry)) is not None:
+        return reason
     if check_start and registry.is_deterministic(predicate):
         before = await registry.evaluate(_anywhere(predicate), ctx.at_start())
         if before.status is Support.SUPPORTED:

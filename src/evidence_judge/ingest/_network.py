@@ -83,7 +83,9 @@ def network_event(
     max_body_chars: int,
     body_source: BodySource,
 ) -> NetworkEvent | None:
-    """Build a NetworkEvent from a HAR entry, or None if it has no method or URL."""
+    """Build a NetworkEvent from a HAR entry, or None if it has no method or URL. An entry
+    Playwright marks ``_wasFulfilled`` was answered by the agent's route handler, so its event
+    is ``synthetic``."""
     request = as_object(entry.get("request"))
     response = as_object(entry.get("response"))
     method = as_str(request.get("method"))
@@ -110,6 +112,7 @@ def network_event(
         else None,
         mime_type=response_mime,
         failed=failed,
+        synthetic=entry.get("_wasFulfilled") is True,
     )
 
 

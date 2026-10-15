@@ -18,6 +18,10 @@ Weak contradictions (0.6) never fail a run, however many there are.
 <li markdown="block">
 <span class="ej-badge ej-badge--review">NEEDS REVIEW</span> **Anything is uncertain:**
 
+- the agent ran its own code in the page or its route handler answered or rewrote a request
+  (an `inject` action or a `synthetic` request), so what the run shows from then on is not the
+  site's alone; see
+  [evidence that proves nothing](claims-and-predicates.md#evidence-that-proves-nothing);
 - any other claim is contradicted: a non-key claim, or a key claim refuted only weakly (by
   point-in-time snapshots, a vision model, or conflicting evidence);
 - the side-effects dimension has findings: successful mutations the spec does not explain, or
@@ -74,6 +78,14 @@ Real summaries from the demo runs:
 
     ```text
     NEEDS_REVIEW: only 0% of the agent's answer became checkable claims (review threshold 60%).
+    ```
+
+=== "Rule 3: injected"
+
+    ```text
+    NEEDS_REVIEW: the agent ran its own code in the page: evaluate(document.getElementById('stock')
+    .textContent = 'In stock') (act#3); evidence from then on is not the site's, so the run
+    cannot pass.
     ```
 
 === "Rule 3: no site"
