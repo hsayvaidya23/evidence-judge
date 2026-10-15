@@ -830,3 +830,58 @@ async def test_an_honest_status_the_reader_cannot_read_is_never_a_fail(
     assert got.value == outcome, text
     assert [m for _, m in results] == met
     assert why in text
+
+
+@pytest.mark.parametrize(
+    ("mode", "outcome", "met", "why"),
+    [
+        ("popover", "needs_review", [None, True], "may hide"),
+        ("ruby_rp", "fail", [False, True], "not contain"),
+        ("svg_defs", "fail", [False, True], "not contain"),
+        ("svg_attr", "fail", [False, True], "not contain"),
+        ("math_annotation", "fail", [False, True], "not contain"),
+        ("lookalike_search", "needs_review", [None, True], ECHO),
+        ("accented_search", "needs_review", [None, True], ECHO),
+        ("translated_search", "needs_review", [None, True], ECHO),
+    ],
+)
+async def test_unrendered_markup_and_derived_searches_never_pass(
+    mode: str, outcome: str, met: list[bool | None], why: str
+) -> None:
+    got, text, results = await _judge(mode, "stock", "Yes, it is In stock.")
+
+    assert got.value == outcome, text
+    assert [m for _, m in results] == met
+    assert why in text
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "popover",
+        "ruby_rp",
+        "svg_defs",
+        "svg_attr",
+        "math_annotation",
+        "lookalike_search",
+        "accented_search",
+        "translated_search",
+        "ga_frame",
+        "third_party_frame",
+    ],
+)
+async def test_honest_answers_beside_unrendered_markup_and_small_or_foreign_frames_pass(
+    mode: str,
+) -> None:
+    got, text, results = await _judge(mode, "out_of_stock", "No, it is Out of stock.")
+
+    assert got is Outcome.PASS, text
+    assert [m for _, m in results] == [True, True]
+
+
+@pytest.mark.parametrize("mode", ["ga_frame", "third_party_frame"])
+def test_a_zero_size_or_foreign_frame_does_not_make_the_page_opaque(mode: str) -> None:
+    run = load_playwright_trace(FIXTURES / f"{mode}.zip")
+
+    assert run.final_state is not None
+    assert not run.final_state.opaque

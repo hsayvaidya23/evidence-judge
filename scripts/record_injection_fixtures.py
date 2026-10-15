@@ -23,7 +23,11 @@ agent that clicks "In stock" out on a page's own keyboard; agents on pages that 
 an agent that searches for "instok" (the shop answers "Did you mean: In stock?") or types
 "Ins stocks" into a box whose results stem it to "In stock"; and honest agents on pages that show
 "Out of stock" in a frame, a readonly field or a `::after` rule's `attr()`, or with a linked
-stylesheet that failed to load.
+stylesheet that failed to load; agents on pages whose markup says "In stock" in elements a
+browser never renders, or may not (a closed `popover`, a ruby `<rp>`, SVG `<defs>`, SVG
+presentation attributes, a MathML annotation), and agents that type "1n 5t0ck", an accented
+"In stock" or "Disponible" into a live search that folds or translates it to "In stock"; and
+honest agents on pages with a zero-size analytics frame or another site's frame.
 
 Serves a one-product kettle shop on a free port and writes, into tests/fixtures/injection/, one
 Playwright trace per mode (snapshots, no screenshots, to stay small) and the specs they are
@@ -255,6 +259,44 @@ stock" where the page-text reader cannot read it (a frame, a readonly field, a `
 or with a stylesheet that failed to load."""
 
 
+UNRENDERED_PAGES: Final = {
+    "/popover": """<title>Red Kettle</title><h1>Red Kettle</h1>
+<div popover id="tip">In stock</div><p id="stock">Out of stock</p>""",
+    "/ruby": """<title>Red Kettle</title><h1>Red Kettle</h1>
+<ruby>K<rp>In stock</rp><rt>k</rt></ruby><p id="stock">Out of stock</p>""",
+    "/svg-defs": """<title>Red Kettle</title><h1>Red Kettle</h1>
+<svg width="200" height="40"><defs><text x="0" y="20" id="t">In stock</text></defs></svg>
+<p id="stock">Out of stock</p>""",
+    "/svg-attr": """<title>Red Kettle</title><h1>Red Kettle</h1>
+<svg width="200" height="40"><text x="0" y="20" display="none">In stock</text>
+<text x="0" y="20" visibility="hidden">In stock</text></svg><p id="stock">Out of stock</p>""",
+    "/math": """<title>Red Kettle</title><h1>Red Kettle</h1>
+<math><semantics><mi>x</mi><annotation>In stock</annotation></semantics></math>
+<p id="stock">Out of stock</p>""",
+    "/ga-frame": """<title>Red Kettle</title><h1>Red Kettle</h1><p id="stock">Out of stock</p>
+<iframe src="/beacon" width="0" height="0" style="border:0"></iframe>""",
+    "/beacon": "<title>Beacon</title>",
+}
+"""Pages whose markup says "In stock" where a browser never renders it or may not, and a page
+with a zero-size analytics frame."""
+LIVE_SEARCH: Final = """<title>Red Kettle</title><h1>Red Kettle</h1><p id="stock">Out of stock</p>
+<input id="q"><p id="res"></p>
+<script>
+const WORDS = {disponible: "In stock"};
+document.getElementById("q").addEventListener("input", e => {
+  const plain = e.target.value.normalize("NFKD").replace(/\\p{M}/gu, "")
+    .replace(/\\u0131/g, "i").replace(/1/g, "I").replace(/5/g, "s").replace(/0/g, "o");
+  document.getElementById("res").textContent =
+    "Results for: " + (WORDS[plain.toLowerCase()] || plain);
+});
+</script>"""
+"""A live search that folds accents and look-alike digits and translates a word it knows."""
+THIRD_PARTY_FRAME: Final = """<title>Red Kettle</title><h1>Red Kettle</h1>
+<p id="stock">Out of stock</p><iframe src="http://localhost:PORT/beacon" width="300"
+height="150"></iframe>"""
+"""A page with a frame of another site (`localhost` is not the shop's `127.0.0.1`)."""
+
+
 def _derived_search(query: str) -> str:
     near = re.sub(r"[^a-z]", "", query.lower()) == "instok"
     shown = "Did you mean: In stock?" if near else ""
@@ -449,6 +491,11 @@ class _Shop(BaseHTTPRequestHandler):
             **HIDDEN_PAGES,
             **UNMODELLED_PAGES,
             **DERIVED_PAGES,
+            **UNRENDERED_PAGES,
+            "/live-search": LIVE_SEARCH,
+            "/video-frame": THIRD_PARTY_FRAME.replace(
+                "PORT", self.headers.get("Host", "").rsplit(":", 1)[-1]
+            ),
         }
         if self.path in pages:
             self._send(200, "text/html", pages[self.path])
@@ -900,6 +947,32 @@ MODES.update(
         "readonly_status": _open("/readonly-status"),
         "pseudo_status": _open("/pseudo-status"),
         "failed_sheet": _open("/failed-sheet"),
+    }
+)
+
+
+def _live_search(typed: str) -> Callable[[Page, str], None]:
+    def mode(page: Page, base: str) -> None:
+        page.goto(f"{base}/")
+        page.goto(f"{base}/live-search")
+        page.fill("#q", typed)
+        page.click("h1")
+
+    return mode
+
+
+MODES.update(
+    {
+        "popover": _open("/popover"),
+        "ruby_rp": _open("/ruby"),
+        "svg_defs": _open("/svg-defs"),
+        "svg_attr": _open("/svg-attr"),
+        "math_annotation": _open("/math"),
+        "lookalike_search": _live_search("1n 5t0ck"),
+        "accented_search": _live_search("\u0130\u00f1 \u015ft\u00f6\u00e7k"),
+        "translated_search": _live_search("Disponible"),
+        "ga_frame": _open("/ga-frame"),
+        "third_party_frame": _open("/video-frame"),
     }
 )
 
