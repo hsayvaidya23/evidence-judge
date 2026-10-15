@@ -94,21 +94,22 @@ def _redirected(landing: str, *, status: int = 200, location: str | None = None)
             200,
             "POST /api/orders → 302 meets every other criterion of a POST request whose URL "
             "contains '/api/orders' with a 2xx or 3xx status, but it was answered 302 and led to "
-            "GET /cart?error=card_declined → 200, whose URL marks a failure",
+            "GET /cart?error=card_declined → 200, whose URL marks a failure ('error')",
         ),
         (
             "/checkout/failed",
             200,
             "POST /api/orders → 302 meets every other criterion of a POST request whose URL "
             "contains '/api/orders' with a 2xx or 3xx status, but it was answered 302 and led to "
-            "GET /checkout/failed → 200, whose URL marks a failure",
+            "GET /checkout/failed → 200, whose URL marks a failure ('failed')",
         ),
         (
             "/checkout",
             200,
             "POST /api/orders → 302 meets every other criterion of a POST request whose URL "
             "contains '/api/orders' with a 2xx or 3xx status, but it was answered 302 and led to "
-            "GET /checkout → 200, back to the page it was sent from",
+            "GET /checkout → 200, back to the page it was sent from, and what that page showed was "
+            "not recorded",
         ),
         (
             "/order/A1",

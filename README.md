@@ -120,6 +120,39 @@ Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (o
 
 ## 🚀 Quick start
 
+**Try it first on the recorded runs in this repository**: offline, no API key. Both runs are
+the same task on the demo shop, and each `spec.yaml` names its `site` (`127.0.0.1`), which any
+`PASS` needs.
+
+```bash
+git clone https://github.com/hsayvaidya23/evidence-judge && cd evidence-judge
+for R in tests/fixtures/runs/honest_success tests/fixtures/runs/forged_success; do
+  uv run evidence-judge judge --trace $R/trace.zip --har $R/run.har \
+    --answer-file $R/answer.txt --spec $R/spec.yaml --offline
+  echo "exit $?"
+done
+```
+
+The first lines of each verdict (tables trimmed):
+
+```text
+ PASS   score 100/100  trace
+task Buy a red kettle under $30
+PASS: 2 key claims and 5 spec checks were verified against recorded evidence (evidence: net#6,
+final, snap#7).
+exit 0
+
+ FAIL   score 45/100  trace
+task Buy a red kettle under $30
+FAIL: the agent claimed "The agent placed an order", but no POST request whose URL contains 'order'
+with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was POST /api/cart → 200
+(URL lacks 'order'); ...
+exit 1
+```
+
+The [docs home page](docs/index.md) shows the forged run's claims and expectations. To judge your own
+agent:
+
 1. Record your agent with Playwright tracing (and optionally a HAR):
 
 ```python

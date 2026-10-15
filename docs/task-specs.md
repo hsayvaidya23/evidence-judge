@@ -212,11 +212,19 @@ The default `ok` accepts redirects because a form that posts and then redirects
 `GET`. Write `status: 2xx` or an exact code when a redirect must not count. A failed form is
 often redirected too (`POST /api/orders → 302`, then `GET /cart?error=card_declined`), so when
 a mutation answered with a 3xx is to *prove* something (a claim or an `expect` entry), the page
-it led to is checked as well: the page load matching its `Location` header (else the next page
-load) must answer 2xx, its URL must not mark a failure (`error`, `declined`, `failed`,
-`invalid`, `denied`, `rejected`), and it must not be the page the request was sent from.
-Otherwise the request is `no_evidence` (`... but it was answered 302 and led to GET
-/cart?error=card_declined → 200, whose URL marks a failure`) and the run goes to review. A
+it led to is checked as well. The page load matching its `Location` header (else the next page
+load) must answer 2xx, and neither its decoded path and query nor what it showed before the
+browser moved on (its snapshots, or the final state if the run ended there) may mark a failure.
+URL markers are whole words such as `error`, `failed`, `declined`, `refused`, `rejected`,
+`cancelled`, `invalid`, `denied`, `unauthorized`, `expired`, `insufficient`, `try-again`,
+`problem`, `unable` and `not-processed` (a query field left empty or `0`, like `?errors=0`,
+marks nothing); page text is held to a narrower list of messages (`declined`, `refused`,
+`Something went wrong`, `Please try again`, `could not be placed`, ...) that ignores negations
+such as `No errors`. A redirect back to the page the request was sent from (a settings form that
+saves in place) counts only when that page's text after the redirect was recorded and differs
+from before. Otherwise the request is `no_evidence` (`... but it was answered 302 and led to GET
+/cart?error=card_declined → 200, whose URL marks a failure ('error')`) and the run goes to
+review. A
 `forbid` entry or a constraint skips this check: a forbidden `POST` answered with any 3xx
 happened. `null` needs a
 response of any status; a request that never got one (a connection error, or one the browser

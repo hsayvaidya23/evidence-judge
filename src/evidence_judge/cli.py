@@ -273,6 +273,35 @@ def _warn_about_model(
         )
 
 
+def _redact_for_judging(
+    err: Console | None,
+    settings: Settings,
+    run: Run,
+    spec: TaskSpec | None,
+    claims: ClaimSet | None,
+    *,
+    redact: bool,
+    persistent: bool,
+) -> tuple[Run, TaskSpec | None, ClaimSet | None]:
+    """Redact the inputs unless disabled, telling `err` (None when quiet) what happened."""
+    if not redact:
+        if err is not None:
+            err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
+        return run, spec, claims
+    redactor = _redactor(settings, persistent=persistent)
+    run, spec, claims, report = _redact_inputs(redactor, run, spec, claims)
+    if err is not None:
+        err.print(Text(_describe(report), style="dim"))
+    return run, spec, claims
+
+
+def _write_reports(verdict: RunVerdict, run: Run, *, out: Path | None, html: Path | None) -> None:
+    if out:
+        _write_output(out, lambda p: write_json(verdict, p))
+    if html:
+        _write_output(html, lambda p: write_html(verdict, run, p))
+
+
 def _print_written(err: Console, outputs: tuple[tuple[str, Path | None], ...]) -> None:
     for label, path in outputs:
         if path:
@@ -328,7 +357,13 @@ def judge(
     spec: Annotated[Path | None, typer.Option(help="Task spec YAML", **_IN_FILE)] = None,
     site: Annotated[
         str | None,
-        typer.Option(help="Site the task is on (URL or host); overrides the spec's site"),
+        typer.Option(
+            help=(
+                "Site the task is on, as a URL or host (a port, when given, must match); "
+                "overrides the spec's site. A PASS needs a named site, from this flag or the "
+                "spec's site. Subdomains are not included unless listed in allowed_hosts"
+            )
+        ),
     ] = None,
     claims: Annotated[
         Path | None, typer.Option(help="Pre-extracted ClaimSet JSON", **_IN_FILE)
@@ -380,13 +415,15 @@ def judge(
         )
 
         llm = None if offline else _build_llm(settings)
-        if settings.redact and not no_redact:
-            redactor = _redactor(settings, persistent=llm is not None)
-            run, task_spec, claim_set, report = _redact_inputs(redactor, run, task_spec, claim_set)
-            if not quiet:
-                err.print(Text(_describe(report), style="dim"))
-        elif not quiet:
-            err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
+        run, task_spec, claim_set = _redact_for_judging(
+            err if not quiet else None,
+            settings,
+            run,
+            task_spec,
+            claim_set,
+            redact=settings.redact and not no_redact,
+            persistent=llm is not None,
+        )
         if not quiet:
             _warn_about_model(err, settings, llm, offline=offline)
         verdict = _run_judge(
@@ -399,10 +436,7 @@ def judge(
             site=site_name,
         )
 
-        if out:
-            _write_output(out, lambda p: write_json(verdict, p))
-        if html:
-            _write_output(html, lambda p: write_html(verdict, run, p))
+        _write_reports(verdict, run, out=out, html=html)
         export_warnings = exporters.export(verdict, otel=otel, langfuse_trace_id=langfuse_trace_id)
     except CliError as e:
         raise _fail(e) from None
