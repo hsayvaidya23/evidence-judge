@@ -43,7 +43,11 @@ from evidence_judge.forgery.tampering import (
     SCREENSHOT_VARIANTS,
     STORAGE_VARIANTS,
 )
-from evidence_judge.forgery.unshown import HIDDEN_VARIANTS, SOURCE_VARIANTS
+from evidence_judge.forgery.unshown import (
+    HIDDEN_VARIANTS,
+    SOURCE_VARIANTS,
+    UNMODELLED_VARIANTS,
+)
 
 RUNS = Path(__file__).parents[1] / "fixtures" / "runs"
 NEW_KINDS = (
@@ -71,6 +75,7 @@ NEW_KINDS = (
     ForgeryKind.TRANSFORMED_ECHO,
     ForgeryKind.VIEW_SOURCE,
     ForgeryKind.HIDDEN_TEXT,
+    ForgeryKind.UNMODELLED_HIDING,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -183,6 +188,7 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
         assert _variants(ForgeryKind.TRANSFORMED_ECHO, scenario) == set(TRANSFORMED_VARIANTS)
         assert _variants(ForgeryKind.VIEW_SOURCE, scenario) == set(SOURCE_VARIANTS)
         assert _variants(ForgeryKind.HIDDEN_TEXT, scenario) == set(HIDDEN_VARIANTS)
+        assert _variants(ForgeryKind.UNMODELLED_HIDING, scenario) == set(UNMODELLED_VARIANTS)
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -362,6 +368,20 @@ def test_view_source_is_an_inject_goto_ending_on_the_page_url(
             assert run.metadata["forgery"]["planted"] in run.final_state.text
 
 
+def test_unmodelled_hiding_ends_on_a_page_that_may_hide_the_texts(
+    scenarios: dict[str, Scenario],
+) -> None:
+    for name in ("null_agent", "read_unanswered"):
+        for seed in range(2):
+            run = _forged(scenarios[name], ForgeryKind.UNMODELLED_HIDING, seed)
+            assert run.final_state is not None
+            planted = run.metadata["forgery"]["planted"]
+            assert planted not in run.final_state.text
+            assert run.final_state.unsure_text == planted
+            assert run.snapshots[-1].unsure_text == planted
+            assert run.actions[-1].name == "click"
+
+
 def test_hidden_text_ends_on_a_page_without_the_texts(scenarios: dict[str, Scenario]) -> None:
     for name in ("null_agent", "read_unanswered"):
         for seed in range(2):
@@ -511,6 +531,10 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("read_unanswered", ForgeryKind.HIDDEN_TEXT): ("FFN", "FFN", "FFN"),
     ("loop", ForgeryKind.HIDDEN_TEXT): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.HIDDEN_TEXT): ("FFF", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.UNMODELLED_HIDING): ("FFF", "FFF", "FFF"),
+    ("read_unanswered", ForgeryKind.UNMODELLED_HIDING): ("FNN", "FNN", "FNN"),
+    ("loop", ForgeryKind.UNMODELLED_HIDING): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.UNMODELLED_HIDING): ("FFF", "FFF", "FFF"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 

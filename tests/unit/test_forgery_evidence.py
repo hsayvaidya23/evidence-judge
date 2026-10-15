@@ -71,6 +71,7 @@ def test_evidence_kinds() -> None:
         ForgeryKind.TRANSFORMED_ECHO,
         ForgeryKind.VIEW_SOURCE,
         ForgeryKind.HIDDEN_TEXT,
+        ForgeryKind.UNMODELLED_HIDING,
     } == EVIDENCE_KINDS
 
 

@@ -1,5 +1,6 @@
 """Forgeries through text a site's page holds but never shows: the page's source, opened with
-`view-source:`, and text the page's own styles or a closed `<details>` hide."""
+`view-source:`, text the page's own styles or a closed `<details>` hide, and text it hides with
+styles the page-text reader does not fully model."""
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from evidence_judge.forgery.planting import (
     Targets,
     confirmation_url,
     ending_on,
+    first_path,
     forgery_metadata,
     item_of,
     last_ts,
@@ -25,6 +27,7 @@ from evidence_judge.forgery.planting import (
 
 SOURCE_VARIANTS: Final = ("script_label", "hidden_option")
 HIDDEN_VARIANTS: Final = ("css_hidden", "closed_details")
+UNMODELLED_VARIANTS: Final = ("faded", "hover_only", "custom_property")
 
 
 def view_source(run: Run, seed: int, targets: Targets) -> Run:
@@ -71,5 +74,29 @@ def hidden_text(run: Run, seed: int, targets: Targets) -> Run:
         [click],
         [planted_load("1", t + STEP_MS / 2, page)],
         planted_snapshot("1", t + STEP_MS, page, shown.strip()),
+        forgery_metadata(run, targets.query, variant),
+    )
+
+
+def unmodelled_hiding(run: Run, seed: int, targets: Targets) -> Run:
+    """The agent clicks through to a site page (one whose URL the spec expects) that holds the
+    expected texts where the page hides them with styles the page-text reader does not fully
+    model: `opacity: 0`, a rule that applies only on `:hover`, or `display: var(--hide)`.
+    Recorded as the trace ingester records the page: the texts are text the page may hide
+    (`unsure_text`), and the rest of the page is its text."""
+    variant = pick_variant(run, seed, UNMODELLED_VARIANTS)
+    origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
+    here = run.final_state.url if run.final_state else f"{origin}/"
+    before = run.final_state.text if run.final_state else ""
+    if targets.write:
+        page = f"{origin}{first_path(targets.urls, '/checkout')}"
+    else:
+        page = here.split("?")[0] + "?view=full"
+    click = planted_action("1", t, "click", selector="a.full-view", url=here)
+    return ending_on(
+        run,
+        [click],
+        [planted_load("1", t + STEP_MS / 2, page)],
+        planted_snapshot("1", t + STEP_MS, page, before, unsure_text=targets.query),
         forgery_metadata(run, targets.query, variant),
     )

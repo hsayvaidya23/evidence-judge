@@ -220,7 +220,8 @@ the names exported from `evidence_judge`) is defined under
   no `<slot>` shows are hidden, and a page with an empty custom element (which may hold a closed
   shadow root) cannot prove text absent (`PageSnapshot.opaque`). Honest pages a stylesheet
   layer, `@supports not`, `@import`, `[hidden]` override or shadow root showed text on no longer
-  FAIL; text hidden by styles the reader does not model no longer PASSes.
+  FAIL; text hidden by styles the reader does not model no longer PASSes. The benchmark forges
+  it as `unmodelled_hiding`.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
