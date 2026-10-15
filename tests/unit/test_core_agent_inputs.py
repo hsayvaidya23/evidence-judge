@@ -50,6 +50,35 @@ def test_goto_paths_and_queries_and_get_queries_are_inputs() -> None:
     assert inputs == ("order a77 confirmed", "payment=success", "receipt", "orders", "a 77")
 
 
+def test_reopening_a_url_the_site_sent_the_browser_to_is_not_input() -> None:
+    redirect = net(2, "POST", "/api/orders", 303).model_copy(
+        update={"response_headers": {"Location": "/order/Shipped-A77"}}
+    )
+    actions = [
+        act(1, "click", "#buy"),
+        act(3, "click", "#details"),
+        act(4, "goto", url=f"{HOST}/order/Shipped-A77#top"),
+        act(5, "goto", url=f"{HOST}/track/Linked-B12"),
+    ]
+    network = [redirect, net(3, "GET", "/track/Linked-B12")]
+    assert _inputs(actions=actions, network=network) == ()
+
+
+def test_a_url_the_agent_opened_first_stays_input_when_the_site_serves_it_later() -> None:
+    actions = [act(1, "goto", url=f"{HOST}/search/Order-A77-confirmed")]
+    network = [
+        net(2, "GET", "/search/Order-A77-confirmed"),
+        net(3, "GET", "/search/Order-A77-confirmed"),
+    ]
+    assert _inputs(actions=actions, network=network) == ("order-a77-confirmed", "search")
+
+
+def test_a_load_that_answers_the_goto_itself_does_not_make_its_url_site_served() -> None:
+    actions = [act(1, "click", "#menu"), act(3, "goto", url=f"{HOST}/orders/A77-confirmed")]
+    network = [net(2, "GET", "/orders/A77-confirmed")]
+    assert _inputs(actions=actions, network=network) == ("a77-confirmed", "orders")
+
+
 def test_pressed_text_is_input_but_key_names_and_chords_are_not() -> None:
     keys = ["Enter", "Control+A", "Shift+Tab", "Control+Shift+T", "ArrowDown ArrowDown Enter"]
     actions = [

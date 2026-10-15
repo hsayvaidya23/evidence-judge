@@ -8,7 +8,16 @@ from collections.abc import Iterable, Iterator
 from functools import cached_property
 from pathlib import PureWindowsPath
 from typing import Final
-from urllib.parse import parse_qsl, quote, quote_plus, unquote, unquote_plus, urlsplit, urlunsplit
+from urllib.parse import (
+    parse_qsl,
+    quote,
+    quote_plus,
+    unquote,
+    unquote_plus,
+    urljoin,
+    urlsplit,
+    urlunsplit,
+)
 
 from evidence_judge.core.actions import FILL, GOTO, PRESS, UPLOAD, canonical_action
 from evidence_judge.core.evidence import (
@@ -233,9 +242,12 @@ class EvidenceIndex:
 
 
 def _raw_inputs(run: Run) -> Iterator[str]:
+    served = _site_served(run)
     keys: list[str] = []
     target: str | None = None
+    last = -math.inf
     for action in run.actions:
+        before, last = last, action.ts
         name = canonical_action(action.name)
         if name == PRESS and action.value is not None and len(action.value) == 1:
             if keys and action.selector != target:
@@ -253,13 +265,36 @@ def _raw_inputs(run: Run) -> Iterator[str]:
             yield action.value
         elif name == UPLOAD and action.value:
             yield from _file_names(action.value)
-        elif name == GOTO and (url := action.value or action.url):
+        elif (
+            name == GOTO
+            and (url := action.value or action.url)
+            and served.get(_page_key(url), math.inf) >= before
+        ):
             yield from _url_inputs(url, with_path=True)
     if keys:
         yield "".join(keys)
     for event in run.network:
         if event.method.upper() == "GET":
             yield from _url_inputs(event.url, with_path=False)
+
+
+def _site_served(run: Run) -> dict[str, float]:
+    """When the browser first loaded each URL, or was redirected to it (Location)."""
+    served: dict[str, float] = {}
+    for event in run.network:
+        keys = [_page_key(event.url)] if event.method.upper() == "GET" else []
+        keys += [
+            _page_key(urljoin(event.url, value))
+            for name, value in event.response_headers.items()
+            if name.lower() == "location"
+        ]
+        for key in keys:
+            served[key] = min(served.get(key, math.inf), event.ts)
+    return served
+
+
+def _page_key(url: str) -> str:
+    return urlunsplit(urlsplit(url)._replace(fragment=""))
 
 
 def _rendered(text: str) -> tuple[str, ...]:

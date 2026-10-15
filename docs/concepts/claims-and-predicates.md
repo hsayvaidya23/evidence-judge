@@ -112,7 +112,10 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   existing. The agent's input is every typed value (`fill`, `type`, `insert_text`), each run of
   single-key `press` actions on one target, the path segments and query values of every URL it
   opened with a `goto`, and the query values of every `GET` request (a submitted search form,
-  or a navigation a HAR-only run cannot attribute), decoded and normalised like page text;
+  or a navigation a HAR-only run cannot attribute), decoded and normalised like page text. A
+  `goto` back to a URL the site had already loaded or redirected to before the agent's previous
+  action (re-opening `/order/A1` after checkout redirected there) adds no path input, because
+  the site chose that URL;
   inputs shorter than three characters or without a letter or digit are ignored. A `page_text`,
   `url` or `value` (`page_regex`) predicate is evaluated again with every occurrence of every
   input masked out of page text and URLs; if it no longer holds, it cannot support the claim.
