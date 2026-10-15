@@ -17,7 +17,7 @@ import ipaddress
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from publicsuffixlist import PublicSuffixList
 
@@ -66,46 +66,9 @@ class Site:
         invalid = InvalidSiteError(f"{what} {value!r} is not an http(s) URL or a host name")
         if not text or any(c.isspace() for c in text):
             raise invalid
-        is_wildcard = "://" not in text and text.startswith(WILDCARD)
-        if is_wildcard:
-            if not wildcard:
-                raise InvalidSiteError(
-                    f"{what} {value!r} cannot be a wildcard; list the subdomains the task uses "
-                    "in allowed_hosts (a wildcard such as '*.shop.test' is allowed there)"
-                )
-            text = text.removeprefix(WILDCARD)
-        if "*" in text:
-            raise InvalidSiteError(f"{what} {value!r} has a '*' that is not a leading '*.'")
-        try:
-            parts = urlsplit(text if "://" in text else f"https://{text}")
-            port = parts.port
-            host = parts.hostname
-        except ValueError:
-            raise invalid from None
-        if parts.scheme not in ("http", "https") or not host:
-            raise invalid
-        if parts.username is not None or parts.password is not None:
-            raise InvalidSiteError(f"{what} {value!r} must not contain a user name or password")
-        if (
-            parts.path not in ("", "/")
-            or parts.query
-            or parts.fragment
-            or text.endswith(("?", "#"))
-        ):
-            raise InvalidSiteError(
-                f"{what} {value!r} has a path, query or fragment, but a site is a whole host "
-                "(and port): every page on it can prove the task, so it cannot be narrowed to "
-                f"part of one. Name the host alone ({_display(host, _port(port))}) only if all of it "
-                "belongs to the site under test, and require the pages you mean with url "
-                "predicates in `expect`"
-            )
-        try:
-            host = _idna(host)
-        except UnicodeError:
-            raise invalid from None
-        if not host:
-            raise invalid
-        site = cls(host, _port(port), is_wildcard)
+        text, is_wildcard = _unwildcard(text, value, what=what, wildcard=wildcard)
+        host, port = _whole_host(text, value, what=what, invalid=invalid)
+        site = cls(host, port, is_wildcard)
         if is_wildcard and site.is_ip:
             raise InvalidSiteError(f"{what} {value!r} is a wildcard of an IP address")
         if site.is_public_suffix:
@@ -181,6 +144,57 @@ def on_any(url: str, sites: Iterable[Site]) -> bool:
     """Whether `url` is on one of `sites`."""
     site = Site.of_url(url)
     return site is not None and any(s.covers(site) for s in sites)
+
+
+def _unwildcard(text: str, value: str, *, what: str, wildcard: bool) -> tuple[str, bool]:
+    """`text` without a leading `*.`, and whether it had one, when `wildcard` allows one."""
+    is_wildcard = "://" not in text and text.startswith(WILDCARD)
+    if is_wildcard:
+        if not wildcard:
+            raise InvalidSiteError(
+                f"{what} {value!r} cannot be a wildcard; list the subdomains the task uses "
+                "in allowed_hosts (a wildcard such as '*.shop.test' is allowed there)"
+            )
+        text = text.removeprefix(WILDCARD)
+    if "*" in text:
+        raise InvalidSiteError(f"{what} {value!r} has a '*' that is not a leading '*.'")
+    return text, is_wildcard
+
+
+def _whole_host(
+    text: str, value: str, *, what: str, invalid: InvalidSiteError
+) -> tuple[str, int | None]:
+    """The encoded host and non-default port `text` names, as a URL or host with nothing else."""
+    try:
+        parts = urlsplit(text if "://" in text else f"https://{text}")
+        port = parts.port
+        host = parts.hostname
+    except ValueError:
+        raise invalid from None
+    if parts.scheme not in ("http", "https") or not host:
+        raise invalid
+    _reject_extras(parts, text, value, what=what, host=_display(host, _port(port)))
+    try:
+        host = _idna(host)
+    except UnicodeError:
+        raise invalid from None
+    if not host:
+        raise invalid
+    return host, _port(port)
+
+
+def _reject_extras(parts: SplitResult, text: str, value: str, *, what: str, host: str) -> None:
+    """Raise unless `parts` is a whole host: no user info, path, query or fragment."""
+    if parts.username is not None or parts.password is not None:
+        raise InvalidSiteError(f"{what} {value!r} must not contain a user name or password")
+    if parts.path not in ("", "/") or parts.query or parts.fragment or text.endswith(("?", "#")):
+        raise InvalidSiteError(
+            f"{what} {value!r} has a path, query or fragment, but a site is a whole host "
+            "(and port): every page on it can prove the task, so it cannot be narrowed to "
+            f"part of one. Name the host alone ({host}) only if all of it "
+            "belongs to the site under test, and require the pages you mean with url "
+            "predicates in `expect`"
+        )
 
 
 def _idna(host: str) -> str:
