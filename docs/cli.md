@@ -129,3 +129,24 @@ evidence-judge bench RUNS_DIR [--seeds 3] [--out results.json] [--markdown resul
 ## `evidence-judge version`
 
 Prints `evidence-judge <version>`.
+
+## `evidence-judge hook`
+
+Entry points coding agents run themselves. Each reads the agent's hook JSON on stdin and
+always exits 0.
+
+| Command | Agent event | Output |
+| --- | --- | --- |
+| `claude-code-stop` | Claude Code `Stop`, `SubagentStop` | `{"decision": "block", "reason": ...}` on FAIL, else `{}` or `{"systemMessage": ...}` |
+| `codex-stop` | Codex `Stop` | as above |
+| `gemini-after-agent` | Gemini CLI `AfterAgent` | `{"decision": "deny", "reason": ...}` on FAIL, else `{}` or `{"systemMessage": ...}` |
+| `claude-code-record` | Claude Code `UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied` | nothing; appends to the evidence log |
+| `codex-record` | Codex `UserPromptSubmit`, `PostToolUse` | nothing; appends to the evidence log |
+| `gemini-record` | Gemini CLI `BeforeAgent`, `AfterTool` | `{}`; appends to the evidence log |
+
+| Option | Description |
+| --- | --- |
+| `--log-dir DIR` | Evidence-log directory (absolute). Record hooks default to `~/.evidence-judge/sessions`; stop hooks log the final answer only when this or `EVJ_HOOK_LOG_DIR` is set |
+
+Settings are `EVJ_HOOK_*` environment variables; see the
+[Claude Code guide](guides/claude-code.md#configuration).

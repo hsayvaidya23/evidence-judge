@@ -215,3 +215,29 @@ def test_the_shim_hands_over_to_the_cli(tmp_path: Path) -> None:
     fake.chmod(0o755)
     done = _shim(["claude-code-stop", "--log-dir", "/a b"], f"{tmp_path}:/usr/bin:/bin", "IN")
     assert done.stdout == "hook|claude-code-stop|--log-dir|/a b|IN"
+
+
+CODEX_EVENTS = {
+    "PreToolUse", "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact",
+    "UserPromptSubmit", "SubagentStop", "Stop", "Interrupt", "SessionStart", "SubagentStart",
+    "SessionEnd",
+}  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("guide", "events", "prefix"),
+    [("codex.md", CODEX_EVENTS, "codex-"), ("gemini-cli.md", GEMINI_EVENTS, "gemini-")],
+)
+def test_guide_hook_snippets_are_valid(guide: str, events: set[str], prefix: str) -> None:
+    text = (ROOT / "docs" / "guides" / guide).read_text(encoding="utf-8")
+    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", text, re.S)]
+    hooks = [b["hooks"] for b in blocks if "hooks" in b]
+    assert len(hooks) == 1
+    handlers = _handlers(hooks[0])
+    assert {event for event, _ in handlers} <= events
+    commands = _hook_commands()
+    for _, handler in handlers:
+        match = re.match(r"evidence-judge hook ([a-z-]+) ", str(handler["command"]))
+        assert match, handler["command"]
+        assert match.group(1) in commands
+        assert match.group(1).startswith(prefix)

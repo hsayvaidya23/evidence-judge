@@ -167,6 +167,9 @@ nav:
       - CI with the GitHub Action: guides/github-action.md
       - Docker: guides/docker.md
       - Integrations: integrations.md
+      - Claude Code: guides/claude-code.md
+      - Codex CLI: guides/codex.md
+      - Gemini CLI: guides/gemini-cli.md
       - Benchmark your own agent: guides/benchmark-your-agent.md
       - Recording recipes: guides/recording-recipes.md
   - Reference:

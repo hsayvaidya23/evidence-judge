@@ -290,6 +290,12 @@ Send verdicts to the tools you already use (each is an optional extra; see [docs
 | Arize Phoenix | `evidence-judge[phoenix]` | `push_to_phoenix(verdict, span_id=...)`: span annotations |
 | Inspect AI | `evidence-judge[inspect]` | `scorer=evidence_judge_scorer()`: C / I / N per sample |
 
+Coding agents: check the agent's answer against its own browser trace before it is allowed to stop.
+
+- **Claude Code**: `/plugin marketplace add hsayvaidya23/evidence-judge`, then `/plugin install evidence-judge@evidence-judge` (or `/plugin install evidence-judge --marketplace hsayvaidya23/evidence-judge`). A Stop hook blocks on FAIL, recorder hooks keep a hash-chained evidence log, and the plugin adds the MCP server and a skill. See [docs/guides/claude-code.md](docs/guides/claude-code.md).
+- **Codex CLI**: `evidence-judge hook codex-stop` as a blocking `Stop` hook, `codex-record` as a `PostToolUse` recorder, and `codex mcp add evidence-judge -- evidence-judge mcp`. See [docs/guides/codex.md](docs/guides/codex.md).
+- **Gemini CLI**: an extension whose `AfterAgent` hook makes Gemini retry a contradicted answer, plus an `AfterTool` recorder and the MCP server. See [docs/guides/gemini-cli.md](docs/guides/gemini-cli.md).
+
 GitHub Actions: gate a pull request on a recorded run.
 
 ```yaml
