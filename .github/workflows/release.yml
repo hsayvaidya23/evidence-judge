@@ -106,6 +106,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           awk -v v="$version" '
             /^## \[/ { if (found) exit; if (index($0, "## [" v "]") == 1) { found = 1; next } }
+            /^\[[^]]+\]: / { if (found) exit }
             found { print }
           ' CHANGELOG.md > notes.md
           test -s notes.md || { echo "CHANGELOG.md has no '## [$version]' section"; exit 1; }
