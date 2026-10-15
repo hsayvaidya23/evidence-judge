@@ -1,0 +1,1590 @@
+"""A small, conservative shell parser for the commands coding agents run.
+
+It never executes anything. It splits a command line into simple commands joined by operators,
+strips environment assignments, redirections and wrappers (`timeout`, `uv run`, `npx`,
+`bash -c`, ...), and classifies each simple command: a test run (and which runner, and whether it
+runs a subset), a build, a lint, a type check, a formatter, a read-only command, or one that may
+change the workspace. Anything it cannot classify may change the workspace: being wrong in that
+direction costs a NEEDS_REVIEW, never a false PASS.
+"""
+
+from __future__ import annotations
+
+import posixpath
+import re
+import shlex
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, field
+from typing import Final
+
+from evidence_judge.sessions.models import Category, CommandAnalysis
+
+MAX_COMMAND_CHARS: Final = 100_000
+MAX_NESTING: Final = 4
+
+_OPERATORS: Final = (
+    "&&",
+    "||",
+    ";;",
+    "|&",
+    "&>>",
+    "&>",
+    ">>",
+    ">&",
+    "<<<",
+    "<<-",
+    "<<",
+    "<>",
+    ">|",
+    "|",
+    ";",
+    "&",
+    "<",
+    ">",
+    "(",
+    ")",
+    "\n",
+)
+_SEPARATORS: Final = frozenset({"&&", "||", ";", ";;", "&", "\n"})
+_PIPES: Final = frozenset({"|", "|&"})
+_REDIRECTS: Final = frozenset({">", ">>", ">|", "&>", "&>>", ">&", "<", "<>", "<<<"})
+_HEREDOCS: Final = frozenset({"<<", "<<-"})
+_SAFE_TARGETS: Final = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+_CHECKS: Final = frozenset({Category.BUILD, Category.LINT, Category.TYPECHECK, Category.FORMAT})
+_ASSIGNMENT: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_PYTHON: Final = re.compile(r"^(?:python|pypy)[0-9.]*$|^py$")
+_SHELLS: Final = frozenset({"sh", "bash", "zsh", "dash", "ksh", "fish"})
+SESSION_STORE: Final = re.compile(
+    r"\.claude/projects|\.claude/plugins|\.codex/sessions|\.codex/archived_sessions|"
+    r"\.gemini/tmp|session-evidence|evidence-judge/evidence",
+    re.IGNORECASE,
+)
+_AGENT_SUMMARY_TEXT: Final = re.compile(
+    r"\b\d+\s+(?:passed|passing|failed|failing|failures?|errors?)\b|"
+    r"\btest result:\s*(?:ok|FAILED)|\bTests?:?\s+\d+|\bOK\s*\(\d+\s+tests?|"
+    r"\bRan\s+\d+\s+tests?|\bBUILD\s+SUCCESS|\ball\s+tests?\s+pass",
+    re.IGNORECASE,
+)
+
+_READ_ONLY: Final = frozenset(
+    {
+        "ls",
+        "cat",
+        "head",
+        "tail",
+        "less",
+        "more",
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "ag",
+        "wc",
+        "echo",
+        "printf",
+        "pwd",
+        "which",
+        "type",
+        "file",
+        "stat",
+        "diff",
+        "cmp",
+        "tree",
+        "sort",
+        "uniq",
+        "cut",
+        "tr",
+        "jq",
+        "yq",
+        "du",
+        "df",
+        "date",
+        "true",
+        "false",
+        "test",
+        "[",
+        "[[",
+        "sleep",
+        "cd",
+        "pushd",
+        "popd",
+        "export",
+        "set",
+        "unset",
+        "alias",
+        ":",
+        "exit",
+        "return",
+        "nl",
+        "column",
+        "basename",
+        "dirname",
+        "realpath",
+        "readlink",
+        "whoami",
+        "id",
+        "uname",
+        "hostname",
+        "ps",
+        "xxd",
+        "od",
+        "hexdump",
+        "md5",
+        "md5sum",
+        "sha1sum",
+        "sha256sum",
+        "shasum",
+        "env",
+        "printenv",
+        "fd",
+        "locate",
+        "comm",
+        "paste",
+        "fold",
+        "fmt",
+        "rev",
+        "tac",
+        "seq",
+        "yes",
+        "expr",
+        "bc",
+        "history",
+        "lsof",
+        "top",
+        "free",
+        "uptime",
+        "nproc",
+        "tput",
+        "clear",
+        "wait",
+        "jobs",
+        "read",
+        "shopt",
+        "ulimit",
+        "umask",
+        "trap",
+        "command",
+        "hash",
+        "declare",
+        "local",
+        "typeset",
+        "getconf",
+        "sw_vers",
+        "lscpu",
+        "pgrep",
+        "kill",
+        "pkill",
+        "open",
+        "awk",
+        "gawk",
+        "sed",
+        "find",
+        "curl",
+        "git",
+        "pip",
+        "pip3",
+        "npm",
+        "pnpm",
+        "yarn",
+        "bun",
+        "cargo",
+        "go",
+        "uv",
+    }
+)
+"""Programs that do not change files (the last group only for some subcommands, decided below)."""
+_MUTATING: Final = frozenset(
+    {
+        "rm",
+        "rmdir",
+        "mv",
+        "cp",
+        "mkdir",
+        "touch",
+        "ln",
+        "chmod",
+        "chown",
+        "chgrp",
+        "truncate",
+        "dd",
+        "tee",
+        "patch",
+        "install",
+        "unzip",
+        "tar",
+        "gunzip",
+        "gzip",
+        "bunzip2",
+        "zip",
+        "rsync",
+        "scp",
+        "wget",
+        "shred",
+        "unlink",
+        "brew",
+        "apt",
+        "apt-get",
+        "yum",
+        "dnf",
+        "apk",
+        "conda",
+        "mamba",
+        "pipx",
+        "gem",
+        "composer",
+        "sync",
+        "mkfifo",
+        "split",
+    }
+)
+_GIT_MUTATING: Final = frozenset(
+    {
+        "apply",
+        "checkout",
+        "restore",
+        "reset",
+        "stash",
+        "switch",
+        "merge",
+        "rebase",
+        "cherry-pick",
+        "revert",
+        "pull",
+        "mv",
+        "rm",
+        "clean",
+        "am",
+        "worktree",
+        "submodule",
+        "clone",
+        "init",
+        "filter-branch",
+        "filter-repo",
+        "update-index",
+        "read-tree",
+        "checkout-index",
+        "sparse-checkout",
+        "lfs",
+        "bisect",
+    }
+)
+_LINTERS: Final = frozenset(
+    {
+        "flake8",
+        "pylint",
+        "eslint",
+        "golangci-lint",
+        "rubocop",
+        "shellcheck",
+        "stylelint",
+        "markdownlint",
+        "markdownlint-cli2",
+        "yamllint",
+        "hadolint",
+        "swiftlint",
+        "ktlint",
+        "standard",
+        "xo",
+        "oxlint",
+        "pyflakes",
+        "pycodestyle",
+        "pydocstyle",
+        "bandit",
+        "vulture",
+        "staticcheck",
+        "revive",
+        "tflint",
+        "actionlint",
+        "codespell",
+        "cspell",
+        "djlint",
+    }
+)
+_TYPECHECKERS: Final = frozenset(
+    {"pyright", "basedpyright", "mypy", "pyre", "pytype", "vue-tsc", "flow", "ty"}
+)
+_BUILDERS: Final = frozenset(
+    {
+        "webpack",
+        "rollup",
+        "esbuild",
+        "parcel",
+        "ninja",
+        "msbuild",
+        "javac",
+        "gcc",
+        "g++",
+        "clang",
+        "clang++",
+        "rustc",
+        "tsup",
+        "swc",
+        "turbo",
+        "nx",
+    }
+)
+_PM: Final = frozenset({"npm", "pnpm", "yarn", "bun"})
+_PM_INSTALL: Final = frozenset(
+    {
+        "install",
+        "i",
+        "ci",
+        "add",
+        "remove",
+        "rm",
+        "uninstall",
+        "un",
+        "update",
+        "up",
+        "upgrade",
+        "link",
+        "unlink",
+        "rebuild",
+        "dedupe",
+        "prune",
+        "patch",
+        "import",
+        "create",
+        "init",
+    }
+)
+_PM_READ_ONLY: Final = frozenset(
+    {
+        "ls",
+        "list",
+        "view",
+        "info",
+        "outdated",
+        "audit",
+        "why",
+        "explain",
+        "config",
+        "help",
+        "version",
+        "--version",
+        "-v",
+        "root",
+        "bin",
+        "prefix",
+        "whoami",
+        "search",
+        "doctor",
+    }
+)
+_TYPECHECK_SCRIPTS: Final = re.compile(r"^(?:type-?check|types|tsc|check-types|typecheck:.*)$")
+_LINT_SCRIPTS: Final = re.compile(r"^lint(?::.*)?$")
+_FORMAT_SCRIPTS: Final = re.compile(r"^(?:format|fmt|prettier)(?::.*)?$")
+_BUILD_SCRIPTS: Final = re.compile(r"^(?:build|compile)(?::.*)?$")
+_TEST_TARGETS: Final = frozenset({"test", "tests", "check"})
+
+_PYTEST_VALUE_FLAGS: Final = frozenset(
+    {
+        "-k",
+        "-m",
+        "-p",
+        "-c",
+        "-o",
+        "-n",
+        "-W",
+        "-r",
+        "--tb",
+        "--cov",
+        "--cov-report",
+        "--cov-config",
+        "--cov-fail-under",
+        "--deselect",
+        "--ignore",
+        "--ignore-glob",
+        "--rootdir",
+        "--confcutdir",
+        "--durations",
+        "--durations-min",
+        "--maxfail",
+        "--timeout",
+        "--junitxml",
+        "--junit-xml",
+        "--basetemp",
+        "--import-mode",
+        "--log-level",
+        "--log-cli-level",
+        "--log-file",
+        "--color",
+        "--capture",
+        "--dist",
+        "--override-ini",
+        "--config-file",
+        "--randomly-seed",
+        "--reruns",
+        "--html",
+        "--benchmark-json",
+        "--count",
+        "--workers",
+        "--tests-per-worker",
+        "--log-format",
+        "--log-date-format",
+    }
+)
+_PYTEST_FILTER_FLAGS: Final = {
+    "-k": "-k",
+    "-m": "-m",
+    "--deselect": "--deselect",
+    "--ignore": "--ignore",
+    "--ignore-glob": "--ignore-glob",
+    "-c": "a different config (-c)",
+    "--config-file": "a different config (--config-file)",
+    "-o": "a config override (-o)",
+    "--override-ini": "a config override (--override-ini)",
+    "-p": "a plugin switch (-p)",
+    "--rootdir": "a different root (--rootdir)",
+    "--confcutdir": "--confcutdir",
+}
+_PYTEST_FILTER_SWITCHES: Final = {
+    "--lf": "--lf",
+    "--last-failed": "--last-failed",
+    "--sw": "--stepwise",
+    "--stepwise": "--stepwise",
+    "--sw-skip": "--stepwise-skip",
+    "--noconftest": "--noconftest",
+    "--pyargs": "--pyargs",
+    "--doctest-only": "--doctest-only",
+}
+_JS_VALUE_FLAGS: Final = frozenset(
+    {
+        "-t",
+        "--testNamePattern",
+        "--testPathPattern",
+        "--testPathPatterns",
+        "--testPathIgnorePatterns",
+        "--shard",
+        "-c",
+        "--config",
+        "--reporters",
+        "--reporter",
+        "-w",
+        "--maxWorkers",
+        "--selectProjects",
+        "--project",
+        "--environment",
+        "--dir",
+        "--root",
+        "--mode",
+        "--changedSince",
+        "--outputFile",
+        "--coverageReporters",
+        "--testTimeout",
+        "--pool",
+        "--poolOptions",
+        "-r",
+        "--grep",
+        "-g",
+        "--fgrep",
+        "-f",
+        "--spec",
+        "--exclude",
+        "--browser",
+        "--workers",
+        "-j",
+        "--retries",
+        "--timeout",
+        "--seed",
+        "--require",
+        "--ui",
+        "--slow",
+        "--filter",
+    }
+)
+_JS_FILTER_FLAGS: Final = frozenset(
+    {
+        "-t",
+        "--testNamePattern",
+        "--testPathPattern",
+        "--testPathPatterns",
+        "--testPathIgnorePatterns",
+        "--shard",
+        "-c",
+        "--config",
+        "--selectProjects",
+        "--project",
+        "--changedSince",
+        "--dir",
+        "--root",
+        "--grep",
+        "-g",
+        "--fgrep",
+        "-f",
+        "--spec",
+        "--exclude",
+        "--filter",
+    }
+)
+_JS_FILTER_SWITCHES: Final = frozenset(
+    {
+        "-o",
+        "--onlyChanged",
+        "--findRelatedTests",
+        "--related",
+        "--lastCommit",
+        "--changed",
+        "--onlyFailures",
+        "--bail",
+        "--invert",
+        "--only",
+        "--last-failed",
+    }
+)
+_JS_COLLECT: Final = frozenset({"--listTests", "--list", "--showConfig"})
+_VITEST_SUBCOMMANDS: Final = frozenset({"run", "watch", "dev"})
+_GO_VALUE_FLAGS: Final = frozenset(
+    {
+        "-run",
+        "-skip",
+        "-bench",
+        "-count",
+        "-timeout",
+        "-tags",
+        "-p",
+        "-parallel",
+        "-coverprofile",
+        "-covermode",
+        "-coverpkg",
+        "-cpu",
+        "-exec",
+        "-o",
+        "-vet",
+        "-shuffle",
+        "-fuzz",
+        "-fuzztime",
+        "-benchtime",
+        "-ldflags",
+        "-gcflags",
+        "-mod",
+        "-C",
+    }
+)
+_CARGO_VALUE_FLAGS: Final = frozenset(
+    {
+        "-p",
+        "--package",
+        "--test",
+        "--bin",
+        "--example",
+        "--bench",
+        "--exclude",
+        "--features",
+        "-F",
+        "--target",
+        "-j",
+        "--jobs",
+        "--profile",
+        "--manifest-path",
+        "--target-dir",
+        "--color",
+        "-E",
+        "--filterset",
+        "--message-format",
+        "--config",
+        "-Z",
+    }
+)
+_CARGO_FILTER_FLAGS: Final = frozenset(
+    {"-p", "--package", "--test", "--bin", "--example", "--bench", "--exclude", "-E", "--filterset"}
+)
+_CARGO_FILTER_SWITCHES: Final = frozenset(
+    {"--lib", "--bins", "--doc", "--examples", "--benches", "--tests"}
+)
+_TEST_BINARY_FILTERS: Final = frozenset({"--skip", "--exact", "--ignored"})
+_UV_VALUE_FLAGS: Final = frozenset(
+    {
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "--python",
+        "-p",
+        "--project",
+        "--directory",
+        "--group",
+        "--extra",
+        "--package",
+        "--env-file",
+        "--index",
+        "--default-index",
+        "--index-url",
+        "--extra-index-url",
+        "--find-links",
+        "-f",
+        "--no-group",
+        "--only-group",
+        "--config-file",
+        "--cache-dir",
+        "--refresh-package",
+        "--reinstall-package",
+        "--upgrade-package",
+        "--exclude-newer",
+        "--prerelease",
+        "--resolution",
+        "--link-mode",
+        "--color",
+        "--native-tls",
+        "--from",
+    }
+)
+_MAKE_VALUE_FLAGS: Final = frozenset({"-C", "-f", "--file", "--directory", "-j", "--jobs", "-l"})
+_TIMEOUT_VALUE_FLAGS: Final = frozenset({"-s", "--signal", "-k", "--kill-after"})
+_FIX_FLAGS: Final = frozenset(
+    {
+        "--fix",
+        "--fix-only",
+        "--unsafe-fixes",
+        "-a",
+        "-A",
+        "--autocorrect",
+        "--autocorrect-all",
+        "--write",
+        "--apply",
+        "--apply-unsafe",
+        "-u",
+        "--updateSnapshot",
+        "--update-snapshots",
+        "--snapshot-update",
+        "--update",
+    }
+)
+
+
+@dataclass(slots=True)
+class _Simple:
+    words: list[str] = field(default_factory=list[str])
+    env: dict[str, str] = field(default_factory=dict[str, str])
+    writes: list[str] = field(default_factory=list[str])
+    heredoc: bool = False
+    negated: bool = False
+
+
+@dataclass(slots=True)
+class _Pipeline:
+    commands: list[_Simple] = field(default_factory=list[_Simple])
+    op_after: str | None = None
+
+
+@dataclass(slots=True)
+class _Classified:
+    category: Category
+    program: str
+    runner: str | None = None
+    filters: list[str] = field(default_factory=list[str])
+    collect_only: bool = False
+    mutation: str | None = None
+    deleted: list[str] = field(default_factory=list[str])
+    touched: list[str] = field(default_factory=list[str])
+    nested: CommandAnalysis | None = None
+
+
+def _split_operators(token: str) -> Iterator[str]:
+    rest = token
+    while rest:
+        op = next((o for o in _OPERATORS if rest.startswith(o)), rest[0])
+        yield op
+        rest = rest[len(op) :]
+
+
+def tokenize(command: str) -> list[str]:
+    """Shell words and operators; raises ValueError for unbalanced quotes."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
+    lexer.whitespace_split = True
+    lexer.whitespace = " \t\r"
+    lexer.commenters = ""
+    tokens: list[str] = []
+    for token in lexer:
+        if token and set(token) <= set("();<>|&\n"):
+            tokens.extend(_split_operators(token))
+        else:
+            tokens.append(token)
+    return tokens
+
+
+def _strip_comments(tokens: list[str]) -> list[str]:
+    out: list[str] = []
+    skipping = False
+    for tok in tokens:
+        if tok == "\n":
+            skipping = False
+        elif tok.startswith("#") and (not out or out[-1] in _SEPARATORS | _PIPES):
+            skipping = True
+        if not skipping:
+            out.append(tok)
+    return out
+
+
+def _parse(tokens: list[str]) -> list[_Pipeline]:
+    pipelines: list[_Pipeline] = [_Pipeline()]
+    current = _Simple()
+    heredoc_end: str | None = None
+    pending_heredoc: str | None = None
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if heredoc_end is not None:
+            if tok == heredoc_end and (i + 1 == len(tokens) or tokens[i + 1] == "\n"):
+                heredoc_end = None
+            i += 1
+            continue
+        if tok == "\n" and pending_heredoc is not None:
+            heredoc_end, pending_heredoc = pending_heredoc, None
+            i += 1
+            continue
+        if tok in _HEREDOCS:
+            current.heredoc = True
+            pending_heredoc = tokens[i + 1] if i + 1 < len(tokens) else ""
+            i += 2
+            continue
+        if tok in _REDIRECTS:
+            target = tokens[i + 1] if i + 1 < len(tokens) else ""
+            if current.words and current.words[-1].isdigit():
+                current.words.pop()
+            fd_dup = tok == ">&" and target.isdigit()
+            if tok not in ("<", "<<<") and not fd_dup and target not in _SAFE_TARGETS | {"-"}:
+                current.writes.append(target)
+            i += 2
+            continue
+        if tok in ("(", ")"):
+            i += 1
+            continue
+        if tok in _PIPES or tok in _SEPARATORS:
+            pipelines[-1].commands.append(current)
+            current = _Simple()
+            if tok in _SEPARATORS:
+                pipelines[-1].op_after = tok
+                pipelines.append(_Pipeline())
+            i += 1
+            continue
+        if not current.words and tok == "!":
+            current.negated = True
+        elif not current.words and _ASSIGNMENT.match(tok):
+            name, _, value = tok.partition("=")
+            current.env[name] = value
+        else:
+            current.words.append(tok)
+        i += 1
+    pipelines[-1].commands.append(current)
+    cleaned: list[_Pipeline] = []
+    for pipeline in pipelines:
+        commands = [c for c in pipeline.commands if c.words or c.writes or c.env]
+        if commands:
+            cleaned.append(_Pipeline(commands, pipeline.op_after))
+        elif cleaned and pipeline.op_after is not None:
+            cleaned[-1].op_after = pipeline.op_after
+    return cleaned
+
+
+def program_name(word: str) -> str:
+    return posixpath.basename(word)
+
+
+def _flags_then_rest(words: Sequence[str], value_flags: frozenset[str]) -> list[str]:
+    """Drop leading options (and their values) and return the remaining words."""
+    i = 0
+    while i < len(words) and words[i].startswith("-") and words[i] != "--":
+        flag = words[i]
+        i += 1
+        if "=" not in flag and flag in value_flags:
+            i += 1
+    if i < len(words) and words[i] == "--":
+        i += 1
+    return list(words[i:])
+
+
+def _unwrap(words: list[str]) -> list[str]:
+    """Strip wrapper programs that run another command (`timeout 60 pytest`, `uv run pytest`)."""
+    for _ in range(MAX_NESTING * 2):
+        if not words:
+            return words
+        prog = program_name(words[0])
+        rest = words[1:]
+        if prog in ("time", "nohup", "exec", "builtin", "caffeinate", "sudo", "doas"):
+            words = _flags_then_rest(rest, frozenset({"-u", "-g", "-C"}))
+        elif prog == "command" and rest and rest[0] not in ("-v", "-V"):
+            words = _flags_then_rest(rest, frozenset())
+        elif prog == "env" and rest:
+            rest = _flags_then_rest(rest, frozenset({"-u", "-C", "-S"}))
+            while rest and _ASSIGNMENT.match(rest[0]):
+                rest = rest[1:]
+            if not rest:
+                return words
+            words = rest
+        elif prog == "timeout":
+            rest = _flags_then_rest(rest, _TIMEOUT_VALUE_FLAGS)
+            words = rest[1:]
+        elif prog == "nice":
+            words = _flags_then_rest(rest, frozenset({"-n", "--adjustment"}))
+        elif prog in ("stdbuf", "ionice", "chrt", "taskset"):
+            words = _flags_then_rest(rest, frozenset({"-c", "-n", "-p"}))
+        elif prog == "xvfb-run":
+            words = _flags_then_rest(rest, frozenset({"-n", "-s", "-e", "-f", "-p", "-w"}))
+        elif prog in ("uv", "poetry", "pipenv", "pdm", "rye", "hatch") and rest[:1] == ["run"]:
+            words = _flags_then_rest(rest[1:], _UV_VALUE_FLAGS)
+        elif prog in ("uvx", "pipx") and (prog == "uvx" or rest[:1] == ["run"]):
+            words = _flags_then_rest(rest if prog == "uvx" else rest[1:], _UV_VALUE_FLAGS)
+        elif prog in ("npx", "bunx", "pnpx"):
+            words = _flags_then_rest(rest, frozenset({"-p", "--package", "-c", "--call"}))
+        elif prog in ("npm", "pnpm", "yarn") and rest[:1] in (["exec"], ["dlx"], ["x"]):
+            words = _flags_then_rest(rest[1:], frozenset({"-p", "--package", "-c", "--call"}))
+        elif prog == "bundle" and rest[:1] == ["exec"]:
+            words = rest[1:]
+        elif prog == "dotenv" and "--" in rest:
+            words = rest[rest.index("--") + 1 :]
+        elif _PYTHON.match(prog) and len(rest) >= 2 and rest[0] == "-m":
+            words = [rest[1], *rest[2:]]
+        elif _PYTHON.match(prog) and rest[:1] and rest[0].startswith("-m") and len(rest[0]) > 2:
+            words = [rest[0][2:], *rest[1:]]
+        else:
+            return words
+    return words
+
+
+def _pytest_filters(args: list[str], env: dict[str, str]) -> tuple[list[str], bool]:
+    filters: list[str] = []
+    collect_only = False
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, _ = arg.partition("=")
+        if arg in (
+            "--co",
+            "--collect-only",
+            "--fixtures",
+            "--markers",
+            "--version",
+            "-h",
+            "--help",
+            "--setup-plan",
+        ):
+            collect_only = True
+        elif arg.startswith("-") and not eq and arg in _PYTEST_FILTER_FLAGS:
+            filters.append(_PYTEST_FILTER_FLAGS[arg])
+            i += 1
+        elif eq and name in _PYTEST_FILTER_FLAGS:
+            filters.append(_PYTEST_FILTER_FLAGS[name])
+        elif arg in _PYTEST_FILTER_SWITCHES:
+            filters.append(_PYTEST_FILTER_SWITCHES[arg])
+        elif re.fullmatch(r"-k.+|-m.+|-p.+|-c.+|-o.+", arg):
+            filters.append(_PYTEST_FILTER_FLAGS[arg[:2]])
+        elif arg.startswith("-"):
+            if not eq and arg in _PYTEST_VALUE_FLAGS:
+                i += 1
+        elif arg not in (".", "./"):
+            filters.append(f"only {arg}")
+        i += 1
+    if "PYTEST_ADDOPTS" in env:
+        filters.append("PYTEST_ADDOPTS")
+    return filters, collect_only
+
+
+def _unittest_filters(args: list[str]) -> tuple[list[str], bool]:
+    if not args or args[0] == "discover":
+        rest = args[1:] if args else []
+        filters = [f"discover {a}" for a in rest if a in ("-p", "--pattern", "-k")]
+        return filters, False
+    if args[0] in ("-h", "--help"):
+        return [], True
+    positional = [a for a in args if not a.startswith("-")]
+    filters = [f"only {a}" for a in positional]
+    if "-k" in args:
+        filters.append("-k")
+    return filters, False
+
+
+def _js_filters(runner: str, args: list[str]) -> tuple[list[str], bool]:
+    filters: list[str] = []
+    collect_only = False
+    if runner == "vitest" and args[:1] == ["related"]:
+        filters.append("vitest related")
+    if args[:1] and args[0] in _VITEST_SUBCOMMANDS | {"related", "test"}:
+        args = args[1:]
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, _ = arg.partition("=")
+        if name in _JS_COLLECT:
+            collect_only = True
+        elif name in _JS_FILTER_FLAGS:
+            filters.append(name)
+            if not eq:
+                i += 1
+        elif name in _JS_FILTER_SWITCHES:
+            filters.append(name)
+        elif arg.startswith("-"):
+            if not eq and arg in _JS_VALUE_FLAGS:
+                i += 1
+        else:
+            filters.append(f"only {arg}")
+        i += 1
+    return filters, collect_only
+
+
+def _go_filters(args: list[str]) -> tuple[list[str], bool]:
+    filters: list[str] = []
+    packages: list[str] = []
+    collect_only = False
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, _ = arg.partition("=")
+        flag = name.replace("--", "-", 1) if name.startswith("--") else name
+        if flag in ("-run", "-skip"):
+            filters.append(flag)
+            if not eq:
+                i += 1
+        elif flag == "-short":
+            filters.append("-short")
+        elif flag == "-list":
+            collect_only = True
+            if not eq:
+                i += 1
+        elif arg.startswith("-"):
+            if not eq and flag in _GO_VALUE_FLAGS:
+                i += 1
+        else:
+            packages.append(arg)
+        i += 1
+    if not packages:
+        filters.append("only the current package (no ./...)")
+    filters.extend(f"only {p}" for p in packages if not p.endswith("..."))
+    return filters, collect_only
+
+
+def _cargo_filters(args: list[str]) -> tuple[list[str], bool]:
+    filters: list[str] = []
+    collect_only = False
+    binary: list[str] = []
+    if "--" in args:
+        split = args.index("--")
+        args, binary = args[:split], args[split + 1 :]
+    if args[:1] == ["run"]:
+        args = args[1:]
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, _ = arg.partition("=")
+        if name in _CARGO_FILTER_FLAGS:
+            filters.append(name)
+            if not eq:
+                i += 1
+        elif name in _CARGO_FILTER_SWITCHES:
+            filters.append(name)
+        elif name in ("--no-run", "--list"):
+            collect_only = True
+        elif arg.startswith("-"):
+            if not eq and name in _CARGO_VALUE_FLAGS:
+                i += 1
+        else:
+            filters.append(f"only tests matching {arg}")
+        i += 1
+    for arg in binary:
+        if arg in _TEST_BINARY_FILTERS:
+            filters.append(arg)
+        elif arg == "--list":
+            collect_only = True
+        elif not arg.startswith("-") and not arg.isdigit():
+            filters.append(f"only tests matching {arg}")
+    return filters, collect_only
+
+
+def _generic_filters(label: str, args: list[str]) -> list[str]:
+    """Arguments passed to a test script whose runner is unknown narrow it, conservatively."""
+    meaningful = [a for a in args if a != "--" and a not in ("--silent", "-s", "--if-present")]
+    return [f"arguments passed to {label}: {' '.join(meaningful)}"] if meaningful else []
+
+
+def _pm_script(pm: str, words: list[str]) -> _Classified:
+    rest = [
+        w for w in words[1:] if w not in ("--silent", "-s", "--if-present", "-w", "--workspaces")
+    ]
+    if not rest:
+        return _Classified(Category.MUTATING, pm, mutation=f"{pm} with no arguments installs")
+    sub = rest[0]
+    args = rest[1:]
+    if sub in ("run", "run-script", "rum", "urn"):
+        if not args:
+            return _Classified(Category.READ_ONLY, pm)
+        sub, args = args[0], args[1:]
+    elif sub in ("t", "tst"):
+        sub = "test"
+    elif sub in _PM_INSTALL:
+        return _Classified(Category.MUTATING, pm, mutation=f"{pm} {sub} changes dependencies")
+    elif sub in _PM_READ_ONLY:
+        return _Classified(Category.READ_ONLY, pm)
+    elif pm == "bun" and sub == "test":
+        filters, collect = _js_filters("bun", args)
+        return _Classified(Category.TEST, pm, "bun test", filters, collect)
+    label = f"{pm} {sub}" if sub == "test" else f"{pm} run {sub}"
+    if sub == "test" or sub.startswith("test:"):
+        filters = _generic_filters(label, args)
+        if sub != "test":
+            filters.insert(0, f"script {sub} (not the project's test script)")
+        return _Classified(Category.TEST, pm, f"{pm} test", filters)
+    if _BUILD_SCRIPTS.match(sub):
+        return _Classified(Category.BUILD, pm)
+    if _LINT_SCRIPTS.match(sub):
+        fix = any(a in _FIX_FLAGS for a in args) or "fix" in sub
+        return _Classified(
+            Category.LINT, pm, mutation=f"{label} --fix rewrites files" if fix else None
+        )
+    if _TYPECHECK_SCRIPTS.match(sub):
+        return _Classified(Category.TYPECHECK, pm)
+    if _FORMAT_SCRIPTS.match(sub):
+        checking = "check" in sub or any("check" in a for a in args)
+        return _Classified(
+            Category.FORMAT, pm, mutation=None if checking else f"{label} rewrites files"
+        )
+    return _Classified(Category.UNKNOWN, pm, mutation=f"{label} runs a project script")
+
+
+def _make_like(prog: str, words: list[str]) -> _Classified:
+    targets = [w for w in _flags_then_rest(words[1:], _MAKE_VALUE_FLAGS) if "=" not in w]
+    if any(w in ("-n", "--dry-run", "--just-print") for w in words[1:]):
+        return _Classified(Category.READ_ONLY, prog)
+    if not targets:
+        return _Classified(Category.BUILD, prog, mutation=f"{prog} runs the default target")
+    target = targets[0]
+    label = f"{prog} {target}"
+    if target in _TEST_TARGETS or target.startswith(("test-", "test_", "tests-")):
+        filters = [] if target in _TEST_TARGETS else [f"target {target}"]
+        filters.extend(f"also runs {t}" for t in targets[1:])
+        return _Classified(Category.TEST, prog, label, filters)
+    if target in ("build", "all", "compile", "dist"):
+        return _Classified(Category.BUILD, prog)
+    if target in ("lint", "check-lint", "ruff", "flake8"):
+        return _Classified(Category.LINT, prog)
+    if target in ("typecheck", "type-check", "types", "mypy", "pyright", "tsc"):
+        return _Classified(Category.TYPECHECK, prog)
+    if target in ("fmt", "format"):
+        return _Classified(Category.FORMAT, prog, mutation=f"{label} rewrites files")
+    return _Classified(Category.UNKNOWN, prog, mutation=f"{label} runs a project target")
+
+
+def _git(words: list[str]) -> _Classified:
+    args = _flags_then_rest(words[1:], frozenset({"-C", "-c", "--git-dir", "--work-tree"}))
+    sub = args[0] if args else ""
+    if sub in _GIT_MUTATING:
+        deleted = [a for a in args[1:] if not a.startswith("-")] if sub == "rm" else []
+        if sub == "stash" and args[1:2] in (["list"], ["show"]):
+            return _Classified(Category.READ_ONLY, "git")
+        if sub == "worktree" and args[1:2] == ["list"]:
+            return _Classified(Category.READ_ONLY, "git")
+        return _Classified(
+            Category.MUTATING,
+            "git",
+            mutation=f"git {sub} changes the working tree",
+            deleted=deleted,
+        )
+    return _Classified(Category.READ_ONLY, "git")
+
+
+def _classify_program(
+    words: list[str], env: dict[str, str], depth: int, cwd: str | None
+) -> _Classified:
+    prog = program_name(words[0])
+    args = words[1:]
+    if prog in _SHELLS and depth < MAX_NESTING:
+        script = next(
+            (args[i + 1] for i, a in enumerate(args[:-1]) if re.fullmatch(r"-[a-z]*c[a-z]*", a)),
+            None,
+        )
+        if script is not None:
+            nested = _analyse(script, cwd, depth + 1)
+            if nested.runners:
+                category = Category.TEST
+            elif nested.mutation is not None:
+                category = Category.MUTATING
+            else:
+                category = nested.categories[-1] if nested.categories else Category.READ_ONLY
+            return _Classified(category, prog, nested=nested)
+        return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs a script")
+    if prog in ("pytest", "py.test"):
+        filters, collect = _pytest_filters(args, env)
+        return _Classified(Category.TEST, prog, "pytest", filters, collect)
+    if prog == "unittest":
+        filters, collect = _unittest_filters(args)
+        return _Classified(Category.TEST, prog, "unittest", filters, collect)
+    if prog in ("jest", "vitest", "mocha", "ava", "tap", "jasmine"):
+        filters, collect = _js_filters(prog, args)
+        if prog == "vitest" and args[:1] in (["bench"], ["list"]):
+            collect = True
+        mutation = (
+            "updates snapshots"
+            if any(a in ("-u", "--updateSnapshot", "--update") for a in args)
+            else None
+        )
+        return _Classified(Category.TEST, prog, prog, filters, collect, mutation=mutation)
+    if prog == "playwright" and args[:1] == ["test"]:
+        filters, collect = _js_filters("playwright", args[1:])
+        return _Classified(Category.TEST, prog, "playwright test", filters, collect)
+    if prog == "cypress" and args[:1] == ["run"]:
+        filters, collect = _js_filters("cypress", args[1:])
+        return _Classified(Category.TEST, prog, "cypress run", filters, collect)
+    if prog in ("rspec", "phpunit", "pest", "ctest", "behave", "nosetests", "nose2", "ward"):
+        positional = [a for a in args if not a.startswith("-")]
+        filters = [f"only {a}" for a in positional]
+        filters.extend(
+            a.partition("=")[0]
+            for a in args
+            if a.partition("=")[0]
+            in (
+                "-e",
+                "--example",
+                "-t",
+                "--tag",
+                "--filter",
+                "--group",
+                "--testsuite",
+                "-R",
+                "-L",
+                "-k",
+                "--only-failures",
+            )
+        )
+        return _Classified(Category.TEST, prog, prog, filters)
+    if prog in ("tox", "nox"):
+        filters = [
+            a.partition("=")[0]
+            for a in args
+            if a.partition("=")[0] in ("-e", "-s", "--session", "--sessions", "-k", "-t", "--tags")
+        ]
+        if "--" in args and args[args.index("--") + 1 :]:
+            filters.append(f"arguments passed through {prog}")
+        return _Classified(Category.TEST, prog, prog, filters)
+    if prog == "go":
+        sub = args[0] if args else ""
+        if sub == "test":
+            filters, collect = _go_filters(args[1:])
+            return _Classified(Category.TEST, prog, "go test", filters, collect)
+        if sub in ("build", "install"):
+            return _Classified(Category.BUILD, prog)
+        if sub == "vet":
+            return _Classified(Category.LINT, prog)
+        if sub in ("fmt", "generate", "get") or args[:2] == ["mod", "tidy"]:
+            return _Classified(Category.MUTATING, prog, mutation=f"go {sub} changes files")
+        if sub in ("version", "env", "list", "doc", "help") or args[:2] == ["mod", "graph"]:
+            return _Classified(Category.READ_ONLY, prog)
+        return _Classified(Category.UNKNOWN, prog, mutation=f"go {sub} runs a program")
+    if prog == "cargo":
+        sub = args[0] if args else ""
+        if sub in ("test", "t"):
+            filters, collect = _cargo_filters(args[1:])
+            return _Classified(Category.TEST, prog, "cargo test", filters, collect)
+        if sub == "nextest":
+            filters, collect = _cargo_filters(args[1:])
+            return _Classified(Category.TEST, prog, "cargo nextest", filters, collect)
+        if sub in ("build", "b"):
+            return _Classified(Category.BUILD, prog)
+        if sub in ("check", "c"):
+            return _Classified(Category.TYPECHECK, prog)
+        if sub == "clippy":
+            fix = "--fix" in args
+            return _Classified(
+                Category.LINT, prog, mutation="clippy --fix rewrites files" if fix else None
+            )
+        if sub == "fmt":
+            check = "--check" in args
+            return _Classified(
+                Category.FORMAT, prog, mutation=None if check else "cargo fmt rewrites files"
+            )
+        if sub in ("tree", "metadata", "search", "version", "--version", "help", "doc"):
+            return _Classified(Category.READ_ONLY, prog)
+        return _Classified(Category.UNKNOWN, prog, mutation=f"cargo {sub} may change files")
+    if prog in _PM:
+        return _pm_script(prog, words)
+    if prog in ("make", "gmake", "just", "task", "mage"):
+        return _make_like(prog, words)
+    if prog in ("mvn", "mvnw", "gradle", "gradlew"):
+        goals = [a for a in args if not a.startswith("-")]
+        filters = [
+            a.partition("=")[0]
+            for a in args
+            if a.startswith(("-Dtest", "-pl", "--tests", "--projects"))
+        ]
+        if any(g in ("test", "verify", "check", "integration-test") for g in goals):
+            return _Classified(Category.TEST, prog, prog, filters)
+        if any(g in ("build", "package", "compile", "install", "assemble") for g in goals):
+            return _Classified(Category.BUILD, prog)
+        return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs a project task")
+    if prog == "dotnet":
+        sub = args[0] if args else ""
+        if sub == "test":
+            filters = [a for a in args[1:] if a in ("--filter",)] + [
+                f"only {a}" for a in args[1:2] if not a.startswith("-")
+            ]
+            return _Classified(Category.TEST, prog, "dotnet test", filters)
+        if sub == "build":
+            return _Classified(Category.BUILD, prog)
+        if sub == "format":
+            return _Classified(
+                Category.FORMAT,
+                prog,
+                mutation=None if "--verify-no-changes" in args else "dotnet format rewrites files",
+            )
+        return _Classified(Category.UNKNOWN, prog, mutation=f"dotnet {sub} may change files")
+    if prog in ("deno", "swift", "mix", "bazel", "bazelisk"):
+        sub = args[0] if args else ""
+        if sub == "test":
+            positional = [a for a in args[1:] if not a.startswith("-")]
+            filters = [f"only {a}" for a in positional]
+            filters.extend(
+                a for a in args[1:] if a.partition("=")[0] in ("--filter", "--only", "--exclude")
+            )
+            return _Classified(Category.TEST, prog, f"{prog} test", filters)
+        if sub in ("build", "compile"):
+            return _Classified(Category.BUILD, prog)
+        if sub == "lint":
+            return _Classified(Category.LINT, prog)
+        if sub == "check":
+            return _Classified(Category.TYPECHECK, prog)
+        if sub in ("fmt", "format"):
+            return _Classified(
+                Category.FORMAT,
+                prog,
+                mutation=None if "--check" in args else f"{prog} {sub} rewrites files",
+            )
+        return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} {sub} may change files")
+    if prog == "hatch" and args[:1] == ["test"]:
+        return _Classified(
+            Category.TEST, prog, "hatch test", _generic_filters("hatch test", args[1:])
+        )
+    if prog == "ruff":
+        sub = args[0] if args else ""
+        if sub == "format":
+            check = any(a in ("--check", "--diff") for a in args)
+            return _Classified(
+                Category.FORMAT, prog, mutation=None if check else "ruff format rewrites files"
+            )
+        fix = any(
+            a.partition("=")[0] in ("--fix", "--unsafe-fixes", "--fix-only")
+            and not a.endswith("=false")
+            for a in args
+        )
+        return _Classified(
+            Category.LINT, prog, mutation="ruff --fix rewrites files" if fix else None
+        )
+    if prog in ("black", "isort", "autopep8", "yapf", "autoflake"):
+        check = any(a in ("--check", "--diff", "--check-only", "-c") for a in args)
+        if prog in ("autopep8", "yapf", "autoflake"):
+            check = not any(a in ("-i", "--in-place") for a in args)
+        return _Classified(
+            Category.FORMAT, prog, mutation=None if check else f"{prog} rewrites files"
+        )
+    if prog in ("prettier", "biome", "dprint"):
+        writes = any(
+            a in ("--write", "-w", "--apply", "--apply-unsafe", "--fix") for a in args
+        ) or args[:1] == ["fmt"]
+        category = (
+            Category.LINT
+            if prog == "biome" and args[:1] in (["lint"], ["check"], ["ci"])
+            else Category.FORMAT
+        )
+        return _Classified(category, prog, mutation=f"{prog} rewrites files" if writes else None)
+    if prog in ("gofmt", "goimports", "rustfmt", "clang-format", "shfmt", "terraform"):
+        writes = any(a in ("-w", "-i", "--write") for a in args) or (
+            prog == "rustfmt" and "--check" not in args
+        )
+        if prog == "terraform":
+            writes = args[:1] == ["fmt"] and "-check" not in args
+        return _Classified(
+            Category.FORMAT, prog, mutation=f"{prog} rewrites files" if writes else None
+        )
+    if prog == "pre-commit":
+        return _Classified(Category.LINT, prog, mutation="pre-commit hooks may rewrite files")
+    if prog in _LINTERS:
+        fix = any(a.partition("=")[0] in _FIX_FLAGS for a in args)
+        return _Classified(
+            Category.LINT, prog, mutation=f"{prog} fixes rewrite files" if fix else None
+        )
+    if prog in _TYPECHECKERS:
+        return _Classified(Category.TYPECHECK, prog)
+    if prog == "tsc":
+        no_emit = "--noEmit" in args or "--noemit" in args
+        return _Classified(Category.TYPECHECK if no_emit else Category.BUILD, prog)
+    if prog in ("vite", "next", "nuxt", "astro", "svelte-kit", "ng") and args[:1] == ["build"]:
+        return _Classified(Category.BUILD, prog)
+    if (
+        prog in _BUILDERS
+        or (prog == "docker" and args[:1] == ["build"])
+        or (prog == "cmake" and "--build" in args)
+    ):
+        return _Classified(Category.BUILD, prog)
+    if prog in ("build",) or (
+        prog in ("uv", "poetry", "hatch", "pdm", "flit") and args[:1] == ["build"]
+    ):
+        return _Classified(Category.BUILD, prog)
+    if prog == "uv":
+        sub = args[0] if args else ""
+        if sub in ("sync", "add", "remove", "lock", "venv", "init", "self", "tool") or args[:2] in (
+            ["pip", "install"],
+            ["pip", "uninstall"],
+            ["pip", "sync"],
+        ):
+            return _Classified(
+                Category.MUTATING, prog, mutation=f"uv {sub} changes the environment"
+            )
+        return (
+            _Classified(Category.READ_ONLY, prog)
+            if sub in ("pip", "tree", "version", "--version", "help", "python")
+            else _Classified(Category.UNKNOWN, prog, mutation=f"uv {sub} may change files")
+        )
+    if prog in ("pip", "pip3"):
+        sub = args[0] if args else ""
+        if sub in ("install", "uninstall", "download", "wheel"):
+            return _Classified(
+                Category.MUTATING, prog, mutation=f"pip {sub} changes the environment"
+            )
+        return _Classified(Category.READ_ONLY, prog)
+    if prog == "git":
+        return _git(words)
+    if prog == "sed":
+        in_place = any(
+            a == "-i"
+            or a.startswith(("-i", "--in-place"))
+            or (a.startswith("-") and not a.startswith("--") and "i" in a[1:])
+            for a in args
+            if a.startswith("-")
+        )
+        return _Classified(
+            Category.MUTATING if in_place else Category.READ_ONLY,
+            prog,
+            mutation="sed -i edits files" if in_place else None,
+        )
+    if prog == "perl":
+        in_place = any(a.startswith("-") and not a.startswith("--") and "i" in a[1:] for a in args)
+        return _Classified(
+            Category.MUTATING if in_place else Category.UNKNOWN,
+            prog,
+            mutation="perl -i edits files" if in_place else "perl runs a program",
+        )
+    if prog in ("awk", "gawk"):
+        program_text = " ".join(args)
+        writes = (
+            "system(" in program_text or re.search(r"print[^|;]*>\s*\"", program_text) is not None
+        )
+        return _Classified(
+            Category.MUTATING if writes else Category.READ_ONLY,
+            prog,
+            mutation="awk writes files or runs commands" if writes else None,
+        )
+    if prog == "find":
+        acting = [
+            a
+            for a in args
+            if a in ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls")
+        ]
+        return _Classified(
+            Category.MUTATING if acting else Category.READ_ONLY,
+            prog,
+            mutation=f"find {acting[0]} acts on files" if acting else None,
+        )
+    if prog == "curl":
+        writes = any(
+            a in ("-o", "-O", "--output", "--remote-name", "-J") or a.startswith("--output")
+            for a in args
+        )
+        return _Classified(
+            Category.MUTATING if writes else Category.READ_ONLY,
+            prog,
+            mutation="curl writes a file" if writes else None,
+        )
+    if prog in ("rm", "unlink", "shred"):
+        deleted = [a for a in args if not a.startswith("-")]
+        return _Classified(
+            Category.MUTATING, prog, mutation=f"{prog} deletes files", deleted=deleted
+        )
+    if prog == "mv":
+        moved = [a for a in args if not a.startswith("-")][:-1]
+        return _Classified(Category.MUTATING, prog, mutation="mv moves files", deleted=moved)
+    if prog in _MUTATING:
+        return _Classified(Category.MUTATING, prog, mutation=f"{prog} changes files")
+    if prog in ("xargs", "parallel", "watch", "eval", "source", "."):
+        return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs other commands")
+    if prog in _READ_ONLY:
+        return _Classified(Category.READ_ONLY, prog)
+    return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} is not a known read-only program")
+
+
+def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
+    words = _unwrap(list(simple.words))
+    if not words:
+        result = _Classified(Category.READ_ONLY, "")
+    else:
+        result = _classify_program(words, simple.env, depth, cwd)
+    if simple.writes and result.mutation is None:
+        result.mutation = f"writes {simple.writes[0]}"
+        if result.category is Category.READ_ONLY:
+            result.category = Category.MUTATING
+    if simple.heredoc and result.category is Category.UNKNOWN:
+        result.mutation = result.mutation or "feeds a heredoc to a program"
+    if result.category is Category.MUTATING:
+        result.touched = [w for w in words[1:] if not w.startswith("-")]
+    result.touched.extend(simple.writes)
+    return result
+
+
+def _empty(reason: str) -> CommandAnalysis:
+    return CommandAnalysis(
+        categories=[Category.UNKNOWN],
+        mutation=f"the command could not be parsed ({reason})",
+        exit_masked_by="the command could not be parsed",
+        parse_error=reason,
+    )
+
+
+def _same_dir(target: str, cwd: str | None) -> bool:
+    if target in (".", "./", ""):
+        return True
+    if cwd is None:
+        return False
+    return posixpath.normpath(target) == posixpath.normpath(cwd)
+
+
+def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
+    if len(command) > MAX_COMMAND_CHARS:
+        return _empty(f"longer than {MAX_COMMAND_CHARS} characters")
+    try:
+        pipelines = _parse(_strip_comments(tokenize(command)))
+    except ValueError as exc:
+        return _empty(str(exc))
+
+    categories: list[Category] = []
+    programs: list[str] = []
+    runners: list[str] = []
+    filters: list[str] = []
+    deleted: list[str] = []
+    collect_only = False
+    mutation: str | None = None
+    agent_text = _AGENT_SUMMARY_TEXT.search(command) is not None
+    pipefail = re.search(r"\bpipefail\b", command) is not None
+    primary: tuple[int, int] | None = None
+    masked: str | None = None
+    output_filter: str | None = None
+    cd_elsewhere: str | None = None
+
+    touched: list[str] = []
+    mutating_at: list[tuple[int, int]] = []
+    nested_after = False
+    for p_index, pipeline in enumerate(pipelines):
+        for c_index, simple in enumerate(pipeline.commands):
+            classified = _classify(simple, depth, cwd)
+            touched.extend(classified.touched)
+            if classified.mutation is not None or (
+                classified.nested is not None and classified.nested.mutates
+            ):
+                mutating_at.append((p_index, c_index))
+            categories.append(classified.category)
+            if classified.program:
+                programs.append(classified.program)
+            if classified.program in ("cd", "pushd") and simple.words[1:2]:
+                target = simple.words[1]
+                cd_elsewhere = None if _same_dir(target, cwd) else target
+            nested = classified.nested
+            if nested is not None:
+                runners.extend(nested.runners)
+                filters.extend(nested.test_filters)
+                collect_only = collect_only or nested.collect_only
+                deleted.extend(nested.deleted_paths)
+                agent_text = agent_text or nested.agent_text
+                mutation = mutation or nested.mutation
+                touched.extend(nested.touched_paths)
+                if nested.runners or (classified.category in _CHECKS and not runners):
+                    nested_after = nested.mutation_after_check
+                    primary = (p_index, c_index)
+                    masked = nested.exit_masked_by
+                    output_filter = nested.output_filter
+                continue
+            mutation = mutation or classified.mutation
+            deleted.extend(classified.deleted)
+            if classified.runner is not None:
+                runners.append(classified.runner)
+                filters.extend(classified.filters)
+                if cd_elsewhere is not None:
+                    filters.append(f"runs in {cd_elsewhere}")
+                collect_only = collect_only or classified.collect_only
+                primary = (p_index, c_index)
+                masked = None
+                output_filter = None
+            elif classified.category in _CHECKS and not runners:
+                primary = (p_index, c_index)
+                masked = None
+                output_filter = None
+
+    mutation_after = primary is not None and (
+        any(position > primary for position in mutating_at)
+        or (nested_after and primary in mutating_at)
+    )
+    if primary is not None and masked is None:
+        p_index, c_index = primary
+        pipeline = pipelines[p_index]
+        after_pipe = pipeline.commands[c_index + 1 :]
+        if after_pipe:
+            output_filter = (
+                program_name(_unwrap(after_pipe[0].words)[0])
+                if _unwrap(after_pipe[0].words)
+                else "?"
+            )
+            if any(program_name((_unwrap(c.words) or ["?"])[0]) != "tail" for c in after_pipe):
+                output_filter = next(
+                    program_name((_unwrap(c.words) or ["?"])[0])
+                    for c in after_pipe
+                    if program_name((_unwrap(c.words) or ["?"])[0]) != "tail"
+                )
+            if not pipefail:
+                masked = f"its output is piped into {output_filter}"
+        if pipeline.commands[c_index].negated:
+            masked = "it is negated with !"
+        if masked is None and pipeline.op_after == "&":
+            masked = "it runs in the background"
+        if masked is None:
+            for k in range(p_index, len(pipelines) - 1):
+                op = pipelines[k].op_after
+                if op != "&&":
+                    following = pipelines[k + 1]
+                    shown = " ".join(following.commands[0].words[:3])
+                    label = "a newline" if op == "\n" else repr(op)
+                    masked = f"it is followed by {label} and {shown!r}"
+                    break
+        if masked is None:
+            trailing = [
+                _classify(c, depth, cwd).category
+                for later in pipelines[p_index + 1 :]
+                for c in later.commands
+            ]
+            if any(cat is not Category.READ_ONLY for cat in trailing):
+                masked = "other commands run after it"
+
+    return CommandAnalysis(
+        categories=categories,
+        programs=programs,
+        runners=runners,
+        test_filters=list(dict.fromkeys(filters)),
+        collect_only=collect_only,
+        exit_masked_by=masked,
+        output_filter=output_filter,
+        agent_text=agent_text,
+        mutation=mutation,
+        deleted_paths=deleted,
+        touched_paths=list(dict.fromkeys(touched)),
+        mutation_after_check=mutation_after,
+        session_store=SESSION_STORE.search(command) is not None,
+    )
+
+
+def analyse(command: str, cwd: str | None = None) -> CommandAnalysis:
+    """Parse and classify a shell command line run in `cwd`."""
+    return _analyse(command, cwd, 0)
+
+
+def unwrap_shell(argv: Sequence[str]) -> str:
+    """A command recorded as an argument vector, as one shell line (`["bash", "-lc", "x"]` is
+    `x`)."""
+    if (
+        len(argv) == 3
+        and program_name(argv[0]) in _SHELLS
+        and re.fullmatch(r"-[a-z]*c[a-z]*", argv[1])
+    ):
+        return argv[2]
+    return shlex.join(argv)
