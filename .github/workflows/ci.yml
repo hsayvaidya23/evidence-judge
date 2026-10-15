@@ -25,6 +25,8 @@ jobs:
       UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python-version }}
@@ -51,6 +53,8 @@ jobs:
       UV_PYTHON: "3.13"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.13"
@@ -65,6 +69,8 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.13"
@@ -92,6 +98,8 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Build image
         run: docker build -t evidence-judge:ci .
       - name: Judge a recorded forged run in the container (must exit 1 = FAIL)
@@ -110,9 +118,11 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Judge an honest run with the action
         id: honest
-        uses: ./
+        uses: $/
         with:
           trace: tests/fixtures/runs/honest_success/trace.zip
           har: tests/fixtures/runs/honest_success/run.har
@@ -121,13 +131,13 @@ jobs:
       - name: Judge a missing trace with the action (bad input must fail, not reuse a verdict)
         id: broken
         continue-on-error: true
-        uses: ./
+        uses: $/
         with:
           trace: tests/fixtures/runs/does-not-exist/trace.zip
       - name: Judge a forged run with the action (expected to fail the step)
         id: forged
         continue-on-error: true
-        uses: ./
+        uses: $/
         with:
           trace: tests/fixtures/runs/forged_success/trace.zip
           har: tests/fixtures/runs/forged_success/run.har
@@ -146,3 +156,51 @@ jobs:
           test "$FORGED_STEP" = failure
           test -z "$BROKEN"
           test "$BROKEN_STEP" = failure
+
+  changelog:
+    name: changelog updated with src/
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # read the PR's labels at run time, so a re-run sees a new skip-changelog
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: src/ changes need a CHANGELOG.md entry (label skip-changelog to opt out)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          if ! grep -q '^src/' <<<"$changed"; then
+            echo "No src/ changes."
+            exit 0
+          fi
+          if grep -qx 'CHANGELOG.md' <<<"$changed"; then
+            echo "CHANGELOG.md is updated."
+            exit 0
+          fi
+          if gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' | grep -qx 'skip-changelog'; then
+            echo "src/ changed without a changelog entry; skipped by the skip-changelog label."
+            exit 0
+          fi
+          echo "::error file=CHANGELOG.md::src/ changed but CHANGELOG.md did not. Add an entry under [Unreleased], or label the PR skip-changelog and re-run this job."
+          exit 1
+
+  zizmor:
+    name: workflow security (zizmor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          version: "1.30.1"
+          online-audits: false
+          advanced-security: false
+          annotations: true

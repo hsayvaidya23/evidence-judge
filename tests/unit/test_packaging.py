@@ -39,7 +39,7 @@ def test_release_runs_the_full_ci_before_publishing() -> None:
     release = yaml.safe_load((workflows / "release.yml").read_text(encoding="utf-8"))
     assert "workflow_call" in ci[True]
     jobs = release["jobs"]
-    [gate] = [name for name, job in jobs.items() if job.get("uses") == "./.github/workflows/ci.yml"]
+    [gate] = [name for name, job in jobs.items() if job.get("uses") == "$/.github/workflows/ci.yml"]
     assert gate in jobs["build"]["needs"]
     assert jobs["publish"]["needs"] == "build"
 
@@ -61,7 +61,7 @@ def _uses_lines() -> list[tuple[str, str, str]]:
 
 
 def test_third_party_actions_are_pinned_to_a_commit_sha_with_a_version_comment() -> None:
-    external = [(f, ref, rest) for f, ref, rest in _uses_lines() if not ref.startswith("./")]
+    external = [(f, ref, rest) for f, ref, rest in _uses_lines() if not ref.startswith("$/")]
     assert {f for f, _, _ in external} >= {"action.yml", "ci.yml", "release.yml", "docs.yml"}
     for file, ref, rest in external:
         assert _PINNED.match(ref), f"{file}: {ref} is not pinned to a full commit SHA"
@@ -71,17 +71,66 @@ def test_third_party_actions_are_pinned_to_a_commit_sha_with_a_version_comment()
 def test_each_action_is_pinned_to_one_sha_everywhere() -> None:
     shas: dict[str, set[str]] = {}
     for _, ref, rest in _uses_lines():
-        if not ref.startswith("./"):
+        if not ref.startswith("$/"):
             name, _, sha = ref.partition("@")
             shas.setdefault(name, set()).add(f"{sha}{rest.strip()}")
     assert all(len(pins) == 1 for pins in shas.values()), shas
 
 
-def test_dependabot_keeps_action_pins_updated() -> None:
+def test_in_repo_actions_and_workflows_use_the_self_repository_form() -> None:
+    assert not [(f, ref) for f, ref, _ in _uses_lines() if ref.startswith("./")]
+
+
+def _workflows() -> dict[str, dict[Any, Any]]:
+    import yaml
+
+    return {
+        path.name: yaml.safe_load(path.read_text(encoding="utf-8"))
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    }
+
+
+def test_checkouts_never_persist_credentials() -> None:
+    for name, workflow in _workflows().items():
+        for job_name, job in workflow["jobs"].items():
+            for step in job.get("steps", []):
+                if str(step.get("uses", "")).startswith("actions/checkout@"):
+                    assert step.get("with", {}).get("persist-credentials") is False, (
+                        name,
+                        job_name,
+                    )
+
+
+def test_dependabot_keeps_action_pins_updated_after_a_cooldown() -> None:
     import yaml
 
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
     assert any(u["package-ecosystem"] == "github-actions" for u in config["updates"])
+    assert all(u["cooldown"]["default-days"] >= 7 for u in config["updates"])
+
+
+def test_release_attests_the_distributions_and_ships_an_sbom() -> None:
+    jobs = _workflows()["release.yml"]["jobs"]
+    build = jobs["build"]
+    assert build["permissions"]["id-token"] == "write"
+    assert build["permissions"]["attestations"] == "write"
+    attests = [
+        s["with"] for s in build["steps"] if str(s.get("uses", "")).startswith("actions/attest@")
+    ]
+    assert {"subject-path": "dist/*"} in attests
+    assert any("sbom-path" in a for a in attests)
+    assert any("--format cyclonedx" in s.get("run", "") for s in build["steps"])
+    release = jobs["github-release"]
+    assert release["permissions"] == {"contents": "write"}
+    assert "dist/* sbom/*" in release["steps"][-1]["run"]
+
+
+def test_changelog_check_runs_only_on_pull_requests_and_honours_the_skip_label() -> None:
+    job = _workflows()["ci.yml"]["jobs"]["changelog"]
+    assert job["if"] == "github.event_name == 'pull_request'"
+    script = job["steps"][-1]["run"]
+    assert "skip-changelog" in script
+    assert "CHANGELOG.md" in script
 
 
 def _action() -> dict[str, Any]:
@@ -127,3 +176,13 @@ def test_ci_exercises_the_action_failure_path() -> None:
     broken = next(s for s in steps if s.get("id") == "broken")
     assert broken["continue-on-error"] is True
     assert 'test "$BROKEN_STEP" = failure' in steps[-1]["run"]
+
+
+def test_project_urls_point_at_the_docs_changelog_and_issues() -> None:
+    urls = _pyproject()["project"]["urls"]
+    config = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    mkdocs = dict(re.findall(r"^(site_url|repo_url): (\S+)$", config, re.M))
+    assert urls["Documentation"] == mkdocs["site_url"]
+    assert urls["Repository"] == mkdocs["repo_url"]
+    assert urls["Changelog"] == f"{mkdocs['repo_url']}/blob/main/CHANGELOG.md"
+    assert urls["Issues"] == f"{mkdocs['repo_url']}/issues"

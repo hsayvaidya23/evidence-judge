@@ -42,7 +42,11 @@ all = ["evidence-judge[anthropic,otel,langfuse,phoenix,inspect]"]
 evidence-judge = "evidence_judge.cli:app"
 
 [project.urls]
+Homepage = "https://hsayvaidya23.github.io/evidence-judge/"
+Documentation = "https://hsayvaidya23.github.io/evidence-judge/"
 Repository = "https://github.com/hsayvaidya23/evidence-judge"
+Changelog = "https://github.com/hsayvaidya23/evidence-judge/blob/main/CHANGELOG.md"
+Issues = "https://github.com/hsayvaidya23/evidence-judge/issues"
 
 [dependency-groups]
 dev = [

@@ -19,7 +19,7 @@ jobs:
       # ... run your agent here and record runs/checkout/{trace.zip,run.har,answer.txt}
       - name: Judge the checkout run
         id: judge
-        uses: hsayvaidya23/evidence-judge@main
+        uses: hsayvaidya23/evidence-judge@v0.1.0 # (1)!
         with:
           trace: runs/checkout/trace.zip
           har: runs/checkout/run.har
@@ -33,6 +33,15 @@ jobs:
           name: evidence-judge-report
           path: ${{ steps.judge.outputs.report }}
 ```
+
+1.  Or pin the full commit SHA with a `# v0.1.0` comment, which Dependabot keeps up to date.
+
+!!! warning "Pin a release, not a branch"
+
+    The action installs evidence-judge from the ref you pin, so `@main` would change your
+    verdicts whenever `main` moves. Pin a version tag (`@v0.1.0`) or, stricter, its full commit
+    SHA (`@<sha> # v0.1.0`). v0.1.0 is not tagged yet: until the first release, pin a full
+    commit SHA from `main`.
 
 ## Inputs
 
@@ -77,7 +86,7 @@ The action runs offline by default. To use LLM claim extraction, pass the key as
 variable and turn offline off:
 
 ```yaml
-      - uses: hsayvaidya23/evidence-judge@main
+      - uses: hsayvaidya23/evidence-judge@v0.1.0
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           EVJ_MAX_COST_USD: "0.10"

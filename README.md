@@ -225,12 +225,7 @@ Full references: [docs/cli.md](docs/cli.md) (every command and option) and
 ```python
 import asyncio
 
-from evidence_judge.config import Settings
-from evidence_judge.core.taskspec import TaskSpec
-from evidence_judge.engine import Judge, JudgeOptions
-from evidence_judge.ingest import load_run
-from evidence_judge.llm import build_llm
-from evidence_judge.redact import Redactor
+from evidence_judge import Judge, JudgeOptions, Redactor, Settings, TaskSpec, build_llm, load_run
 
 settings = Settings()
 run = load_run(trace="trace.zip", har="run.har", answer_file="answer.txt")
@@ -241,6 +236,8 @@ judge = Judge(settings, build_llm(settings))
 verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=spec)))
 print(verdict.outcome, verdict.summary)
 ```
+
+The names exported from `evidence_judge` are the supported Python API; SemVer also covers the CLI (flags and exit codes) and the verdict JSON (`schema_id` `evidence-judge/run-verdict@1`). Submodules are internal and may change in any 0.x release. See [Stability](docs/reference/python-api.md#stability).
 
 ## ⚙️ Configuration
 
@@ -296,7 +293,7 @@ Send verdicts to the tools you already use (each is an optional extra; see [docs
 GitHub Actions: gate a pull request on a recorded run.
 
 ```yaml
-- uses: hsayvaidya23/evidence-judge@main
+- uses: hsayvaidya23/evidence-judge@v0.1.0 # or pin the full commit SHA with a `# v0.1.0` comment
   with:
     trace: runs/checkout/trace.zip
     har: runs/checkout/run.har
@@ -306,6 +303,8 @@ GitHub Actions: gate a pull request on a recorded run.
 ```
 
 The step fails on FAIL (and optionally NEEDS_REVIEW), writes the verdict to the job summary, and exposes `outcome`, `score` and `report` outputs.
+
+Pin a release, never `@main`: the action installs evidence-judge from the ref you pin, so a moving branch changes your verdicts under you. v0.1.0 is not tagged yet; until it is, pin a full commit SHA from `main`.
 
 Docker: `docker build -t evidence-judge . && docker run --rm -v "$PWD:/work:ro" evidence-judge judge --trace trace.zip --answer-file answer.txt --offline`
 
