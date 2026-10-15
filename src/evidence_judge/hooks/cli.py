@@ -47,8 +47,9 @@ hook_app = typer.Typer(
     name="hook",
     help=(
         "Hooks for coding agents. Stop hooks read the hook JSON on stdin, judge the newest "
-        "trace and write the decision JSON on stdout; record hooks append tool calls to the "
-        "session's evidence log. Always exit 0; problems become a notice."
+        "trace against the task spec and re-run the session spec's rerun: block, then write "
+        "the decision JSON on stdout; record hooks append tool calls to the session's evidence "
+        "log. Always exit 0; problems become a notice."
     ),
     no_args_is_help=True,
     add_completion=False,

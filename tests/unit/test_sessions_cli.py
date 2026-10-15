@@ -413,3 +413,10 @@ def test_a_browser_spec_given_to_a_session_command_gets_a_hint() -> None:
         text = " ".join(result.output.split())
         assert "this looks like a browser task spec; use evidence-judge judge --spec" in text
         assert "Extra inputs" not in text
+
+
+def test_session_judge_help_fits_80_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLUMNS", "80")
+    result = runner.invoke(app, ["session", "judge", "--help"], terminal_width=80)
+    assert "--require-tamper-evidence" in result.output
+    assert "…" not in result.output

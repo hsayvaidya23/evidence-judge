@@ -180,7 +180,7 @@ the final answer when the log lacks them.
 | `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block |
 | `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
 | `--out FILE` | Write the verdict JSON (schema `evidence-judge/run-verdict@1`) here |
-| `--offline` / `--no-offline` | No LLM calls; heuristic claim extraction only |
+| `--offline` | No LLM calls; heuristic claim extraction only |
 | `--no-redact` | Keep secrets in commands, outputs and reports |
 | `--require-tamper-evidence` | Cap the run at needs review unless it comes from an evidence log or a harness stream |
 | `--rerun` | Run the spec's `rerun` command on a copy of `--project` in a clean environment and decide `test_result` predicates from the runner's own report instead of the recorded output; see [Independent re-run](design/coding-agent-sessions.md#independent-re-run) |
@@ -189,7 +189,7 @@ the final answer when the log lacks them.
 | `--rerun-baseline FILE` | Fingerprint of `.venv`, `venv` and `node_modules` saved when the turn started (the turn-start hooks write it); the re-run needs review when they changed since, or when the file is missing or unreadable |
 | `--run-id TEXT` | Override the run id (default: the session id) |
 | `--quiet`, `-q` | Only set the exit code |
-| `--debug` / `--no-debug` | Show tracebacks for internal errors |
+| `--debug` | Show tracebacks for internal errors |
 
 ### `evidence-judge session rerun`
 
@@ -211,7 +211,7 @@ from the base revision. The verdict's `verification.method` is `rerun`.
 | `--rerun-baseline FILE` | As for `session judge` |
 | `--out FILE` | Write the verdict JSON here |
 | `--quiet`, `-q` | Only set the exit code |
-| `--debug` / `--no-debug` | Show tracebacks for internal errors |
+| `--debug` | Show tracebacks for internal errors |
 
 ### `evidence-judge session inspect`
 
@@ -228,7 +228,7 @@ changes and test-weakening edits, plus the last change that later test runs must
 | `--claude-code SESSION`, `--project PATH`, `--codex FILE`, `--evidence-log FILE` | As for `session judge` |
 | `--json` | Print machine-readable JSON instead of a table |
 | `--no-redact` | Show commands and outputs unredacted |
-| `--debug` / `--no-debug` | Re-raise internal errors with a traceback instead of exiting `4` |
+| `--debug` | Re-raise internal errors with a traceback instead of exiting `4` |
 
 ## `evidence-judge schema`
 

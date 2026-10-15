@@ -145,7 +145,7 @@ _LogAnchor = Annotated[
         **_IN_FILE,
     ),
 ]
-_Debug = Annotated[bool, typer.Option(help="Show tracebacks for internal errors")]
+_Debug = Annotated[bool, typer.Option("--debug", help="Show tracebacks for internal errors")]
 
 
 def _stderr() -> Console:
@@ -297,7 +297,7 @@ def judge_command(
         Path | None, typer.Option(help="Write the verdict JSON here", **_OUT_FILE)
     ] = None,
     offline: Annotated[
-        bool, typer.Option(help="No LLM calls; heuristic claim extraction only")
+        bool, typer.Option("--offline", help="No LLM calls; heuristic claim extraction only")
     ] = False,
     no_redact: Annotated[
         bool, typer.Option("--no-redact", help="Keep secrets in commands, outputs and reports")
