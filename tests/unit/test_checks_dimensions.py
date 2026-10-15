@@ -175,6 +175,7 @@ def test_loop_ids_are_truncated() -> None:
     assert finding.endswith("act#1, act#2, act#3, act#4, act#5, …, act#10")
 
 
+@pytest.mark.perf
 def test_loop_detection_is_linear() -> None:
     actions = [act(i, "click", f"#b{i % 2500}") for i in range(5000)]
     start = time.perf_counter()
@@ -418,6 +419,7 @@ def test_primary_host_is_the_first_page_the_run_was_on() -> None:
     assert EvidenceIndex(make_run()).primary_host is None
 
 
+@pytest.mark.perf
 async def test_allow_regex_that_times_out_explains_nothing() -> None:
     run = honest_run()
     odd = net(9, "POST", "/" + "a" * 9000 + "!", 200)

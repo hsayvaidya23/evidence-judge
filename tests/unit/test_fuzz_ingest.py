@@ -229,6 +229,7 @@ def test_mutated_histories_fail_cleanly(seed: int, tmp_path: Path) -> None:
     check(lambda: load_browser_use_history(path))
 
 
+@pytest.mark.perf
 def test_fuzzing_reaches_both_outcomes(tmp_path: Path) -> None:
     outcomes: set[str] = set()
     for seed in range(40):

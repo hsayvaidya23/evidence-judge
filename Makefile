@@ -21,8 +21,9 @@ fmt: ## Auto-fix lint issues and format
 typecheck: ## Strict type check
 	$(UV) run pyright
 
-test: ## Unit tests with coverage
-	$(UV) run pytest tests/unit --cov=evidence_judge --cov-report=term-missing
+test: ## Unit tests with coverage, then the wall-clock budgets without it
+	$(UV) run pytest tests/unit -m "not live and not perf" --cov=evidence_judge --cov-report=term-missing
+	$(UV) run pytest tests/unit -m perf
 
 e2e: ## End-to-end tests against a real browser
 	$(UV) run pytest -m e2e

@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import time
 
+import pytest
+
 from evidence_judge.config import Settings
 from evidence_judge.core.claims import Claim, ClaimKind, ClaimSet
 from evidence_judge.core.evidence import Channel, PageSnapshot, PageState, Run
@@ -65,6 +67,7 @@ def _claims() -> ClaimSet:
     return ClaimSet(claims=claims)
 
 
+@pytest.mark.perf
 def test_thirty_claims_over_two_thousand_long_snapshots_judge_within_budget() -> None:
     run = _long_run()
     judge = Judge(Settings(_env_file=None, cache_dir=None))  # pyright: ignore[reportCallIssue]

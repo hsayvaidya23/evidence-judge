@@ -190,6 +190,7 @@ def large_trace(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return path
 
 
+@pytest.mark.perf
 def test_large_trace_loads_within_budget(large_trace: Path) -> None:
     with within(TRACE_BUDGET_S):
         run = load_playwright_trace(large_trace)

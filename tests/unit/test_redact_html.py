@@ -116,6 +116,7 @@ def test_snapshot_html_and_html_bodies_are_redacted(r: Redactor) -> None:
     assert report.counts == {"html_secret": 2}
 
 
+@pytest.mark.perf
 def test_large_html_is_redacted_quickly(r: Redactor) -> None:
     import time
 

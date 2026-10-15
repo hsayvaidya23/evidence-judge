@@ -246,6 +246,7 @@ def test_compile_regex_raises_typed_error() -> None:
     ],
     ids=["nested-plus", "alternation", "adjacent-plus"],
 )
+@pytest.mark.perf
 def test_backtracking_regex_times_out_with_a_typed_error(pattern: str, text: str) -> None:
     start = time.perf_counter()
     with pytest.raises(RegexTimeoutError, match="regex timed out"):
@@ -253,6 +254,7 @@ def test_backtracking_regex_times_out_with_a_typed_error(pattern: str, text: str
     assert time.perf_counter() - start < 0.2
 
 
+@pytest.mark.perf
 def test_quadratic_patterns_on_long_input_finish_fast() -> None:
     text = "a" * 9000 + "!"
     start = time.perf_counter()

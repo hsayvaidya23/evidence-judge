@@ -50,6 +50,7 @@ def test_unknown_kind_and_duplicates() -> None:
         registry.register(RequestChecker())
 
 
+@pytest.mark.perf
 async def test_catastrophic_regex_is_no_evidence_without_hanging() -> None:
     start = time.perf_counter()
     long_page = "/" + "a" * 9000 + "!"

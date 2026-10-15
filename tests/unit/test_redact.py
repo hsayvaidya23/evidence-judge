@@ -471,6 +471,7 @@ def test_percent_encoding_without_pii_is_left_alone(r: Redactor, text: str) -> N
     assert red(r, text) == text
 
 
+@pytest.mark.perf
 def test_percent_scan_is_linear_on_long_unescaped_runs(r: Redactor) -> None:
     text = "a" * 200_000 + "%zz"
     started = time.perf_counter()
