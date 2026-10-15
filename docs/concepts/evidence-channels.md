@@ -58,13 +58,19 @@ run can pass: a trace whose HAR added anything is `partial`, so judge it without
 
 ### Page text and the final page
 
-Snapshot and final-state text is the text the page itself holds, minus what the snapshot shows
-hidden: the `hidden` attribute, a closed `<dialog>` or `<details>` (its `<summary>` stays), and
-`display: none`, `visibility: hidden` or `content-visibility: hidden` from inline styles,
-`<style>` elements, constructed stylesheets and the linked stylesheets the trace holds, plus
-the common hiding classes (`hidden`, `d-none`, `sr-only`, `visually-hidden`, `invisible`).
-Text hidden any other way (a stylesheet the trace does not hold, script, layout or colour)
-still counts; see [`page_text`](../task-specs.md#page_text-the-pages-text-contains-a-phrase).
+Snapshot and final-state text (`text`) is the text the page shows. Text the snapshot shows
+hidden is left out: the `hidden` attribute and a closed `<dialog>` unless the page's styles
+show them, a closed `<details>` body (its `<summary>` stays), an SVG `<title>` or `<desc>`,
+light-DOM children no `<slot>` shows, and what the cascade certainly sets to `display: none`,
+`visibility: hidden` or `content-visibility: hidden` (inline styles, `<style>` elements,
+constructed stylesheets, and the linked and `@import`ed stylesheets the trace holds; each shadow
+root is its own scope). Text whose visibility depends on something the judge does not fully
+model (a condition or selector it cannot evaluate, `var()`, near-zero opacity or font size, a
+transparent colour, clipping, off-screen offsets, a utility class no recorded sheet defines, or
+a stylesheet the trace does not hold) goes to `unsure_text` instead: it never proves a
+predicate and keeps its absence from contradicting one. `opaque` marks a page with an empty
+custom element, which may render a closed shadow root no snapshot holds. See
+[`page_text`](../task-specs.md#page_text-the-pages-text-contains-a-phrase).
 Text typed into `<input>` and
 `<textarea>` fields (and their default values) is left out, because the agent controls it: a
 search box holding "Order #1042 confirmed" is not the page confirming the order. So is the
