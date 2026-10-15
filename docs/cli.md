@@ -9,6 +9,8 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | `judge` | Judge one agent run |
 | `inspect` | Summarise the evidence in a trace, HAR or browser-use run without judging it |
 | `mcp` | Run an MCP server so coding agents can judge, inspect and explain runs as tools |
+| `session judge` | Judge a coding-agent session (Claude Code, Codex) against its tool-call log |
+| `session inspect` | Summarise a coding-agent session without judging it |
 | `schema` | Print the JSON Schema of the verdict format |
 | `version` | Print the evidence-judge version |
 
@@ -142,6 +144,57 @@ evidence-judge mcp [--root DIR]... [--http] [--port 8000] [--offline-only]
 
 Settings come from the server's environment as for every command; `EVJ_REDACT` decides whether
 tool results are redacted.
+
+## `evidence-judge session`
+
+Grades coding-agent sessions (Claude Code, Codex CLI) by checking the agent's final answer
+against the session's tool-call log: the commands it ran with their exit status and output, and
+the files it edited. See [Coding-agent sessions](design/coding-agent-sessions.md) for the
+formats, predicates and soundness rules.
+
+### `evidence-judge session judge`
+
+```text
+evidence-judge session judge [--claude-code SESSION] [--codex FILE] [--evidence-log FILE] [OPTIONS]
+```
+
+At least one of `--claude-code`, `--codex` or `--evidence-log` is required. With an evidence
+log, tool calls come from the log, and a transcript given alongside supplies only the task and
+the final answer when the log lacks them.
+
+| Option | Description |
+| --- | --- |
+| `--claude-code SESSION` | Claude Code transcript: a `.jsonl` path, a session id (looked up under `~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects`), or `latest` for the newest transcript of `--project` |
+| `--project PATH` | Project directory for `--claude-code latest` (default: the current directory) |
+| `--codex FILE` | Codex `exec --json` output saved by the harness, or a rollout file from `~/.codex/sessions` |
+| `--evidence-log FILE` | Evidence-recorder log (format version 1), written by a harness hook after every tool call; the only transcript-independent source, so the verdict's `tamper_detection` is `full` |
+| `--answer TEXT` / `--answer-file FILE` | Judge this final answer instead of the recorded one |
+| `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence` |
+| `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
+| `--out FILE` | Write the verdict JSON (schema `evidence-judge/run-verdict@1`) here |
+| `--offline` / `--no-offline` | No LLM calls; heuristic claim extraction only |
+| `--no-redact` | Keep secrets in commands, outputs and reports |
+| `--require-tamper-evidence` | Cap the run at needs review unless it comes from an evidence log or a harness stream |
+| `--run-id TEXT` | Override the run id (default: the session id) |
+| `--quiet`, `-q` | Only set the exit code |
+| `--debug` / `--no-debug` | Show tracebacks for internal errors |
+
+### `evidence-judge session inspect`
+
+```text
+evidence-judge session inspect [--claude-code SESSION] [--codex FILE] [--evidence-log FILE] [--json]
+```
+
+Lists every recorded command and edit with what the judge makes of it: the test runner and its
+summary, filters, masked exit statuses, summary text typed by the agent, possible workspace
+changes and test-weakening edits, plus the last change that later test runs must follow.
+
+| Option | Description |
+| --- | --- |
+| `--claude-code SESSION`, `--project PATH`, `--codex FILE`, `--evidence-log FILE` | As for `session judge` |
+| `--json` | Print machine-readable JSON instead of a table |
+| `--no-redact` | Show commands and outputs unredacted |
+| `--debug` / `--no-debug` | Re-raise internal errors with a traceback instead of exiting `4` |
 
 ## `evidence-judge schema`
 

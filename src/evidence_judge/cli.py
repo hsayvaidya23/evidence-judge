@@ -38,6 +38,7 @@ from evidence_judge.report.console import (
 )
 from evidence_judge.report.html_report import write_html
 from evidence_judge.report.json_report import export_schema, schema_to_json, write_json
+from evidence_judge.sessions.cli import session_app
 
 
 class ExitCode(IntEnum):
@@ -105,6 +106,7 @@ app = typer.Typer(
     pretty_exceptions_enable=False,
 )
 app.add_typer(hook_app)
+app.add_typer(session_app, name="session")
 
 
 def _load_run(**kwargs: Any) -> Run:

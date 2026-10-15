@@ -88,6 +88,24 @@ the names exported from `evidence_judge`) is defined under
   the stop and recorder hooks, the `evidence-judge mcp` server and a skill on recording traces
   with Playwright MCP, writing a spec and reading a verdict. A Gemini CLI extension with the
   same hooks and server, and guides for Claude Code, Codex CLI and Gemini CLI.
+- Coding-agent sessions: `evidence-judge session judge` grades a Claude Code transcript (a path,
+  a session id or `latest` for a project), a Codex `exec --json` stream or rollout, or an
+  evidence-recorder log against its tool-call log, and `session inspect` lists what the judge
+  sees in it. Claims ("all tests pass", "I fixed the bug in `x.py`", "the build succeeds", "I
+  didn't touch the tests", "I ran the linter") compile to `test_result`, `command`, `edit` and
+  `build` predicates checked deterministically; session specs add `expect` and `forbid`
+  predicates. Design and formats: `docs/design/coding-agent-sessions.md`.
+- A passing test run proves a pass only when it ran after the last workspace change, without
+  filters, with a parsed runner summary (pytest, unittest, jest, vitest, mocha, go, cargo, rspec,
+  phpunit, dotnet, maven), its own exit status and its whole output, from a command line that
+  does not print summary text itself, and with no test-weakening change in the session: skip
+  markers, removed or rewritten assertions, deleted tests, test configuration, conftest hooks,
+  runner shims, patched packages, aliases, shell functions or PATH changes.
+- Evidence-recorder log format v1 (`--evidence-log`), shared by Claude Code, Codex and Gemini
+  hooks, with an optional hash chain; such logs and saved harness streams give
+  `tamper_detection: full`, transcripts `partial`.
+- A session forgery benchmark (`python -m evidence_judge.sessions.bench`): 253 forged successes
+  over real Claude Code sessions, rewritten answers and 40 tricks, with no false PASS.
 
 ### Changed
 
