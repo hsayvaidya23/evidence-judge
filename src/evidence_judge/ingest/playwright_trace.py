@@ -241,6 +241,8 @@ class _RawSnapshot:
     text: str
     call_id: str | None
     field_values: tuple[str, ...] = ()
+    unsure_text: str = ""
+    opaque: bool = False
 
 
 @dataclass(slots=True)
@@ -300,7 +302,7 @@ class _TraceReader:
     form_values: int = 0
     routes: RouteCalls = field(default_factory=RouteCalls)
     pending: list[_PendingSnapshot] = field(default_factory=list[_PendingSnapshot])
-    css_entries: dict[str, JsonObject] = field(default_factory=dict[str, JsonObject])
+    css_entries: dict[str, JsonObject | None] = field(default_factory=dict[str, JsonObject | None])
     css: dict[str, str | None] = field(default_factory=dict[str, str | None])
 
     def read_all(self) -> None:
@@ -485,18 +487,27 @@ class _TraceReader:
         """Render the context's main-frame snapshots, now that its stylesheets are read."""
         self.css_entries = {}
         self.css = {}
+        self.store.forget_styles()
         for entry in self.resources:
             response = as_object(entry.get("response"))
             content = as_object(response.get("content"))
             mime = (as_str(content.get("mimeType")) or "text/css").lower()
             status = as_int(response.get("status")) or 0
             url = as_str(as_object(entry.get("request")).get("url"))
-            if url and 200 <= status < 300 and "css" in mime:
+            if not url:
+                continue
+            if 200 <= status < 300 and "css" in mime:
                 self.css_entries[url] = content
+            elif status >= 400 and url not in self.css_entries:
+                self.css_entries[url] = None
         for raw in self.pending:
             try:
                 page = self.store.render(
-                    raw.frame_id, raw.index, viewport=raw.viewport, stylesheets=self._stylesheet
+                    raw.frame_id,
+                    raw.index,
+                    viewport=raw.viewport,
+                    stylesheets=self._stylesheet,
+                    url=raw.url,
                 )
             except SnapshotDecodeError as exc:
                 self.warnings.append(f"snapshot of {raw.url} skipped: {exc}")
@@ -511,16 +522,22 @@ class _TraceReader:
                     page.text,
                     raw.call_id,
                     page.field_values,
+                    page.unsure_text,
+                    page.opaque,
                 )
             )
         self.pending.clear()
 
     def _stylesheet(self, url: str) -> str | None:
-        """The text of the last stylesheet the context recorded from `url` (up to
-        MAX_SHEET_CHARS characters), or None."""
+        """The text of the last stylesheet the context recorded from `url`, "" when the
+        recording shows it failed to load, or None when the recording does not hold it (or it is
+        longer than MAX_SHEET_CHARS characters)."""
         if url not in self.css:
-            content = self.css_entries.get(url)
-            self.css[url] = None if content is None else self._css_text(content)
+            if url not in self.css_entries:
+                self.css[url] = None
+            else:
+                content = self.css_entries[url]
+                self.css[url] = "" if content is None else self._css_text(content)
         return self.css[url]
 
     def _css_text(self, content: JsonObject) -> str | None:
@@ -534,13 +551,13 @@ class _TraceReader:
         else:
             try:
                 with self.archive.open(info) as stream:
-                    body = stream.read(MAX_SHEET_CHARS)
+                    body = stream.read(MAX_SHEET_CHARS + 1)
             except _ZIP_ERRORS as exc:
                 self.warnings.append(f"stylesheet {name} is corrupt: {exc}")
                 return None
         if isinstance(body, bytes):
-            return body.decode("utf-8", errors="replace")
-        return body
+            body = body.decode("utf-8", errors="replace")
+        return None if body is None or len(body) > MAX_SHEET_CHARS else body
 
     def _on_image(self, event: JsonObject, time: float | None) -> None:
         file = as_str(event.get("file"))
@@ -590,11 +607,7 @@ class _TraceReader:
             snapshots=snapshots,
             screenshots=screenshots,
             console=self._build_console(),
-            initial_state=PageState(
-                url=initial.url, title=initial.title, text=initial.text, snapshot_id=initial.id
-            )
-            if initial
-            else None,
+            initial_state=PageState.of(initial) if initial else None,
             final_state=final_state,
             captured=captured,
             blobs=BlobStore(loaders=loaders),
@@ -714,10 +727,10 @@ class _TraceReader:
     def _build_snapshots(self) -> tuple[list[PageSnapshot], list[str]]:
         out: list[PageSnapshot] = []
         pages: list[str] = []
-        last_by_page: dict[str, tuple[str, str | None, str]] = {}
+        last_by_page: dict[str, tuple[str, str | None, str, str, bool]] = {}
         kept: dict[str, int] = {}
         for raw in sorted(self.snapshots, key=lambda s: s.time):
-            key = (raw.url, raw.title, raw.text)
+            key = (raw.url, raw.title, raw.text, raw.unsure_text, raw.opaque)
             if last_by_page.get(raw.page_id) == key:
                 same = out[kept[raw.page_id]]
                 values = tuple(dict.fromkeys([*same.field_values, *raw.field_values]))
@@ -733,6 +746,8 @@ class _TraceReader:
                     url=raw.url,
                     title=raw.title,
                     text=raw.text,
+                    unsure_text=raw.unsure_text,
+                    opaque=raw.opaque,
                     call_id=raw.call_id,
                     field_values=raw.field_values,
                 )
@@ -789,6 +804,8 @@ class _TraceReader:
             url=last.url,
             title=last.title,
             text=last.text,
+            unsure_text=last.unsure_text,
+            opaque=last.opaque,
             snapshot_id=last.id,
             screenshot_id=shot.id if shot else None,
         )

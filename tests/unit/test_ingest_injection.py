@@ -172,7 +172,7 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("select_filter", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("view_source", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
         ("css_hidden", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
-        ("css_link", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("css_link", "stock", "Yes, it is In stock.", "needs_review", [None, True], "may hide"),
         ("details_closed", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("css_shown", "out_of_stock", "No, Out of stock.", "fail", [False, True], "not contain"),
     ],
@@ -554,28 +554,36 @@ def test_page_text_leaves_out_what_the_page_hides(mode: str, text: str) -> None:
     assert [a.name for a in run.actions][-1] in ("goto", "click")
 
 
-SHOWN_WITHOUT_SHEET = "Red Kettle In stockIn stock Out of stock"
-"""css_link's text when the trace does not hold kettle.css: only the utility classes hide."""
+UNSURE_WITHOUT_SHEET = ("", "Red Kettle In stockIn stock In stockIn stock Out of stock")
+"""css_link's (text, unsure_text) when the trace does not hold kettle.css: the page's styles
+are unknown, so all of its text may be hidden."""
+FAILED_SHEET = ("Red Kettle In stockIn stock Out of stock", "In stockIn stock")
+"""css_link's when kettle.css failed to load: only the utility classes, which no sheet defines,
+may hide."""
 KETTLE_CSS = ".badge{display:none}@media (min-width:600px){.wide-hidden{display:none}}"
 
 
 @pytest.mark.parametrize(
     ("content", "status", "text"),
     [
-        ({"mimeType": "text/css", "text": KETTLE_CSS}, 200, "Red Kettle Out of stock"),
+        (
+            {"mimeType": "text/css", "text": KETTLE_CSS},
+            200,
+            ("Red Kettle Out of stock", "In stockIn stock"),
+        ),
         (
             {"text": base64.b64encode(KETTLE_CSS.encode()).decode(), "encoding": "base64"},
             200,
-            "Red Kettle Out of stock",
+            ("Red Kettle Out of stock", "In stockIn stock"),
         ),
-        ({"mimeType": "text/css", "_sha1": "missing.css"}, 200, SHOWN_WITHOUT_SHEET),
-        ({"mimeType": "text/html", "text": KETTLE_CSS}, 200, SHOWN_WITHOUT_SHEET),
-        ({"mimeType": "text/css", "text": KETTLE_CSS}, 404, SHOWN_WITHOUT_SHEET),
-        ({"mimeType": "text/css"}, 200, SHOWN_WITHOUT_SHEET),
+        ({"mimeType": "text/css", "_sha1": "missing.css"}, 200, UNSURE_WITHOUT_SHEET),
+        ({"mimeType": "text/html", "text": KETTLE_CSS}, 200, UNSURE_WITHOUT_SHEET),
+        ({"mimeType": "text/css", "text": KETTLE_CSS}, 404, FAILED_SHEET),
+        ({"mimeType": "text/css"}, 200, UNSURE_WITHOUT_SHEET),
     ],
 )
 def test_linked_stylesheets_come_from_the_recorded_responses(
-    tmp_path: Path, content: dict[str, Any], status: int, text: str
+    tmp_path: Path, content: dict[str, Any], status: int, text: tuple[str, str]
 ) -> None:
     def change(name: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for event in events:
@@ -588,7 +596,7 @@ def test_linked_stylesheets_come_from_the_recorded_responses(
     run = load_playwright_trace(trace)
 
     assert run.final_state is not None
-    assert run.final_state.text == text
+    assert (run.final_state.text, run.final_state.unsure_text) == text
 
 
 def _stored(source: Path, target: Path) -> Path:
@@ -609,7 +617,7 @@ def test_a_corrupt_stylesheet_is_skipped_with_a_warning(tmp_path: Path) -> None:
     run = load_playwright_trace(trace)
 
     assert run.final_state is not None
-    assert run.final_state.text == SHOWN_WITHOUT_SHEET
+    assert (run.final_state.text, run.final_state.unsure_text) == UNSURE_WITHOUT_SHEET
     assert any(w.startswith("stylesheet resources/") for w in run.metadata["warnings"])
 
 
@@ -619,7 +627,7 @@ def test_a_stylesheet_over_the_resource_limit_is_skipped(tmp_path: Path) -> None
     )
 
     assert run.final_state is not None
-    assert run.final_state.text == SHOWN_WITHOUT_SHEET
+    assert (run.final_state.text, run.final_state.unsure_text) == UNSURE_WITHOUT_SHEET
     assert any("larger than 50 bytes" in w for w in run.metadata["warnings"])
 
 

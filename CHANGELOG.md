@@ -201,6 +201,26 @@ the names exported from `evidence_judge`) is defined under
   `Playwright` object can open a second context or an `APIRequestContext` and send requests the
   trace never shows (a `forbid` on them cannot fire). The harness guide now says to give the
   agent only the traced context or its page.
+- **Page text abstains where it cannot tell.** Each piece of page text is now shown, hidden, or
+  of unsure visibility, and only certainty hides it. Unsure text (`PageSnapshot.unsure_text`)
+  never proves a `page_text` predicate or a `page_regex` value, and keeps its absence from
+  contradicting one (NO_EVIDENCE, "text the page may hide"). It is text under an `@media`,
+  `@supports`, `@container` or `@scope` condition the reader cannot evaluate, a selector it
+  cannot evaluate (`:hover`, `:has()`, unknown or unparseable selectors), `var()` in `display`
+  or `visibility`, `opacity` near 0, a tiny `font-size`, a transparent text colour or one equal
+  to the background, `clip`/`clip-path` that cut it away, a `transform` that scales it to
+  nothing, far off-screen offsets, margins or `text-indent`, a zero-size box that clips its
+  overflow, a utility hiding class no recorded sheet defines, and all text of a page whose
+  stylesheets (linked or `@import`ed) the trace does not fully hold. The reader now also
+  evaluates sibling combinators, `:is()`, `:where()`, `:nth-*`/`*-child`/`*-of-type`,
+  escaped values, `@layer` order (with `!important` reversal), simple `@supports` tests and
+  `@import`ed sheets from the trace; the `hidden` attribute and a closed `<dialog>` yield to
+  the page's own styles; an SVG `<title>`/`<desc>` is not page text. Shadow roots are their own
+  style scope (the page's sheets do not reach in, `:host` rules reach out), light-DOM children
+  no `<slot>` shows are hidden, and a page with an empty custom element (which may hold a closed
+  shadow root) cannot prove text absent (`PageSnapshot.opaque`). Honest pages a stylesheet
+  layer, `@supports not`, `@import`, `[hidden]` override or shadow root showed text on no longer
+  FAIL; text hidden by styles the reader does not model no longer PASSes.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

@@ -52,6 +52,7 @@ from evidence_judge.checks.matching import (
     regex_findall,
     url_path,
 )
+from evidence_judge.checks.page_text import MAY_HIDE
 from evidence_judge.checks.request import RequestMatcher, matching_requests
 from evidence_judge.core.echo import MASK
 from evidence_judge.core.evidence import Channel, NetworkEvent
@@ -156,14 +157,15 @@ def _missing_json_reason(
 
 def _from_pages(
     regex_source: str, index: EvidenceIndex, scope: EvidenceScope | None
-) -> tuple[list[Observation], list[str]]:
-    """Every match on every page state in `scope`, and the ids of states whose text was not
-    fully read."""
+) -> tuple[list[Observation], list[str], list[Observation]]:
+    """Every match on every page state in `scope`, the ids of states whose text was not fully
+    read, and the matches in text the page may hide (PageSnapshot.unsure_text)."""
     regex = compile_regex(regex_source)
     if regex.groups != 1:
         raise InvalidPredicateError(f"page_regex /{regex_source}/ needs exactly one group")
     observations: list[Observation] = []
     partial: list[str] = []
+    unsure: list[Observation] = []
     for state in index.page_states():
         if scope is not None and not scope.page_allowed(state.url):
             continue
@@ -175,7 +177,14 @@ def _from_pages(
             Observation(match.group(1), evidence_id, f"the page {url_path(state.url)}")
             for match in found.matches
         )
-    return observations, partial
+        hidden = regex_findall(regex, state.unsure_text) if state.unsure_text else None
+        if hidden is not None and not hidden.complete:
+            partial.append(evidence_id)
+        unsure.extend(
+            Observation(match.group(1), evidence_id, f"{MAY_HIDE} on {url_path(state.url)}")
+            for match in (hidden.matches if hidden is not None else ())
+        )
+    return observations, partial, unsure
 
 
 def _partial_reason(state_ids: list[str]) -> str:
@@ -188,12 +197,13 @@ def _partial_reason(state_ids: list[str]) -> str:
 
 def _observe(
     predicate: ValuePredicate, index: EvidenceIndex, scope: EvidenceScope | None
-) -> tuple[list[Observation], str, str | None]:
+) -> tuple[list[Observation], str, str | None, list[Observation]]:
     if predicate.json_path is None and predicate.page_regex is None:
         raise InvalidPredicateError("value predicate needs 'json_path' or 'page_regex'")
     observations: list[Observation] = []
     gaps: list[str] = []
     unread: str | None = None
+    unsure: list[Observation] = []
     if predicate.json_path is not None:
         candidates = _candidates(predicate, index, scope)
         found = [o for e in candidates for o in _read_bodies(e, predicate.json_path)]
@@ -205,7 +215,7 @@ def _observe(
         elif not found:
             gaps.append(_missing_json_reason(predicate, predicate.json_path, candidates, index))
     if predicate.page_regex is not None:
-        pages, partial = _from_pages(predicate.page_regex, index, scope)
+        pages, partial, unsure = _from_pages(predicate.page_regex, index, scope)
         observations.extend(pages)
         if partial:
             reason = _partial_reason(partial)
@@ -213,19 +223,26 @@ def _observe(
             gaps.append(reason)
         elif not pages:
             gaps.append(f"No recorded page text matches /{predicate.page_regex}/")
-    return observations, "; ".join(gaps), unread
+    return observations, "; ".join(gaps), unread, unsure
 
 
 def check_value(
     predicate: ValuePredicate, index: EvidenceIndex, scope: EvidenceScope | None = None
 ) -> PredicateResult:
-    observations, gaps, unread = _observe(predicate, index, scope)
+    observations, gaps, unread, unsure = _observe(predicate, index, scope)
     field = predicate.field
     expected = f"{predicate.op} {as_text(predicate.value)}"
     if not observations:
+        if unsure:
+            return _unsure_result(field, unsure, f"so {quoted(field)} could not be read")
         return result(Support.NO_EVIDENCE, f"{gaps}, so {quoted(field)} could not be read", KIND)
     verdicts = [(o, compare(o.value, predicate.op, predicate.value)) for o in observations]
     violations, ambiguous = _violations(verdicts)
+    doubtful = [o for o in unsure if compare(o.value, predicate.op, predicate.value) is not True]
+    if doubtful:
+        return _unsure_result(
+            field, doubtful, f"and would not be shown to satisfy {expected} if the page shows it"
+        )
     incomparable = [o for o, holds in verdicts if holds is None]
     if violations:
         worst = violations[-1]
@@ -272,6 +289,17 @@ def check_value(
         f"{_disagreement(observations)}",
         KIND,
         _cite(observations),
+    )
+
+
+def _unsure_result(field: str, unsure: list[Observation], tail: str) -> PredicateResult:
+    latest = unsure[-1]
+    return result(
+        Support.NO_EVIDENCE,
+        f"{field} was {format_value(latest.value)} in {latest.where}, {tail}: its styles may "
+        "keep it from showing, and the judge cannot tell whether they do",
+        KIND,
+        _cite(unsure),
     )
 
 
