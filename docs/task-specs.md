@@ -112,7 +112,9 @@ NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
   list them, or use a `*.` wildcard.
 - Page states whose URL is `data:`, `about:`, `blob:` (or `javascript:`, `chrome:`,
   `devtools:`) never count: an agent can fill such a page with any text. A `final`-scope
-  predicate on such a final page is `no_evidence`.
+  predicate on such a final page is `no_evidence`. A `view-source:` page is reported under the
+  http URL of the page whose source it shows, so the `goto` that opens it counts as the agent
+  writing the page instead, and evidence from then on is set aside.
 
 `forbid` entries and `constraints` are not restricted: a forbidden request or a violating value
 counts wherever it went.
@@ -345,6 +347,25 @@ context.tracing.start(screenshots=True, snapshots=True)
 Whatever is set this way is the harness's responsibility: the judge cannot see it, so a
 header or a login state that makes the site lie is trusted like the site.
 
+### Harness setup: give the agent only the traced context
+
+A Playwright trace records the calls made on the browser context it traces, and nothing else.
+An agent that holds the `Browser` can open a second context (`browser.new_context()`), or
+hold the `Playwright` object and send requests with `playwright.request.new_context()` (an
+`APIRequestContext`): neither is in the trace. Through one it can `POST /upgrade` or place an
+order the trace never shows, so a `forbid` on that request cannot fire, and then read the
+result on a page of the traced context as if the site had done it unasked. The judge cannot
+tell, so the harness has to rule it out:
+
+- Create the browser, the context and the trace in the harness, and hand the agent only that
+  context or its page; never the `Browser`, the `Playwright` object, `playwright.request` or
+  an `APIRequestContext`.
+- If the agent's framework opens its own browser, connect it to a context the harness created
+  and traces (for example over CDP to a browser the harness launched, with tracing started on
+  the context the agent will use), and do not let it create others.
+- Trace the context the agent works in, from before its first page: tracing a context the
+  agent is not using records nothing it did.
+
 ### `require_tamper_evidence`: only a source that shows tampering can pass
 
 Every verdict says what its evidence can show of the agent tampering with the page or its
@@ -508,13 +529,26 @@ Ingest keeps bodies only up to a size limit and marks a cut body with `…[trunc
 recorded, so the result is `no_evidence`, never `contradicted`. A phrase found in the recorded
 part still matches.
 
-### `page_text`: visible text contains a phrase
+### `page_text`: the page's text contains a phrase
 
 ```yaml
 - {kind: page_text, contains: Thank you for your order, scope: final}
 ```
 
 `scope` is `final` (the final page, the default) or `any` (any snapshot during the run).
+
+Page text is the text of the DOM snapshot minus what the snapshot shows hidden: elements with
+the `hidden` attribute, a closed `<dialog>`, the body of a closed `<details>` (its `<summary>`
+stays), and whatever the page's styles set to `display: none`, `visibility: hidden` or
+`content-visibility: hidden`, from inline styles, `<style>` elements, constructed stylesheets
+and the `<link rel=stylesheet>` sheets the trace holds (Playwright records them with the
+network), with `@media` rules read at the recorded viewport. Common hiding classes (`hidden`,
+`d-none`, `sr-only`, `visually-hidden`, `invisible`) count as hidden even when their stylesheet
+is not in the trace. It is not exactly what a person saw: text hidden by a stylesheet the
+trace does not hold, by a selector the reader cannot match (`:hover`, sibling combinators,
+`:nth-child`), by script, or by layout (off-screen, zero size, clipped, covered, same colour as
+the background) still counts. Prefer phrases the page shows only in the state you expect, and
+pair a read with a `url` or `request` predicate when a page carries the phrase hidden.
 
 ### `url`: the page URL matched
 

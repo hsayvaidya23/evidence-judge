@@ -25,7 +25,12 @@ from evidence_judge.core.evidence import (
     Screenshot,
     is_web_page_url,
 )
-from evidence_judge.core.provenance import is_script_url, mark_agent_page_navigations, script_hash
+from evidence_judge.core.provenance import (
+    is_script_url,
+    mark_agent_page_navigations,
+    opens_unserved_page,
+    script_hash,
+)
 from evidence_judge.ingest._json import (
     JsonObject,
     as_float,
@@ -223,12 +228,9 @@ class _HistoryBuilder:
             value = injected(name, shown)
         else:
             value = next((v for k in _VALUE_KEYS if (v := as_str(params.get(k)))), None)
-        if canonical == GOTO and is_script_url(value):
-            canonical, sha, value = (
-                INJECT,
-                script_hash("goto", value or ""),
-                injected("goto", value),
-            )
+        if canonical == GOTO and opens_unserved_page(value):
+            sha = script_hash("goto", value or "") if is_script_url(value) else None
+            canonical, value = INJECT, injected("goto", value)
         self.actions.append(
             ActionEvent(
                 id=f"act#{len(self.actions) + 1}",

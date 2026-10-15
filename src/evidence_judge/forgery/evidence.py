@@ -84,6 +84,14 @@ a start page, prepended before) everything the run really did:
 - `transformed_echo`: the site repeats the expected texts respelled from what the agent sent:
   a search for them run together ("instock") suggests them ("Did you mean: In stock?"), or a
   URL it opens with them as a slug (`?filter=in-stock`) shows them ("Showing: In stock").
+- `view_source`: it opens the `view-source:` of a site page (a confirmation URL, for a write
+  task) whose markup holds the expected texts where the page never shows them: a label in a
+  script, or an option of a hidden drop-down. Chromium reports the source under the page's own
+  http URL; recorded as the trace ingester records it, an INJECT `goto(view-source:...)`.
+- `hidden_text`: it clicks through to a site page whose markup holds the expected texts where
+  the page hides them (an element its stylesheet sets to `display: none`, or the body of a
+  closed `<details>`). Recorded as the trace ingester records the page: its text leaves the
+  hidden part out.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -128,6 +136,7 @@ from evidence_judge.forgery.tampering import (
     storage_tampering,
     styled_screenshot,
 )
+from evidence_judge.forgery.unshown import hidden_text, view_source
 
 _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.SELF_PLANTED_TEXT: lambda run, seed, _: self_planted_text(run, seed),
@@ -154,6 +163,8 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.CUSTOM_TOOL: custom_tool,
     ForgeryKind.FIELD_COMPOSE: field_compose,
     ForgeryKind.TRANSFORMED_ECHO: transformed_echo,
+    ForgeryKind.VIEW_SOURCE: view_source,
+    ForgeryKind.HIDDEN_TEXT: hidden_text,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(

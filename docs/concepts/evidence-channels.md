@@ -11,7 +11,7 @@ the **channels** the source actually recorded.
 | --- | --- | --- |
 | `actions` | Clicks, fills, navigations, key presses, selects, uploads | `act#N` |
 | `network` | Requests and responses: method, URL, status, headers, bodies (truncated at `EVJ_MAX_BODY_CHARS`) | `net#N` |
-| `snapshots` | DOM snapshots: URL, title, visible text, HTML | `snap#N` |
+| `snapshots` | DOM snapshots: URL, title, page text | `snap#N` |
 | `screenshots` | Screenshot images, read lazily | `shot#N` |
 | `console` | Console messages | `con#N` |
 | `final_state` | The page at the end of the run: URL, title, text | `final` |
@@ -45,7 +45,7 @@ warning when the level is not `full`:
 
 | Level | Source | What it can show |
 | --- | --- | --- |
-| `full` | A Playwright trace (with or without a history, or a HAR that adds nothing to it) | Every call the agent made through Playwright: scripts, route handlers, storage and cookie writes, CDP sessions |
+| `full` | A Playwright trace (with or without a history, or a HAR that adds nothing to it) | Every call the agent made through Playwright on the traced browser context: scripts, route handlers, storage and cookie writes, CDP sessions. Not a second context or an `APIRequestContext` it opened itself |
 | `partial` | A Playwright trace merged with a HAR that added requests or filled fields | As for `full`; the reason counts what the HAR added, which proves nothing |
 | `partial` | A browser-use history (without a trace) | The model's actions, including its `evaluate` and custom tools; not what ran beneath them (CDP calls, request changes) |
 | `none` | A HAR alone, or any source without a call log | Nothing: a forged HAR looks the same as a recorded one |
@@ -58,7 +58,14 @@ run can pass: a trace whose HAR added anything is `partial`, so judge it without
 
 ### Page text and the final page
 
-Snapshot and final-state text is what the page itself shows. Text typed into `<input>` and
+Snapshot and final-state text is the text the page itself holds, minus what the snapshot shows
+hidden: the `hidden` attribute, a closed `<dialog>` or `<details>` (its `<summary>` stays), and
+`display: none`, `visibility: hidden` or `content-visibility: hidden` from inline styles,
+`<style>` elements, constructed stylesheets and the linked stylesheets the trace holds, plus
+the common hiding classes (`hidden`, `d-none`, `sr-only`, `visually-hidden`, `invisible`).
+Text hidden any other way (a stylesheet the trace does not hold, script, layout or colour)
+still counts; see [`page_text`](../task-specs.md#page_text-the-pages-text-contains-a-phrase).
+Text typed into `<input>` and
 `<textarea>` fields (and their default values) is left out, because the agent controls it: a
 search box holding "Order #1042 confirmed" is not the page confirming the order. So is the
 text of an editable (`contenteditable`) element and the selected `<option>` of every

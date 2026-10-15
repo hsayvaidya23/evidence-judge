@@ -181,6 +181,26 @@ the names exported from `evidence_judge`) is defined under
   no longer proves the product is in stock.
 - The benchmark forges two more ways: `field_compose` (text made in a search box with the mouse
   or a paste, not typed whole) and `transformed_echo` (the site repeats the input respelled).
+- **Opening a `view-source:` page is tampering.** Chromium reports a `view-source:` page under
+  the http URL of the page whose source it shows, so its markup, scripts, comments and option
+  labels read as that page's text. A `goto` (Playwright, or browser-use `navigate`,
+  `go_to_url`, `open_tab`) of any URL that is not `http`, `https`, `data:`, `blob:` or exactly
+  `about:blank` (`view-source:`, `file:`, `chrome:`, ...) now counts as the agent writing the
+  page. The benchmark forges it as `view_source`.
+- **Text a page hides is not page text.** A page's stylesheet (`.instock{display:none}`), a
+  hiding utility class (`hidden`, `d-none`, `sr-only`), or a closed `<details>` no longer lets
+  text the page never showed prove a `page_text` predicate. Page text now applies
+  `display: none`, `visibility: hidden` and `content-visibility: hidden` from inline styles,
+  `<style>` elements, constructed stylesheets and the linked stylesheets the trace holds, with
+  `@media` rules read at the recorded viewport, and leaves out the body of a closed
+  `<details>`. The task-spec guide says what page text is and what it still includes (text
+  hidden by a stylesheet the trace does not hold, by script or by layout). The benchmark forges
+  it as `hidden_text`.
+- The security policy and the task-spec guide no longer say a trace shows every Playwright
+  call: it records the calls on the context it traces. An agent given the `Browser` or the
+  `Playwright` object can open a second context or an `APIRequestContext` and send requests the
+  trace never shows (a `forbid` on them cannot fire). The harness guide now says to give the
+  agent only the traced context or its page.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

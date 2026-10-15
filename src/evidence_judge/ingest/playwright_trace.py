@@ -50,7 +50,8 @@ from evidence_judge.ingest._calls import (
     taints_run,
     upload_text,
 )
-from evidence_judge.ingest._dom import FrameSnapshotStore, SnapshotDecodeError
+from evidence_judge.ingest._css import MAX_SHEET_CHARS
+from evidence_judge.ingest._dom import FrameSnapshotStore, SnapshotDecodeError, Viewport
 from evidence_judge.ingest._json import (
     JsonObject,
     as_float,
@@ -146,7 +147,10 @@ def load_playwright_trace(
 
     ``final_state`` is the last snapshot of the main page that shows a page a site served:
     only ``http`` and ``https`` snapshots count (``is_web_page_url``), never ``about:``,
-    ``data:``, ``view-source:`` or browser-internal URLs. The main page is the page (``pageId``) of the agent's last
+    ``data:``, ``blob:`` or browser-internal URLs. A ``view-source:`` page is not told apart
+    here: Chromium reports it under the http URL of the page whose source it shows, so the
+    ``goto`` that opens it is an INJECT (``opens_unserved_page``) and evidence from then on is
+    not the site's. The main page is the page (``pageId``) of the agent's last
     action that has such a snapshot, so a tab opened after that action (a popup, an ad, a page
     the agent never acted on) is ignored, and a tab the agent did act in last is followed. With
     no such action, it is the first page opened. Its screenshot is the last screencast frame of
@@ -240,6 +244,19 @@ class _RawSnapshot:
 
 
 @dataclass(slots=True)
+class _PendingSnapshot:
+    """A main-frame snapshot rendered once the context's stylesheets are read."""
+
+    frame_id: str
+    index: int
+    time: float
+    page_id: str
+    url: str
+    call_id: str | None
+    viewport: Viewport | None
+
+
+@dataclass(slots=True)
 class _RawShot:
     time: float
     file: str
@@ -282,6 +299,9 @@ class _TraceReader:
     store: FrameSnapshotStore = field(default_factory=FrameSnapshotStore)
     form_values: int = 0
     routes: RouteCalls = field(default_factory=RouteCalls)
+    pending: list[_PendingSnapshot] = field(default_factory=list[_PendingSnapshot])
+    css_entries: dict[str, JsonObject] = field(default_factory=dict[str, JsonObject])
+    css: dict[str, str | None] = field(default_factory=dict[str, str | None])
 
     def read_all(self) -> None:
         prefixes = _trace_prefixes(self.archive)
@@ -305,6 +325,7 @@ class _TraceReader:
             with contextlib.closing(self._events(network_name)) as events:
                 for event in events:
                     self._on_event(event)
+        self._render_pending()
 
     def _read_context_events(self, prefix: str, events: Iterator[JsonObject]) -> bool:
         first = next(events, None)
@@ -455,15 +476,71 @@ class _TraceReader:
         if time is None:
             return
         self._page_seen(page_id, time)
-        try:
-            page = self.store.render(frame_id, index)
-        except SnapshotDecodeError as exc:
-            self.warnings.append(f"snapshot of {url} skipped: {exc}")
-            return
-        self.form_values += page.form_values
-        self.snapshots.append(
-            _RawSnapshot(time, page_id, url, page.title, page.text, call_id, page.field_values)
-        )
+        viewport = as_object(snapshot.get("viewport"))
+        width, height = as_int(viewport.get("width")), as_int(viewport.get("height"))
+        size = (width, height) if width is not None and height is not None else None
+        self.pending.append(_PendingSnapshot(frame_id, index, time, page_id, url, call_id, size))
+
+    def _render_pending(self) -> None:
+        """Render the context's main-frame snapshots, now that its stylesheets are read."""
+        self.css_entries = {}
+        self.css = {}
+        for entry in self.resources:
+            response = as_object(entry.get("response"))
+            content = as_object(response.get("content"))
+            mime = (as_str(content.get("mimeType")) or "text/css").lower()
+            status = as_int(response.get("status")) or 0
+            url = as_str(as_object(entry.get("request")).get("url"))
+            if url and 200 <= status < 300 and "css" in mime:
+                self.css_entries[url] = content
+        for raw in self.pending:
+            try:
+                page = self.store.render(
+                    raw.frame_id, raw.index, viewport=raw.viewport, stylesheets=self._stylesheet
+                )
+            except SnapshotDecodeError as exc:
+                self.warnings.append(f"snapshot of {raw.url} skipped: {exc}")
+                continue
+            self.form_values += page.form_values
+            self.snapshots.append(
+                _RawSnapshot(
+                    raw.time,
+                    raw.page_id,
+                    raw.url,
+                    page.title,
+                    page.text,
+                    raw.call_id,
+                    page.field_values,
+                )
+            )
+        self.pending.clear()
+
+    def _stylesheet(self, url: str) -> str | None:
+        """The text of the last stylesheet the context recorded from `url` (up to
+        MAX_SHEET_CHARS characters), or None."""
+        if url not in self.css:
+            content = self.css_entries.get(url)
+            self.css[url] = None if content is None else self._css_text(content)
+        return self.css[url]
+
+    def _css_text(self, content: JsonObject) -> str | None:
+        file = as_str(content.get("_file"))
+        sha1 = as_str(content.get("_sha1"))
+        name = file or (f"resources/{sha1}" if sha1 else None)
+        if name is None:
+            body = inline_body(content)
+        elif (info := self._resource(name, "stylesheet")) is None:
+            return None
+        else:
+            try:
+                with self.archive.open(info) as stream:
+                    body = stream.read(MAX_SHEET_CHARS)
+            except _ZIP_ERRORS as exc:
+                self.warnings.append(f"stylesheet {name} is corrupt: {exc}")
+                return None
+        if isinstance(body, bytes):
+            return body.decode("utf-8", errors="replace")
+        return body
 
     def _on_image(self, event: JsonObject, time: float | None) -> None:
         file = as_str(event.get("file"))

@@ -94,8 +94,8 @@ _AGENT_HISTORY_SOURCE = "browser-use"
 
 def tamper_detection(run: Run) -> TamperDetection:
     """What `run`'s evidence source can show of the agent tampering with the page or its
-    requests. Only a Playwright trace records every call the agent made through the browser
-    (`full`), unless a HAR merged into it added requests or fields the trace never saw: those
+    requests. Only a Playwright trace records the calls the agent made on the context it traces
+    (`full`; a second context or an APIRequestContext the agent opened is not in it), unless a HAR merged into it added requests or fields the trace never saw: those
     cannot prove anything (checks.proof.har_sourced), but the verdict is no longer the trace's
     alone (`partial`). Browser-use history records the model's actions, not what ran beneath
     them (`partial`); a HAR or any other source records no calls at all (`none`)."""
@@ -107,8 +107,9 @@ def tamper_detection(run: Run) -> TamperDetection:
         return TamperDetection(
             level=TamperLevel.FULL,
             reason=(
-                "the Playwright trace records every call the agent made through Playwright, so "
-                "injected scripts, mocked or rewritten requests and storage writes show"
+                "the Playwright trace records every call the agent made through Playwright on "
+                "the traced browser context, so injected scripts, mocked or rewritten requests "
+                "and storage writes there show"
             ),
         )
     if _AGENT_HISTORY_SOURCE in sources and has_calls:
@@ -139,8 +140,8 @@ def _har_contribution_reason(run: Run) -> str | None:
         *([f"fields of {plural(filled, 'request')} the trace recorded empty"] if filled else []),
     ]
     return (
-        f"the merged HAR added {' and '.join(parts)}; the Playwright trace records every call "
-        "the agent made, but what only the HAR holds is a file anyone can write, so it can "
+        f"the merged HAR added {' and '.join(parts)}; the Playwright trace records the calls "
+        "on its browser context, but what only the HAR holds is a file anyone can write, so it can "
         "contradict claims and show side effects but proves nothing"
     )
 

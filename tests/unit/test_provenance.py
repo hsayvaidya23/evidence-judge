@@ -15,6 +15,7 @@ from evidence_judge.core.provenance import (
     doubt,
     is_script_url,
     mark_agent_page_navigations,
+    opens_unserved_page,
     script_hash,
     tainted_at,
     tampering,
@@ -355,6 +356,56 @@ def test_browser_use_goto_of_a_javascript_url_is_an_inject_action(tmp_path: Path
     ]
     assert run.actions[0].script_sha256 == script_hash("goto", code)
     assert run.actions[1].script_sha256 is None
+
+
+@pytest.mark.parametrize(
+    ("url", "unserved"),
+    [
+        ("view-source:https://shop.test/p/red-kettle", True),
+        (" View-Source:https://shop.test/", True),
+        ("view\t-source:https://shop.test/", True),
+        ("file:///tmp/kettle.html", True),
+        ("chrome://settings/", True),
+        ("about:srcdoc", True),
+        ("about:blank#x", True),
+        ("javascript:void(0)", True),
+        ("https://shop.test/view-source:x", False),
+        ("http://shop.test/", False),
+        ("HTTPS://shop.test/", False),
+        ("data:text/html,<p>In stock</p>", False),
+        ("blob:https://shop.test/1", False),
+        ("about:blank", False),
+        (" About:Blank ", False),
+        ("shop.test/cart", False),
+        ("localhost:8000/cart", False),
+        ("localhost:8000", False),
+        ("/cart", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_urls_that_show_no_site_page_under_their_own_url(url: str | None, unserved: bool) -> None:
+    assert opens_unserved_page(url) is unserved
+
+
+def test_browser_use_navigation_to_a_page_source_is_an_inject_action(tmp_path: Path) -> None:
+    history = tmp_path / "history.json"
+    source = f"view-source:{HOST}/p/red-kettle"
+    actions = [{"navigate": {"url": source}}, {"open_tab": {"url": "localhost:8000"}}]
+    step = {
+        "model_output": {"action": actions},
+        "result": [{}, {}],
+        "state": {"url": f"{HOST}/p/red-kettle", "title": "Red Kettle"},
+    }
+    history.write_text(json.dumps({"history": [step]}))
+
+    run = load_browser_use_history(history)
+
+    assert [(a.name, a.value, a.script_sha256) for a in run.actions] == [
+        ("inject", f"goto({source})", None),
+        ("goto", "localhost:8000", None),
+    ]
+    assert tampering(run) is not None
 
 
 INVOICE = TaskSpec.model_validate(

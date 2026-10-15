@@ -69,6 +69,8 @@ def test_evidence_kinds() -> None:
         ForgeryKind.CUSTOM_TOOL,
         ForgeryKind.FIELD_COMPOSE,
         ForgeryKind.TRANSFORMED_ECHO,
+        ForgeryKind.VIEW_SOURCE,
+        ForgeryKind.HIDDEN_TEXT,
     } == EVIDENCE_KINDS
 
 

@@ -200,3 +200,77 @@ def test_large_trace_loads_within_budget(large_trace: Path) -> None:
     assert len(run.screenshots) == FRAMES
     assert len(run.snapshots) == SNAPSHOTS
     assert EvidenceIndex(run).screenshot_bytes(run.screenshots[-1]) == JPEG
+
+
+STYLED_SNAPSHOTS = 100
+STYLED_ELEMENTS = 2_000
+STYLE_RULES = 10_000
+
+
+def _styled_events() -> Iterator[dict[str, Any]]:
+    yield {
+        "version": 10,
+        "type": "context-options",
+        "origin": "library",
+        "browserName": "chromium",
+        "wallTime": 1_792_000_000_000,
+        "monotonicTime": 0,
+    }
+    head = [
+        "HEAD",
+        {},
+        ["BASE", {"href": "https://shop.test/"}],
+        ["LINK", {"rel": "stylesheet", "href": "/app.css"}],
+    ]
+    for i in range(STYLED_SNAPSHOTS):
+        items = [
+            [
+                "DIV",
+                {"class": f"card c{n % 500} {'hidden' if n % 7 == 0 else 'shown'}"},
+                f"Item {n}.",
+            ]
+            for n in range(STYLED_ELEMENTS)
+        ]
+        yield {
+            "type": "frame-snapshot",
+            "snapshot": {
+                "pageId": "page@1",
+                "frameId": "frame@1",
+                "frameUrl": f"https://shop.test/{i}",
+                "html": ["HTML", {}, head, ["BODY", {}, ["MAIN", {"id": f"m{i}"}, *items]]],
+                "viewport": {"width": 1280, "height": 720},
+                "timestamp": 2.0 + i,
+                "isMainFrame": True,
+            },
+        }
+    css = "".join(
+        f".c{i % 500} .x{i}, main > .c{i % 500}.y{i} {{ display: none }}"
+        f"@media (min-width: {i % 2000}px) {{ #m{i} .card {{ visibility: visible }} }}"
+        for i in range(STYLE_RULES)
+    )
+    yield {
+        "type": "resource-snapshot",
+        "snapshot": {
+            "_monotonicTime": 1.0,
+            "request": {"method": "GET", "url": "https://shop.test/app.css", "headers": []},
+            "response": {
+                "status": 200,
+                "headers": [],
+                "content": {"mimeType": "text/css", "text": css},
+            },
+        },
+    }
+
+
+@pytest.mark.perf
+def test_snapshots_with_a_large_stylesheet_render_within_budget(tmp_path: Path) -> None:
+    path = tmp_path / "styled.zip"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("trace.trace", _event_lines(_styled_events()))
+
+    with within(TRACE_BUDGET_S):
+        run = load_playwright_trace(path)
+
+    assert len(run.snapshots) == STYLED_SNAPSHOTS
+    assert "Item 1." in run.snapshots[-1].text
+    assert "Item 7." not in run.snapshots[-1].text
