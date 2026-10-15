@@ -2,9 +2,14 @@
 per-session log outside the workspace (log format version 1, see
 ``docs/design/coding-agent-sessions.md``).
 
-Lines are hash-chained (``seq`` from 0, ``prev`` = SHA-256 hex of the previous line's bytes) and
-written under an exclusive lock with append + fsync, so concurrent async hooks cannot interleave
-or fork the chain. Excerpts are redacted and bounded; ``stdout_sha256`` hashes the full raw
+Lines are chained (``seq`` from 0, assigned under the lock in arrival order; ``prev`` = the
+previous line's HMAC-SHA256 under the installation's log key, ``chain: "hmac-sha256"`` and the
+key's ``key_id``; without a state directory, the plain SHA-256 of the previous line) and written
+under an exclusive lock with append + fsync, so concurrent async hooks cannot interleave or fork
+the chain. After each line the head anchor in the state directory records the line count and
+the last line's MAC, so cutting lines off the end shows. Async hooks can finish out of order:
+``seq`` is arrival order, ``ts`` is the hook's own clock and ``tool_use_id`` ties a line to the
+agent's transcript. Excerpts are redacted and bounded; ``stdout_sha256`` hashes the full raw
 output, and ``output_truncated`` is true whenever the excerpt is cut or redaction changed it, so
 a redacted excerpt never counts as the whole output.
 
@@ -12,7 +17,9 @@ Exit codes are never guessed:
 
 * Claude Code: ``PostToolUse`` of ``Bash`` without ``returnCodeInterpretation`` is 0; a
   ``PostToolUseFailure`` whose ``error`` starts ``Exit code N`` is N; anything else is null.
-* Codex: the hook payload's ``exit_code`` / ``exitCode`` when present, else null.
+* Codex: the hook payload's ``exit_code`` / ``exitCode`` when present, else the
+  first ``Process exited with code N`` line of the tool's text output (Codex writes it before
+  the command's own output), else null.
 * Gemini CLI: the ``Exit Code: N`` line of a ``run_shell_command`` result, else null.
 """
 
@@ -30,6 +37,7 @@ from pathlib import Path
 from typing import Final, Literal, cast
 
 from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.hooks.state import LOG_CHAIN, key_id, line_mac, log_key, write_log_head
 from evidence_judge.redact import Redactor
 
 FORMAT_VERSION: Final = 1
@@ -42,6 +50,7 @@ _MAX_ITEMS: Final = 50
 _TAIL_READ: Final = 1024 * 1024
 _CLAUDE_EXIT: Final = re.compile(r"\AExit code (-?\d+)\b")
 _GEMINI_EXIT: Final = re.compile(r"^Exit Code: (-?\d+)\b", re.M)
+_CODEX_EXIT: Final = re.compile(r"^Process exited with code (-?\d+)\b", re.M)
 _SESSION_ID: Final = re.compile(r"\A[A-Za-z0-9_.-]{1,128}\Z")
 _CLAUDE_RESULT_KEYS: Final = ("structuredPatch", "type", "userModified")
 _CODEX_RESULT_KEYS: Final = ("changes",)
@@ -175,6 +184,9 @@ def _codex(data: Payload) -> _Call:
     if code is None:
         code = _int(fields.get("exitCode"))
     stdout = _as_text(fields.get("stdout")) if "stdout" in fields else _as_text(response)
+    if code is None:
+        found = _CODEX_EXIT.search(_as_text(response) or "")
+        code = int(found.group(1)) if found else None
     status: Status | None = None if code is None else ("ok" if code == 0 else "error")
     result = _pick(fields, _CODEX_RESULT_KEYS) or _pick(
         _fields(data.get("tool_input")), ("changes",)
@@ -300,36 +312,52 @@ def _last_line(fd: int) -> bytes | None:
     return data.rsplit(b"\n", 1)[-1]
 
 
-def _chain(previous: bytes | None) -> tuple[int, str | None]:
+def _next_seq(previous: bytes | None) -> int:
     if previous is None:
-        return 0, None
+        return 0
     try:
         seq = json.loads(previous).get("seq")
     except (ValueError, AttributeError):
         seq = None
-    nxt = seq + 1 if isinstance(seq, int) and not isinstance(seq, bool) else 0
-    return nxt, hashlib.sha256(previous).hexdigest()
+    return seq + 1 if isinstance(seq, int) and not isinstance(seq, bool) else 0
 
 
-def append(log_dir: Path, entry: Mapping[str, JsonValue]) -> Path:
+def _prev(previous: bytes | None, key: bytes | None) -> str | None:
+    if previous is None:
+        return None
+    return line_mac(key, previous) if key is not None else hashlib.sha256(previous).hexdigest()
+
+
+def append(log_dir: Path, entry: Mapping[str, JsonValue], state_dir: Path | None = None) -> Path:
     """Append ``entry`` with its ``seq``/``prev`` to its session's log (directory 0700, file
-    0600), under an exclusive lock, and fsync it."""
+    0600), under an exclusive lock, and fsync it. With ``state_dir``, the chain is keyed with
+    the installation's log key and the head anchor there is updated under the same lock."""
     log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     session = entry.get("session_id")
-    path = log_path(log_dir, session if isinstance(session, str) and session else "unknown")
+    session_id = session if isinstance(session, str) and session else "unknown"
+    path = log_path(log_dir, session_id)
+    key = log_key(state_dir) if state_dir is not None else None
     fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
     try:
         with _locked(fd):
-            seq, prev = _chain(_last_line(fd))
-            line = json.dumps({**entry, "seq": seq, "prev": prev}, ensure_ascii=False, default=str)
-            os.write(fd, line.encode("utf-8") + b"\n")
+            previous = _last_line(fd)
+            seq = _next_seq(previous)
+            chained: dict[str, JsonValue] = {**entry, "seq": seq, "prev": _prev(previous, key)}
+            if key is not None:
+                chained |= {"chain": LOG_CHAIN, "key_id": key_id(key)}
+            line = json.dumps(chained, ensure_ascii=False, default=str).encode("utf-8")
+            os.write(fd, line + b"\n")
             os.fsync(fd)
+            if key is not None and state_dir is not None:
+                write_log_head(state_dir, session_id, seq + 1, line_mac(key, line))
     finally:
         os.close(fd)
     return path
 
 
-def record(agent: Agent, data: Payload, log_dir: Path) -> Path | None:
+def record(
+    agent: Agent, data: Payload, log_dir: Path, state_dir: Path | None = None
+) -> Path | None:
     """Log one hook call. Returns the log file, or None when the event is not logged."""
     entry = build_record(agent, data, redactor())
-    return None if entry is None else append(log_dir, entry)
+    return None if entry is None else append(log_dir, entry, state_dir)

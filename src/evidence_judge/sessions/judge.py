@@ -48,6 +48,9 @@ class SessionJudgeOptions:
     claims: SessionClaimSet | None = None
     require_tamper_evidence: bool = False
     run_id: str | None = None
+    trusted_log: bool = False
+    """The user asserts the evidence log, its key and its anchor were out of the agent's reach;
+    also set by the spec's `trusted_evidence_log`."""
 
 
 @dataclass(slots=True)
@@ -74,12 +77,20 @@ def combine(results: list[PredicateResult]) -> PredicateResult:
     return PredicateResult(status=status, reason=reason, citations=citations, checker=CHECKER)
 
 
-def tamper_detection(run: SessionRun) -> TamperDetection:
-    if run.evidence is EvidenceKind.EVIDENCE_LOG and run.complete:
-        return TamperDetection(
-            level=TamperLevel.FULL,
-            reason="an evidence log written by a harness hook after every tool call",
+def tamper_detection(run: SessionRun, trusted_log: bool = False) -> TamperDetection:
+    if run.evidence is EvidenceKind.EVIDENCE_LOG:
+        found = run.integrity or TamperDetection(
+            level=TamperLevel.PARTIAL, reason="the log's integrity was not checked"
         )
+        if found.level is TamperLevel.FULL and not trusted_log:
+            return TamperDetection(
+                level=TamperLevel.PARTIAL,
+                reason="the log's HMAC chain and head anchor verify, but an agent running as the "
+                "same OS user could read the key and sign a forged log; pass --trusted-log (or "
+                "set trusted_evidence_log) only when the log, its key and anchor were out of "
+                "the agent's reach",
+            )
+        return found
     if run.evidence is EvidenceKind.HARNESS_STREAM and run.complete:
         return TamperDetection(
             level=TamperLevel.FULL,
@@ -138,7 +149,8 @@ class SessionJudge:
         if spec:
             expectations.extend(self._expectation(item, "forbid", index) for item in spec.forbid)
 
-        tamper = tamper_detection(run)
+        trusted = options.trusted_log or (spec is not None and spec.trusted_evidence_log)
+        tamper = tamper_detection(run, trusted)
         self._integrity(run, index, tamper, options, state)
 
         outcome = self._outcome(claims, expectations, state)

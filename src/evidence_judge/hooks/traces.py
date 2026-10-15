@@ -21,6 +21,10 @@ _MAX_ENTRIES: Final = 20_000
 _MAX_PACKED_BYTES: Final = 512 * 1024 * 1024
 _BLOB_REF: Final = re.compile(rb'"_?(file|sha1)"\s*:\s*"([^"\\]{1,512})"')
 _SAFE_NAME: Final = re.compile(r"^[\w@.+=-]+(/[\w@.+=-]+)*$")
+_WALL_TIME: Final = re.compile(rb'"wallTime"\s*:\s*(\d{1,16}(?:\.\d+)?)')
+_HEAD_BYTES: Final = 64 * 1024
+_TAIL_BYTES: Final = 1024 * 1024
+_MAX_EVENTS_BYTES: Final = 256 * 1024 * 1024
 
 
 class TraceTooLargeError(ValueError):
@@ -66,7 +70,7 @@ def _walk(top: Path) -> Iterator[os.DirEntry[str]]:
             continue
 
 
-def _kind(name: str) -> Literal["zip", "raw"] | None:
+def kind_of(name: str) -> Literal["zip", "raw"] | None:
     if name.endswith(".zip") and "trace" in name:
         return "zip"
     if name.endswith(".trace"):
@@ -74,21 +78,60 @@ def _kind(name: str) -> Literal["zip", "raw"] | None:
     return None
 
 
-def newest_trace(roots: Iterable[Path], *, since: float) -> TraceFile | None:
-    """The most recently modified trace under ``roots`` modified at or after ``since``."""
-    best: TraceFile | None = None
+def fresh_traces(roots: Iterable[Path], *, since: float) -> list[TraceFile]:
+    """Every trace under ``roots`` modified at or after ``since``, newest first."""
+    found: dict[Path, TraceFile] = {}
     for top in roots:
         for entry in _walk(top):
-            kind = _kind(entry.name)
+            kind = kind_of(entry.name)
             if kind is None:
                 continue
             try:
                 mtime = entry.stat(follow_symlinks=False).st_mtime
             except OSError:
                 continue
-            if mtime >= since and (best is None or mtime > best.mtime):
-                best = TraceFile(Path(entry.path), mtime, kind)
-    return best
+            if mtime >= since:
+                path = Path(entry.path)
+                found[path] = TraceFile(path, mtime, kind)
+    return sorted(found.values(), key=lambda t: t.mtime, reverse=True)
+
+
+def _wall_times(data: bytes) -> list[float]:
+    return [float(v) / 1000 for v in _WALL_TIME.findall(data)]
+
+
+def _events_bytes(trace: TraceFile) -> bytes:
+    """The trace's event stream: the head and tail of a raw ``.trace``, or a zip's whole
+    ``*.trace`` members (bounded)."""
+    if trace.kind == "raw":
+        with trace.path.open("rb") as handle:
+            head = handle.read(_HEAD_BYTES)
+            size = handle.seek(0, os.SEEK_END)
+            handle.seek(max(_HEAD_BYTES, size - _TAIL_BYTES))
+            return head + b"\n" + handle.read(_TAIL_BYTES)
+    chunks: list[bytes] = []
+    total = 0
+    with zipfile.ZipFile(trace.path) as archive:
+        for info in archive.infolist():
+            if not info.filename.endswith(".trace"):
+                continue
+            total += info.file_size
+            if total > _MAX_EVENTS_BYTES:
+                raise TraceTooLargeError(f"{trace.path.name}: trace events exceed the read limit")
+            chunks.append(archive.read(info))
+    return b"\n".join(chunks)
+
+
+def recorded_until(trace: TraceFile) -> float | None:
+    """The latest wall-clock time (epoch seconds) the trace's own events record, or None when
+    it records none. Unlike the file's mtime, the agent cannot change this without rewriting
+    the trace.
+
+    Raises:
+        OSError, ValueError: the trace cannot be read.
+    """
+    times = _wall_times(_events_bytes(trace))
+    return max(times) if times else None
 
 
 def _blob_names(data: bytes) -> set[str]:

@@ -2,18 +2,37 @@
 
 Format version 1 is specified in docs/design/coding-agent-sessions.md ("Log format, version
 1"). The same format serves Claude Code, Codex and Gemini recorders; tool names stay each
-agent's own. A line that does not parse, a record without a required key, or a broken
-`seq`/`prev` hash chain marks the run incomplete.
+agent's own. A line that does not parse, a record without a required key, a broken
+`seq`/`prev` chain or a log that does not end where its head anchor says marks the run
+incomplete.
+
+What the log can show of tampering is its `integrity`: `full` only for an HMAC-chained log
+whose MACs verify under the installation's key and whose line count and last MAC match the
+head anchor the recorder keeps apart from it. Anything less is `partial`, with the reason. Even
+`full` only means the log is as the recorder wrote it *if* the agent could not read the key:
+the session judge accepts it as tamper evidence only when the user says so (`--trusted-log`).
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
+from evidence_judge.core.verdict import TamperDetection, TamperLevel
+from evidence_judge.hooks.state import (
+    LOG_CHAIN,
+    LOG_KEY_FILE,
+    key_id,
+    line_mac,
+    log_head_path,
+    read_log_head,
+    read_log_key,
+    resolve_state_dir,
+)
 from evidence_judge.ingest._json import JsonObject, as_int, as_object, as_str
 from evidence_judge.sessions.ingest._lines import LineStats, iter_records, parse_ts
 from evidence_judge.sessions.models import CallStatus, EvidenceKind, SessionRun, SessionSource
@@ -49,25 +68,95 @@ _GEMINI_EXIT: Final = re.compile(r"^Exit Code: (-?\d+)\s*$", re.MULTILINE)
 
 
 class _Chain:
-    def __init__(self) -> None:
+    def __init__(self, key: bytes | None) -> None:
+        self.key = key
         self.previous: bytes | None = None
         self.used = False
+        self.keyed = 0
+        self.plain = 0
+        self.key_ids: set[object] = set()
         self.broken: str | None = None
         self.count = 0
+
+    def _expected(self, keyed: bool) -> tuple[bool, str | None]:
+        """Whether the ``prev`` of the next line can be checked, and its expected value."""
+        if self.previous is None:
+            return True, None
+        if not keyed:
+            return True, hashlib.sha256(self.previous).hexdigest()
+        if self.key is None:
+            return False, None
+        return True, line_mac(self.key, self.previous)
 
     def check(self, raw: bytes, record: JsonObject) -> None:
         seq = record.get("seq")
         prev = record.get("prev", ...)
         if seq is not None or prev is not ...:
             self.used = True
+        keyed = record.get("chain") == LOG_CHAIN
+        if keyed:
+            self.keyed += 1
+            self.key_ids.add(record.get("key_id"))
+        elif self.used:
+            self.plain += 1
         if self.used and self.broken is None:
-            expected = None if self.previous is None else hashlib.sha256(self.previous).hexdigest()
+            checkable, expected = self._expected(keyed)
             if as_int(seq) != self.count:
                 self.broken = f"line {self.count + 1} has seq {seq!r}, expected {self.count}"
-            elif prev != expected:
+            elif checkable and prev != expected:
                 self.broken = f"line {self.count + 1} does not chain to the line before it"
         self.previous = raw
         self.count += 1
+
+
+@dataclass(frozen=True, slots=True)
+class _Anchor:
+    count: int
+    head: str
+
+
+def _anchor_problem(chain: _Chain, anchor: _Anchor | None) -> str | None:
+    if anchor is None or chain.key is None or chain.previous is None:
+        return None
+    if anchor.count != chain.count or anchor.head != line_mac(chain.key, chain.previous):
+        return (
+            f"the log does not end where its head anchor says ({chain.count} lines, the anchor "
+            f"records {anchor.count}): lines were cut off or rewritten"
+        )
+    return None
+
+
+def _integrity(chain: _Chain, anchor: _Anchor | None, complete: bool) -> TamperDetection:
+    gaps: list[str] = []
+    if not chain.used:
+        gaps.append("the log is not chained")
+    elif not chain.keyed:
+        gaps.append(
+            "the log is chained with plain SHA-256, which anyone who can write it can recompute"
+        )
+    elif chain.plain:
+        gaps.append(f"{chain.plain} line(s) are not HMAC-chained")
+    if chain.keyed:
+        if chain.key is None:
+            gaps.append("the log key was not found, so the HMAC chain cannot be checked")
+        elif chain.key_ids != {key_id(chain.key)}:
+            gaps.append("the log was signed with a different key")
+        if anchor is None:
+            gaps.append("no head anchor was found, so lines cut from the end would not show")
+    if not complete:
+        gaps.append("the log could not be read completely or does not verify")
+    if gaps:
+        return TamperDetection(level=TamperLevel.PARTIAL, reason="; ".join(gaps))
+    return TamperDetection(
+        level=TamperLevel.FULL,
+        reason="an evidence log whose HMAC chain and head anchor verify under the "
+        "installation's log key",
+    )
+
+
+def _load_anchor(path: Path | None) -> _Anchor | None:
+    found = read_log_head(path) if path is not None else None
+    return _Anchor(*found) if found is not None else None
 
 
 def _complete_excerpt(excerpt: str, digest: str | None, flag: Any) -> bool:
@@ -112,9 +201,15 @@ def _call(record: JsonObject, agent: str) -> ToolCall:
     )
 
 
-def load_evidence_log(path: Path) -> SessionRun:
+def load_evidence_log(
+    path: Path, *, key_file: Path | None = None, anchor_file: Path | None = None
+) -> SessionRun:
+    """Load an evidence log. The key and head anchor default to the hooks' state directory
+    (``EVJ_HOOK_STATE_DIR``, else ``~/.evidence-judge/state``) and the log's session."""
+    state = resolve_state_dir(None)
+    key = read_log_key(key_file if key_file is not None else state / LOG_KEY_FILE)
     stats = LineStats()
-    chain = _Chain()
+    chain = _Chain(key)
     calls: list[ToolCall] = []
     problems: list[str] = []
     agents: set[str] = set()
@@ -157,6 +252,12 @@ def load_evidence_log(path: Path) -> SessionRun:
             calls.append(_call(record, agent))
         else:
             stats.skip(event)
+    session_id = next(iter(session_ids)) if len(session_ids) == 1 else None
+    if anchor_file is None and session_id is not None:
+        anchor_file = log_head_path(state, session_id)
+    anchor = _load_anchor(anchor_file)
+    if cut := _anchor_problem(chain, anchor):
+        problems.append(cut)
     notes = stats.notes() + problems
     if chain.broken:
         notes.append(f"hash chain broken: {chain.broken}")
@@ -171,17 +272,22 @@ def load_evidence_log(path: Path) -> SessionRun:
     if dropped:
         notes.append(f"{dropped} event(s) over the event cap were dropped")
     agent = next(iter(agents)) if len(agents) == 1 else "claude-code"
+    complete = (
+        not (stats.damaged or problems or chain.broken or dropped or stats.not_objects)
+        and len(session_ids) <= 1
+    )
+    integrity = _integrity(chain, anchor, complete)
     return SessionRun(
         source=_AGENTS[agent],
         evidence=EvidenceKind.EVIDENCE_LOG,
-        session_id=next(iter(session_ids)) if len(session_ids) == 1 else None,
+        session_id=session_id,
         cwd=cwd,
         task=task,
         final_answer=final,
         started_at=first_ts,
         ended_at=last_ts,
         events=events,
-        complete=not (stats.damaged or problems or chain.broken or dropped or stats.not_objects)
-        and len(session_ids) <= 1,
+        complete=complete,
         notes=notes,
+        integrity=integrity,
     )

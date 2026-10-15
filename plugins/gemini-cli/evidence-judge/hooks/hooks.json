@@ -5,9 +5,15 @@
         "matcher": "*",
         "hooks": [
           {
+            "name": "evidence-judge-turn-start",
+            "type": "command",
+            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-turn-start --state-dir \"$HOME/.evidence-judge/state\"",
+            "timeout": 30000
+          },
+          {
             "name": "evidence-judge-record-prompt",
             "type": "command",
-            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-record --log-dir \"$HOME/.evidence-judge/sessions\"",
+            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-record --log-dir \"$HOME/.evidence-judge/sessions\" --state-dir \"$HOME/.evidence-judge/state\"",
             "timeout": 10000
           }
         ]
@@ -20,7 +26,7 @@
           {
             "name": "evidence-judge-record",
             "type": "command",
-            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-record --log-dir \"$HOME/.evidence-judge/sessions\"",
+            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-record --log-dir \"$HOME/.evidence-judge/sessions\" --state-dir \"$HOME/.evidence-judge/state\"",
             "timeout": 10000
           }
         ]
@@ -33,7 +39,7 @@
           {
             "name": "evidence-judge-check",
             "type": "command",
-            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-after-agent --log-dir \"$HOME/.evidence-judge/sessions\"",
+            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-after-agent --log-dir \"$HOME/.evidence-judge/sessions\" --state-dir \"$HOME/.evidence-judge/state\"",
             "timeout": 90000
           }
         ]

@@ -58,21 +58,46 @@ nothing.
 
 ## What the Stop hook does
 
+On every `UserPromptSubmit`, `claude-code-turn-start` (synchronous) saves the task spec the
+turn starts with, or the fact that there is none, to the hooks' private state directory
+(`${CLAUDE_PLUGIN_DATA}/state/<session_id>/`). It runs before the agent acts.
+
 On every `Stop` and `SubagentStop`:
 
-1. If `stop_hook_active` is true (Claude is already continuing because a stop hook blocked),
-   allow the stop. The hook never blocks twice in a row.
-2. Find the turn's start: the time of the last user prompt in the transcript. Without a
+1. Find the turn's start: the time of the last user prompt in the transcript. Without a
    readable transcript, only traces from the last 30 minutes count.
-3. Look for the newest trace modified since then under `.playwright-mcp/`,
-   `.evidence-judge/traces/`, `test-results/` and any `EVJ_HOOK_TRACE_DIRS`, without following
-   symlinks. No trace: allow the stop, with a notice if a Playwright MCP tool was used this turn.
-4. Judge it with `evidence-judge judge --offline` in a child process, with the agent's final
-   message (`last_assistant_message`) as the answer, the last prompt as the task and the
-   project spec if there is one.
-5. FAIL: return `{"decision": "block", "reason": ...}`. The reason names the trace, the
-   verdict's summary and up to five claims or spec expectations the evidence does not back up,
-   with evidence ids. PASS and NEEDS REVIEW: allow the stop with a one-line `systemMessage`.
+2. Choose the traces to judge:
+    - If `browser_stop_tracing` reported trace files in the transcript this turn, only those
+      count, and each must exist.
+    - Otherwise, every trace modified since the turn started counts, up to 10, under
+      `.playwright-mcp/`, `.evidence-judge/traces/`, `test-results/` and any
+      `EVJ_HOOK_TRACE_DIRS`, without following symlinks.
+    - A trace whose own recorded events (`wallTime`) end before the turn started is rejected,
+      whatever its file time says.
+3. Judge each trace with `evidence-judge judge --offline`, in a child process. The child runs
+   in a private temporary directory, so the project's `.env` cannot reach it, and inherits no
+   `EVJ_*` variable except those in `EVJ_HOOK_PASS_ENV`. The judge gets the agent's final
+   message as the answer, the last prompt as the task, and the spec saved at turn start (or
+   the live spec when the turn-start hook did not run).
+4. Decide:
+    - **Any trace FAILs:** return `{"decision": "block", "reason": ...}`. The reason names the
+      trace, the verdict's summary and up to five claims or spec expectations the evidence does
+      not back up, with evidence ids.
+    - **Bad evidence after Playwright was used:** no trace, or a trace that is missing,
+      unreadable, older than the turn or refused by the judge. Block with instructions to record
+      a trace (`EVJ_HOOK_ON_BAD_EVIDENCE=notice` only warns instead). Without Playwright use,
+      bad evidence is a notice.
+    - **The spec changed during the turn:** edited, deleted or created. Block, and say so
+      (`EVJ_HOOK_BLOCK_ON_SPEC_CHANGE=false` only warns).
+    - **Otherwise:** PASS and NEEDS REVIEW allow the stop with a one-line `systemMessage`.
+5. **`stop_hook_active`:** Claude is already continuing because a stop hook blocked. The
+   answer is still judged, but the hook never blocks twice in a row. If it would block, the
+   stop goes through with a `systemMessage` that starts *"WARNING: the agent stopped again
+   after being sent back, and its answer is still not backed by the evidence"*, followed by
+   what is wrong. A second answer that passes gets the ordinary one-line PASS notice.
+
+The hook fails open, with a notice, only for its own problems: bad hook input, invalid
+`EVJ_HOOK_*` settings, a timeout or a judge crash.
 
 Claude Code caps consecutive stop-hook continuations (8 by default,
 `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), on top of the hook's own `stop_hook_active` guard.
@@ -85,13 +110,20 @@ Set these in the environment Claude Code runs in, or in the `env` block of a
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `EVJ_HOOK_ENABLED` | `true` | `false` turns every stop hook into a no-op |
-| `EVJ_HOOK_TIMEOUT_S` | `60` | Wall-clock limit for one judgement; on timeout the stop is allowed |
+| `EVJ_HOOK_TIMEOUT_S` | `60` | Wall-clock limit for judging the turn's traces; on timeout the stop is allowed with a notice |
 | `EVJ_HOOK_BLOCK_ON_NEEDS_REVIEW` | `false` | Also keep the agent working on NEEDS REVIEW |
 | `EVJ_HOOK_LLM` | `false` | Judge with the configured LLM (`ANTHROPIC_API_KEY`) instead of offline |
 | `EVJ_HOOK_TRACE_DIRS` | `[]` | Extra trace directories, a JSON list, relative to the project root |
-| `EVJ_HOOK_SPEC` | unset | Spec to use instead of the conventional locations |
+| `EVJ_HOOK_SPEC` | unset | Spec to use instead of the conventional locations. An absolute path outside the workspace keeps it out of the agent's reach (recommended) |
+| `EVJ_HOOK_ON_BAD_EVIDENCE` | `block` | When Playwright was used but its traces are missing, unreadable, older than the turn or refused by the judge: `block` or `notice` |
+| `EVJ_HOOK_BLOCK_ON_SPEC_CHANGE` | `true` | Keep the agent working when the spec changed during the turn; `false` only warns |
+| `EVJ_HOOK_PASS_ENV` | `[]` | `EVJ_*` variables the judge may inherit, a JSON list; every other `EVJ_*` is dropped |
 | `EVJ_HOOK_MAX_TRACE_AGE_S` | `1800` | Newest trace age accepted when the turn's start is unknown |
 | `EVJ_HOOK_LOG_DIR` | unset | Evidence-log directory when no `--log-dir` is given |
+| `EVJ_HOOK_STATE_DIR` | `$CLAUDE_PLUGIN_DATA/state`, else `~/.evidence-judge/state` | The hooks' private state (spec snapshots, log key, log anchors) when no `--state-dir` is given |
+
+These are read from the environment Claude Code starts the hooks with. A project `.env` file
+is never read, by the hooks or by the judge they start.
 
 The plugin's hook has a 90 second timeout, so the judge's own limit always fires first.
 
@@ -107,7 +139,8 @@ cannot edit. The recorder hooks write one JSON line per prompt, tool call and st
  "event":"tool","tool":"Bash","input":{"command":"npm test"},"exit_code":1,"status":"error",
  "stdout_sha256":"…","stdout_excerpt":"Exit code 1\nFAIL src/cart.test.ts…",
  "stderr_excerpt":"","output_truncated":false,"stdout_bytes":61,"cwd":"/work/shop",
- "tool_use_id":"toolu_…","duration_ms":2310,"seq":4,"prev":"9f2c…"}
+ "tool_use_id":"toolu_…","duration_ms":2310,"seq":4,"prev":"9f2c…",
+ "chain":"hmac-sha256","key_id":"5be1…"}
 ```
 
 - **Exit codes are never guessed.** `PostToolUse` of `Bash` without
@@ -119,11 +152,18 @@ cannot edit. The recorder hooks write one JSON line per prompt, tool call and st
   output.
 - **Edits keep the patch, not the file**: `result` holds `structuredPatch`, `type` and
   `userModified`.
-- **Hash chain.** `seq` counts lines from 0 and `prev` is the SHA-256 of the previous line, so
-  an edit after the fact breaks the chain. Lines are written under a lock with fsync; the
-  directory is `0700` and the file `0600`.
+- **Keyed chain and anchor.** `seq` counts lines from 0. `prev` is the HMAC-SHA256 of the
+  previous line under a per-installation key (`${CLAUDE_PLUGIN_DATA}/state/log-key`, mode
+  `0600`), and `key_id` names that key. After every line, the recorder writes the line count
+  and the last line's MAC to a head anchor (`state/<session_id>/log-head.json`). An edit after
+  the fact breaks the chain, and lines cut off the end no longer match the anchor. Lines are
+  written under a lock with fsync; the directories are `0700` and the files `0600`.
+- **Order.** The recorder hooks are `async`, so they never slow the agent down, but they can
+  finish out of order. `seq` is assigned under the lock, in arrival order. `ts` is the hook's
+  own clock and `tool_use_id` ties each line to the transcript.
 
-The recorder hooks are `async`, so they never slow the agent down.
+`evidence-judge session judge --evidence-log` verifies the chain and the anchor. It still
+reports the log as `partial` tamper evidence unless you pass `--trusted-log`: see below.
 
 ## Security
 
@@ -134,18 +174,83 @@ The recorder hooks are `async`, so they never slow the agent down.
 - **Bounded.** Hook input over 8 MB is refused; trace search does not follow symlinks and
   stops at a depth of 5 and 20,000 entries; a packed trace is limited to 512 MB and only
   includes files inside its own directory.
-- **Fails open.** Bad input, a timeout, a judge crash or an unreadable trace allow the stop
-  with a one-line notice. A judge problem never traps the agent.
+- **Fails open only on its own problems.** Bad hook input, invalid settings, a timeout or a
+  judge crash allow the stop with a one-line notice. Missing, junk or stale evidence after
+  Playwright was used does not: the agent is sent back.
+- **Settings the agent cannot reach.** The judge runs in a private temporary directory with
+  `EVJ_*` variables dropped unless `EVJ_HOOK_PASS_ENV` lists them, so a `.env` the agent
+  writes in the project changes nothing.
 - **Untrusted page text.** The block reason may quote checker reasons that repeat page text.
   It tells Claude to treat that text as data, and evidence excerpts themselves are never
   forwarded.
 
+## What the hooks can and cannot guarantee
+
+The hooks check the agent's answer against evidence. They are only as strong as the agent's
+inability to rewrite that evidence.
+
+- **Everything in the workspace is agent-writable.** Traces under `.playwright-mcp/`, the spec
+  at `.evidence-judge/spec.yaml` and any `.env` are files the agent can change. The hooks
+  defend against the obvious moves: a spec changed mid-turn, a planted or junk trace, deleted
+  traces, a project `.env`. They cannot tell a careful forgery of a whole trace from a real
+  one if the agent can write both.
+- **The state directory is only private if the agent cannot reach it.** The spec snapshot, the
+  log key and the log anchors live in `${CLAUDE_PLUGIN_DATA}/state`, outside the workspace. An
+  agent running unsandboxed as your OS user can still read and write them, sign a forged
+  evidence log with the key, and update the anchor. That is why `session judge` counts a
+  verified log as `full` tamper evidence only with `--trusted-log`.
+- **To make the guarantees hold, keep the agent out of the state directory:**
+    - Run Claude Code with its sandbox on and deny the agent the hooks' directories (below).
+      The hooks run outside the sandbox, as part of Claude Code itself.
+    - Or run the agent in a container or VM, or as another OS user, that does not mount
+      `~/.claude/plugins/data/` or `~/.evidence-judge/`.
+    - Put the spec outside the workspace with `EVJ_HOOK_SPEC=/absolute/path/spec.yaml`.
+
+In `~/.claude/settings.json` (or managed settings, so a project cannot loosen it):
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "failIfUnavailable": true,
+    "filesystem": {
+      "denyRead": ["~/.evidence-judge", "~/.claude/plugins/data"],
+      "denyWrite": ["~/.evidence-judge", "~/.claude/plugins/data"]
+    }
+  },
+  "permissions": {
+    "deny": [
+      "Read(~/.evidence-judge/**)", "Edit(~/.evidence-judge/**)",
+      "Read(~/.claude/plugins/data/**)", "Edit(~/.claude/plugins/data/**)"
+    ]
+  }
+}
+```
+
+- `sandbox.filesystem.denyRead` / `denyWrite` confine every command the agent runs through
+  Bash, including scripts.
+- The `Read` / `Edit` deny rules cover Claude's own file tools.
+- `allowUnsandboxedCommands: false` removes the `dangerouslyDisableSandbox` escape hatch, and
+  `failIfUnavailable: true` stops commands from running unsandboxed when the sandbox cannot
+  start.
+- Commands in `sandbox.excludedCommands` run outside the sandbox, so keep that list empty.
+
+With this in place, a verified evidence log is fit for `session judge --trusted-log`.
+([sandboxing](https://code.claude.com/docs/en/sandboxing),
+[settings](https://code.claude.com/docs/en/settings-reference),
+[permissions](https://code.claude.com/docs/en/permissions))
+
 ## Limits
 
-- The hook reads the transcript only for the turn's start time and as a fallback for the final
-  message. Claude Code documents the transcript format as internal, so if a release changes it,
+- The hook reads the transcript for the turn's start time, the traces `browser_stop_tracing`
+  reported and, as a fallback, the final message. Claude Code documents the transcript format as internal, so if a release changes it,
   the hook falls back to the 30 minute window rather than failing.
-- A turn that browsed without tracing is not judged; the hook says so.
+- A turn that browsed without tracing is sent back to record a trace
+  (`EVJ_HOOK_ON_BAD_EVIDENCE=notice` only warns).
+- Playwright use is detected from Playwright MCP tool calls in the transcript. A browser the
+  agent drives some other way (a script it runs, another MCP server) is judged only if it left
+  a trace in the trace directories.
 - A `SubagentStop` and the parent's `Stop` can judge the same trace, each against its own
   final message.
 

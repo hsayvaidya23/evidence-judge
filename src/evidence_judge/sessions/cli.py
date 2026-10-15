@@ -85,6 +85,20 @@ _EvidenceLog = Annotated[
     Path | None,
     typer.Option("--evidence-log", help="Evidence-recorder log (session-evidence v1)", **_IN_FILE),
 ]
+_LogKey = Annotated[
+    Path | None,
+    typer.Option(
+        "--log-key", help="Evidence-log key (default: the hooks' state dir log-key)", **_IN_FILE
+    ),
+]
+_LogAnchor = Annotated[
+    Path | None,
+    typer.Option(
+        "--log-anchor",
+        help="Evidence-log head anchor (default: the hooks' state dir, by session)",
+        **_IN_FILE,
+    ),
+]
 _Debug = Annotated[bool, typer.Option(help="Show tracebacks for internal errors")]
 
 
@@ -98,6 +112,8 @@ def _load(
     codex: Path | None,
     evidence_log: Path | None,
     answer: str | None = None,
+    log_key: Path | None = None,
+    log_anchor: Path | None = None,
 ) -> SessionRun:
     if not (claude_code or codex or evidence_log):
         raise _Error("provide a session with --claude-code, --codex or --evidence-log", _Exit.USAGE)
@@ -106,7 +122,12 @@ def _load(
     try:
         transcript = locate(claude_code, project=project) if claude_code else None
         return load_session(
-            claude_code=transcript, codex=codex, evidence_log=evidence_log, answer=answer
+            claude_code=transcript,
+            codex=codex,
+            evidence_log=evidence_log,
+            answer=answer,
+            log_key=log_key,
+            log_anchor=log_anchor,
         )
     except (OSError, ValueError) as e:
         raise _Error(f"could not load the session: {e}", _Exit.USAGE) from e
@@ -196,6 +217,16 @@ def judge_command(
     project: _Project = None,
     codex: _Codex = None,
     evidence_log: _EvidenceLog = None,
+    log_key: _LogKey = None,
+    log_anchor: _LogAnchor = None,
+    trusted_log: Annotated[
+        bool,
+        typer.Option(
+            "--trusted-log",
+            help="The evidence log, its key and anchor were out of the agent's reach (sandbox, "
+            "container, another OS user); only then is a verified log full tamper evidence",
+        ),
+    ] = False,
     answer: Annotated[str | None, typer.Option(help="Use this as the agent's final answer")] = None,
     answer_file: Annotated[
         Path | None, typer.Option(help="File with the agent's final answer", **_IN_FILE)
@@ -232,7 +263,15 @@ def judge_command(
         settings = _settings()
         session_spec = _spec(spec)
         claim_set = _claims(claims)
-        run = _load(claude_code, project, codex, evidence_log, _answer(answer, answer_file))
+        run = _load(
+            claude_code,
+            project,
+            codex,
+            evidence_log,
+            _answer(answer, answer_file),
+            log_key=log_key,
+            log_anchor=log_anchor,
+        )
         llm = _llm(settings, offline)
         if settings.redact and not no_redact:
             redactor = _redactor(settings, persistent=llm is not None)
@@ -251,6 +290,7 @@ def judge_command(
             claims=claim_set,
             require_tamper_evidence=require_tamper_evidence,
             run_id=run_id,
+            trusted_log=trusted_log,
         )
         verdict = _run(SessionJudge(llm, max_cost_usd=settings.max_cost_usd), run, options)
         if out:

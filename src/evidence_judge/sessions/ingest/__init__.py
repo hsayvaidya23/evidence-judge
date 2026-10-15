@@ -31,12 +31,14 @@ def load_session(
     codex: Path | None = None,
     evidence_log: Path | None = None,
     answer: str | None = None,
+    log_key: Path | None = None,
+    log_anchor: Path | None = None,
 ) -> SessionRun:
     """Read one session. With an evidence log and a transcript, tool calls come from the log
     and only the task and final answer from the transcript when the log lacks them. `answer`
     replaces the recorded final answer."""
     if evidence_log is not None:
-        run = load_evidence_log(evidence_log)
+        run = load_evidence_log(evidence_log, key_file=log_key, anchor_file=log_anchor)
         transcript = (
             load_transcript(claude_code) if claude_code else load_codex(codex) if codex else None
         )

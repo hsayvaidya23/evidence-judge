@@ -27,6 +27,13 @@ from evidence_judge.hooks.record import (
 from evidence_judge.redact import Redactor
 from tests.unit.hook_fixtures import payload, render
 
+
+@pytest.fixture(autouse=True)
+def _private_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("EVJ_HOOK_STATE_DIR", str(tmp_path / "hook-state"))
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+
+
 runner = CliRunner()
 REDACTOR = Redactor(b"k" * 32)
 NOW = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
@@ -187,11 +194,17 @@ def test_claude_code_other_tools_keep_their_response_text() -> None:
     assert json.loads(str(entry["stdout_excerpt"])) == [{"type": "text", "text": "Navigated"}]
 
 
-def test_codex_exit_code_only_from_the_payload() -> None:
+def test_codex_exit_code_from_the_payload_or_its_exit_line() -> None:
     entry = _entry("codex", payload("codex_post_tool_use.json"))
-    assert (entry["exit_code"], "status" in entry, entry["agent"]) == (None, False, "codex")
+    assert (entry["exit_code"], entry["status"], entry["agent"]) == (2, "error", "codex")
     assert str(entry["stdout_excerpt"]).startswith("Process exited with code 2")
     data = payload("codex_post_tool_use.json")
+    data["tool_response"] = "Chunk ID: 1\nProcess exited with code 0\nOutput:\n5 passed"
+    assert (_entry("codex", data)["exit_code"], _entry("codex", data)["status"]) == (0, "ok")
+    data["tool_response"] = "Process exited with code 1\nOutput:\nProcess exited with code 0"
+    assert _entry("codex", data)["exit_code"] == 1
+    data["tool_response"] = "output mentions: Process exited with code 0 inline"
+    assert "status" not in _entry("codex", data)
     data["tool_response"] = {"stdout": "ok", "stderr": "warn", "exit_code": 0}
     entry = _entry("codex", data)
     assert (entry["exit_code"], entry["status"], entry["stderr_excerpt"]) == (0, "ok", "warn")

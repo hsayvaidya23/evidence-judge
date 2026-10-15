@@ -42,9 +42,15 @@ In `~/.gemini/settings.json` or a project's `.gemini/settings.json`:
         "matcher": "*",
         "hooks": [
           {
+            "name": "evidence-judge-turn-start",
+            "type": "command",
+            "command": "evidence-judge hook gemini-turn-start --state-dir \"$HOME/.evidence-judge/state\"",
+            "timeout": 30000
+          },
+          {
             "name": "evidence-judge-record-prompt",
             "type": "command",
-            "command": "evidence-judge hook gemini-record --log-dir \"$HOME/.evidence-judge/sessions\"",
+            "command": "evidence-judge hook gemini-record --log-dir \"$HOME/.evidence-judge/sessions\" --state-dir \"$HOME/.evidence-judge/state\"",
             "timeout": 10000
           }
         ]
@@ -57,7 +63,7 @@ In `~/.gemini/settings.json` or a project's `.gemini/settings.json`:
           {
             "name": "evidence-judge-record",
             "type": "command",
-            "command": "evidence-judge hook gemini-record --log-dir \"$HOME/.evidence-judge/sessions\"",
+            "command": "evidence-judge hook gemini-record --log-dir \"$HOME/.evidence-judge/sessions\" --state-dir \"$HOME/.evidence-judge/state\"",
             "timeout": 10000
           }
         ]
@@ -70,7 +76,7 @@ In `~/.gemini/settings.json` or a project's `.gemini/settings.json`:
           {
             "name": "evidence-judge-check",
             "type": "command",
-            "command": "evidence-judge hook gemini-after-agent --log-dir \"$HOME/.evidence-judge/sessions\"",
+            "command": "evidence-judge hook gemini-after-agent --log-dir \"$HOME/.evidence-judge/sessions\" --state-dir \"$HOME/.evidence-judge/state\"",
             "timeout": 90000
           }
         ]
@@ -88,13 +94,20 @@ evidence-judge mcp` registers the server from a shell instead.
 The same check as the [Claude Code Stop hook](claude-code.md#what-the-stop-hook-does), with
 Gemini's fields:
 
-- `stop_hook_active` true (Gemini is already retrying): allow the response.
+- `stop_hook_active` true (Gemini is already retrying): the response is still judged but never
+  denied twice in a row. If it still fails, it goes through with a warning to the user that
+  says what is wrong.
+- `gemini-turn-start` on `BeforeAgent` saves the spec the turn starts with; the judge uses
+  that copy, and a spec changed during the turn is denied.
 - The answer is `prompt_response`; the task is `prompt`.
-- Gemini's input has no turn start, so traces modified in the last 30 minutes
-  (`EVJ_HOOK_MAX_TRACE_AGE_S`) count.
+- Gemini's input has no turn start, so every trace modified in the last 30 minutes
+  (`EVJ_HOOK_MAX_TRACE_AGE_S`) is judged, and a trace whose own events are older is rejected.
+- Gemini's hook input does not show which tools ran, so the hook cannot tell that Playwright
+  was used. No trace, or a junk one, is only a notice here, never a denial.
 - FAIL: `{"decision": "deny", "reason": ...}`, and Gemini retries with the reason. PASS and
-  NEEDS REVIEW: `{}` or a `systemMessage`. Every failure allows the response; stdout always
-  holds exactly one JSON object, as Gemini requires.
+  NEEDS REVIEW: `{}` or a `systemMessage`. The hook's own problems (bad input, a timeout, a
+  judge crash) allow the response with a notice; stdout always holds exactly one JSON object,
+  as Gemini requires.
 
 Hooks run with a sanitized environment plus `GEMINI_PROJECT_DIR`. If you set
 `security.environmentVariableRedaction`, allow the `EVJ_HOOK_*` variables you use (and `HOME`,
@@ -106,7 +119,9 @@ which the log path above relies on).
 ([details](claude-code.md#the-evidence-log)) to
 `~/.evidence-judge/sessions/<session_id>.jsonl`, with `"agent": "gemini"`. Gemini's
 `tool_response` has no structured exit code; for `run_shell_command` the recorder reads the
-`Exit Code: N` line of the result text, and leaves `exit_code` null for other tools.
+`Exit Code: N` line of the result text, and leaves `exit_code` null for other tools. With
+`--state-dir`, lines are HMAC-chained and anchored as described for
+[Claude Code](claude-code.md#the-evidence-log).
 
 ## What Gemini CLI can and cannot do
 
@@ -116,6 +131,15 @@ which the log path above relies on).
 | Record every tool call | Yes: `AfterTool` (synchronous, about 0.3 s per call) |
 | Exit code | Parsed from `Exit Code: N` in `run_shell_command` output |
 | Turn start | Not in the hook input; a 30 minute window is used |
+| Playwright use | Not in the hook input; missing or junk traces are only a notice |
+
+## What the hooks can and cannot guarantee
+
+The limits in the [Claude Code guide](claude-code.md#what-the-hooks-can-and-cannot-guarantee)
+apply as written. Gemini CLI's sandbox (`--sandbox`, or `tools.sandbox` in settings) runs
+tools in a container or a macOS Seatbelt profile that confines writes to the project. Keep
+`~/.evidence-judge/` out of it, and run Gemini as an OS user that cannot read that directory if
+you want `session judge --trusted-log`.
 
 Sources: [hooks reference](https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md),
 [hooks overview](https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/index.md),

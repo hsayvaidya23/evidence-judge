@@ -167,7 +167,10 @@ the final answer when the log lacks them.
 | `--claude-code SESSION` | Claude Code transcript: a `.jsonl` path, a session id (looked up under `~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects`), or `latest` for the newest transcript of `--project` |
 | `--project PATH` | Project directory for `--claude-code latest` (default: the current directory) |
 | `--codex FILE` | Codex `exec --json` output saved by the harness, or a rollout file from `~/.codex/sessions` |
-| `--evidence-log FILE` | Evidence-recorder log (format version 1), written by a harness hook after every tool call; the only transcript-independent source, so the verdict's `tamper_detection` is `full` |
+| `--evidence-log FILE` | Evidence-recorder log (format version 1), written by a harness hook after every tool call; the only transcript-independent source. Its `tamper_detection` is `full` only when its HMAC chain and head anchor verify **and** `--trusted-log` is given; otherwise `partial`, with the reason |
+| `--log-key FILE` | The evidence-log key (default: `log-key` in the hooks' state directory, `EVJ_HOOK_STATE_DIR` or `~/.evidence-judge/state`) |
+| `--log-anchor FILE` | The evidence log's head anchor (default: `<state>/<session>/log-head.json`) |
+| `--trusted-log` | Assert that the log, its key and anchor were out of the agent's reach (a sandbox that denies the state directory, a container, another OS user). Without it, an agent running as your user could have read the key and signed a forged log, so a verified log is still `partial`. The spec's `trusted_evidence_log: true` does the same |
 | `--answer TEXT` / `--answer-file FILE` | Judge this final answer instead of the recorded one |
 | `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence` |
 | `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
@@ -213,16 +216,20 @@ always exits 0.
 
 | Command | Agent event | Output |
 | --- | --- | --- |
-| `claude-code-stop` | Claude Code `Stop`, `SubagentStop` | `{"decision": "block", "reason": ...}` on FAIL, else `{}` or `{"systemMessage": ...}` |
+| `claude-code-stop` | Claude Code `Stop`, `SubagentStop` | `{"decision": "block", "reason": ...}` on FAIL, bad evidence after Playwright use, or a spec changed during the turn (never twice in a row); else `{}` or `{"systemMessage": ...}` |
 | `codex-stop` | Codex `Stop` | as above |
 | `gemini-after-agent` | Gemini CLI `AfterAgent` | `{"decision": "deny", "reason": ...}` on FAIL, else `{}` or `{"systemMessage": ...}` |
 | `claude-code-record` | Claude Code `UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied` | nothing; appends to the evidence log |
 | `codex-record` | Codex `UserPromptSubmit`, `PostToolUse` | nothing; appends to the evidence log |
 | `gemini-record` | Gemini CLI `BeforeAgent`, `AfterTool` | `{}`; appends to the evidence log |
+| `claude-code-turn-start` | Claude Code `UserPromptSubmit` (synchronous) | nothing; saves the turn's task spec to the state directory |
+| `codex-turn-start` | Codex `UserPromptSubmit` (synchronous) | nothing; as above |
+| `gemini-turn-start` | Gemini CLI `BeforeAgent` | `{}`; as above |
 
 | Option | Description |
 | --- | --- |
 | `--log-dir DIR` | Evidence-log directory (absolute). Record hooks default to `~/.evidence-judge/sessions`; stop hooks log the final answer only when this or `EVJ_HOOK_LOG_DIR` is set |
+| `--state-dir DIR` | The hooks' private state (absolute): spec snapshots, the evidence-log key and head anchors. Default `EVJ_HOOK_STATE_DIR`, else `$CLAUDE_PLUGIN_DATA/state`, else `~/.evidence-judge/state`. Keep it out of the agent's reach |
 
 Settings are `EVJ_HOOK_*` environment variables; see the
 [Claude Code guide](guides/claude-code.md#configuration).

@@ -33,11 +33,12 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def _offline_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _offline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     for key in list(os.environ):
         if key.startswith("EVJ_HOOK_"):
             monkeypatch.delenv(key)
+    monkeypatch.setenv("EVJ_HOOK_STATE_DIR", str(tmp_path / "hook-state"))
 
 
 def _hook(command: str, stdin: str) -> dict[str, object]:
@@ -90,10 +91,24 @@ def test_an_honest_run_passes_with_a_notice(tmp_path: Path) -> None:
     assert "test-results/shop-buy-chromium/trace.zip" in str(out["systemMessage"])
 
 
-def test_stop_hook_active_never_blocks_again(tmp_path: Path) -> None:
+def test_stop_hook_active_never_blocks_again_but_warns(tmp_path: Path) -> None:
     project = tmp_path / "shop"
     make_project(project)
-    assert _claude_stop(tmp_path, project, stop_hook_active=True) == {}
+    out = _claude_stop(tmp_path, project, stop_hook_active=True)
+    assert "decision" not in out
+    message = str(out["systemMessage"])
+    assert message.startswith("evidence-judge hook: WARNING: the agent stopped again")
+    assert "Evidence Judge: FAIL" in message
+    assert "order #1042" in message
+
+
+def test_a_fine_second_stop_is_a_plain_pass(tmp_path: Path) -> None:
+    project = tmp_path / "shop"
+    make_project(project, "honest_success", layout="zip")
+    answer = (Path(__file__).parents[1] / "fixtures/runs/honest_success/answer.txt").read_text()
+    out = _claude_stop(tmp_path, project, stop_hook_active=True, last_assistant_message=answer)
+    assert out == {"systemMessage": out["systemMessage"]}
+    assert str(out["systemMessage"]).startswith("Evidence Judge: PASS")
 
 
 def test_no_trace_and_no_playwright_is_silent(tmp_path: Path) -> None:
@@ -103,22 +118,43 @@ def test_no_trace_and_no_playwright_is_silent(tmp_path: Path) -> None:
     assert _hook("claude-code-stop", json.dumps(data)) == {}
 
 
-def test_playwright_without_a_trace_is_a_notice(tmp_path: Path) -> None:
+def test_playwright_without_a_trace_blocks(tmp_path: Path) -> None:
     project = tmp_path / "plain"
     project.mkdir()
     out = _claude_stop(tmp_path, project)
-    assert "no trace was recorded" in str(out["systemMessage"])
+    assert out["decision"] == "block"
+    assert "no trace was recorded this turn" in str(out["reason"])
+    assert "browser_start_tracing" in str(out["reason"])
+
+
+def test_playwright_without_a_trace_is_a_notice_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "plain"
+    project.mkdir()
+    monkeypatch.setenv("EVJ_HOOK_ON_BAD_EVIDENCE", "notice")
+    out = _claude_stop(tmp_path, project)
     assert "decision" not in out
+    assert "no trace was recorded" in str(out["systemMessage"])
 
 
-def test_a_trace_from_before_the_turn_is_ignored(tmp_path: Path) -> None:
+def test_deleted_traces_block(tmp_path: Path) -> None:
+    project = tmp_path / "shop"
+    trace = make_project(project)
+    trace.unlink()
+    out = _claude_stop(tmp_path, project)
+    assert out["decision"] == "block"
+    assert "no trace was recorded this turn" in str(out["reason"])
+
+
+def test_a_trace_modified_before_the_turn_is_not_used(tmp_path: Path) -> None:
     project = tmp_path / "shop"
     trace = make_project(project)
     old = time.time() - 3600
     os.utime(trace, (old, old))
     out = _claude_stop(tmp_path, project)
-    assert "decision" not in out
-    assert "no trace was recorded" in str(out["systemMessage"])
+    assert out["decision"] == "block"
+    assert "no trace was recorded this turn" in str(out["reason"])
 
 
 def test_an_empty_answer_is_not_judged(tmp_path: Path) -> None:
@@ -191,9 +227,7 @@ def test_an_unexpected_error_fails_open(tmp_path: Path, monkeypatch: pytest.Monk
     assert "internal error (RuntimeError: kaboom); not blocking" in str(out["systemMessage"])
 
 
-def test_an_unreadable_raw_trace_fails_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_an_unreadable_raw_trace_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project = tmp_path / "shop"
     make_project(project)
 
@@ -202,8 +236,9 @@ def test_an_unreadable_raw_trace_fails_open(
 
     monkeypatch.setattr(core, "pack_raw_trace", refuse)
     out = _claude_stop(tmp_path, project)
-    assert "could not read .playwright-mcp/traces/trace-1792007306000.trace" in str(
-        out["systemMessage"]
+    assert out["decision"] == "block"
+    assert ".playwright-mcp/traces/trace-1792007306000.trace: could not read it" in str(
+        out["reason"]
     )
 
 
@@ -252,12 +287,25 @@ def test_gemini_after_agent_denies_to_force_a_retry(tmp_path: Path) -> None:
     assert str(out["reason"]).startswith("Evidence Judge: FAIL")
 
 
-def test_gemini_retry_is_not_judged_again(tmp_path: Path) -> None:
+def test_a_gemini_retry_is_judged_but_never_denied_again(tmp_path: Path) -> None:
     project = tmp_path / "shop"
     make_project(project)
     data = json.loads(render("gemini_after_agent.json", CWD=str(project)))
     data["stop_hook_active"] = True
-    assert _hook("gemini-after-agent", json.dumps(data)) == {}
+    out = _hook("gemini-after-agent", json.dumps(data))
+    assert "decision" not in out
+    assert "WARNING: the agent stopped again" in str(out["systemMessage"])
+
+
+def test_a_codex_continuation_is_judged_but_never_blocked_again(tmp_path: Path) -> None:
+    project = tmp_path / "shop"
+    make_project(project)
+    rollout = codex_rollout(tmp_path / "rollout.jsonl")
+    data = json.loads(render("codex_stop.json", TRANSCRIPT=str(rollout), CWD=str(project)))
+    data["stop_hook_active"] = True
+    out = _hook("codex-stop", json.dumps(data))
+    assert "decision" not in out
+    assert "WARNING: the agent stopped again" in str(out["systemMessage"])
 
 
 def test_notices_use_system_message() -> None:
@@ -283,7 +331,6 @@ def test_the_judge_runs_offline_without_the_api_key(
         spec=None,
         llm=False,
         timeout_s=5,
-        cwd=tmp_path,
     )
     assert isinstance(run_judge(request), JudgeFailed)
     argv = seen["argv"]
@@ -305,7 +352,7 @@ def test_the_judge_can_use_the_llm_when_configured(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-synthetic")
     monkeypatch.setattr(judge.subprocess, "run", fake)
     spec = tmp_path / "spec.yaml"
-    request = JudgeRequest(tmp_path / "t.zip", "a", "task", spec, True, 5, tmp_path)
+    request = JudgeRequest(tmp_path / "t.zip", "a", "task", spec, True, 5)
     result = run_judge(request)
     assert isinstance(result, JudgeFailed)
     assert "could not run the judge" in result.reason
@@ -325,7 +372,7 @@ def test_an_unreadable_verdict_fails_open(
         return subprocess.CompletedProcess(argv, 1, "", "")
 
     monkeypatch.setattr(judge.subprocess, "run", fake)
-    request = JudgeRequest(tmp_path / "t.zip", "a", None, None, False, 5, tmp_path)
+    request = JudgeRequest(tmp_path / "t.zip", "a", None, None, False, 5)
     result = run_judge(request)
     assert isinstance(result, JudgeFailed)
     assert result.reason == "the judge wrote an unreadable verdict"
@@ -433,3 +480,25 @@ def test_a_failing_stop_log_does_not_change_the_decision(tmp_path: Path) -> None
     )
     assert json.loads(result.stdout)["decision"] == "deny"
     assert "could not record the stop" in result.stderr
+
+
+def test_a_project_env_file_cannot_change_the_judge(tmp_path: Path) -> None:
+    project = tmp_path / "shop"
+    make_project(project)
+    (project / ".env").write_text("EVJ_LLM_BACKEND=not-a-backend\nEVJ_MAX_COST_USD=-1\n")
+    out = _claude_stop(tmp_path, project)
+    assert out["decision"] == "block"
+    assert str(out["reason"]).startswith("Evidence Judge: FAIL")
+
+
+def test_inherited_evj_settings_are_dropped_unless_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "shop"
+    make_project(project)
+    monkeypatch.setenv("EVJ_LLM_BACKEND", "not-a-backend")
+    assert _claude_stop(tmp_path, project)["decision"] == "block"
+    monkeypatch.setenv("EVJ_HOOK_PASS_ENV", '["EVJ_LLM_BACKEND"]')
+    out = _claude_stop(tmp_path, project)
+    assert "decision" not in out
+    assert "the judge exited 3" in str(out["systemMessage"])

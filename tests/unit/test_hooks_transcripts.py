@@ -12,8 +12,14 @@ from evidence_judge.hooks.transcripts import (
     claude_code_turn,
     codex_turn,
     is_playwright_tool,
+    trace_links,
 )
-from tests.unit.hook_fixtures import FORGED_ANSWER, claude_transcript, codex_rollout
+from tests.unit.hook_fixtures import (
+    FORGED_ANSWER,
+    claude_transcript,
+    codex_rollout,
+    stop_tracing_transcript,
+)
 
 PROMPT_AT = 1_791_000_000.0
 
@@ -90,3 +96,36 @@ def test_codex_turn_falls_back_to_the_record_timestamp(tmp_path: Path) -> None:
     turn = codex_turn(path, "t")
     assert turn.started_at is not None
     assert turn.used_playwright is False
+
+
+def test_claude_code_turn_reads_the_traces_stop_tracing_reported(tmp_path: Path) -> None:
+    path = stop_tracing_transcript(tmp_path / "t.jsonl", ".playwright-mcp/traces/trace-7.trace")
+    turn = claude_code_turn(path)
+    assert turn.trace_paths == (".playwright-mcp/traces/trace-7.trace",)
+    assert turn.used_playwright is True
+
+
+def test_trace_links_only_match_the_trace_link() -> None:
+    text = "- [Trace](/a b/t-1.trace)\n- [Network log](/a/t-1.network)\n[Trace](x.zip)"
+    assert trace_links(text) == ["/a b/t-1.trace"]
+
+
+def test_codex_turn_reads_reported_traces(tmp_path: Path) -> None:
+    path = codex_rollout(tmp_path / "r.jsonl", PROMPT_AT)
+    output = {
+        "ordinal": 9,
+        "timestamp": "2026-10-15T09:00:00Z",
+        "type": "response_item",
+        "payload": {
+            "type": "function_call_output",
+            "call_id": "c9",
+            "output": "Trace recording stopped.\n- [Trace](.playwright-mcp/traces/trace-9.trace)",
+        },
+    }
+    structured = output | {
+        "payload": output["payload"] | {"output": {"content": "- [Trace](b.trace)"}}
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(output) + "\n" + json.dumps(structured) + "\n")
+    turn = codex_turn(path, "turn-2")
+    assert turn.trace_paths == (".playwright-mcp/traces/trace-9.trace", "b.trace")

@@ -9,9 +9,11 @@ Evidence Judge checks each claim in your final answer against what the browser r
 network requests, page snapshots, screenshots and the final page. A claim the evidence
 contradicts makes the run FAIL; a claim it cannot show makes it NEEDS REVIEW.
 
-When this plugin is enabled, a Stop hook judges the newest trace recorded during the turn
-against your final message. If the verdict is FAIL, you are asked to keep working with the
-reasons. Fix the problem in the browser or correct the answer: do not restate the same claim.
+When this plugin is enabled, a Stop hook judges every trace recorded during the turn (only
+the ones `browser_stop_tracing` reported, when it reported any) against your final message,
+with the task spec as it was when the turn started. If the verdict is FAIL, you are asked to
+keep working with the reasons. You are also sent back if you used Playwright but left no
+usable trace, or if the spec changed during the turn: leave traces and the spec alone. Fix the problem in the browser or correct the answer: do not restate the same claim.
 
 ## 1. Record a trace with Playwright MCP
 

@@ -12,7 +12,7 @@ import typer
 from pydantic import ValidationError
 
 from evidence_judge.hooks.adapters import CLAUDE_CODE, CODEX, GEMINI, Adapter, HookInput
-from evidence_judge.hooks.core import NOTICE_PREFIX, Decision, allow, evaluate
+from evidence_judge.hooks.core import NOTICE_PREFIX, Decision, allow, evaluate, find_spec
 from evidence_judge.hooks.record import (
     Agent,
     append,
@@ -22,6 +22,7 @@ from evidence_judge.hooks.record import (
     stop_record,
 )
 from evidence_judge.hooks.settings import HookSettings
+from evidence_judge.hooks.state import resolve_state_dir, snapshot_spec
 
 MAX_INPUT_CHARS: Final = 8 * 1024 * 1024
 
@@ -48,17 +49,21 @@ def _read_input(stream: TextIO) -> HookInput:
     return cast(HookInput, data)
 
 
-def _log_stop(adapter: Adapter, data: HookInput, answer: str | None, log_dir: Path) -> None:
+def _log_stop(
+    adapter: Adapter, data: HookInput, answer: str | None, log_dir: Path, state_dir: Path | None
+) -> None:
     try:
-        append(log_dir, stop_record(adapter.name, data, answer, redactor()))
+        append(log_dir, stop_record(adapter.name, data, answer, redactor()), state_dir)
     except Exception as exc:
         sys.stderr.write(f"{NOTICE_PREFIX}could not record the stop ({type(exc).__name__})\n")
 
 
-def decide(adapter: Adapter, stream: TextIO, log_dir: Path | None = None) -> Decision:
+def decide(
+    adapter: Adapter, stream: TextIO, log_dir: Path | None = None, state_dir: Path | None = None
+) -> Decision:
     """The decision for one hook call. Fails open: any error allows the stop with a notice.
     With ``log_dir``, the stop and the agent's final answer are also appended to the session's
-    evidence log."""
+    evidence log; ``state_dir`` holds the spec the turn-start hook saved."""
     try:
         settings = HookSettings()
     except ValidationError as exc:
@@ -68,17 +73,17 @@ def decide(adapter: Adapter, stream: TextIO, log_dir: Path | None = None) -> Dec
         data = _read_input(stream)
         context = adapter.context(data)
         if log_dir is not None:
-            _log_stop(adapter, data, context.answer, log_dir)
-        return evaluate(context, settings)
+            _log_stop(adapter, data, context.answer, log_dir, state_dir)
+        return evaluate(context, settings, state_dir)
     except ValueError as exc:
         return allow(f"unreadable hook input ({exc}); not checking")
     except Exception as exc:
         return allow(f"internal error ({type(exc).__name__}: {exc}); not blocking")
 
 
-def _respond(adapter: Adapter, log_dir: str | None) -> None:
+def _respond(adapter: Adapter, log_dir: str | None, state_dir: str | None) -> None:
     target = resolve_log_dir(log_dir) if log_dir or os.environ.get("EVJ_HOOK_LOG_DIR") else None
-    decision = decide(adapter, sys.stdin, target)
+    decision = decide(adapter, sys.stdin, target, resolve_state_dir(state_dir))
     sys.stdout.write(json.dumps(adapter.output(decision), ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
@@ -92,47 +97,96 @@ _LogDir = Annotated[
 ]
 
 
+_StateDir = Annotated[
+    str | None,
+    typer.Option(
+        help="The hooks' private state directory (default EVJ_HOOK_STATE_DIR, else "
+        "$CLAUDE_PLUGIN_DATA/state, else ~/.evidence-judge/state); keep it out of the agent's reach"
+    ),
+]
+
+
+def turn_start(stream: TextIO, state_dir: Path) -> None:
+    """Save the spec the turn starts with. Never fails the agent: a problem is one line on
+    stderr."""
+    try:
+        settings = HookSettings()
+        data = _read_input(stream)
+        session = data.get("session_id")
+        cwd = data.get("cwd")
+        if not isinstance(session, str) or not session or not isinstance(cwd, str):
+            return
+        root = Path(cwd)
+        if not root.is_absolute() or not root.is_dir():
+            return
+        snapshot_spec(state_dir, session, find_spec(root.resolve(), settings.spec))
+    except Exception as exc:
+        sys.stderr.write(f"{NOTICE_PREFIX}could not save the turn's spec ({type(exc).__name__})\n")
+
+
+@hook_app.command("claude-code-turn-start")
+def claude_code_turn_start(state_dir: _StateDir = None) -> None:
+    """Claude Code UserPromptSubmit hook (synchronous): save the task spec the turn starts with,
+    print nothing."""
+    turn_start(sys.stdin, resolve_state_dir(state_dir))
+
+
+@hook_app.command("codex-turn-start")
+def codex_turn_start(state_dir: _StateDir = None) -> None:
+    """Codex CLI UserPromptSubmit hook: save the task spec the turn starts with, print nothing."""
+    turn_start(sys.stdin, resolve_state_dir(state_dir))
+
+
+@hook_app.command("gemini-turn-start")
+def gemini_turn_start(state_dir: _StateDir = None) -> None:
+    """Gemini CLI BeforeAgent hook: save the task spec the turn starts with, print ``{}``."""
+    turn_start(sys.stdin, resolve_state_dir(state_dir))
+    sys.stdout.write("{}\n")
+
+
 @hook_app.command("claude-code-stop")
-def claude_code_stop(log_dir: _LogDir = None) -> None:
+def claude_code_stop(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Claude Code Stop / SubagentStop hook."""
-    _respond(CLAUDE_CODE, log_dir)
+    _respond(CLAUDE_CODE, log_dir, state_dir)
 
 
-def _record(agent: Agent, log_dir: str | None) -> None:
+def _record(agent: Agent, log_dir: str | None, state_dir: str | None) -> None:
     """Log one tool call or prompt. Never fails the agent: a problem is one line on stderr."""
     try:
-        record(agent, _read_input(sys.stdin), resolve_log_dir(log_dir))
+        record(
+            agent, _read_input(sys.stdin), resolve_log_dir(log_dir), resolve_state_dir(state_dir)
+        )
     except Exception as exc:
         sys.stderr.write(f"{NOTICE_PREFIX}could not record the tool call ({type(exc).__name__})\n")
 
 
 @hook_app.command("claude-code-record")
-def claude_code_record(log_dir: _LogDir = None) -> None:
+def claude_code_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Claude Code PostToolUse, PostToolUseFailure, PermissionDenied and UserPromptSubmit
     hook: log the call or prompt, print nothing."""
-    _record("claude-code", log_dir)
+    _record("claude-code", log_dir, state_dir)
 
 
 @hook_app.command("codex-record")
-def codex_record(log_dir: _LogDir = None) -> None:
+def codex_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Codex CLI PostToolUse and UserPromptSubmit hook: log the call or prompt, print nothing."""
-    _record("codex", log_dir)
+    _record("codex", log_dir, state_dir)
 
 
 @hook_app.command("gemini-record")
-def gemini_record(log_dir: _LogDir = None) -> None:
+def gemini_record(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Gemini CLI AfterTool and BeforeAgent hook: log the call or prompt, print ``{}``."""
-    _record("gemini", log_dir)
+    _record("gemini", log_dir, state_dir)
     sys.stdout.write("{}\n")
 
 
 @hook_app.command("codex-stop")
-def codex_stop(log_dir: _LogDir = None) -> None:
+def codex_stop(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Codex CLI Stop hook."""
-    _respond(CODEX, log_dir)
+    _respond(CODEX, log_dir, state_dir)
 
 
 @hook_app.command("gemini-after-agent")
-def gemini_after_agent(log_dir: _LogDir = None) -> None:
+def gemini_after_agent(log_dir: _LogDir = None, state_dir: _StateDir = None) -> None:
     """Gemini CLI AfterAgent hook."""
-    _respond(GEMINI, log_dir)
+    _respond(GEMINI, log_dir, state_dir)

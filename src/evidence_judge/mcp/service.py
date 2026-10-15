@@ -4,12 +4,13 @@ caller can fix."""
 
 from __future__ import annotations
 
+import re
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
 from pydantic import ValidationError
 
@@ -80,6 +81,7 @@ class JudgeRequest:
     run_id: str | None = None
     json_report: str | None = None
     html_report: str | None = None
+    overwrite: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,13 +111,53 @@ def _opt(roots: Roots, value: str | None, what: str, *, directory_ok: bool = Fal
         raise ToolInputError(str(e)) from e
 
 
-def _out(roots: Roots, value: str | None, what: str) -> Path | None:
+UNTRUSTED_TAG: Final = "untrusted_data"
+_TAG_LOOKALIKE: Final = re.compile(r"<(\s*/?\s*untrusted[\s_-]*data)", re.IGNORECASE)
+
+
+def fence(text: str) -> str:
+    """Page- or agent-derived text, wrapped so a reading model treats it as data: anything that
+    looks like the wrapper tag inside it is defanged, so it cannot close the fence."""
+    return f"<{UNTRUSTED_TAG}>{_TAG_LOOKALIKE.sub(r'[\1', text)}</{UNTRUSTED_TAG}>"
+
+
+_HTML_MARKER: Final = b'<meta name="generator" content="evidence-judge '
+_MARKER_BYTES: Final = 4096
+_MAX_REPORT_BYTES: Final = 64 * 1024 * 1024
+
+
+def is_report(path: Path, kind: Literal["json", "html"]) -> bool:
+    """Whether ``path`` is a report evidence-judge wrote: a verdict JSON that validates, or an
+    HTML page carrying the report's generator tag."""
+    try:
+        if kind == "html":
+            with path.open("rb") as handle:
+                return _HTML_MARKER in handle.read(_MARKER_BYTES)
+        if path.stat().st_size > _MAX_REPORT_BYTES:
+            return False
+        RunVerdict.model_validate_json(path.read_bytes())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _out(
+    roots: Roots, value: str | None, what: str, kind: Literal["json", "html"], overwrite: bool
+) -> Path | None:
+    """A report path inside the roots. An existing file is replaced only when it is an earlier
+    evidence-judge report, or when ``overwrite`` is set."""
     if value is None:
         return None
     try:
-        return roots.output(value, what=what)
+        path = roots.output(value, what=what)
     except PathNotAllowedError as e:
         raise ToolInputError(str(e)) from e
+    if path.exists() and not overwrite and not is_report(path, kind):
+        raise ToolInputError(
+            f"{what} {value!r} exists and is not an evidence-judge {kind} report; refusing to "
+            "overwrite it (pass overwrite=true to replace it)"
+        )
+    return path
 
 
 def _evidence_paths(
@@ -226,8 +268,8 @@ def prepare_judge(config: ServerConfig, req: JudgeRequest) -> PreparedJudge:
     trace, har, browser_use = _evidence_paths(roots, req.trace, req.har, req.browser_use)
     answer_file = _opt(roots, req.answer_file, "answer_file")
     reasoning_file = _opt(roots, req.reasoning_file, "reasoning_file")
-    json_path = _out(roots, req.json_report, "json_report")
-    html_path = _out(roots, req.html_report, "html_report")
+    json_path = _out(roots, req.json_report, "json_report", "json", req.overwrite)
+    html_path = _out(roots, req.html_report, "html_report", "html", req.overwrite)
     settings = settings_of(config)
     spec = _load_spec(roots, req.spec, req.spec_yaml)
     run = load_evidence(
@@ -466,7 +508,7 @@ def render_explanation(e: Explanation) -> str:
     lines = [
         f"**{e.outcome.value.upper()}** (score {round(e.score * 100)}/100), run `{e.run_id}`",
         "",
-        e.summary,
+        fence(e.summary),
     ]
     if e.supported_claims:
         lines += ["", f"{e.supported_claims} claim(s) were supported by the evidence."]
@@ -476,17 +518,18 @@ def render_explanation(e: Explanation) -> str:
             label = f"{item.kind} `{item.id}`" + (" (key)" if item.key else "")
             lines.append(f"- {label}: **{item.status}**")
             if item.statement:
-                lines.append(f"  - claim: {item.statement}")
-            lines.append(f"  - why: {item.why}")
+                lines.append(f"  - claim: {fence(item.statement)}")
+            lines.append(f"  - why: {fence(item.why)}")
             if item.evidence:
                 cited = ", ".join(
-                    c.evidence_id + (f" ({c.excerpt})" if c.excerpt else "") for c in item.evidence
+                    c.evidence_id + (f" ({fence(c.excerpt)})" if c.excerpt else "")
+                    for c in item.evidence
                 )
                 lines.append(f"  - evidence: {cited}")
     elif e.outcome.value == "pass":
         lines += ["", "Every claim and expectation was backed by the recorded evidence."]
     if e.warnings:
-        lines += ["", "Warnings:", *(f"- {w}" for w in e.warnings)]
+        lines += ["", "Warnings:", *(f"- {fence(w)}" for w in e.warnings)]
     return "\n".join(lines)
 
 
@@ -574,7 +617,8 @@ def summarize_verdict(verdict: RunVerdict) -> str:
     """A few lines for a model to read: the outcome and what decided it."""
     counts = {s: sum(c.status is s for c in verdict.claims) for s in Support}
     lines = [
-        f"{verdict.outcome.value.upper()} score {round(verdict.score * 100)}/100: {verdict.summary}",
+        f"{verdict.outcome.value.upper()} score {round(verdict.score * 100)}/100: "
+        + fence(verdict.summary),
         (
             f"claims: {counts[Support.SUPPORTED]} supported, "
             f"{counts[Support.CONTRADICTED]} contradicted, {counts[Support.NO_EVIDENCE]} "

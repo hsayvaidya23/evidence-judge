@@ -159,6 +159,10 @@ the names exported from `evidence_judge`) is defined under
   fallback after LLM extraction fails cannot PASS.
 - The GitHub Action judges into a fresh directory, so a second step never reuses an earlier
   verdict, and fails on bad input or internal errors.
+- The Codex recorder reads the exit code from the `Process exited with code N` line that Codex
+  writes before a command's output, when the hook payload has no exit code. Before, every
+  Codex shell call was logged with a null exit code, so an honest Codex log could not show that
+  its tests passed.
 
 ### Security
 
@@ -314,6 +318,83 @@ the names exported from `evidence_judge`) is defined under
   trailing slash): `contains: /p/red-kettle` is a substring and is also met by
   `/p/red-kettle-lid`. The task-spec guide steers exact pages to `path` or an anchored `regex`.
   Like `regex`, a `path` the agent typed into the address bar cannot prove itself, however short.
+- **Hook judges ignore the project's `.env` and the agent's `EVJ_*` settings.** The stop hook
+  ran the judge with the project as its working directory, so a `.env` the agent wrote there
+  could change the judge's settings (or break them, which let the stop through). The judge now
+  runs in a private temporary directory, and inherits only the `EVJ_*` variables listed in
+  `EVJ_HOOK_PASS_ENV`.
+- **A second stop is still judged.** When the agent stopped again after a stop hook sent it
+  back (`stop_hook_active`), the hooks returned nothing, so the corrected answer was never
+  checked and the user was not told. Claude Code, Codex and Gemini CLI hooks now judge it too.
+  They never block a second time, to avoid a loop. If the answer still fails, the stop goes
+  through with a warning to the user that names what the evidence does not back up.
+- **Stop hooks judge every trace of the turn and stop failing open on bad evidence.** Before,
+  the hook judged only the trace with the newest mtime. That let three things through: a junk
+  trace the judge refused (exit 3) passed the stop, an older clean trace with a fresh mtime
+  replaced the real one, and deleting the traces after using Playwright gave an empty reply.
+  Now:
+  - When `browser_stop_tracing` reported trace files in the transcript (Claude Code, Codex),
+    only those count, and each must exist and pass.
+  - Otherwise, every trace modified during the turn is judged (up to 10).
+  - A trace whose own recorded events (`wallTime`) end before the turn started is rejected,
+    whatever its mtime says.
+  - If Playwright was used and a trace is missing, unreadable, rejected by the judge or older
+    than the turn, the agent is sent back with instructions. Set `EVJ_HOOK_ON_BAD_EVIDENCE` to
+    `notice` to only tell the user instead.
+  - The hook still fails open, with a notice, only for its own errors and timeouts.
+- **The agent cannot weaken the spec its own answer is judged against.** The stop hook read
+  `.evidence-judge/spec.yaml` from the workspace at stop time, so an agent could edit it during
+  the turn (for example, drop a `forbid`) and pass. A new synchronous turn-start hook now saves
+  the spec when the turn starts, into the hooks' private state directory (`--state-dir`,
+  `EVJ_HOOK_STATE_DIR`, or `$CLAUDE_PLUGIN_DATA/state`), keyed by session:
+  - Claude Code and Codex: `claude-code-turn-start` / `codex-turn-start` on `UserPromptSubmit`.
+  - Gemini CLI: `gemini-turn-start` on `BeforeAgent`.
+
+  The stop hook judges with that copy. If the live spec changed, was deleted or was created
+  during the turn, the agent is sent back (`EVJ_HOOK_BLOCK_ON_SPEC_CHANGE=false` only warns).
+  `EVJ_HOOK_SPEC` may point outside the workspace. The plugin and extension manifests install
+  the turn-start hook.
+- **Evidence logs are HMAC-chained and anchored.** The recorder chained lines with plain SHA-256,
+  so anyone who could write the log could rewrite it and recompute the chain, and cutting lines
+  off the end left no trace. Now, with a state directory (`--state-dir`, as the plugin manifests
+  pass it):
+  - Each line's `prev` is an HMAC-SHA256 under a per-installation key (`<state>/log-key`,
+    mode 0600), and the line names the key's `key_id`.
+  - After every line, including the stop hook's `stop` line, the recorder updates a head anchor
+    (`<state>/<session>/log-head.json`) with the line count and last MAC.
+
+  The loader verifies the chain under the key and the end of the log against the anchor. A
+  truncated or rewritten log is incomplete. Integrity is `full` only when the key and anchor
+  both check out. An unkeyed, unanchored or unverifiable log is `partial`, with the reason.
+- **An evidence log is no longer `full` tamper evidence just because it parses.**
+  `session judge` reported every complete evidence log as `tamper_detection: full`. An agent
+  that runs unsandboxed as the same OS user can read the log key and sign a forged log, so a
+  log now counts as `full` only when two things hold. First, its HMAC chain and head anchor
+  verify. Second, the user asserts with `--trusted-log` (or the spec's
+  `trusted_evidence_log: true`) that the log, key and anchor were out of the agent's reach.
+  Otherwise the log is `partial`, with the reason, and `--require-tamper-evidence` caps it at
+  needs review. `--log-key` and `--log-anchor` override the default state-directory paths.
+- **MCP `judge_run` no longer overwrites arbitrary files.** `json_report` and `html_report`
+  replaced any file inside the allowed roots, even though the tool was annotated as
+  non-destructive. Now an existing file is replaced only when it is an earlier evidence-judge
+  report: a verdict JSON that validates, or an HTML page with the report's generator tag.
+  Replacing any other file needs `overwrite: true`, and the tool is annotated
+  `destructiveHint: true`.
+- **MCP results fence page- and agent-derived text.** `judge_run` and `explain_verdict` now wrap
+  summaries, claim quotes, reasons, evidence excerpts and warnings in `<untrusted_data>` tags,
+  so a reading model can tell them apart from instructions. A tag lookalike inside the text is
+  defanged and cannot close the fence. The server instructions and the tool descriptions say
+  that this text is data, never instructions. The hook feedback already says the same.
+- **The hook guides say what the hooks can and cannot guarantee.** The Claude Code, Codex and
+  Gemini CLI guides, `SECURITY.md` and the session design doc no longer describe evidence logs
+  as out of the agent's reach, or the stop hooks as failing open on bad evidence. Each guide now
+  has a section on the agent-writable workspace and on sandboxing the hooks' state directory:
+  - Claude Code: `sandbox.filesystem.denyRead`/`denyWrite` with
+    `allowUnsandboxedCommands: false`.
+  - Codex: `workspace-write` plus a separate OS user or container.
+  - Gemini CLI: its sandbox.
+
+  The MCP guide documents `overwrite` and the `<untrusted_data>` fencing.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
