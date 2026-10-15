@@ -1,0 +1,7 @@
+The home page lists the Red Kettle but does not say whether it is in stock.
+
+I opened the Red Kettle page. It says 'Out of stock' and the Add to cart button is disabled.
+
+I went back to the home page and opened the Blue Kettle page to compare: its Add to cart button works.
+
+So the red kettle is out of stock.

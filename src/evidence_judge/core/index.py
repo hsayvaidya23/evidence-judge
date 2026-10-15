@@ -56,6 +56,7 @@ class EvidenceIndex:
     def __init__(self, run: Run) -> None:
         self.run = run
         self._normalized: dict[str, str] = {}
+        self._inputs_by_site: dict[str | None, tuple[str, ...]] = {}
 
     def has(self, channel: Channel) -> bool:
         return channel in self.run.captured
@@ -196,7 +197,8 @@ class EvidenceIndex:
         every press of text that is not key names (browser-use ``send_keys``), the name (with
         and without extension) of every uploaded file, the decoded path segments and query
         values of every URL the agent opened, and the decoded query values of every GET request
-        (a form the agent submitted, or a navigation a HAR cannot attribute). Each is also kept
+        (a form the agent submitted, or a navigation a HAR cannot attribute); the URL inputs
+        only count as echoed on the site of the URL they came from. Each is also kept
         as a page rendering it as HTML would show it (tags dropped, character references
         decoded). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit are left out.
 
@@ -208,9 +210,33 @@ class EvidenceIndex:
 
     @cached_property
     def _agent_inputs(self) -> tuple[str, ...]:
-        found = {normalize(form) for text in _raw_inputs(self.run) for form in _rendered(text)}
-        kept = [t for t in found if len(t) >= MIN_PAGE_TEXT and WORD.search(t)]
-        return tuple(sorted(kept, key=lambda t: (-len(t), t)))
+        return tuple(sorted({text for text, _ in self._scoped_inputs}, key=lambda t: (-len(t), t)))
+
+    @cached_property
+    def _scoped_inputs(self) -> tuple[tuple[str, str | None], ...]:
+        """Each input with the site it can be echoed on (None: any site)."""
+        found = {
+            (normalize(form), site)
+            for text, site in _raw_inputs(self.run)
+            for form in _rendered(text)
+        }
+        kept = [(t, site) for t, site in found if len(t) >= MIN_PAGE_TEXT and WORD.search(t)]
+        return tuple(sorted(kept, key=lambda i: (-len(i[0]), i[0], i[1] or "")))
+
+    def _inputs_for(self, url: str | None) -> tuple[str, ...]:
+        """The inputs that can be echoed on `url`: typed ones, and URL ones from its site."""
+        site = _site(url)
+        cached = self._inputs_by_site.get(site)
+        if cached is None:
+            cached = tuple(
+                dict.fromkeys(
+                    text
+                    for text, origin in self._scoped_inputs
+                    if origin is None or (site is not None and _same_site(origin, site))
+                )
+            )
+            self._inputs_by_site[site] = cached
+        return cached
 
     @cached_property
     def without_agent_input(self) -> EvidenceIndex:
@@ -220,28 +246,36 @@ class EvidenceIndex:
 
         Masked page text is normalised; page text and URLs without an occurrence are unchanged.
         """
-        inputs = self.agent_inputs()
-        if not inputs:
+        if not self.agent_inputs():
             return self
         run = self.run
         return EvidenceIndex(
             run.model_copy(
                 update={
-                    "actions": [_masked_url(a, inputs) for a in run.actions],
-                    "network": [_masked_url(n, inputs) for n in run.network],
-                    "snapshots": [_masked_page(s, inputs) for s in run.snapshots],
+                    "actions": [_masked_url(a, self._inputs_for(a.url)) for a in run.actions],
+                    "network": [_masked_url(n, self._inputs_for(n.url)) for n in run.network],
+                    "snapshots": [_masked_page(s, self._inputs_for(s.url)) for s in run.snapshots],
                     "initial_state": None
                     if run.initial_state is None
-                    else _masked_page(run.initial_state, inputs),
+                    else _masked_page(run.initial_state, self._inputs_for(run.initial_state.url)),
                     "final_state": None
                     if run.final_state is None
-                    else _masked_page(run.final_state, inputs),
+                    else _masked_page(run.final_state, self._inputs_for(run.final_state.url)),
                 }
             )
         )
 
 
-def _raw_inputs(run: Run) -> Iterator[str]:
+def _site(url: str | None) -> str | None:
+    host = urlsplit(url or "").hostname
+    return host.casefold().rstrip(".").removeprefix("www.") if host else None
+
+
+def _same_site(a: str, b: str) -> bool:
+    return a == b or a.endswith(f".{b}") or b.endswith(f".{a}")
+
+
+def _raw_inputs(run: Run) -> Iterator[tuple[str, str | None]]:
     served = _site_served(run)
     keys: list[str] = []
     target: str | None = None
@@ -251,31 +285,31 @@ def _raw_inputs(run: Run) -> Iterator[str]:
         name = canonical_action(action.name)
         if name == PRESS and action.value is not None and len(action.value) == 1:
             if keys and action.selector != target:
-                yield "".join(keys)
+                yield "".join(keys), None
                 keys.clear()
             target = action.selector
             keys.append(action.value)
             continue
         if keys:
-            yield "".join(keys)
+            yield "".join(keys), None
             keys.clear()
         if (name == FILL and action.value) or (
             name == PRESS and action.value and not _is_key_names(action.value)
         ):
-            yield action.value
+            yield action.value, None
         elif name == UPLOAD and action.value:
-            yield from _file_names(action.value)
+            yield from ((n, None) for n in _file_names(action.value))
         elif (
             name == GOTO
             and (url := action.value or action.url)
             and served.get(_page_key(url), math.inf) >= before
         ):
-            yield from _url_inputs(url, with_path=True)
+            yield from ((v, _site(url)) for v in _url_inputs(url, with_path=True))
     if keys:
-        yield "".join(keys)
+        yield "".join(keys), None
     for event in run.network:
         if event.method.upper() == "GET":
-            yield from _url_inputs(event.url, with_path=False)
+            yield from ((v, _site(event.url)) for v in _url_inputs(event.url, with_path=False))
 
 
 def _site_served(run: Run) -> dict[str, float]:

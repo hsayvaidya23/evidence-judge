@@ -1,0 +1,12 @@
+# A coarse spec written from the task text alone: some page showed a stock status. It knows
+# neither the answer nor the shop's URLs.
+id: kettle-stock-generic
+task: Check whether the red kettle is in stock
+site: 127.0.0.1   # the demo shop runs locally
+expect:
+  - id: stock_shown
+    description: A page showed whether the kettle is in stock
+    any:
+      - {kind: page_text, contains: in stock, scope: any}
+      - {kind: page_text, contains: out of stock, scope: any}
+      - {kind: page_text, contains: sold out, scope: any}

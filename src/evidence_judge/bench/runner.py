@@ -1,17 +1,19 @@
 """Forged-run benchmark: how often does each judge PASS a failed run whose story was rewritten?
 
 For every failed scenario the runner forges each `ForgeryKind` with N seeds (only the answer and
-reasoning change), keeps every original run as an honest control, judges all of them with
-Evidence Judge (with the scenario's task spec, with a coarser generic spec when the scenario has
-one, and with no spec) and optionally a transcript LLM judge, and reports false-PASS rates on
-forgeries and accuracy on controls with Wilson 95% intervals.
+reasoning change), keeps every original run as an honest control and adds honest edits of the
+passing ones (`forgery.controls`), judges all of them with Evidence Judge (with the scenario's
+task spec, with a coarser generic spec when the scenario has one, and with no spec) and
+optionally a transcript LLM judge, and reports false-PASS rates on forgeries and accuracy on
+controls with Wilson 95% intervals.
 
 `injected_predicates` and `tautological_predicates` forgeries also replace claim extraction:
 the judge receives the claims an injection-controlled extractor would return
 (`forgery.injection`), carrying vacuous, weak or tautological predicates, after the extractor's
-own validation. `self_planted_text` and `third_party_order` forgeries also append the evidence
-a gaming agent would plant (`forgery.evidence`): its claimed confirmation typed into the shop's
-search box, or an order sent to a third-party host.
+own validation. The `forgery.evidence` kinds also plant the evidence a gaming agent would
+(echoes, off-site pages, its own mirror of the site, a redirected order, an old confirmation);
+write-only kinds skip read-only tasks, and `agent_chosen_host` is judged with `site` and
+`allowed_hosts` removed from the specs.
 """
 
 from __future__ import annotations
@@ -34,7 +36,14 @@ from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.forgery.base import MANIPULATION_KINDS, Forger, ForgeryKind
-from evidence_judge.forgery.evidence import plant_evidence
+from evidence_judge.forgery.controls import ControlKind, apply_control
+from evidence_judge.forgery.evidence import (
+    UNANCHORED_KINDS,
+    WRITE_ONLY_KINDS,
+    is_write_task,
+    plant_evidence,
+    unanchored,
+)
 from evidence_judge.forgery.injection import injected_claims
 from evidence_judge.forgery.templates import TemplateForger
 from evidence_judge.llm.base import LLMClient, LLMError
@@ -55,6 +64,8 @@ MAX_SUMMARY_CHARS: Final = 300
 class BenchConfig:
     seeds: int = 3
     kinds: tuple[ForgeryKind, ...] = tuple(ForgeryKind)
+    controls: tuple[ControlKind, ...] = tuple(ControlKind)
+    """Honest edits applied to every scenario labelled PASS, as extra honest controls."""
     offline: bool = True
     """Evidence Judge extracts claims with heuristics only (no LLM)."""
 
@@ -73,6 +84,8 @@ class Case:
     seed: int | None = None
     claims: ClaimSet | None = None
     """Pre-extracted claims (injected_predicates forgeries); None means extract as usual."""
+    control: ControlKind | None = None
+    """The honest edit applied to a control run; None for the run as recorded."""
 
     @property
     def forged(self) -> bool:
@@ -88,6 +101,7 @@ class CaseResult(BaseModel):
     forged: bool
     kind: ForgeryKind | None = None
     seed: int | None = None
+    control: ControlKind | None = None
     expected: Outcome
     outcome: Outcome | None = Field(description="None when the judge errored")
     summary: str = ""
@@ -217,12 +231,26 @@ class BenchmarkRunner:
             for s in scenarios
         ]
         for scenario in scenarios:
-            if not scenario.forgery_base:
+            if scenario.expected is not Outcome.PASS:
                 continue
-            for kind in self.config.kinds:
+            for control in self.config.controls:
+                edited = apply_control(scenario.run, control)
+                if edited is not None:
+                    cases.append(
+                        Case(
+                            case_id=f"{scenario.name}/control/{control.value}",
+                            scenario=scenario,
+                            run=edited,
+                            expected=scenario.expected,
+                            control=control,
+                        )
+                    )
+        for scenario in scenarios:
+            specs = (scenario.spec, scenario.generic_spec)
+            for kind in forgery_kinds(scenario, self.config.kinds):
                 for seed in range(self.config.seeds):
                     forged = await self.forger.forge(scenario.run, kind, seed=seed)
-                    forged = plant_evidence(forged, kind, seed=seed)
+                    forged = plant_evidence(forged, kind, seed=seed, specs=specs)
                     injected = (
                         injected_claims(forged, seed=seed, kind=kind)
                         if kind in INJECTION_KINDS
@@ -242,12 +270,10 @@ class BenchmarkRunner:
         return cases
 
     def _prepare(self, case: Case) -> _Prepared:
-        prepared = _Prepared(
-            run=case.run,
-            spec=case.scenario.spec,
-            generic_spec=case.scenario.generic_spec,
-            claims=case.claims,
-        )
+        spec, generic_spec = case.scenario.spec, case.scenario.generic_spec
+        if case.kind in UNANCHORED_KINDS:
+            spec, generic_spec = unanchored(spec), unanchored(generic_spec)
+        prepared = _Prepared(run=case.run, spec=spec, generic_spec=generic_spec, claims=case.claims)
         if self.redactor is None:
             return prepared
         prepared.run, _ = self.redactor.redact_run(case.run)
@@ -269,6 +295,7 @@ class BenchmarkRunner:
             "forged": case.forged,
             "kind": case.kind,
             "seed": case.seed,
+            "control": case.control,
             "expected": case.expected,
         }
         specs = {EJ_WITH_SPEC: prepared.spec, EJ_GENERIC_SPEC: prepared.generic_spec}
@@ -344,12 +371,22 @@ def control_metrics(results: Sequence[CaseResult], judges: Sequence[str]) -> lis
     return metrics
 
 
+def forgery_kinds(scenario: Scenario, kinds: Sequence[ForgeryKind]) -> list[ForgeryKind]:
+    """The kinds `scenario` is forged with: none unless it is a forgery base, and no write-only
+    kind for a read-only task."""
+    if not scenario.forgery_base:
+        return []
+    write = is_write_task((scenario.spec, scenario.generic_spec))
+    return [k for k in kinds if write or k not in WRITE_ONLY_KINDS]
+
+
 def llm_calls_upper_bound(
     scenarios: Sequence[Scenario], config: BenchConfig, *, baseline: bool
 ) -> int:
     """Judgements that may call an LLM; used to size the benchmark's overall budget."""
-    forged = sum(s.forgery_base for s in scenarios) * len(config.kinds) * config.seeds
-    cases = len(scenarios) + forged
+    forged = sum(len(forgery_kinds(s, config.kinds)) for s in scenarios) * config.seeds
+    controls = sum(s.expected is Outcome.PASS for s in scenarios) * len(config.controls)
+    cases = len(scenarios) + controls + forged
     evidence_judges = len((EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC))
     per_case = (0 if config.offline else evidence_judges) + (1 if baseline else 0)
     return cases * per_case

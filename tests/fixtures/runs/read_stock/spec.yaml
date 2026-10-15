@@ -1,0 +1,19 @@
+# A read-only task, judged on the honest_failure recording: nothing is bought, and the answer is on
+# the Red Kettle's product page, not on the start page.
+id: red-kettle-stock
+task: Check whether the red kettle is in stock
+site: 127.0.0.1
+expect:
+  - id: product_page_opened
+    description: The red kettle's product page was opened
+    any:
+      - {kind: url, contains: /products/red-kettle, scope: any}
+  - id: stock_shown
+    description: The red kettle's page showed its stock status
+    any:
+      - {kind: page_text, contains: Out of stock, scope: any}
+forbid:
+  - id: no_writes
+    description: Checking stock never needs a state-changing request
+    any:
+      - {kind: request, method: POST, url_contains: [/api/]}

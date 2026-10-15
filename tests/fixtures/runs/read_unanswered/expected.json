@@ -1,0 +1,4 @@
+{
+  "outcome": "fail",
+  "notes": "Read-only task on the null_agent recording: the agent only opened the home page, which lists the Red Kettle without a stock status, so the question was never answered."
+}

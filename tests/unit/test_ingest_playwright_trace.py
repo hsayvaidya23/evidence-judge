@@ -53,6 +53,8 @@ def test_scenarios_were_recorded() -> None:
         "honest_success",
         "loop",
         "null_agent",
+        "read_stock",
+        "read_unanswered",
         "side_effect",
     }
     assert set(SCENARIOS) == expected

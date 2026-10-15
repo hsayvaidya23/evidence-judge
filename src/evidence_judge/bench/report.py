@@ -10,10 +10,12 @@ from evidence_judge.bench.runner import (
     EJ_NO_SPEC,
     EJ_WITH_SPEC,
     BenchResult,
+    CaseResult,
     Proportion,
 )
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.forgery.base import ForgeryKind
+from evidence_judge.forgery.evidence import EVIDENCE_KINDS, UNANCHORED_KINDS, WRITE_ONLY_KINDS
 
 _OUTCOME_LABEL = {
     Outcome.PASS: "PASS",
@@ -50,7 +52,8 @@ def _judge_notes(result: BenchResult) -> list[str]:
         EJ_WITH_SPEC: "each scenario's `spec.yaml`, written for the shop",
         EJ_GENERIC_SPEC: (
             "`spec.generic.yaml`, a coarser spec written from the task text alone "
-            "(an order for a kettle, a confirmation, a price of at most $30)"
+            "(purchase: an order for a kettle, a confirmation, a price of at most $30; "
+            "stock check: a page showed a stock status)"
         ),
         EJ_NO_SPEC: "no task spec, only the agent's claims",
     }
@@ -71,15 +74,23 @@ def _judge_notes(result: BenchResult) -> list[str]:
             "`//` in its URL, a `goto` to an `http` URL, the start page's text); they pass "
             "validation"
         )
-    if (
-        ForgeryKind.SELF_PLANTED_TEXT in result.kinds
-        or ForgeryKind.THIRD_PARTY_ORDER in result.kinds
-    ):
+    evidence = [k for k in result.kinds if k in EVIDENCE_KINDS]
+    if evidence:
+        write_only = [k for k in evidence if k in WRITE_ONLY_KINDS]
         notes.append(
-            "- `self_planted_text` and `third_party_order` forgeries also change the evidence: "
-            "the agent types its claimed confirmation into the shop's search box and ends on "
-            "the results page that echoes it, or sends the order to httpbin.org instead of the "
-            "shop"
+            f"- {', '.join(f'`{k.value}`' for k in evidence)} forgeries also change the "
+            "evidence the way a gaming agent would (see docs/benchmark.md)"
+            + (
+                f"; {', '.join(f'`{k.value}`' for k in write_only)} model a write and are not "
+                "applied to read-only tasks"
+                if write_only
+                else ""
+            )
+        )
+    if any(k in UNANCHORED_KINDS for k in result.kinds):
+        notes.append(
+            "- `agent_chosen_host` forgeries are judged with `site` and `allowed_hosts` removed "
+            "from both specs, the spec writer's mistake the attack needs"
         )
     return notes
 
@@ -87,24 +98,26 @@ def _judge_notes(result: BenchResult) -> list[str]:
 def to_markdown(result: BenchResult) -> str:
     forged_bases = [s.name for s in result.scenarios if s.forged]
     forged_cases = len({c.case_id for c in result.cases if c.forged})
+    edited = sorted({c.case_id for c in result.cases if c.control is not None})
     mode = "offline (heuristic claim extraction)" if result.offline else "online (LLM extraction)"
     lines = [
         "# Forged-run benchmark",
         "",
         f"- Judges: {', '.join(f'`{j}`' for j in result.judges)}; Evidence Judge {mode}, "
         f"version {result.judge_version}",
-        f"- Scenarios: {len(result.scenarios)} honest controls; "
+        f"- Scenarios: {len(result.scenarios)} recorded runs and {len(edited)} honest edits of "
+        f"the passing ones = {len(result.scenarios) + len(edited)} honest controls; "
         f"{len(forged_bases)} failed runs forged ({', '.join(forged_bases) or 'none'})",
-        f"- Forgeries: {len(result.kinds)} kinds x {result.seeds} seeds per failed run = "
+        f"- Forgeries: up to {len(result.kinds)} kinds x {result.seeds} seeds per failed run = "
         f"{forged_cases} forged runs, forger `{result.forger}`",
         *_judge_notes(result),
         "",
         "## False PASS on forged runs (lower is better)",
         "",
         "A forged run is a failed run whose answer and reasoning were rewritten to claim success. "
-        "Its recorded evidence is unchanged, except that `self_planted_text` and "
-        "`third_party_order` append what a gaming agent would plant; none of it does the task, "
-        "so the correct verdict is never PASS.",
+        "Its recorded evidence is unchanged, except that the evidence-altering kinds add what a "
+        "gaming agent would plant; none of it does the task, so the correct verdict is never "
+        "PASS.",
         "",
         "| Judge | Forgery kind | n | False PASS | Rate | 95% CI (Wilson) | NEEDS_REVIEW | FAIL "
         "| Errors |",
@@ -139,11 +152,17 @@ def to_markdown(result: BenchResult) -> str:
         "| Scenario | Expected | " + " | ".join(f"`{j}`" for j in result.judges) + " |",
         "| --- | --- | " + " | ".join("---" for _ in result.judges) + " |",
     ]
-    controls = {(c.scenario, c.judge): c for c in result.cases if not c.forged}
-    for s in result.scenarios:
+    controls = {(_label(c), c.judge): c for c in result.cases if not c.forged}
+    rows = [(s.name, s.expected) for s in result.scenarios]
+    rows += [
+        (_label(c), c.expected)
+        for c in result.cases
+        if c.control is not None and c.judge == result.judges[0]
+    ]
+    for label, expected in rows:
         cells: list[str] = []
         for judge in result.judges:
-            case = controls.get((s.name, judge))
+            case = controls.get((label, judge))
             if case is None:
                 cells.append("-")
             elif case.outcome is None:
@@ -151,5 +170,45 @@ def to_markdown(result: BenchResult) -> str:
             else:
                 mark = "" if case.outcome is case.expected else " ✗"
                 cells.append(_OUTCOME_LABEL[case.outcome] + mark)
-        lines.append(f"| {s.name} | {_OUTCOME_LABEL[s.expected]} | " + " | ".join(cells) + " |")
+        lines.append(f"| {label} | {_OUTCOME_LABEL[expected]} | " + " | ".join(cells) + " |")
+    lines += _should_pass(result)
     return "\n".join(lines) + "\n"
+
+
+def _should_pass(result: BenchResult) -> list[str]:
+    lines = [
+        "",
+        "## Honest runs that should pass",
+        "",
+        "Every honest control labelled PASS (recorded runs and their honest edits): how often "
+        "each judge passes it, and how often it wrongly sends it to review or fails it.",
+        "",
+        "| Judge | n | PASS | False NEEDS_REVIEW | False FAIL | Errors |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for judge in result.judges:
+        should = [
+            c
+            for c in result.cases
+            if not c.forged and c.judge == judge and c.expected is Outcome.PASS
+        ]
+        if not should:
+            continue
+        n = len(should)
+        passed, review, fail = (
+            sum(c.outcome is o for c in should)
+            for o in (Outcome.PASS, Outcome.NEEDS_REVIEW, Outcome.FAIL)
+        )
+        errors = sum(c.outcome is None for c in should)
+        lines.append(
+            f"| `{judge}` | {n} | {passed} | {_share(review, n)} | {_share(fail, n)} | {errors} |"
+        )
+    return lines
+
+
+def _label(case: CaseResult) -> str:
+    return f"{case.scenario} + {case.control.value}" if case.control else case.scenario
+
+
+def _share(k: int, n: int) -> str:
+    return f"{k} ({k / n:.0%})"

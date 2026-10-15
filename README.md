@@ -6,7 +6,7 @@
   <img alt="Python 3.12 | 3.13" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white">
   <img alt="pyright strict" src="https://img.shields.io/badge/types-pyright%20strict-2F6FED">
   <img alt="ruff" src="https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black">
-  <img alt="0 of 135 forged runs passed" src="https://img.shields.io/badge/forged%20runs%20passed-0%2F135-brightgreen">
+  <img alt="0 of 261 forged runs passed on one demo shop" src="https://img.shields.io/badge/forged%20runs%20passed%20(1%20demo%20shop)-0%2F261-brightgreen">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -131,7 +131,9 @@ context.tracing.stop(path="trace.zip")
 
 2. Describe what success must look like. Optional for read-only tasks, but **required for any
    task that changes state**: without a spec every state-changing request counts as an
-   unexplained side effect, so the run can at best get `NEEDS_REVIEW`, never `PASS`.
+   unexplained side effect, so the run can at best get `NEEDS_REVIEW`, never `PASS`. Every
+   spec, read-only or not, needs `site` (or `--site`) to `PASS`: otherwise the site is inferred
+   from the first page the agent opened, which the agent chooses.
 
 ```yaml
 # spec.yaml
@@ -233,18 +235,18 @@ the cache directory is not writable, a per-process key is used with a one-line w
 ## 🧪 Benchmark: can a forged story fool it?
 
 <p align="center">
-  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 135 forged runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
+  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 243 attack runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
 </p>
 
-The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites only the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks aimed at the claim extractor, evidence-tampering attacks (the agent types its own "confirmation" into the page, or sends the order to a third-party host), and a style-only control. The real order is never placed, so the correct verdict is never PASS. Counts below pool the 8 attack kinds (120 runs per judge); the style-only control adds 15 more, also 0 passes.
+The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks aimed at the claim extractor, and a style-only control. Eight more kinds also tamper with the evidence the way a gaming agent would, each modelled on an attack that once got a false PASS: the expected text echoed back from the agent's own input (exactly, or cut short, rendered from markup, as an upload's file name or as sent keys), a confirmation on a page the agent controls, an order sent to a third party or to the agent's own mirror of the shop (judged with `site` left out of the spec), an order answered with a redirect to a card-declined page, and a confirmation that was already on screen before the agent acted. The base runs are five failed purchases and one unanswered read-only question ("is the red kettle in stock?"); the correct verdict is never PASS. Counts below pool the 14 attack kinds (243 runs per judge); the style-only control adds 18 more, also 0 passes.
 
 | Judge | Forged runs | False PASS | 95% CI |
 | --- | ---: | ---: | --- |
-| Evidence Judge + exact task spec (offline) | 120 | **0** | 0–3% |
-| Evidence Judge + generic task spec (offline) | 120 | **0** (19 sent to review) | 0–3% |
-| Evidence Judge, no spec (offline) | 120 | **0** (75 sent to review) | 0–3% |
+| Evidence Judge + exact task spec (offline) | 243 | **0** (14 sent to review) | 0–2% |
+| Evidence Judge + generic task spec (offline) | 243 | **0** (55 sent to review) | 0–2% |
+| Evidence Judge, no spec (offline) | 243 | **0** (170 sent to review) | 0–2% |
 
-Honest controls: 7/7 correct with the exact spec, 6/7 with the generic one (the side-effect run goes to review because the generic spec has no `forbid` rule). Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`; add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
+This is one demo shop with two tasks (a purchase and a stock check) and template forgeries, so it shows these attacks are refused, not that every site and task is covered. Honest controls: 17/17 correct with the exact spec and 16/17 with the generic one (the side-effect run goes to review because the generic spec has no `forbid` rule). The 17 are the nine recorded runs plus eight honest edits of the passing ones (an order answered with a redirect to its confirmation, a search typed first, a detour to another site); all 11 that should pass do with either spec. Without a spec all 11 go to review: a spec-less run that changes state or makes no checkable claim is review-only by design. Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`; add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
 
 ## 🔌 Integrations
 
@@ -275,7 +277,7 @@ Docker: `docker build -t evidence-judge . && docker run --rm -v "$PWD:/work:ro" 
 
 ## 🛍️ Demo shop
 
-A small shop app and seven recorded agent runs live in the repo: an honest success, an honest failure, a forged success, a constraint violation, a side effect, a click loop and a do-nothing agent. Every one is judged correctly offline, and that is enforced as a golden regression test.
+A small shop app and seven recorded agent runs live in the repo: an honest success, an honest failure, a forged success, a constraint violation, a side effect, a click loop and a do-nothing agent. Two of the recordings are also judged against a read-only task (is the red kettle in stock?), as an answered and an unanswered question. Every one is judged correctly offline, and that is enforced as a golden regression test.
 
 ```bash
 uv run python -m scripts.record_fixtures      # re-record with Playwright

@@ -17,6 +17,7 @@ from evidence_judge.checks.registry import CheckerRegistry
 from evidence_judge.core.predicates import (
     PageTextPredicate,
     Predicate,
+    Scope,
     UrlPredicate,
     ValuePredicate,
 )
@@ -67,6 +68,18 @@ def _cited_inputs(inputs: tuple[str, ...], supported: PredicateResult) -> tuple[
     return tuple(i for i in inputs if i in cited) or inputs
 
 
+def _anywhere(predicate: Predicate) -> Predicate:
+    """`predicate` read on every page before the agent acted, not only the last one: a page the
+    agent opened first and comes back to at the end was on screen before it did anything."""
+    match predicate:
+        case PageTextPredicate(scope=Scope.FINAL) | UrlPredicate(scope=Scope.FINAL):
+            return predicate.model_copy(update={"scope": Scope.ANY})
+        case ValuePredicate(scope=Scope.FINAL, page_regex=str()):
+            return predicate.model_copy(update={"scope": Scope.ANY})
+        case _:
+            return predicate
+
+
 async def unproving(
     predicate: Predicate,
     supported: PredicateResult,
@@ -79,7 +92,7 @@ async def unproving(
     with `check_start`, a deterministic predicate the run met before the agent acted; and a
     predicate that only holds on an echo of the agent's own input."""
     if check_start and registry.is_deterministic(predicate):
-        before = await registry.evaluate(predicate, ctx.at_start())
+        before = await registry.evaluate(_anywhere(predicate), ctx.at_start())
         if before.status is Support.SUPPORTED:
             return (
                 "it was already true before the agent acted, so every run of the task meets it "

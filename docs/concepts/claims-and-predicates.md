@@ -104,8 +104,10 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   run's *baseline*: the initial page, and the requests, snapshots and navigations before the
   agent's first action that is not a navigation. A predicate the baseline meets, such as a URL
   containing `://` or the shop's host, `GET` with `url_contains: ["//"]`, or a `goto` whose value
-  contains `http`, is met by an agent that did nothing. State and value claims may still cite
-  text of the start page ("the kettle costs $24").
+  contains `http`, is met by an agent that did nothing. A `final`-scope predicate is checked
+  against every page of the baseline, not only its last one, so a page the agent opened first,
+  left and came back to at the end does not count. State and value claims may still cite text of
+  the start page ("the kettle costs $24").
 - **Echoes of the agent's own input.** A site that repeats what the agent sent it proves
   nothing: typing "Order #1042 confirmed" into a search box and landing on its results page, or
   opening `/search?q=Order+%231042+confirmed` directly, shows the phrase without any order
@@ -115,7 +117,9 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   or a navigation a HAR-only run cannot attribute), decoded and normalised like page text. A
   `goto` back to a URL the site had already loaded or redirected to before the agent's previous
   action (re-opening `/order/A1` after checkout redirected there) adds no path input, because
-  the site chose that URL;
+  the site chose that URL. URL inputs only count as echoed on pages and URLs of the site they
+  came from: typing `https://en.wikipedia.org/wiki/Kettle` does not make the shop's own
+  `/products/red-kettle` an echo;
   inputs shorter than three characters or without a letter or digit are ignored. A `page_text`,
   `url` or `value` (`page_regex`) predicate is evaluated again with every occurrence of every
   input masked out of page text and URLs; if it no longer holds, it cannot support the claim.
