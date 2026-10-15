@@ -223,6 +223,10 @@ the names exported from `evidence_judge`) is defined under
   (`ActionEvent.target_text`, from the trace's action log, else the text its selector names),
   and the labels of two or more clicks in a row on controls of at most five characters are
   joined into one input, like keys.
+- The benchmark forges four more ways: `short_compose` (the texts typed a piece per field and
+  previewed side by side), `markup_echo` (typed with markup a preview leaves out),
+  `fragment_echo` (a URL fragment or valueless query key the page shows) and `click_compose`
+  (clicked out on a page's own keyboard).
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
