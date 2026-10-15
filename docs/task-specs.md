@@ -15,12 +15,12 @@ If `--task` is not given, the spec's `task` is used as the task text.
 ```yaml
 id: buy-kettle                      # required, unique
 task: Buy a red kettle under $30    # required, the instruction given to the agent
-site: https://shop.example.com      # the site the task is on (URL or host name)
+site: https://shop.example.com      # the site the task is on (URL or host[:port])
 expect: [...]                       # expectations that must be met
 forbid: [...]                       # expectations that must NOT be met
 constraints: [...]                  # value predicates that must hold
 allow: [...]                        # request predicates for expected intermediate mutations
-allowed_hosts: [shop.example.com]   # mutations to other hosts count as side effects
+allowed_hosts: [api.example.com]    # more hosts of the site; '*.example.com' for every subdomain
 ```
 
 Each entry in `expect` and `forbid` is an expectation:
@@ -41,15 +41,35 @@ meets it proves nothing (see below).
 ### Which hosts can prove something
 
 Evidence that *proves* something (an agent's claim or an `expect` entry) must come from the
-site the run was about. Name it with `site` (a URL or host name, checked when the spec loads;
-`--site` on the command line overrides it). The site's hosts are `site` and the
-`allowed_hosts`, each with its subdomains and a leading `www.` ignored. With neither, the site is
-inferred from the run's first page: the initial page state, else the first page the agent
-opened. The agent chooses that page, so an agent that opens `https://evil.test/` first and
-posts its "order" to `https://evil.test/api/orders` would prove its own task, and one that reads
-its answer off a page on `https://evil.test/` would prove a read-only task. A spec therefore
-never passes on an inferred site, whether its task writes or only reads: a run that would pass
-gets
+site the run was about. Name it with `site`; `--site` on the command line overrides it.
+
+A site is a host and a port, whatever the scheme:
+
+- `site` is a URL (`https://shop.example.com/`) or a host name with an optional port
+  (`shop.example.com`, `127.0.0.1:8000`, `localhost:3000`). Ports 80 and 443 are the default
+  port; any other port must be named, and then only that port is the site:
+  `https://shop.example.com:8443` is not on a site named `https://shop.example.com`, and a site
+  named `127.0.0.1` does not cover `http://127.0.0.1:8000`.
+- A site covers its own host with or without a leading `www.` (`www.shop.example.com` and
+  `shop.example.com` are one site), and **no subdomains**. List each other host the site uses
+  (an API host, a checkout host) in `allowed_hosts`, or name every subdomain of a host with a
+  wildcard: `*.example.com` covers `api.example.com` and `a.b.example.com`, but not
+  `example.com` itself. Wildcards are only allowed in `allowed_hosts`.
+- `site`, `--site` and every `allowed_hosts` entry are checked when the spec loads (an invalid
+  `--site` exits with code 3): the scheme must be http or https; user names and passwords
+  (`https://user:pw@shop.example.com`) are refused; so are public suffixes and single-label
+  names other than `localhost` (`com`, `co.uk`, `github.io`, `intranet`), which anyone can
+  register a site under. Hosts are lower-cased, a trailing dot is dropped, and international
+  names are IDNA-encoded: `shöp.example` is stored as `xn--shp-tna.example` and matches pages
+  recorded under either form. The public-suffix check uses a short bundled list of common
+  suffixes; it never fetches anything.
+
+With neither `site` nor `allowed_hosts` (nor `--site`), the site is inferred from the run's
+first page, host and port: the initial page state, else the first page the agent opened. The
+agent chooses that page, so an agent that opens `https://evil.test/` first and posts its "order"
+to `https://evil.test/api/orders` would prove its own task, and one that reads its answer off a
+page on `https://evil.test/` would prove a read-only task. **A run never passes on an inferred
+site**, whether its task writes or only reads. With a spec, a run that would pass gets
 
 ```
 NEEDS_REVIEW: the site host (shop.example.com) was inferred from the run's first page, which the
@@ -57,31 +77,29 @@ agent may have chosen; set `site` in the task spec (or pass --site) so evidence 
 host cannot prove the task.
 ```
 
-Every spec needs `site` (or `allowed_hosts`, or `--site`) to pass. A run judged without a spec
-infers its site the same way; if its pages and page loads span more than one site (hosts that
-are neither equal nor subdomains of each other, `www.` ignored), a run that would pass gets
-`NEEDS_REVIEW: the run visited several sites (shop.example.com, evil.test); which one is the
-site is ambiguous; pass --site.` A spec-less run that stays on one site is unaffected.
+and without a spec, however many hosts the run visited,
+
+```
+NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
+```
 
 - With `site` or `allowed_hosts` set, request, page text, URL and value predicates only match
-  requests and page states on the site's hosts (`site` and `allowed_hosts`) or their
-  subdomains: a `GET` to another host proves nothing either.
-- With the site inferred, a mutation (POST, PUT, PATCH, DELETE) and every page state (page text, URLs,
-  values read with `page_regex`) must be on a site host (`site`, else the inferred host) or a
-  subdomain of it. A POST to a third party
+  requests and page states on the site: a `GET` to another host or port proves nothing either.
+- With the site inferred, a mutation (POST, PUT, PATCH, DELETE) and every page state (page text,
+  URLs, values read with `page_regex`) must be on the inferred site. A POST to a third party
   (`https://httpbin.org/anything/order`) cannot prove "order placed", and it is reported as a
   side effect; a confirmation shown on another host (a gist or paste page the agent opened)
   cannot prove it either: a `final`-scope predicate on such a final page is `no_evidence`, and
   an `any`-scope one skips such pages. Other reads (a `GET` request) on any host still count
   until the site is named.
-  If the site posts to a sibling host (`api.example.com` from `shop.example.com`), list both in
-  `allowed_hosts`.
+- With `allowed_hosts` set, a mutation outside the site and the allowed hosts is a side effect.
 - A request that meets every criterion except the host is `no_evidence`, never a contradiction:
   the judge cannot tell a third party from a sibling API host it was not told about. Its reason
   names the host (`POST /api/orders → 201 is a POST request ... but it went to api.example.com,
   outside the run's host (shop.example.com) ...; if api.example.com is part of the site, list it
   in the spec's allowed_hosts`), the claim or `expect` entry stays unproven and the run goes to
-  review. Sibling hosts are not matched by registrable domain (`example.com`); list them.
+  review. Sibling hosts and subdomains are not matched by registrable domain (`example.com`);
+  list them, or use a `*.` wildcard.
 - Page states whose URL is `data:`, `about:`, `blob:` (or `javascript:`, `chrome:`,
   `devtools:`) never count: an agent can fill such a page with any text. A `final`-scope
   predicate on such a final page is `no_evidence`.
@@ -111,8 +129,8 @@ dimension does not flag them. Any other successful mutation that no met expectat
 constraint or allow entry explains is reported as a side effect. The agent's own claims never
 explain a mutation: "I also changed your email" is still a side effect, even though the claim is
 true. Telemetry (pings, beacons, CSP reports) is not a side effect, unless its body carries
-redacted values or, with `allowed_hosts` set, goes to another host (possible data
-exfiltration); see [architecture.md](architecture.md#side-effects-and-telemetry) for the exact
+redacted values or, with `allowed_hosts` set, goes outside the site and the allowed hosts
+(possible data exfiltration); see [architecture.md](architecture.md#side-effects-and-telemetry) for the exact
 rule.
 
 Without a spec, nothing says which changes are expected, so a run that changed state is

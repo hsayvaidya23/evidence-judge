@@ -94,12 +94,14 @@ So a score of 0.70 or more always means a pass, and a run waiting for review nev
 ## Which hosts can prove something
 
 Claims and `expect` entries are checked through an `EvidenceScope` (`checks/base.py`): the
-site is the spec's `site` (or `--site`) and `allowed_hosts`; without either it is the run's
-primary host (`EvidenceIndex.primary_host`), inferred from the first page the run was on.
-Mutations and page states must be on a site host (or a subdomain), so a third-party POST or a
-confirmation on another host cannot satisfy "order placed"; a matching request on another host
-is `no_evidence`. Because the agent may choose the first page, a spec with a state-changing
-`expect` never passes on an inferred site (`engine._unanchored`). Page states on `data:`,
+sites are the spec's `site` (or `--site`) and `allowed_hosts`; without either it is the site of
+the run's first page (`EvidenceIndex.primary_site`). A site (`core/site.py`, `Site`) is a host
+and a port, whatever the scheme (80 and 443 are the default port); it covers its host with or
+without `www.` and no subdomain unless `allowed_hosts` lists it or a `*.` wildcard of it.
+Mutations and page states must be on a site, so a third-party POST, a confirmation on another
+host, or the same host on another port cannot satisfy "order placed"; a matching request
+elsewhere is `no_evidence`. Because the agent may choose the first page, no run passes on an
+inferred site, with a spec or without one (`engine._unanchored`). Page states on `data:`,
 `about:`, `blob:` and similar URLs never prove anything. `forbid` entries and
 constraints see every host. See [task specs](task-specs.md#which-hosts-can-prove-something).
 
@@ -119,9 +121,10 @@ is not a change to application state and is skipped (`checks/dimensions.py`, `is
    whatever their host.
 2. **Untyped sendBeacon.** A POST with no resource type (or `other`) and a `text/plain`
    content type, which is what `sendBeacon` sends for a string body, is skipped only when it
-   goes to a third-party host. First-party hosts are the site's hosts (the spec's `site` and
-   `allowed_hosts`), or, when both are empty, the run's primary host: the host of the initial state, else of the first action,
-   snapshot, document navigation or final state that names a URL.
+   goes to a third-party host. First-party hosts are the site's (the spec's `site` and
+   `allowed_hosts`), or, when both are empty, the run's primary site: the host and port of the
+   initial state, else of the first action, snapshot, document navigation or final state that
+   names a URL.
 
 Skipping telemetry as a state change does not make its body harmless: a beacon is also the
 easiest way to send data off the page. Telemetry is therefore still reported, as a side effect
@@ -129,14 +132,15 @@ that needs review with the reason "possible data exfiltration", when:
 
 - its body contains a redaction token (`[REDACTED:...]`), on any host and with or without a
   spec, because a secret or personal value left the browser in it; or
-- the spec sets `allowed_hosts` and the request sends a non-empty body to a host outside them.
+- the spec sets `allowed_hosts` and the request sends a non-empty body outside the site and
+  them.
 
 A bodiless ping (an `<a ping>` or a beacon with no payload) stays ignored.
 
 Everything else stays a finding: a third-party `fetch` or `xhr` POST (a newsletter
 subscription, a payment call), a first-party `text/plain` POST, and any untyped POST with a
-JSON or form body. With `allowed_hosts` set, a non-telemetry mutation to another host is
-reported as outside the allowed hosts.
+JSON or form body. With `allowed_hosts` set, a non-telemetry mutation outside the site and the
+allowed hosts is reported as outside the allowed hosts.
 
 Without a task spec nothing defines which changes are expected, so every successful mutation is
 a finding and the run is at best `needs_review`, with the summary "the run changed state (N

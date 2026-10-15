@@ -60,7 +60,8 @@ $ echo $?
 Both claims are still supported. But nothing says which state changes were *supposed* to happen,
 so `POST /api/cart` and `POST /api/orders` are both possible side effects, and a claim can never
 authorise a side effect. This is deliberate: **a run that changes state can only pass against a
-spec.** Read-only tasks can pass without one.
+spec.** Read-only tasks can pass without one, given the site with `--site` (here
+`--site 127.0.0.1:56432`, the demo shop's host and port): without a named site no run passes.
 
 ## Write a spec
 

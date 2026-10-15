@@ -32,6 +32,10 @@ description: Frequently asked questions about Evidence Judge - LLM judges, NEEDS
       became checkable claims.
     - **An unexplained side effect**: a successful mutation your spec does not `expect` or
       `allow`.
+    - **No site named.** A run only passes when the spec's `site` (or `allowed_hosts`) or
+      `--site` says which site the task is on, with or without a spec: otherwise the site would
+      be whatever page the agent opened first. Name the port too when it is not 80 or 443
+      (`--site 127.0.0.1:8000`), and list subdomains the site uses in `allowed_hosts`.
 
     The full list is on [Outcomes & rules](concepts/outcomes.md).
 

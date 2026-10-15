@@ -26,7 +26,11 @@ Weak contradictions (0.6) never fail a run, however many there are.
 - any spec result is unknown (`met: null`), including a failed attempt at a forbidden action;
 - LLM claim extraction failed and the heuristic fallback was used;
 - claim coverage is below `EVJ_REVIEW_COVERAGE_THRESHOLD` (default 0.6);
-- nothing establishes success: no decided key claim and no `expect` in the spec.
+- nothing establishes success: no decided key claim and no `expect` in the spec;
+- no site was named (no `site`, no `allowed_hosts`, no `--site`), so the run's own first page
+  decided which host counts. This holds with a spec or without one, read-only or not: without a
+  spec the summary reads ``NEEDS_REVIEW: no site was named; pass --site or set `site` in a
+  spec.`` See [task specs](../task-specs.md#which-hosts-can-prove-something).
 </li>
 <li markdown="block">
 <span class="ej-badge ej-badge--pass">PASS</span> **Otherwise.**
@@ -70,6 +74,12 @@ Real summaries from the demo runs:
 
     ```text
     NEEDS_REVIEW: only 0% of the agent's answer became checkable claims (review threshold 60%).
+    ```
+
+=== "Rule 3: no site"
+
+    ```text
+    NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
     ```
 
 === "Rule 4"
