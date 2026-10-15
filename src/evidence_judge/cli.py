@@ -366,7 +366,7 @@ _BrowserUse = Annotated[
     Path | None,
     typer.Option("--browser-use", help="browser-use history JSON or run directory", **_IN_ANY),
 ]
-_Debug = Annotated[bool, typer.Option(help="Show tracebacks for internal errors")]
+_Debug = Annotated[bool, typer.Option("--debug", help="Show tracebacks for internal errors")]
 _AllowMismatch = Annotated[
     bool,
     typer.Option("--allow-mismatch", help="Accept a HAR that does not appear to match the trace"),
@@ -401,6 +401,7 @@ _Llm = Annotated[
     LLMChoice | None,
     typer.Option(
         "--llm",
+        metavar="<backend>",
         help=(
             "LLM backend: anthropic (ANTHROPIC_API_KEY), or the claude-code, codex or gemini CLI "
             "you are logged into. Default: EVJ_LLM_BACKEND"
@@ -454,7 +455,7 @@ def judge(
         Path | None, typer.Option(help="Write the HTML report here", **_OUT_FILE)
     ] = None,
     offline: Annotated[
-        bool, typer.Option(help="No LLM calls; heuristic claim extraction only")
+        bool, typer.Option("--offline", help="No LLM calls; heuristic claim extraction only")
     ] = False,
     llm_backend: _Llm = None,
     no_redact: Annotated[
@@ -663,7 +664,9 @@ def bench(
             resolve_path=True,
         ),
     ],
-    seeds: Annotated[int, typer.Option(min=1, help="Forgeries per failed run and kind")] = 3,
+    seeds: Annotated[
+        int, typer.Option(min=1, metavar="<n>", help="Forgeries per failed run and kind")
+    ] = 3,
     out: Annotated[
         Path | None, typer.Option(help="Write the results JSON here", **_OUT_FILE)
     ] = None,

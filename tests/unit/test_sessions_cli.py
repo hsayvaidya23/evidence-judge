@@ -415,11 +415,22 @@ def test_a_browser_spec_given_to_a_session_command_gets_a_hint() -> None:
         assert "Extra inputs" not in text
 
 
-def test_session_judge_help_fits_80_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("command", "option"),
+    [
+        (["session", "judge"], "--require-tamper-evidence"),
+        (["judge"], "--require-tamper-evidence"),
+        (["judge"], "--langfuse-trace-id"),
+        (["bench"], "--baseline-screenshot"),
+    ],
+)
+def test_help_fits_80_columns(
+    monkeypatch: pytest.MonkeyPatch, command: list[str], option: str
+) -> None:
     for name, value in {"COLUMNS": "80", "NO_COLOR": "1", "TERM": "dumb"}.items():
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("FORCE_COLOR", raising=False)
-    result = runner.invoke(app, ["session", "judge", "--help"], terminal_width=80)
+    result = runner.invoke(app, [*command, "--help"], terminal_width=80)
     output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
-    assert "--require-tamper-evidence" in output
+    assert option in output
     assert "…" not in output

@@ -69,11 +69,11 @@ At least one of `--trace`, `--har` or `--browser-use` is required.
 | --- | --- |
 | `--out FILE` | Write the verdict JSON here (schema: `evidence-judge schema`) |
 | `--html FILE` | Write the self-contained HTML report here. Screenshots are embedded unredacted |
-| `--offline` / `--no-offline` | No LLM calls; heuristic claim extraction and no screenshot checks. Also never reads or creates the redaction key file. Default: off, but runs offline anyway on the `anthropic` backend when no `ANTHROPIC_API_KEY` is set |
+| `--offline` | No LLM calls; heuristic claim extraction and no screenshot checks. Also never reads or creates the redaction key file. Default: off, but runs offline anyway on the `anthropic` backend when no `ANTHROPIC_API_KEY` is set |
 | `--llm BACKEND` | Where LLM calls go for this run: `anthropic` (the API, with `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to run that CLI headless on your existing login, with its tools off. Default: `EVJ_LLM_BACKEND`. A CLI that is missing or not logged in exits `4`. `--offline` wins over it |
 | `--no-redact` | Keep secrets and PII in evidence, prompts and reports. Use only on synthetic data |
 | `--quiet`, `-q` | Print nothing; only set the exit code |
-| `--debug` / `--no-debug` | Re-raise internal errors with a traceback instead of exiting `4` |
+| `--debug` | Re-raise internal errors with a traceback instead of exiting `4` |
 
 ### Export to other tools
 
@@ -105,7 +105,7 @@ with a per-process key; `inspect` never reads or creates the redaction key file.
 | `--browser-use PATH` | browser-use history JSON or run directory |
 | `--json` | Print machine-readable JSON instead of a table |
 | `--no-redact` | Show raw URLs and values |
-| `--debug` / `--no-debug` | Re-raise internal errors with a traceback instead of exiting `4` |
+| `--debug` | Re-raise internal errors with a traceback instead of exiting `4` |
 
 ## `evidence-judge bench`
 
@@ -128,7 +128,7 @@ evidence-judge bench RUNS_DIR [--seeds 3] [--out results.json] [--markdown resul
 | `--llm BACKEND` | The LLM backend for `--online` and `--with-llm-baseline`: `anthropic`, `claude-code`, `codex` or `gemini`. Default: `EVJ_LLM_BACKEND` |
 | `--no-redact` | Judge unredacted evidence and agent text |
 | `--quiet`, `-q` | Do not print the report |
-| `--debug` / `--no-debug` | Show tracebacks for internal errors |
+| `--debug` | Show tracebacks for internal errors |
 
 ## `evidence-judge mcp`
 
