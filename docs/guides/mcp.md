@@ -10,9 +10,9 @@ Judge and get a verdict back as a tool result, instead of trusting its own accou
 
 !!! info "Not on PyPI yet"
 
-    Until v0.1.0 is on PyPI, install from GitHub: `uv tool install "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install` and `uvx --from "evidence-judge[mcp]"` forms on this page work
+    Until v0.1.0 is on PyPI, install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install` and `uvx --from "evidence-judge[mcp]"` forms on this page work
     once it is; until then, give `uvx` the same GitHub requirement:
-    `uvx --from "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`.
+    `uvx --python 3.12 --from "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`.
 
 ```bash
 pip install "evidence-judge[mcp]"

@@ -144,7 +144,7 @@ Evidence Judge needs Python 3.12 or newer. It is not on PyPI yet, so install it 
 === "uv"
 
     ```bash
-    uv tool install "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"
+    uv tool install --python 3.12 "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"
     evidence-judge version
     ```
 

@@ -112,10 +112,10 @@ See [docs/architecture.md](docs/architecture.md).
 ## 📦 Install
 
 ```bash
-uv tool install "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
+uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
 ```
 
-v0.1.0 is not on PyPI yet, so this installs from GitHub; once it is, `uv tool install "evidence-judge[anthropic,mcp]"` does the same.
+v0.1.0 is not on PyPI yet, so this installs from GitHub; once it is, `uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"` does the same.
 
 Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically. The `mcp` extra adds the MCP server (`evidence-judge mcp`), which the Claude Code plugin starts.
 

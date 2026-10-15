@@ -15,7 +15,7 @@ pip install "evidence-judge[all]"        # all of the above plus anthropic and m
 !!! info "Not on PyPI yet"
 
     No release has been published to PyPI so far, so install from the GitHub repository, e.g.
-    `uv tool install "evidence-judge[otel] @ git+https://github.com/hsayvaidya23/evidence-judge"`
+    `uv tool install --python 3.12 "evidence-judge[otel] @ git+https://github.com/hsayvaidya23/evidence-judge"`
     (see [Install](getting-started/install.md)). The commands above will work once a release
     exists.
 

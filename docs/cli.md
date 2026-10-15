@@ -17,7 +17,7 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | `schema` | Print the JSON Schema of the verdict format |
 | `version` | Print the evidence-judge version (also `evidence-judge --version`) |
 
-Until v0.1.0 is on PyPI, install from GitHub: `uv tool install "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install "evidence-judge[...]"` forms below work once the release is on PyPI.
+Until v0.1.0 is on PyPI, install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install "evidence-judge[...]"` forms below work once the release is on PyPI.
 
 Settings (models, budget, redaction, cache) come from environment variables or a `.env` file;
 see the [configuration reference](reference/configuration.md).

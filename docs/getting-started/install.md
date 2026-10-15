@@ -9,14 +9,17 @@ Evidence Judge needs **Python 3.12 or newer** (it is tested on 3.12 and 3.13).
 !!! info "Not on PyPI yet"
 
     No release has been published to PyPI so far, so install from the GitHub repository. Once a
-    release exists, `uv tool install "evidence-judge[anthropic]"` and
+    release exists, `uv tool install --python 3.12 "evidence-judge[anthropic]"` and
     `pip install "evidence-judge[anthropic]"` will work as well.
 
 === "uv (recommended)"
 
     ```bash
-    uv tool install "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"
+    uv tool install --python 3.12 "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"
     ```
+
+    `uv tool install` uses uv's default interpreter, not a `.python-version` file, so
+    `--python 3.12` keeps it from picking an older Python (any 3.12 or newer works).
 
 === "pip"
 

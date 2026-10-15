@@ -24,7 +24,7 @@ The plugin ships four things:
 1. Install the CLI. The hooks and the MCP server run `evidence-judge` from your `PATH`:
 
     ```bash
-    uv tool install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
+    uv tool install --python 3.12 "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
     ```
 
 2. In Claude Code, add the repository as a plugin marketplace and install the plugin:

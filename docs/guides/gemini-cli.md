@@ -20,7 +20,7 @@ against a live Gemini CLI.
 ## Install
 
 ```bash
-uv tool install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
+uv tool install --python 3.12 "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
 git clone https://github.com/hsayvaidya23/evidence-judge
 gemini extensions link evidence-judge/plugins/gemini-cli/evidence-judge
 ```
