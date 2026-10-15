@@ -172,6 +172,12 @@ the names exported from `evidence_judge`) is defined under
 
 ### Security
 
+- **Code under test that reaches into the runner weakens the suite.** An edited Python source
+  file outside the tests that imports pytest, `_pytest`, nose or pluggy, assigns attributes of
+  those or of `unittest`, `doctest` or `builtins`, or writes `sys.modules` needs review: one
+  line in `calc.py` (`_pytest.python.Function.runtest = lambda self: None`) made every test
+  pass. The import and rebinding check that test modules already had now runs on every edited
+  Python file.
 - **Changing the expected values a test reads weakens the suite.** Files under `test_data/`,
   `test-data/`, `testdata/`, `golden(s)/`, `snapshots/`, `__snapshots__/`, `expected/`,
   `fixtures/`, `cassettes/` and `baseline(s)/` are test files, and any non-code file that a test

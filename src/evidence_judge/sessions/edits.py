@@ -432,6 +432,8 @@ def suite_findings(
         findings.extend(_new_rebindings(name, added, texts))
     if not test_file:
         findings.extend(_config_findings(path, change, removed, added, texts))
+        if path.endswith((".py", ".pyw")) and change != "delete":
+            findings.extend(_new_runner_patches(name, added, texts))
     return findings
 
 
@@ -512,3 +514,49 @@ def data_reader(path: str, opened: dict[str, set[str]]) -> str | None:
             elif path == lit or path.endswith("/" + lit):
                 return module
     return None
+
+
+_RUNNER_IMPORTS: Final = re.compile(r"^(?:_pytest|pytest|py\.test|nose2?|pluggy)(?:\.|$)")
+_RUNNER_MODULES: Final = re.compile(
+    r"^(?:_pytest|pytest|unittest|nose2?|doctest|pluggy|builtins|__builtin__)(?:\.|$)"
+)
+
+
+def runner_patches(source: str, name: str) -> list[str]:
+    """Ways code outside the tests reaches into the test runner: importing pytest's internals
+    (or pytest, nose, pluggy), assigning attributes of `unittest`, `doctest`, the runner or
+    `builtins`, or writing `sys.modules`. Code under test has no business doing either; doing
+    it can make every test pass (`_pytest.python.Function.runtest = lambda self: None`)."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+    found: list[str] = []
+    names: dict[str, str] = {"__builtins__": "builtins"}
+    for node in ast.walk(tree):
+        modules: list[tuple[str, str]] = []
+        if isinstance(node, ast.Import):
+            modules = [(a.asname or a.name.split(".")[0], a.name) for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            modules = [(a.asname or a.name, f"{node.module}.{a.name}") for a in node.names]
+        for local, module in modules:
+            if _RUNNER_IMPORTS.match(module):
+                found.append(f"imports {module}")
+            if _RUNNER_MODULES.match(module):
+                names[local] = module
+    found.extend(_patches(list(tree.body), names, monkeypatch=False))
+    return [
+        f"{what} in {name}, code outside the tests that can change how the tests run"
+        for what in dict.fromkeys(found)
+    ]
+
+
+def _new_runner_patches(
+    name: str, added: list[str] | None, texts: tuple[str, str] | None
+) -> list[str]:
+    if texts is not None:
+        before = set(runner_patches(texts[0], name))
+        return [f for f in runner_patches(texts[1], name) if f not in before]
+    if added is None:
+        return []
+    return runner_patches("\n".join(added), name)
