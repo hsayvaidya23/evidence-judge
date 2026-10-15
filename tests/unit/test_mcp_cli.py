@@ -9,6 +9,7 @@ from mcp.server.mcpserver import MCPServer
 from typer.testing import CliRunner
 
 import evidence_judge.mcp
+from evidence_judge._extras import REPOSITORY
 from evidence_judge.cli import ExitCode, app
 from evidence_judge.mcp import Roots, ServerConfig
 from evidence_judge.mcp import server as server_module
@@ -76,7 +77,8 @@ def test_mcp_without_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner.invoke(app, ["mcp"])
     assert result.exit_code == ExitCode.USAGE
     text = " ".join(result.output.split())
-    assert 'uv tool install --reinstall "evidence-judge[mcp] @ git+https://' in text
+    assert 'uv tool install --python 3.12 --reinstall "evidence-judge[anthropic,mcp] @ ' in text
+    assert f'pip install "evidence-judge[mcp] @ {REPOSITORY}"' in text
     assert "pip install 'evidence-judge" not in text
 
 
