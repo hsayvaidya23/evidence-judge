@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from itertools import groupby
 from statistics import fmean
 from typing import Final
+from urllib.parse import urlsplit
 
 from evidence_judge.checks._common import describe_request, took_effect
 from evidence_judge.checks.action import describe_action
@@ -33,7 +34,7 @@ from evidence_judge.core.predicates import (
     Scope,
     UrlPredicate,
 )
-from evidence_judge.core.site import Site, on_any
+from evidence_judge.core.site import Site, on_any, registrable_domain
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import (
     ClaimVerdict,
@@ -113,9 +114,19 @@ class _Budget:
     label: str
     matchers: list[RequestMatcher]
     limit: int | None
+    names: tuple[str, ...] = ()
+    """An allow entry's url_contains, case-folded: an off-site mutation is explained only by an
+    entry that names its host or the domain it is registered under."""
     hits: list[NetworkEvent] = field(default_factory=list[NetworkEvent])
     explained: int = 0
     excess: list[NetworkEvent] = field(default_factory=list[NetworkEvent])
+
+    def names_host(self, event: NetworkEvent) -> bool:
+        site = Site.of_url(event.url)
+        if site is None:
+            return False
+        domain = registrable_domain(site.host)
+        return any(site.host in n or domain in n for n in self.names)
 
     @property
     def has_room(self) -> bool:
@@ -147,16 +158,26 @@ def _budgets(spec: TaskSpec | None, index: EvidenceIndex) -> list[_Budget]:
         if e.request_predicates()
     ]
     budgets += [
-        _Budget(f"allow entry ({RequestMatcher(a).describe()})", [RequestMatcher(a)], a.max_count)
+        _Budget(
+            f"allow entry ({RequestMatcher(a).describe()})",
+            [RequestMatcher(a)],
+            a.max_count,
+            tuple(u.casefold() for u in a.url_contains),
+        )
         for a in spec.allow
     ]
     return budgets
 
 
-def _explained(event: NetworkEvent, budgets: Sequence[_Budget]) -> bool:
+def _explained(event: NetworkEvent, budgets: Sequence[_Budget], *, off_site: bool) -> bool:
     """Charge `event` to the first matching budget with room, else record it as a repeat of the
-    first matching one. False only when no budget matches it at all."""
-    matching = [b for b in budgets if matches_any(event, b.matchers)]
+    first matching one. False only when no budget matches it at all. A mutation `off_site`
+    (outside the site and allowed hosts) is matched only by allow entries that name its host."""
+    matching = [
+        b
+        for b in budgets
+        if matches_any(event, b.matchers) and (not off_site or b.names_host(event))
+    ]
     for budget in matching:
         budget.hits.append(event)
     if not matching:
@@ -227,6 +248,21 @@ def _listed(sites: Sequence[Site]) -> str:
     return ", ".join(map(str, sites))
 
 
+def off_site_hint(event: NetworkEvent) -> str:
+    """How a spec explains a mutation to another host: an allow entry naming it for a third
+    party, allowed_hosts only for a host the site owns (which lets it prove the task)."""
+    host = url_host(event.url) or "the host"
+    segment = next((p for p in urlsplit(event.url).path.split("/") if p), "")
+    where = f"{host}/{segment}" if segment else host
+    entry = f"{{kind: request, method: {event.method.upper()}, url_contains: [{where}]}}"
+    return (
+        f"if {host} is a third party the task uses (a payment provider, an API, a CDN), "
+        f"explain it with an allow entry such as `allow: [{entry}]`; list it in allowed_hosts "
+        "only if the site owns it (an api. or static. subdomain), since pages and requests on "
+        "an allowed host can prove the task"
+    )
+
+
 def _unexplained(
     event: NetworkEvent, spec: TaskSpec | None, reported: set[str], scope: EvidenceScope | None
 ) -> str:
@@ -234,10 +270,9 @@ def _unexplained(
         "is not explained by the task spec" if spec else "changed state and no task spec covers it"
     )
     if scope is not None and not scope.request_allowed(event):
-        host = url_host(event.url)
         what = (
-            f"went to {host}, outside {scope.describe()}, so no expectation can explain it; if "
-            f"{host} is part of the site, list it in the spec's allowed_hosts"
+            f"went to {url_host(event.url)}, outside {scope.describe()}, so no expectation can "
+            f"explain it; {off_site_hint(event)}"
         )
     note = (
         " (the agent reported it, but a claim cannot authorise a side effect)"
@@ -257,8 +292,10 @@ def assess_side_effects(
 
     Telemetry (is_telemetry) is not a change to application state, but a telemetry body with
     redacted values, or one sent outside the site and `allowed_hosts`, is flagged
-    (_telemetry_leak). With `allowed_hosts` set, a mutation outside the site and the allowed
-    hosts is a side effect.
+    (_telemetry_leak). A mutation outside the site and the allowed hosts (or, with neither
+    named, the inferred site) is explained only by an `allow` entry whose url_contains names
+    its host or registrable domain, the way a spec lets a payment provider's callback through without letting the
+    provider's pages prove the task (off_site_hint).
 
     Only the spec explains a mutation: each `expect` entry explains up to `max_count` (default 1)
     mutations matching its request predicates, and each `allow` entry explains any number (or
@@ -280,12 +317,8 @@ def assess_side_effects(
             if (leak := _telemetry_leak(event, allowed)) is not None:
                 findings.append(leak)
             continue
-        if allowed and not on_any(event.url, allowed):
-            findings.append(
-                f"{event.id}: {describe_request(event)} went to {url_host(event.url)}, outside "
-                f"the allowed hosts ({_listed(allowed)})"
-            )
-        elif not _explained(event, budgets):
+        off_site = scope is not None and not scope.request_allowed(event)
+        if not _explained(event, budgets, off_site=off_site):
             findings.append(_unexplained(event, spec, reported, scope))
     findings += [f for b in budgets if (f := b.finding()) is not None]
     return DimensionScore(score=_penalised(len(findings), SIDE_EFFECT_PENALTY), findings=findings)

@@ -29,6 +29,7 @@ from tests.unit.conftest import (
     loop_run,
     make_run,
     net,
+    off_site_hint,
     shop_spec,
     side_effect_run,
     uncaptured_network_run,
@@ -106,8 +107,8 @@ async def test_mutation_outside_allowed_hosts() -> None:
     run = run.model_copy(update={"network": [*run.network, beacon]})
     dims = await assess(run, shop_spec(allowed_hosts=["shop.test"]))
     assert dims[Dimension.SIDE_EFFECTS].findings == [
-        "net#9: POST /collect → 204 went to tracker.evil.test, outside the allowed hosts "
-        "(shop.test)"
+        "net#9: POST /collect → 204 went to tracker.evil.test, outside the site (shop.test), so "
+        f"no expectation can explain it; {off_site_hint('tracker.evil.test', 'tracker.evil.test/collect')}"
     ]
 
 
@@ -398,8 +399,8 @@ async def test_third_party_fetch_mutation_is_still_a_side_effect() -> None:
     dims = await assess(_with(honest_run(), subscribe), shop_spec())
     assert dims[Dimension.SIDE_EFFECTS].findings == [
         "net#20: POST /v1/subscribe → 204 went to api.partner.test, outside the site "
-        "(shop.test), so no expectation can explain it; if api.partner.test is part of the site, "
-        "list it in the spec's allowed_hosts"
+        "(shop.test), so no expectation can explain it; "
+        + off_site_hint("api.partner.test", "api.partner.test/v1")
     ]
 
 

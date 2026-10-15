@@ -21,6 +21,7 @@ forbid: [...]                       # expectations that must NOT be met
 constraints: [...]                  # value predicates that must hold
 allow: [...]                        # request predicates for expected intermediate mutations
 allowed_hosts: [api.example.com]    # more hosts of the site; '*.example.com' for every subdomain
+failure_markers: [...]              # regexes that mark a page a redirect lands on as a failure
 ```
 
 Each entry in `expect` and `forbid` is an expectation:
@@ -56,13 +57,19 @@ A site is a host and a port, whatever the scheme:
   wildcard: `*.example.com` covers `api.example.com` and `a.b.example.com`, but not
   `example.com` itself. Wildcards are only allowed in `allowed_hosts`.
 - `site`, `--site` and every `allowed_hosts` entry are checked when the spec loads (an invalid
-  `--site` exits with code 3): the scheme must be http or https; user names and passwords
-  (`https://user:pw@shop.example.com`) are refused; so are public suffixes and single-label
-  names other than `localhost` (`com`, `co.uk`, `github.io`, `intranet`), which anyone can
-  register a site under. Hosts are lower-cased, a trailing dot is dropped, and international
-  names are IDNA-encoded: `shöp.example` is stored as `xn--shp-tna.example` and matches pages
-  recorded under either form. The public-suffix check uses a short bundled list of common
-  suffixes; it never fetches anything.
+  spec or `--site` exits with code 3): the scheme must be http or https; user names and
+  passwords (`https://user:pw@shop.example.com`) are refused. A site is a whole host, so a
+  path, query or fragment is refused too (`github.com/myorg`): every page on a host can prove
+  the task, so a site cannot be narrowed to part of one. Name the host alone only when all of
+  it belongs to the site under test, and require the pages you mean with `url` predicates in
+  `expect`. Public suffixes and single-label names other than `localhost` (`com`, `co.uk`,
+  `github.io`, `myshopify.com`, `fly.dev`, `s3.amazonaws.com`, `intranet`) are refused,
+  because anyone can register a site under them; `my-store.myshopify.com` is a site. Hosts are
+  lower-cased, a trailing dot is dropped, and international names are IDNA-encoded:
+  `shöp.example` is stored as `xn--shp-tna.example` and matches pages recorded under either
+  form. The public-suffix check uses the full [Public Suffix List](https://publicsuffix.org/)
+  (ICANN and private sections) bundled with the `publicsuffixlist` package; it never fetches
+  anything at run time, and upgrading that package refreshes the list.
 
 With neither `site` nor `allowed_hosts` (nor `--site`), the site is inferred from the run's
 first page, host and port: the initial page state, else the first page the agent opened. The
@@ -92,12 +99,13 @@ NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
   cannot prove it either: a `final`-scope predicate on such a final page is `no_evidence`, and
   an `any`-scope one skips such pages. Other reads (a `GET` request) on any host still count
   until the site is named.
-- With `allowed_hosts` set, a mutation outside the site and the allowed hosts is a side effect.
+- A mutation outside the site and the allowed hosts is a side effect, unless an `allow` entry
+  names its host or registrable domain (see [Payment providers, APIs and CDNs](#payment-providers-apis-and-cdns)).
 - A request that meets every criterion except the host is `no_evidence`, never a contradiction:
   the judge cannot tell a third party from a sibling API host it was not told about. Its reason
   names the host (`POST /api/orders → 201 is a POST request ... but it went to api.example.com,
-  outside the run's host (shop.example.com) ...; if api.example.com is part of the site, list it
-  in the spec's allowed_hosts`), the claim or `expect` entry stays unproven and the run goes to
+  outside the run's host (shop.example.com) ...; if the site owns api.example.com (an api. or
+  static. subdomain), list it in the spec's allowed_hosts`), the claim or `expect` entry stays unproven and the run goes to
   review. Sibling hosts and subdomains are not matched by registrable domain (`example.com`);
   list them, or use a `*.` wildcard.
 - Page states whose URL is `data:`, `about:`, `blob:` (or `javascript:`, `chrome:`,
@@ -106,6 +114,73 @@ NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
 
 `forbid` entries and `constraints` are not restricted: a forbidden request or a violating value
 counts wherever it went.
+
+### Payment providers, APIs and CDNs
+
+A task often touches hosts other than the site. Which spec field covers one depends on who owns
+it:
+
+- **A host the site owns** (`api.shop.example.com`, `static.shop.example.com`, a checkout
+  subdomain): list it in `allowed_hosts`. It becomes part of the site, so its requests and
+  pages can prove claims and `expect` entries, and its mutations are judged like the site's.
+- **A third party the task uses** (a payment provider's 3-D Secure callback, an address
+  lookup API, a CDN): do **not** list it in `allowed_hosts`, because then its pages and
+  requests could prove the task: a provider page that says "Payment successful" would pass a
+  checkout the shop never confirmed. Explain its mutations with an `allow` entry whose
+  `url_contains` names the host. An `allow` entry explains a mutation to another host only
+  when it names that host or the domain it is registered under (`payprovider.test/3ds` covers
+  `hooks.payprovider.test/3ds/authenticate`), so `url_contains: [/3ds]` does not cover
+  `hooks.payprovider.test/3ds/authenticate`, and neither does `/api/cart` cover a POST to a
+  mirror at `shop.example.com:8443/api/cart`.
+
+GETs to a third party (scripts, fonts, a CDN) need nothing: reads are not side effects.
+
+A worked example: the shop answers the order with a redirect to the provider's 3-D Secure
+challenge, the agent enters the code, and the provider posts it and redirects back to the
+shop's confirmation page:
+
+```
+POST https://shop.test/checkout/submit           → 303 to hooks.payprovider.test/3ds/challenge
+GET  https://hooks.payprovider.test/3ds/challenge → 200  "Verify it's you. Enter the code."
+POST https://hooks.payprovider.test/3ds/authenticate → 302 to shop.test/order/A1/confirmed
+GET  https://shop.test/order/A1/confirmed         → 200  "Thank you for your order! Order A1 ..."
+```
+
+With only `site: shop.test`, the provider's POST is a side effect, and the report says how to
+explain it:
+
+```
+NEEDS_REVIEW: side effect: net#8: POST /3ds/authenticate → 302 went to hooks.payprovider.test,
+outside the site (shop.test), so no expectation can explain it; if hooks.payprovider.test is a
+third party the task uses (a payment provider, an API, a CDN), explain it with an allow entry
+such as `allow: [{kind: request, method: POST, url_contains: [hooks.payprovider.test/3ds]}]`;
+list it in allowed_hosts only if the site owns it (an api. or static. subdomain), since pages
+and requests on an allowed host can prove the task.
+```
+
+Following the hint, this spec passes the honest run, and only the shop's own order request
+and confirmation page prove it:
+
+```yaml
+id: buy-kettle
+task: Buy a red kettle under $30
+site: shop.test
+expect:
+  - id: order
+    all:
+      - {kind: request, method: POST, url_contains: [/checkout/submit]}
+  - id: confirmation
+    any:
+      - {kind: page_text, contains: Thank you for your order}
+allow:
+  - {kind: request, method: POST, url_contains: [/api/cart]}
+  - {kind: request, method: POST, url_contains: [hooks.payprovider.test/3ds]}
+```
+
+The confirmation entry also decides what the redirected order request proves (see
+[What a mutation proves](#what-a-mutation-proves)): the shop's page says `Thank you for your
+order`, so its footer `If your card is declined later, we will email you` does not send the run
+to review.
 
 ### Forbidden attempts
 
@@ -165,6 +240,33 @@ response) are never counted.
 
 `allow` entries explain any number of matching mutations (an agent may add to the cart several
 times) unless the entry sets `max_count`; past it, the extra ones are duplicates too.
+
+### Settings and other edits
+
+A task such as "change my display name to Jane Doe" cannot be proven by the page: the agent
+typed `Jane Doe`, so a settings page shows it as an echo of the agent's own input whether or
+not the change was saved, and a `page_text` for the new value never proves anything (see
+[echoes](concepts/claims-and-predicates.md)). What proves it is the write that carried the new
+value to the site. Expect that request, with the value in its body:
+
+```yaml
+id: rename
+task: Change my display name to Jane Doe
+site: shop.example.com
+expect:
+  - id: saved
+    all:
+      - {kind: request, method: POST, url_contains: [/api/profile], body_contains: [Jane Doe]}
+```
+
+Offline, the heuristic claim extractor reads "changed / updated / set / renamed the X to Y" in
+the agent's answer the same way: the claim `The agent set the display name to Jane Doe` is
+proven by a `POST`, `PUT` or `PATCH` whose body contains every word of the value (`Jane` and
+`Doe`, so a JSON body and a form-encoded `name=Jane+Doe` both match). An agent that typed the
+name and never saved gets the claim contradicted. Vague values (`to the new one`), secrets
+that ingest redacts (passwords, card numbers) and values without a word of three or more
+letters (`to 2`) make no such claim. Use `PUT` or `PATCH` in the spec when that is what the
+site sends.
 
 ## Predicates
 
@@ -237,27 +339,74 @@ navigation, prove the visit with what the page shows (`page_text`) instead of it
 
 The default `ok` accepts redirects because a form that posts and then redirects
 (POST/Redirect/GET) answers the `POST` with `303` and the browser loads the result page with a
-`GET`. Write `status: 2xx` or an exact code when a redirect must not count. A failed form is
-often redirected too (`POST /api/orders → 302`, then `GET /cart?error=card_declined`), so when
-a mutation answered with a 3xx is to *prove* something (a claim or an `expect` entry), the page
-it led to is checked as well. The page load matching its `Location` header (else the next page
-load) must answer 2xx, and neither its decoded path and query nor what it showed before the
-browser moved on (its snapshots, or the final state if the run ended there) may mark a failure.
-URL markers are whole words such as `error`, `failed`, `declined`, `refused`, `rejected`,
-`cancelled`, `invalid`, `denied`, `unauthorized`, `expired`, `insufficient`, `try-again`,
-`problem`, `unable` and `not-processed` (a query field left empty or `0`, like `?errors=0`,
-marks nothing); page text is held to a narrower list of messages (`declined`, `refused`,
-`Something went wrong`, `Please try again`, `could not be placed`, ...) that ignores negations
-such as `No errors`. A redirect back to the page the request was sent from (a settings form that
-saves in place) counts only when that page's text after the redirect was recorded and differs
-from before. Otherwise the request is `no_evidence` (`... but it was answered 302 and led to GET
-/cart?error=card_declined → 200, whose URL marks a failure ('error')`) and the run goes to
-review. A
-`forbid` entry or a constraint skips this check: a forbidden `POST` answered with any 3xx
-happened. `null` needs a
+`GET`. Write `status: 2xx` or an exact code when a redirect must not count. `null` needs a
 response of any status; a request that never got one (a connection error, or one the browser
 blocked) only matches `none` or `any`. A status that is none of these is refused when the spec
 loads.
+
+#### What a mutation proves
+
+When a mutation is to *prove* something (a claim or an `expect` entry), matching it is not
+enough: a failed write is often answered like a successful one. The request is `no_evidence`,
+and the run goes to review, when:
+
+- **its response reports a failure.** A `2xx` whose JSON (or form-encoded) body has a
+  top-level `errors` or `error` that holds something, an `ok`, `success` or `succeeded` that is
+  false, or a `status`, `state`, `result` or `outcome` that names a failure (`failed`,
+  `declined`, `payment_refused`, ...). A GraphQL `{"data": {"placeOrder": null}, "errors":
+  [{"message": "Payment declined"}]}` answered `200` reads `... but it was answered 200 and its
+  response reports an error ('Payment declined'), with 'placeOrder' null`.
+- **it was redirected to a failure.** A failed form is often redirected too (`POST
+  /api/orders → 302`, then `GET /cart?error=card_declined`), so a 3xx is judged by the page it
+  led to: the page load matching its `Location` header, else the next page load, and what that
+  page showed before the browser moved on (its snapshots, or the final state if the run ended
+  there). In order:
+    1. The page must load with a 2xx.
+    2. Its decoded path and query must not mark a failure. URL markers are whole words:
+       `error`, `failed`, `declined`, `refused`, `rejected`, `cancelled`, `invalid`, `denied`,
+       `unauthorized`, `expired`, `insufficient`, `try-again`, `problem`, `unable`,
+       `unsuccessful`, `timeout`, `timed-out`, `not-processed`, and a few common words in
+       other languages (`refusé`, `abgelehnt`, `fehlgeschlagen`, `Fehler`, `rechazado`,
+       `rifiutato`, `échec`). A status-like query field (`status`, `state`, `result`,
+       `outcome`, or a name ending in one, such as `paymentStatus`) whose whole value is `ko`
+       or `nok` marks a failure, and so does a success flag (`ok`, `success`, `paid`,
+       `approved`, ...) set to `false`, `0` or `no`. A query field left empty or `0`, like
+       `?errors=0`, marks nothing.
+    3. Neither its URL nor its text may match one of the spec's `failure_markers` (below).
+    4. If the page is on the site and shows a page text that an `expect` entry asks for
+       (`Thank you for your order`), that positive evidence decides: the mutation is proven,
+       whatever else the page says. A confirmation page with a footer such as `If a payment is
+       declined later, we will email you` passes.
+    5. Otherwise the whole page text is scanned for a failure message (`declined`, `refused`,
+       `Something went wrong`, `Please try again`, `could not be placed`, ...; negations such
+       as `No errors` are ignored). Recorded page text is flat, so nothing tells a footer from
+       the message; a landing page that says `Your card was declined` must not prove the
+       order, so the scan reads all of it, and a footer that mentions a failure sends the run
+       to review. Name the confirmation text in an `expect` entry and step 4 applies instead.
+    6. A redirect back to the page the request was sent from (a settings form that saves in
+       place) counts only when that page's text after the redirect was recorded and differs
+       from before.
+
+    A failed check reads like `... but it was answered 302 and led to GET
+    /cart?error=card_declined → 200, whose URL marks a failure ('error')`.
+
+A URL `expect` entry does not stand in for step 4: an order page such as `/order/A1` is
+reached whether or not its payment went through. A `forbid` entry or a constraint skips all of
+this: a forbidden `POST` answered with any 3xx, or with a `200` that reports errors, happened.
+
+#### `failure_markers`: failures in your site's words
+
+The built-in markers are mostly English. List the words or messages your site shows when the
+task fails, in any language, as `failure_markers`: case-insensitive regular expressions matched
+against the decoded URL and the text of the page a redirect lands on. A match always makes the
+mutation `no_evidence`, even when the page also shows the expected confirmation text.
+
+```yaml
+failure_markers:
+  - Zahlung\s+(wurde\s+)?abgelehnt     # "payment declined"
+  - paiement\s+refus                    # "paiement refusé"
+  - estado=rechazado
+```
 
 `url_contains` ignores the query string so that `POST /api/log?next=/api/orders` cannot pass for
 an order request. Use `query_contains` to match query parameters, or `url_regex` for the whole

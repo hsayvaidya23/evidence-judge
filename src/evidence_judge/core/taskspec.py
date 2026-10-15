@@ -31,7 +31,13 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from evidence_judge.core.evidence import MUTATION_METHODS
-from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
+from evidence_judge.core.predicates import (
+    PageTextPredicate,
+    Pattern,
+    Predicate,
+    RequestPredicate,
+    ValuePredicate,
+)
 from evidence_judge.core.site import Site
 
 
@@ -104,9 +110,18 @@ class TaskSpec(BaseModel):
         default=None,
         description=(
             "The site the task is on, as a URL or host name, with a port when it is not the "
-            "default. Evidence that proves a claim or an expect entry must come from it (with "
+            "default; a whole host, never a path or a public suffix. Evidence that proves a claim or an expect entry must come from it (with "
             "or without 'www.', on its port) or the allowed hosts; without it or allowed_hosts, "
             "no run can pass"
+        ),
+    )
+
+    failure_markers: list[Pattern] = Field(
+        default_factory=list[Pattern],
+        description=(
+            "Regexes (case-insensitive, any language) that mark a page as a failure: a "
+            "mutation answered with a redirect proves nothing when the page it lands on has "
+            "one in its URL or text, e.g. 'Zahlung abgelehnt' or 'statut=refus'"
         ),
     )
 
@@ -125,6 +140,17 @@ class TaskSpec(BaseModel):
         named = [self.site] if self.site else []
         return list(
             dict.fromkeys(Site.parse(h, wildcard=True) for h in [*named, *self.allowed_hosts])
+        )
+
+    def success_texts(self) -> list[str]:
+        """The page texts its `expect` entries ask for, in order."""
+        return list(
+            dict.fromkeys(
+                p.contains
+                for e in self.expect
+                for p in [*e.all, *e.any]
+                if isinstance(p, PageTextPredicate)
+            )
         )
 
     def changes_state(self) -> bool:

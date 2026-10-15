@@ -7,9 +7,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
+import regex
+
 from evidence_judge.core.evidence import NetworkEvent, is_web_page_url
 from evidence_judge.core.index import EvidenceIndex
-from evidence_judge.core.predicates import Predicate
+from evidence_judge.core.predicates import Predicate, compile_pattern
 from evidence_judge.core.provenance import untampered
 from evidence_judge.core.site import Site, on_any
 from evidence_judge.core.verdict import PredicateResult, Usage
@@ -34,17 +36,31 @@ class EvidenceScope:
     sites: tuple[Site, ...] = ()
     inferred: bool = True
     """True when nothing but the run itself says which site it was about."""
+    success_texts: tuple[str, ...] = ()
+    """The page texts the spec's `expect` asks for: a redirect landing on a page of the site
+    that shows one proves the mutation (checks.request.redirect_doubt)."""
+    failure_markers: tuple[regex.Pattern[str], ...] = ()
+    """The spec's `failure_markers`, compiled: a redirect landing on a page whose URL or text
+    matches one proves nothing."""
 
     @classmethod
     def of(
-        cls, index: EvidenceIndex, allowed_hosts: Sequence[str] = (), site: str | None = None
+        cls,
+        index: EvidenceIndex,
+        allowed_hosts: Sequence[str] = (),
+        site: str | None = None,
+        *,
+        success_texts: Sequence[str] = (),
+        failure_markers: Sequence[str] = (),
     ) -> EvidenceScope:
+        texts = tuple(success_texts)
+        markers = tuple(compile_pattern(m) for m in failure_markers)
         hosts = [*([site] if site else []), *allowed_hosts]
         if hosts:
-            named = (Site.parse(h, wildcard=True) for h in hosts)
-            return cls(tuple(dict.fromkeys(named)), inferred=False)
+            named = tuple(dict.fromkeys(Site.parse(h, wildcard=True) for h in hosts))
+            return cls(named, False, texts, markers)
         primary = index.primary_site
-        return cls((primary,) if primary else ())
+        return cls((primary,) if primary else (), True, texts, markers)
 
     def describe(self) -> str:
         if self.inferred:

@@ -60,6 +60,18 @@ def _body(value: object | None) -> str | None:
     return json.dumps(value)
 
 
+def off_site_hint(host: str, where: str, method: str = "POST") -> str:
+    """The side-effects hint for a mutation to another host, spelled out
+    (checks.dimensions.off_site_hint)."""
+    entry = f"{{kind: request, method: {method}, url_contains: [{where}]}}"
+    return (
+        f"if {host} is a third party the task uses (a payment provider, an API, a CDN), explain "
+        f"it with an allow entry such as `allow: [{entry}]`; list it in allowed_hosts only if "
+        "the site owns it (an api. or static. subdomain), since pages and requests on an "
+        "allowed host can prove the task"
+    )
+
+
 def act(
     n: int,
     name: str,

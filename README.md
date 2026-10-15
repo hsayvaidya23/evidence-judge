@@ -163,8 +163,8 @@ context.tracing.stop(path="trace.zip")
 ```
 
 2. Name the site and describe what success must look like. **Every run needs a named site to
-   `PASS`**: `site` in a spec, or `--site` without one (a host and, unless it is 80/443, its
-   port). Otherwise the site is inferred from the first page the agent opened, which the agent
+   `PASS`**: `site` (or `allowed_hosts`) in a spec, or `--site` (a host and, unless it is
+   80/443, its port). Otherwise the site is inferred from the first page the agent opened, which the agent
    chooses, so the run gets `NEEDS_REVIEW` at best. A spec is optional for read-only tasks but
    **required for any task that changes state**: without one every state-changing request
    counts as an unexplained side effect.

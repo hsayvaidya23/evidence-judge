@@ -193,3 +193,61 @@ def test_claim_whose_predicates_are_all_vacuous_stays_unverifiable():
     assert [c.text for c in result.claims] == ["The agent saved changes"]
     assert result.claims[0].predicates == []
     assert result.coverage_note == "truncated=0; vacuous_predicates=3"
+
+
+def _setting(body: list[str]) -> list[RequestPredicate]:
+    return [RequestPredicate(method=m, body_contains=body) for m in ("POST", "PUT", "PATCH")]
+
+
+@pytest.mark.parametrize(
+    ("answer", "text", "body"),
+    [
+        (
+            "I changed your display name to Jane Doe.",
+            "The agent set the display name to Jane Doe",
+            ["Jane", "Doe"],
+        ),
+        (
+            "I updated the theme to dark mode and saved it.",
+            "The agent set the theme to dark mode",
+            ["dark", "mode"],
+        ),
+        (
+            'I renamed the project to "Apollo 11".',
+            "The agent set the project to Apollo 11",
+            ["Apollo", "11"],
+        ),
+        (
+            "I changed the language from English to German.",
+            "The agent set the language to German",
+            ["German"],
+        ),
+        ("Set the display name to Bob", "The agent set the display name to Bob", ["Bob"]),
+    ],
+)
+def test_changed_x_to_y_is_proven_by_a_mutation_carrying_y(answer: str, text: str, body: list[str]):
+    [claim] = [c for c in _extract(answer).claims if c.text.startswith("The agent set the")]
+    assert claim.text == text
+    assert claim.key
+    assert claim.kind is ClaimKind.OUTCOME
+    assert claim.predicates == _setting(body)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "I set the quantity to 2.",
+        "I changed the address to the new one.",
+        "I changed my password to hunter2.",
+        "I changed the card number to 4242 4242 4242 4242.",
+        "I could not change the name to Bob.",
+        "I will change the name to Bob.",
+        "I set the notifications to on.",
+    ],
+)
+def test_vague_secret_or_unasserted_values_make_no_setting_claim(answer: str):
+    assert not [c for c in _extract(answer).claims if c.text.startswith("The agent set the")]
+
+
+def test_an_email_value_stays_with_the_email_rule():
+    assert _texts(_extract("I changed the email to a@b.test.")) == ["The agent changed the email"]
