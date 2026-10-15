@@ -26,6 +26,7 @@ import httpx
 import uvicorn
 from demo.shop.app import create_app
 from playwright.sync_api import Page, ViewportSize, sync_playwright
+from scripts.fixture_hygiene import scrub_trace
 
 from evidence_judge.core.taskspec import TaskSpec
 
@@ -302,6 +303,7 @@ def record(scenario: Scenario, base: str, out_dir: Path) -> None:
         scenario.agent(page, base)
         page.wait_for_timeout(SETTLE_MS)
         context.tracing.stop(path=target / "trace.zip")
+        scrub_trace(target / "trace.zip")
         context.close()
         browser.close()
     (target / "answer.txt").write_text(scenario.answer + "\n", encoding="utf-8")

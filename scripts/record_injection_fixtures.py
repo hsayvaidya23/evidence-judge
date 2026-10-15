@@ -30,6 +30,7 @@ from urllib.parse import quote
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, Route, sync_playwright
+from scripts.fixture_hygiene import scrub_trace
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = ROOT / "tests" / "fixtures" / "injection"
@@ -463,6 +464,7 @@ def record(mode: str, base: str, out_dir: Path) -> Path:
         MODES[mode](page, base)
         page.wait_for_timeout(SETTLE_MS)
         context.tracing.stop(path=path)
+        scrub_trace(path)
         context.close()
         browser.close()
     return path
