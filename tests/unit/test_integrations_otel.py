@@ -237,3 +237,36 @@ def test_missing_api_raises_a_clear_error(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(builtins, "__import__", no_otel)
     with pytest.raises(MissingExtraError, match=r"evidence-judge\[otel\]"):
         otel.ensure_available()
+
+
+@pytest.mark.parametrize(
+    ("protocol", "module", "package"),
+    [
+        ("", "opentelemetry.sdk.trace.export", "opentelemetry-sdk"),
+        ("", "opentelemetry.exporter.otlp.proto.http.trace_exporter", "proto-http"),
+        ("grpc", "opentelemetry.exporter.otlp.proto.grpc.trace_exporter", "proto-grpc"),
+    ],
+)
+def test_ensure_available_needs_what_the_cli_builds_a_provider_from(
+    monkeypatch: pytest.MonkeyPatch, protocol: str, module: str, package: str
+) -> None:
+    monkeypatch.setattr(trace, "get_tracer_provider", trace.ProxyTracerProvider)
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", raising=False)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", protocol)
+    monkeypatch.setitem(sys.modules, module, None)
+    with pytest.raises(
+        MissingExtraError, match=rf"{package}.*evidence-judge\[anthropic,mcp,otel\]"
+    ):
+        otel.ensure_available()
+
+
+def test_ensure_available_skips_the_sdk_when_it_is_not_needed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "opentelemetry.sdk.trace.export", None)
+    monkeypatch.setattr(trace, "get_tracer_provider", TracerProvider)
+    otel.ensure_available()
+    monkeypatch.setattr(trace, "get_tracer_provider", trace.ProxyTracerProvider)
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    otel.ensure_available()

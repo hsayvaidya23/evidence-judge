@@ -7,6 +7,7 @@ uses. OTLP over gRPC additionally needs ``opentelemetry-exporter-otlp-proto-grpc
 
 from __future__ import annotations
 
+import importlib
 import os
 from typing import TYPE_CHECKING
 
@@ -50,8 +51,14 @@ def _trace_api():
 
 
 def ensure_available() -> None:
-    """Raise :class:`MissingExtraError` unless the OpenTelemetry API is installed."""
-    _trace_api()
+    """Raise :class:`MissingExtraError` unless ``--otel`` can export: the OpenTelemetry API, and,
+    when no tracer provider is configured, the SDK and OTLP exporter it would build one from."""
+    trace = _trace_api()
+    if _sdk_disabled() or not isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider):
+        return
+    missing = _missing_otlp()
+    if missing is not None:
+        raise MissingExtraError("OpenTelemetry", "otel", ImportError(missing))
 
 
 def event_attributes(record: EvaluationRecord) -> dict[str, AttributeValue]:
@@ -204,31 +211,50 @@ def _traceparent_context() -> Context | None:
     return TraceContextTextMapPropagator().extract({"traceparent": traceparent})
 
 
-def _provider_from_env() -> tuple[TracerProvider | None, str | None]:
-    if os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true":
-        return None, "OTEL_SDK_DISABLED is set; verdict not exported"
-    try:
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    except ImportError:
-        return None, (
-            "no OpenTelemetry tracer provider is configured and opentelemetry-sdk is not "
-            f"installed; verdict not exported ({needs_extra('otel')})"
-        )
+def _sdk_disabled() -> bool:
+    return os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true"
+
+
+def _grpc() -> bool:
     protocol = os.environ.get(
         "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "")
     )
-    try:
-        if protocol.strip().lower() == "grpc":
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-        else:
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    except ImportError:
+    return protocol.strip().lower() == "grpc"
+
+
+def _missing_otlp() -> str | None:
+    """Which package building a tracer provider from ``OTEL_*`` lacks, or None."""
+    transport = "grpc" if _grpc() else "http"
+    for module, package in (
+        ("opentelemetry.sdk.trace.export", "opentelemetry-sdk"),
+        (
+            f"opentelemetry.exporter.otlp.proto.{transport}.trace_exporter",
+            f"opentelemetry-exporter-otlp-proto-{transport}",
+        ),
+    ):
+        try:
+            importlib.import_module(module)
+        except ImportError:
+            return f"{package} is not installed"
+    return None
+
+
+def _provider_from_env() -> tuple[TracerProvider | None, str | None]:
+    if _sdk_disabled():
+        return None, "OTEL_SDK_DISABLED is set; verdict not exported"
+    missing = _missing_otlp()
+    if missing is not None:
         return None, (
-            "no OpenTelemetry tracer provider is configured and opentelemetry-exporter-otlp is "
-            f"not installed; verdict not exported ({needs_extra('otel')}; for gRPC also "
-            "install opentelemetry-exporter-otlp-proto-grpc)"
+            f"no OpenTelemetry tracer provider is configured and {missing}; verdict not exported "
+            f"({needs_extra('otel')})"
         )
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+    if _grpc():
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    else:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     provider = TracerProvider()
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     return provider, None

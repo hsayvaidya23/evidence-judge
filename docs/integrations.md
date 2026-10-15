@@ -23,7 +23,10 @@ To let a coding agent call Evidence Judge as tools, see the [MCP server](guides/
 (`evidence-judge[mcp]`).
 
 Using an integration without its extra raises `MissingExtraError` (an `ImportError`) naming the
-extra to install. In the CLI the same problem exits with code 3 before anything is judged.
+extra to install. In the CLI, `--otel` and `--langfuse-trace-id` are exports you asked for, so a
+missing extra (or, for `--otel` without a configured tracer provider, a missing OTLP exporter)
+or missing Langfuse credentials exit with code 3 before anything is judged. Once judging has
+run, a failed export is only a warning and never changes the verdict's exit code.
 
 All integrations export the same results:
 
@@ -84,8 +87,8 @@ provider sends them. Pass `tracer=` to use a specific one.
 
 From the CLI, `--otel` uses the globally configured tracer provider (for example under
 `opentelemetry-instrument`). When none is configured, it builds one from the standard `OTEL_*`
-environment variables with an OTLP exporter if `opentelemetry-exporter-otlp` is installed, and
-warns otherwise. A W3C `TRACEPARENT` environment variable names the judged span:
+environment variables with an OTLP exporter, and exits with code 3 before judging if that
+exporter is not installed. A W3C `TRACEPARENT` environment variable names the judged span:
 
 ```bash
 pip install "evidence-judge[otel]" opentelemetry-exporter-otlp

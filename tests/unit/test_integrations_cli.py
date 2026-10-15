@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +91,30 @@ def test_missing_otel_extra_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) ->
     result = judge("--otel")
     assert result.exit_code == ExitCode.USAGE
     assert "evidence-judge[otel]" in result.output
+
+
+def test_a_missing_otlp_exporter_is_a_usage_error_before_judging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(trace, "get_tracer_provider", trace.ProxyTracerProvider)
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_PROTOCOL", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", raising=False)
+    monkeypatch.setitem(sys.modules, "opentelemetry.exporter.otlp.proto.http.trace_exporter", None)
+    result = judge("--otel")
+    assert result.exit_code == ExitCode.USAGE
+    text = " ".join(result.output.split())
+    assert "opentelemetry-exporter-otlp-proto-http is not installed" in text
+    assert "evidence-judge[anthropic,mcp,otel]" in text
+    assert "score" not in result.output
+
+
+def test_missing_langfuse_extra_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "langfuse", None)
+    result = judge("--langfuse-trace-id", TRACE_ID)
+    assert result.exit_code == ExitCode.USAGE
+    assert "evidence-judge[anthropic,mcp,langfuse]" in " ".join(result.output.split())
+    assert "score" not in result.output
 
 
 def test_export_failure_is_a_warning_not_a_new_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
