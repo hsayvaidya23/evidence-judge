@@ -4,8 +4,8 @@ Rules, first match wins:
 1. FAIL if a key claim is CONTRADICTED with confidence >= CONFIDENT_CONTRADICTION. Weak
    contradictions never fail a run, however many there are.
 2. FAIL if any expect, forbid or constraint result is not met.
-3. NEEDS_REVIEW if the agent ran its own code in the page or its route handler answered or
-   rewrote a request (`tampered`, core.provenance): what the run shows from then on is not the
+3. NEEDS_REVIEW if the agent ran its own code in the page, made a browser call the ingester
+   does not trust, or its route handler answered or rewrote a request (`tampered`, core.provenance): what the run shows from then on is not the
    site's alone, so it can never pass; if any other claim is CONTRADICTED (a non-key claim, or a key claim refuted only
    weakly: by point-in-time snapshots, a vision model, or conflicting evidence); if the side-effects dimension has findings
    (successful mutations the task spec does not explain, or every mutation when there is no

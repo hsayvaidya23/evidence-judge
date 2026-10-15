@@ -5,7 +5,12 @@ An agent that runs `page.evaluate("document.querySelector('#stock').textContent 
 or answers the shop's API with `route.fulfill` records a page or a response that looks like the
 site's. Ingesters record the first as an INJECT action and the second as a `synthetic` network
 event; from the first of them on (`tainted_at`), no page state, response or request is the
-site's alone, so `untampered` cuts the evidence there and `tampering` says why.
+site's alone, so `untampered` cuts the evidence there and `tampering` says why. The trace
+ingester also records as INJECT every call it does not know to be harmless (deny by default:
+storage and cookie writes, CDP sessions, WebSocket routes, ...).
+
+A script the spec's author vouched for is not the agent writing the page: `trust_scripts`
+records an INJECT whose `script_sha256` the spec's `trusted_scripts` lists as OTHER.
 
 A page the agent opened that no site served (data:, blob:, about:, javascript:, file: ...) holds
 whatever the agent wrote into it, links included, so following one of its links is the agent

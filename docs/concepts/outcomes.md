@@ -18,7 +18,8 @@ Weak contradictions (0.6) never fail a run, however many there are.
 <li markdown="block">
 <span class="ej-badge ej-badge--review">NEEDS REVIEW</span> **Anything is uncertain:**
 
-- the agent ran its own code in the page or its route handler answered or rewrote a request
+- the agent ran its own code in the page, made a browser call the judge does not trust (deny
+  by default), or its route handler answered or rewrote a request
   (an `inject` action or a `synthetic` request), so what the run shows from then on is not the
   site's alone; see
   [evidence that proves nothing](claims-and-predicates.md#evidence-that-proves-nothing);

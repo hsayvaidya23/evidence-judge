@@ -22,6 +22,7 @@ constraints: [...]                  # value predicates that must hold
 allow: [...]                        # request predicates for expected intermediate mutations
 allowed_hosts: [api.example.com]    # more hosts of the site; '*.example.com' for every subdomain
 failure_markers: [...]              # regexes that mark a page a redirect lands on as a failure
+trusted_scripts: [...]              # sha256 hashes of harness scripts that do not change the page
 ```
 
 Each entry in `expect` and `forbid` is an expectation:
@@ -267,6 +268,41 @@ name and never saved gets the claim contradicted. Vague values (`to the new one`
 that ingest redacts (passwords, card numbers) and values without a word of three or more
 letters (`to 2`) make no such claim. Use `PUT` or `PATCH` in the spec when that is what the
 site sends.
+
+### `trusted_scripts`: harness scripts you vouch for
+
+A Playwright trace is read deny by default: every recorded call that is not navigation, user
+interaction, waiting, reading or page and context management makes what follows the agent's
+own evidence, and the run can be NEEDS_REVIEW at best (see
+[evidence the agent made in the browser](concepts/claims-and-predicates.md#evidence-that-proves-nothing)).
+That includes scripts a harness runs for its own reasons: a stealth `add_init_script`, a
+`page.evaluate` that reads the page or scrolls. Playwright MCP's wait between actions is
+recognised by itself; for any other script that does not change what the page shows, list its
+hash:
+
+```yaml
+trusted_scripts:
+  - 5db0ba85961130c7c6916b2714c5611bc6a0af490c664ded9a1be36483050bee
+```
+
+Get the hash from the run: `evidence-judge inspect --trace run.zip` lists every agent-made call
+with the sha256 of each script, and the NEEDS_REVIEW reason prints it after the action id
+(`evaluate(...) (act#3, sha256 5db0...)`). It is the SHA-256, in hex, of the UTF-8 text
+
+```text
+<api>\n<code>\n<arg>
+```
+
+where `<api>` is the call as the action names it (`evaluate`, `evaluateHandle`, `$eval`,
+`$$eval`, `waitForFunction`, `addInitScript`, `addScriptTag`, `addStyleTag`, `setContent`),
+`<code>` is the script exactly as the trace recorded it, and `<arg>` is its argument in
+Playwright's wire form as the trace records it (`{"n":500}` for `500`, `{"v":"null"}` for none
+given to `evaluate`), or `null` for a call without one, written as canonical JSON (keys
+sorted, no spaces, non-ASCII kept); `evidence_judge.core.provenance.script_hash` computes it.
+Only an exact match is exempt: another argument or one changed character is another hash.
+Calls that are not scripts (cookies, storage, CDP sessions, WebSocket routes) have no hash and
+cannot be trusted; give a harness's login state to the browser context when it is created
+(`storage_state=`), which the trace does not record as a call.
 
 ## Predicates
 
