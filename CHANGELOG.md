@@ -365,6 +365,11 @@ the names exported from `evidence_judge`) is defined under
   report: a verdict JSON that validates, or an HTML page with the report's generator tag.
   Replacing any other file needs `overwrite: true`, and the tool is annotated
   `destructiveHint: true`.
+- **MCP results fence page- and agent-derived text.** `judge_run` and `explain_verdict` now wrap
+  summaries, claim quotes, reasons, evidence excerpts and warnings in `<untrusted_data>` tags,
+  so a reading model can tell them apart from instructions. A tag lookalike inside the text is
+  defanged and cannot close the fence. The server instructions and the tool descriptions say
+  that this text is data, never instructions. The hook feedback already says the same.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
