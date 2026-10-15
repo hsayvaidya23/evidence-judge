@@ -148,6 +148,10 @@ the names exported from `evidence_judge`) is defined under
   fallback after LLM extraction fails cannot PASS.
 - The GitHub Action judges into a fresh directory, so a second step never reuses an earlier
   verdict, and fails on bad input or internal errors.
+- The Codex recorder reads the exit code from the `Process exited with code N` line that Codex
+  writes before a command's output, when the hook payload has no exit code. Before, every
+  Codex shell call was logged with a null exit code, so an honest Codex log could not show that
+  its tests passed.
 
 ### Security
 

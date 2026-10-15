@@ -12,7 +12,9 @@ Exit codes are never guessed:
 
 * Claude Code: ``PostToolUse`` of ``Bash`` without ``returnCodeInterpretation`` is 0; a
   ``PostToolUseFailure`` whose ``error`` starts ``Exit code N`` is N; anything else is null.
-* Codex: the hook payload's ``exit_code`` / ``exitCode`` when present, else null.
+* Codex: the hook payload's ``exit_code`` / ``exitCode`` when present, else the
+  first ``Process exited with code N`` line of the tool's text output (Codex writes it before
+  the command's own output), else null.
 * Gemini CLI: the ``Exit Code: N`` line of a ``run_shell_command`` result, else null.
 """
 
@@ -42,6 +44,7 @@ _MAX_ITEMS: Final = 50
 _TAIL_READ: Final = 1024 * 1024
 _CLAUDE_EXIT: Final = re.compile(r"\AExit code (-?\d+)\b")
 _GEMINI_EXIT: Final = re.compile(r"^Exit Code: (-?\d+)\b", re.M)
+_CODEX_EXIT: Final = re.compile(r"^Process exited with code (-?\d+)\b", re.M)
 _SESSION_ID: Final = re.compile(r"\A[A-Za-z0-9_.-]{1,128}\Z")
 _CLAUDE_RESULT_KEYS: Final = ("structuredPatch", "type", "userModified")
 _CODEX_RESULT_KEYS: Final = ("changes",)
@@ -175,6 +178,9 @@ def _codex(data: Payload) -> _Call:
     if code is None:
         code = _int(fields.get("exitCode"))
     stdout = _as_text(fields.get("stdout")) if "stdout" in fields else _as_text(response)
+    if code is None:
+        found = _CODEX_EXIT.search(_as_text(response) or "")
+        code = int(found.group(1)) if found else None
     status: Status | None = None if code is None else ("ok" if code == 0 else "error")
     result = _pick(fields, _CODEX_RESULT_KEYS) or _pick(
         _fields(data.get("tool_input")), ("changes",)
