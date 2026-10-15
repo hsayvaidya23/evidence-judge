@@ -1,113 +1,70 @@
-"""A small, conservative shell parser for the commands coding agents run.
-
-It never executes anything. It splits a command line into simple commands joined by operators,
-strips environment assignments, redirections and wrappers (`timeout`, `uv run`, `npx`,
-`bash -c`, ...), and classifies each simple command: a test run (and which runner, and whether it
-runs a subset), a build, a lint, a type check, a formatter, a read-only command, or one that may
-change the workspace. Anything it cannot classify may change the workspace: being wrong in that
-direction costs a NEEDS_REVIEW, never a false PASS.
-"""
+"""Classifying simple commands and analysing whole command lines."""
 
 from __future__ import annotations
 
-import ast
-import posixpath
 import re
-import shlex
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
 from typing import Final
 
-from evidence_judge.sessions import edits
 from evidence_judge.sessions.models import Category, CommandAnalysis
+from evidence_judge.sessions.shell.classified import Classified
+from evidence_judge.sessions.shell.env import (
+    GO_REGEN,
+    command_env,
+    exports,
+    harmless_env,
+    harness_change,
+    is_harness_env,
+    off,
+    pytest_regenerates,
+    regenerates_env,
+    run_env_allowed,
+)
+from evidence_judge.sessions.shell.guard_paths import (
+    AGENT_CONFIG,
+    JUDGE_NAME,
+    SESSION_STORE,
+    guard_tamper,
+    writes_session_store,
+)
+from evidence_judge.sessions.shell.lexer import (
+    MAX_NESTING,
+    PYTHON,
+    SHELLS,
+    Simple,
+    Wrapped,
+    parse,
+    program_name,
+    strip_comments,
+    tokenize,
+    unspelled,
+    unwrap,
+)
+from evidence_judge.sessions.shell.runners.cargo import cargo_filters
+from evidence_judge.sessions.shell.runners.generic import generic_filters
+from evidence_judge.sessions.shell.runners.go import go_filters
+from evidence_judge.sessions.shell.runners.js import js_filters
+from evidence_judge.sessions.shell.runners.make import make_like
+from evidence_judge.sessions.shell.runners.node import node_test_filters
+from evidence_judge.sessions.shell.runners.pm import FIX_FLAGS, pm_script
+from evidence_judge.sessions.shell.runners.pytest import pytest_filters
+from evidence_judge.sessions.shell.runners.tox import tox_filters
+from evidence_judge.sessions.shell.runners.unittest import unittest_filters
+from evidence_judge.sessions.shell.writes import (
+    PM,
+    SCRATCH,
+    git,
+    maybe_directory,
+    perl,
+    run_writes,
+    sed,
+    tool_config_change,
+    written_code,
+)
 
 MAX_COMMAND_CHARS: Final = 100_000
-MAX_NESTING: Final = 4
 
-_OPERATORS: Final = (
-    "&&",
-    "||",
-    ";;",
-    "|&",
-    "&>>",
-    "&>",
-    ">>",
-    ">&",
-    "<<<",
-    "<<-",
-    "<<",
-    "<>",
-    ">|",
-    "|",
-    ";",
-    "&",
-    "<",
-    ">",
-    "(",
-    ")",
-    "\n",
-)
-_SEPARATORS: Final = frozenset({"&&", "||", ";", ";;", "&", "\n"})
-_PIPES: Final = frozenset({"|", "|&"})
-_REDIRECTS: Final = frozenset({">", ">>", ">|", "&>", "&>>", ">&", "<", "<>", "<<<"})
-_HEREDOCS: Final = frozenset({"<<", "<<-"})
-_SAFE_TARGETS: Final = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+
 _CHECKS: Final = frozenset({Category.BUILD, Category.LINT, Category.TYPECHECK, Category.FORMAT})
-_ASSIGNMENT: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_PYTHON: Final = re.compile(r"^(?:python|pypy)[0-9.]*$|^py$")
-_SHELLS: Final = frozenset({"sh", "bash", "zsh", "dash", "ksh", "fish"})
-SESSION_STORE: Final = re.compile(
-    r"\.claude/projects|\.claude/plugins|\.codex/sessions|\.codex/archived_sessions|"
-    r"\.gemini/tmp|session-evidence|evidence-judge/evidence|\.evidence-judge(?:/|$)|"
-    r"EVJ_HOOK_LOG_DIR",
-    re.IGNORECASE,
-)
-"""Where harnesses and the evidence recorder keep session records (and the project's
-`.evidence-judge/` spec): a command that writes there can rewrite the evidence."""
-AGENT_CONFIG: Final = re.compile(
-    r"(?:^|/)\.claude/(?:[^/]*settings[^/]*\.json|(?:[^/]+/)*[^/]*hooks[^/]*)$|"
-    r"(?:^|/)\.claude/(?:hooks|plugins)(?:/|$)|(?:^|/)\.claude-plugin(?:/|$)|"
-    r"(?:^|/)\.codex(?:/|$)|(?:^|/)\.gemini(?:/|$)|(?:^|/)hooks/hooks\.json$|"
-    r"(?:^|/)\.mcp\.json$|(?:^|/)managed-settings\.json$|"
-    r"(?:^|/)(?:ClaudeCode|claude-code|codex|gemini-cli)/(?:[^/]+/)*[^/]*settings[^/]*$",
-    re.IGNORECASE,
-)
-"""Coding-agent configuration: settings that can turn hooks off (`disableAllHooks`), hook and
-plugin definitions, MCP server lists, and the Codex and Gemini CLI homes. An agent that writes
-one can switch off the hooks that record and judge it."""
-JUDGE_INSTALL: Final = re.compile(
-    r"(?:^|/)(?:bin|Scripts)/evidence-judge(?:\.exe|\.cmd)?$|"
-    r"(?:^|/)(?:uv/tools|pipx/venvs|tools)/evidence-judge(?:/|$)",
-    re.IGNORECASE,
-)
-"""The installed `evidence-judge` executable or tool environment the hooks run."""
-_JUDGE_NAME: Final = re.compile(r"evidence[-_]judge", re.IGNORECASE)
-_PACKAGE_VERBS: Final = frozenset({"install", "uninstall", "remove", "rm", "upgrade", "reinstall"})
-
-
-def guard_path_reason(path: str, shown: str | None = None) -> str | None:
-    """Why writing `path` (named `shown` in the reason) can disable the evidence hooks or the
-    judge, or None."""
-    shown = shown or path
-    if JUDGE_INSTALL.search(path):
-        return f"replaced or removed the evidence-judge install at {shown}"
-    if AGENT_CONFIG.search(path):
-        return f"changed agent configuration {shown}, which can disable the evidence hooks"
-    return None
-
-
-_HOOK_SWITCH: Final = re.compile(
-    r"disableAllHooks|allowManagedHooksOnly|\"?hooks\"?\s*[:=]\s*(?:\{\s*\}|\[\s*\]|null|false)",
-    re.IGNORECASE,
-)
-
-
-def hook_switch_reason(why: str, text: str) -> str:
-    """`why`, saying so when `text` (a command line or written content) switches hooks off."""
-    found = _HOOK_SWITCH.search(text)
-    if found is None:
-        return why
-    return f"{why}; it sets {found.group(0)}, which turns the hooks (the evidence recorder and judge) off"
 
 
 _AGENT_SUMMARY_TEXT: Final = re.compile(
@@ -244,6 +201,8 @@ READ_ONLY_PROGRAMS: Final = frozenset(
     }
 )
 """Programs that do not change files (the last group only for some subcommands, decided below)."""
+
+
 _MUTATING: Final = frozenset(
     {
         "rm",
@@ -288,37 +247,8 @@ _MUTATING: Final = frozenset(
         "split",
     }
 )
-_GIT_MUTATING: Final = frozenset(
-    {
-        "apply",
-        "checkout",
-        "restore",
-        "reset",
-        "stash",
-        "switch",
-        "merge",
-        "rebase",
-        "cherry-pick",
-        "revert",
-        "pull",
-        "mv",
-        "rm",
-        "clean",
-        "am",
-        "worktree",
-        "submodule",
-        "clone",
-        "init",
-        "filter-branch",
-        "filter-repo",
-        "update-index",
-        "read-tree",
-        "checkout-index",
-        "sparse-checkout",
-        "lfs",
-        "bisect",
-    }
-)
+
+
 _LINTERS: Final = frozenset(
     {
         "flake8",
@@ -351,9 +281,13 @@ _LINTERS: Final = frozenset(
         "djlint",
     }
 )
+
+
 _TYPECHECKERS: Final = frozenset(
     {"pyright", "basedpyright", "mypy", "pyre", "pytype", "vue-tsc", "flow", "ty"}
 )
+
+
 _BUILDERS: Final = frozenset(
     {
         "webpack",
@@ -374,1424 +308,27 @@ _BUILDERS: Final = frozenset(
         "nx",
     }
 )
-_PM: Final = frozenset({"npm", "pnpm", "yarn", "bun"})
-_PM_INSTALL: Final = frozenset(
-    {
-        "install",
-        "i",
-        "ci",
-        "add",
-        "remove",
-        "rm",
-        "uninstall",
-        "un",
-        "update",
-        "up",
-        "upgrade",
-        "link",
-        "unlink",
-        "rebuild",
-        "dedupe",
-        "prune",
-        "patch",
-        "import",
-        "create",
-        "init",
-    }
-)
-_PM_READ_ONLY: Final = frozenset(
-    {
-        "ls",
-        "list",
-        "view",
-        "info",
-        "outdated",
-        "audit",
-        "why",
-        "explain",
-        "config",
-        "help",
-        "version",
-        "--version",
-        "-v",
-        "root",
-        "bin",
-        "prefix",
-        "whoami",
-        "search",
-        "doctor",
-    }
-)
-_TYPECHECK_SCRIPTS: Final = re.compile(r"^(?:type-?check|types|tsc|check-types|typecheck:.*)$")
-_LINT_SCRIPTS: Final = re.compile(r"^lint(?::.*)?$")
-_FORMAT_SCRIPTS: Final = re.compile(r"^(?:format|fmt|prettier)(?::.*)?$")
-_BUILD_SCRIPTS: Final = re.compile(r"^(?:build|compile)(?::.*)?$")
-_TEST_TARGETS: Final = frozenset({"test", "tests", "check"})
-
-_PYTEST_HARMLESS_VALUES: Final = frozenset(
-    {"-r", "-n", "--numprocesses", "--maxprocesses", "--tb", "--color", "--code-highlight",
-     "--capture", "--durations", "--durations-min", "--maxfail", "--junitxml", "--junit-xml",
-     "--junit-prefix", "--cov", "--cov-report", "--cov-config", "--cov-fail-under",
-     "--cov-context", "--dist", "--log-level", "--log-cli-level", "--log-file",
-     "--log-file-level", "--log-format", "--log-date-format", "--log-cli-format",
-     "--log-cli-date-format", "--show-capture", "--basetemp", "--randomly-seed",
-     "--random-order-seed", "--random-order-bucket", "--timeout", "--timeout-method", "--html",
-     "--benchmark-json", "--count", "--workers", "--tests-per-worker", "--verbosity", "--assert",
-     "--hypothesis-seed"}
-)  # fmt: skip
-"""pytest options taking a value that change only how a run reports, orders, spreads, times or
-measures the tests it would run anyway."""
-_PYTEST_HARMLESS_SWITCHES: Final = frozenset(
-    {"-q", "--quiet", "-v", "--verbose", "-x", "--exitfirst", "-s", "-l", "--showlocals",
-     "--no-showlocals", "--no-header", "--no-summary", "--strict-markers", "--strict-config",
-     "--strict", "--full-trace", "--disable-warnings", "--disable-pytest-warnings",
-     "--cache-clear", "--ff", "--failed-first", "--nf", "--new-first", "--setup-show",
-     "--no-cov", "--no-cov-on-fail", "--cov-branch", "--cov-append", "--instafail",
-     "--runxfail", "--doctest-modules", "--doctest-continue-on-failure",
-     "--randomly-dont-reorganize", "--random-order", "--benchmark-disable",
-     "--hypothesis-show-statistics", "--pdb", "--trace", "--force-sugar"}
-)  # fmt: skip
-"""pytest switches that change only output, order, stopping early or debugging. Any other
-option may decide what a pass means (`--record-mode=rewrite`, `--regtest-reset`, `--reruns`)."""
-_PYTEST_SHORT_VALUES: Final = frozenset("kmpcoWrn")
-_PYTEST_COLLECT: Final = frozenset(
-    {"--co", "--collect-only", "--fixtures", "--markers", "--version", "-V", "-h", "--help",
-     "--setup-plan"}
-)  # fmt: skip
-_PYTEST_FILTER_FLAGS: Final = {
-    "-k": "-k",
-    "-m": "-m",
-    "--deselect": "--deselect",
-    "--ignore": "--ignore",
-    "--ignore-glob": "--ignore-glob",
-    "-c": "a different config (-c)",
-    "--config-file": "a different config (--config-file)",
-    "-o": "a config override (-o)",
-    "--override-ini": "a config override (--override-ini)",
-    "-p": "a plugin switch (-p)",
-    "--rootdir": "a different root (--rootdir)",
-    "--confcutdir": "--confcutdir",
-    "-W": "a warnings filter (-W)",
-    "--pythonwarnings": "a warnings filter (--pythonwarnings)",
-}
-_HARMLESS_PLUGIN_SWITCHES: Final = (
-    ["no:cacheprovider"],
-    ["no:randomly"],
-    ["no:random_order"],
-    ["no:cov"],
-    ["no:sugar"],
-    ["no:xdist"],
-)
-"""`-p` values that change no test's outcome or selection: the cache plugin only stores --lf
-state, randomly and random_order only shuffle, cov only measures, sugar only prints and xdist
-only spreads the same tests over workers. `no:warnings` is not one: it drops `filterwarnings =
-error`, which can turn failing tests into passing ones."""
-_PYTEST_FILTER_SWITCHES: Final = {
-    "--lf": "--lf",
-    "--last-failed": "--last-failed",
-    "--sw": "--stepwise",
-    "--stepwise": "--stepwise",
-    "--sw-skip": "--stepwise-skip",
-    "--noconftest": "--noconftest",
-    "--pyargs": "--pyargs",
-    "--doctest-only": "--doctest-only",
-}
-_JS_VALUE_FLAGS: Final = frozenset(
-    {
-        "-t",
-        "--testNamePattern",
-        "--testPathPattern",
-        "--testPathPatterns",
-        "--testPathIgnorePatterns",
-        "--shard",
-        "-c",
-        "--config",
-        "--reporters",
-        "--reporter",
-        "-w",
-        "--maxWorkers",
-        "--selectProjects",
-        "--project",
-        "--environment",
-        "--dir",
-        "--root",
-        "--mode",
-        "--changedSince",
-        "--outputFile",
-        "--coverageReporters",
-        "--testTimeout",
-        "--pool",
-        "--poolOptions",
-        "-r",
-        "--grep",
-        "-g",
-        "--fgrep",
-        "-f",
-        "--spec",
-        "--exclude",
-        "--browser",
-        "--workers",
-        "-j",
-        "--retries",
-        "--timeout",
-        "--seed",
-        "--require",
-        "--ui",
-        "--slow",
-        "--filter",
-    }
-)
-_JS_FILTER_FLAGS: Final = frozenset(
-    {
-        "-t",
-        "--testNamePattern",
-        "--testPathPattern",
-        "--testPathPatterns",
-        "--testPathIgnorePatterns",
-        "--shard",
-        "-c",
-        "--config",
-        "--selectProjects",
-        "--project",
-        "--changedSince",
-        "--dir",
-        "--root",
-        "--grep",
-        "-g",
-        "--fgrep",
-        "-f",
-        "--spec",
-        "--exclude",
-        "--filter",
-    }
-)
-_JS_FILTER_SWITCHES: Final = frozenset(
-    {
-        "-o",
-        "--onlyChanged",
-        "--findRelatedTests",
-        "--related",
-        "--lastCommit",
-        "--changed",
-        "--onlyFailures",
-        "--bail",
-        "--invert",
-        "--only",
-        "--last-failed",
-    }
-)
-_JS_HARMLESS: Final = frozenset(
-    {"--ci", "--runInBand", "-i", "--verbose", "--silent", "--coverage", "--no-coverage",
-     "--watch", "--watchAll", "--no-watch", "--no-watchAll", "--run", "--colors", "--no-colors",
-     "--color", "--no-color", "--passWithNoTests", "--detectOpenHandles", "--forceExit",
-     "--json", "--logHeapUsage", "--useStderr", "--no-cache", "--cache", "--expand",
-     "--errorOnDeprecated", "--noStackTrace", "--hideSkippedTests", "--no-file-parallelism",
-     "-w", "--maxWorkers", "--reporters", "--reporter", "--outputFile", "--coverageReporters",
-     "--coverageDirectory", "--testTimeout", "--pool", "--logLevel", "-u", "--updateSnapshot",
-     "--update"}
-)  # fmt: skip
-"""jest and vitest options that change only output, workers, caching, timeouts or coverage."""
-_JS_COLLECT: Final = frozenset({"--listTests", "--list", "--showConfig"})
-_VITEST_SUBCOMMANDS: Final = frozenset({"run", "watch", "dev"})
-_GO_VALUE_FLAGS: Final = frozenset(
-    {
-        "-run",
-        "-skip",
-        "-bench",
-        "-count",
-        "-timeout",
-        "-tags",
-        "-p",
-        "-parallel",
-        "-coverprofile",
-        "-covermode",
-        "-coverpkg",
-        "-cpu",
-        "-exec",
-        "-o",
-        "-vet",
-        "-shuffle",
-        "-fuzz",
-        "-fuzztime",
-        "-benchtime",
-        "-ldflags",
-        "-gcflags",
-        "-mod",
-        "-C",
-    }
-)
-_GO_SWITCHES: Final = frozenset(
-    {"-v", "-race", "-cover", "-failfast", "-json", "-benchmem", "-trimpath", "-a", "-x", "-work",
-     "-msan", "-asan", "-fullpath"}
-)  # fmt: skip
-_GO_HARMLESS: Final = _GO_SWITCHES | frozenset(
-    {"-count", "-timeout", "-p", "-parallel", "-cpu", "-mod", "-coverprofile", "-covermode",
-     "-coverpkg", "-shuffle", "-vet", "-bench", "-benchtime", "-o", "-outputdir", "-cpuprofile",
-     "-memprofile", "-blockprofile", "-mutexprofile", "-trace"}
-)  # fmt: skip
-"""`go test` options that change only output, parallelism, timing, coverage or the order tests
-run in. Build tags, linker flags, `-exec` and `-C` can change which code and tests run."""
-_CARGO_VALUE_FLAGS: Final = frozenset(
-    {
-        "-p",
-        "--package",
-        "--test",
-        "--bin",
-        "--example",
-        "--bench",
-        "--exclude",
-        "--features",
-        "-F",
-        "--target",
-        "-j",
-        "--jobs",
-        "--profile",
-        "--manifest-path",
-        "--target-dir",
-        "--color",
-        "-E",
-        "--filterset",
-        "--message-format",
-        "--config",
-        "-Z",
-        "--test-threads",
-        "--failure-output",
-        "--success-output",
-        "--status-level",
-        "--final-status-level",
-        "--cargo-profile",
-        "--retries",
-    }
-)
-_CARGO_FILTER_FLAGS: Final = frozenset(
-    {"-p", "--package", "--test", "--bin", "--example", "--bench", "--exclude", "-E", "--filterset"}
-)
-_CARGO_FILTER_SWITCHES: Final = frozenset(
-    {"--lib", "--bins", "--doc", "--examples", "--benches", "--tests"}
-)
-_TEST_BINARY_FILTERS: Final = frozenset({"--skip", "--exact", "--ignored"})
-_CARGO_HARMLESS: Final = frozenset(
-    {"--release", "-r", "--all", "--workspace", "--all-features", "--locked", "--frozen",
-     "--offline", "-q", "--quiet", "-v", "-vv", "--verbose", "--no-fail-fast", "--all-targets",
-     "--keep-going", "--timings", "--ignore-rust-version", "-j", "--jobs", "--target",
-     "--target-dir", "--manifest-path", "--color", "--message-format", "--profile",
-     "--cargo-profile", "--test-threads", "--no-capture", "--nocapture", "--failure-output",
-     "--success-output", "--status-level", "--final-status-level", "--hide-progress-bar"}
-)  # fmt: skip
-"""`cargo test` and `cargo nextest run` options that change only output, profile, parallelism
-or stopping early. Features can compile tests out; `--retries` can turn a failure into a pass."""
-_TEST_BINARY_HARMLESS: Final = frozenset(
-    {"--nocapture", "--show-output", "--test-threads", "-q", "--quiet", "--color", "--format",
-     "--report-time", "--include-ignored"}
-)  # fmt: skip
-_UV_VALUE_FLAGS: Final = frozenset(
-    {
-        "--with",
-        "--with-editable",
-        "--with-requirements",
-        "--python",
-        "-p",
-        "--project",
-        "--directory",
-        "--group",
-        "--extra",
-        "--package",
-        "--env-file",
-        "--index",
-        "--default-index",
-        "--index-url",
-        "--extra-index-url",
-        "--find-links",
-        "-f",
-        "--no-group",
-        "--only-group",
-        "--config-file",
-        "--cache-dir",
-        "--refresh-package",
-        "--reinstall-package",
-        "--upgrade-package",
-        "--exclude-newer",
-        "--prerelease",
-        "--resolution",
-        "--link-mode",
-        "--color",
-        "--native-tls",
-        "--from",
-    }
-)
-_TIMEOUT_VALUE_FLAGS: Final = frozenset({"-s", "--signal", "-k", "--kill-after"})
-_FIX_FLAGS: Final = frozenset(
-    {
-        "--fix",
-        "--fix-only",
-        "--unsafe-fixes",
-        "-a",
-        "-A",
-        "--autocorrect",
-        "--autocorrect-all",
-        "--write",
-        "--apply",
-        "--apply-unsafe",
-        "-u",
-        "--updateSnapshot",
-        "--update-snapshots",
-        "--snapshot-update",
-        "--update",
-    }
-)
-
-
-@dataclass(slots=True)
-class _Simple:
-    words: list[str] = field(default_factory=list[str])
-    env: dict[str, str] = field(default_factory=dict[str, str])
-    writes: list[str] = field(default_factory=list[str])
-    heredoc: bool = False
-    negated: bool = False
-    subshell: bool = False
-
-
-@dataclass(slots=True)
-class _Pipeline:
-    commands: list[_Simple] = field(default_factory=list[_Simple])
-    op_after: str | None = None
-
-
-@dataclass(slots=True)
-class _Classified:
-    category: Category
-    program: str
-    runner: str | None = None
-    filters: list[str] = field(default_factory=list[str])
-    collect_only: bool = False
-    mutation: str | None = None
-    deleted: list[str] = field(default_factory=list[str])
-    touched: list[str] | None = None
-    """Files the program writes, when its command line names them all; None to take them from
-    its arguments."""
-    opaque: str | None = None
-    """Why the program may write files its command line does not name."""
-    paths: list[str] | None = None
-    """The paths a test run selects when plain paths are its only filters."""
-    nested: CommandAnalysis | None = None
-    run_env: list[str] = field(default_factory=list[str])
-    """Variables set for a test run on its own command line (`CI=true pytest`)."""
-    relocations: list[str] = field(default_factory=list[str])
-    """Directories the run moves to on its own (`make -C dir`, `uv run --directory dir`)."""
-    config_files: list[str] = field(default_factory=list[str])
-    """Files the run reads as its test configuration (`make -f rules`)."""
-    writes_after: bool = False
-    """The run writes files its own check does not cover (`pytest --log-file=calc.py`)."""
-
-
-def _split_operators(token: str) -> Iterator[str]:
-    rest = token
-    while rest:
-        op = next((o for o in _OPERATORS if rest.startswith(o)), rest[0])
-        yield op
-        rest = rest[len(op) :]
-
-
-def tokenize(command: str) -> list[str]:
-    """Shell words and operators; raises ValueError for unbalanced quotes."""
-    lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
-    lexer.whitespace_split = True
-    lexer.whitespace = " \t\r"
-    lexer.commenters = ""
-    tokens: list[str] = []
-    for token in lexer:
-        if token and set(token) <= set("();<>|&\n"):
-            tokens.extend(_split_operators(token))
-        else:
-            tokens.append(token)
-    return tokens
-
-
-def _strip_comments(tokens: list[str]) -> list[str]:
-    out: list[str] = []
-    skipping = False
-    for tok in tokens:
-        if tok == "\n":
-            skipping = False
-        elif tok.startswith("#") and (not out or out[-1] in _SEPARATORS | _PIPES):
-            skipping = True
-        if not skipping:
-            out.append(tok)
-    return out
-
-
-def _parse(tokens: list[str]) -> list[_Pipeline]:
-    pipelines: list[_Pipeline] = [_Pipeline()]
-    current = _Simple()
-    heredoc_end: str | None = None
-    pending_heredoc: str | None = None
-    depth = 0
-    i = 0
-    while i < len(tokens):
-        tok = tokens[i]
-        if heredoc_end is not None:
-            if tok == heredoc_end and (i + 1 == len(tokens) or tokens[i + 1] == "\n"):
-                heredoc_end = None
-            i += 1
-            continue
-        if tok == "\n" and pending_heredoc is not None:
-            heredoc_end, pending_heredoc = pending_heredoc, None
-            i += 1
-            continue
-        if tok in _HEREDOCS:
-            current.heredoc = True
-            pending_heredoc = tokens[i + 1] if i + 1 < len(tokens) else ""
-            i += 2
-            continue
-        if tok in _REDIRECTS:
-            target = tokens[i + 1] if i + 1 < len(tokens) else ""
-            if current.words and current.words[-1].isdigit():
-                current.words.pop()
-            fd_dup = tok == ">&" and target.isdigit()
-            if tok not in ("<", "<<<") and not fd_dup and target not in _SAFE_TARGETS | {"-"}:
-                current.writes.append(target)
-            i += 2
-            continue
-        if tok in ("(", ")"):
-            depth = depth + 1 if tok == "(" else max(depth - 1, 0)
-            current.subshell = current.subshell or depth > 0
-            i += 1
-            continue
-        if tok in _PIPES or tok in _SEPARATORS:
-            pipelines[-1].commands.append(current)
-            current = _Simple()
-            if tok in _SEPARATORS:
-                pipelines[-1].op_after = tok
-                pipelines.append(_Pipeline())
-            i += 1
-            continue
-        current.subshell = current.subshell or depth > 0
-        if not current.words and tok == "!":
-            current.negated = True
-        elif not current.words and _ASSIGNMENT.match(tok):
-            name, _, value = tok.partition("=")
-            current.env[name] = value
-        else:
-            current.words.append(tok)
-        i += 1
-    pipelines[-1].commands.append(current)
-    cleaned: list[_Pipeline] = []
-    for pipeline in pipelines:
-        commands = [c for c in pipeline.commands if c.words or c.writes or c.env]
-        if commands:
-            cleaned.append(_Pipeline(commands, pipeline.op_after))
-        elif cleaned and pipeline.op_after is not None:
-            cleaned[-1].op_after = pipeline.op_after
-    return cleaned
-
-
-def program_name(word: str) -> str:
-    return posixpath.basename(word)
-
-
-def _flags_then_rest(words: Sequence[str], value_flags: frozenset[str]) -> list[str]:
-    """Drop leading options (and their values) and return the remaining words."""
-    i = 0
-    while i < len(words) and words[i].startswith("-") and words[i] != "--":
-        flag = words[i]
-        i += 1
-        if "=" not in flag and flag in value_flags:
-            i += 1
-    if i < len(words) and words[i] == "--":
-        i += 1
-    return list(words[i:])
-
-
-@dataclass(slots=True)
-class _Wrapped:
-    """What the wrappers around a command do to the run inside them."""
-
-    filters: list[str] = field(default_factory=list[str])
-    dirs: list[str] = field(default_factory=list[str])
-
-
-_UV_RUN_HARMLESS: Final = frozenset(
-    {"--no-project", "--frozen", "--locked", "--offline", "-q", "--quiet", "-v", "--verbose",
-     "--no-sync", "--isolated", "--python", "-p", "--all-extras", "--extra", "--group", "--dev",
-     "--no-dev", "--only-dev", "--no-group", "--only-group", "--all-groups", "--color",
-     "--native-tls", "--cache-dir", "--no-cache", "-n", "--refresh", "--refresh-package",
-     "--reinstall", "--reinstall-package", "--upgrade", "-U", "--upgrade-package", "--index",
-     "--default-index", "--index-url", "--extra-index-url", "--find-links", "-f", "--no-index",
-     "--exclude-newer", "--resolution", "--prerelease", "--link-mode", "--active",
-     "--managed-python", "--no-managed-python", "--no-python-downloads", "--no-env-file",
-     "--no-editable", "--compile-bytecode", "--package", "--all-packages", "--with",
-     "--with-editable", "--with-requirements", "--from", "--no-progress", "-m", "--module"}
-)  # fmt: skip
-"""`uv run` and `uvx` options that change only which interpreter, index, cache or lock state
-the environment comes from (`--with` and `--from` are judged as packages the session adds).
-`--directory` and `--project` move the run; `--env-file` sets variables; anything else may
-change what runs."""
-
-
-def _uv_run_options(args: list[str], wrapped: _Wrapped) -> None:
-    i = 0
-    while i < len(args) and args[i].startswith("-") and args[i] != "--":
-        name, eq, value = args[i].partition("=")
-        takes = not eq and name in _UV_VALUE_FLAGS
-        if takes:
-            value = args[i + 1] if i + 1 < len(args) else ""
-        if name in ("--directory", "--project"):
-            wrapped.dirs.append(_dir_word(value))
-        elif name == "--env-file":
-            wrapped.filters.append(f"variables loaded from {value} (--env-file)")
-        elif name not in _UV_RUN_HARMLESS:
-            wrapped.filters.append(f"uv run {name}, an option the judge cannot tell is harmless")
-        i += 2 if takes else 1
-
-
-def _dir_word(target: str) -> str:
-    """A directory as written, or `?` when only the shell knows it."""
-    return "?" if target in ("", "-") or target.startswith("~") or _unspelled(target) else target
-
-
-def _unwrap(words: list[str], wrapped: _Wrapped | None = None) -> list[str]:
-    """Strip wrapper programs that run another command (`timeout 60 pytest`, `uv run pytest`),
-    noting in `wrapped` what they do to the run (`uv run --directory`, `dotenv`)."""
-    wrapped = wrapped if wrapped is not None else _Wrapped()
-    for _ in range(MAX_NESTING * 2):
-        if not words:
-            return words
-        prog = program_name(words[0])
-        rest = words[1:]
-        if prog in ("time", "nohup", "exec", "builtin", "caffeinate", "sudo", "doas"):
-            words = _flags_then_rest(rest, frozenset({"-u", "-g", "-C"}))
-        elif prog == "command" and rest and rest[0] not in ("-v", "-V"):
-            words = _flags_then_rest(rest, frozenset())
-        elif prog == "env" and rest:
-            for i, arg in enumerate(rest):
-                if arg in ("-C", "--chdir") and i + 1 < len(rest):
-                    wrapped.dirs.append(_dir_word(rest[i + 1]))
-                elif arg.startswith("--chdir="):
-                    wrapped.dirs.append(_dir_word(arg.partition("=")[2]))
-                elif not arg.startswith("-"):
-                    break
-            rest = _flags_then_rest(rest, frozenset({"-u", "-C", "-S"}))
-            while rest and _ASSIGNMENT.match(rest[0]):
-                rest = rest[1:]
-            if not rest:
-                return words
-            words = rest
-        elif prog == "timeout":
-            rest = _flags_then_rest(rest, _TIMEOUT_VALUE_FLAGS)
-            words = rest[1:]
-        elif prog == "nice":
-            words = _flags_then_rest(rest, frozenset({"-n", "--adjustment"}))
-        elif prog in ("stdbuf", "ionice", "chrt", "taskset"):
-            words = _flags_then_rest(rest, frozenset({"-c", "-n", "-p"}))
-        elif prog == "xvfb-run":
-            words = _flags_then_rest(rest, frozenset({"-n", "-s", "-e", "-f", "-p", "-w"}))
-        elif prog in ("uv", "poetry", "pipenv", "pdm", "rye", "hatch") and rest[:1] == ["run"]:
-            if prog == "uv":
-                _uv_run_options(rest[1:], wrapped)
-            words = _flags_then_rest(rest[1:], _UV_VALUE_FLAGS)
-        elif prog in ("uvx", "pipx") and (prog == "uvx" or rest[:1] == ["run"]):
-            if prog == "uvx":
-                _uv_run_options(rest, wrapped)
-            words = _flags_then_rest(rest if prog == "uvx" else rest[1:], _UV_VALUE_FLAGS)
-        elif prog in ("npx", "bunx", "pnpx"):
-            words = _flags_then_rest(rest, frozenset({"-p", "--package", "-c", "--call"}))
-        elif prog in ("npm", "pnpm", "yarn") and rest[:1] in (["exec"], ["dlx"], ["x"]):
-            words = _flags_then_rest(rest[1:], frozenset({"-p", "--package", "-c", "--call"}))
-        elif prog == "bundle" and rest[:1] == ["exec"]:
-            words = rest[1:]
-        elif prog == "dotenv" and "--" in rest:
-            wrapped.filters.append("variables loaded by dotenv")
-            words = rest[rest.index("--") + 1 :]
-        elif _PYTHON.match(prog) and len(rest) >= 2 and rest[0] == "-m":
-            words = [rest[1], *rest[2:]]
-        elif _PYTHON.match(prog) and rest[:1] and rest[0].startswith("-m") and len(rest[0]) > 2:
-            words = [rest[0][2:], *rest[1:]]
-        else:
-            return words
-    return words
-
-
-def _short_cluster(arg: str) -> list[str]:
-    """`-qx` as `-q -x`, and `-qopython_functions=x` as `-q -o python_functions=x`: a letter
-    that takes a value takes the rest of the word."""
-    if arg.startswith("--") or len(arg) <= 2 or not arg.startswith("-"):
-        return [arg]
-    out: list[str] = []
-    for k, letter in enumerate(arg[1:], start=2):
-        out.append(f"-{letter}")
-        if letter in _PYTEST_SHORT_VALUES:
-            if arg[k:]:
-                out.append(arg[k:])
-            break
-    return out
-
-
-def _pytest_filters(
-    args: list[str], env: dict[str, str]
-) -> tuple[list[str], bool, list[str] | None]:
-    """(filters, collect only, paths): `paths` are the files and directories the run selects
-    when its only filters are plain paths, else None. An option not known to be harmless counts
-    as a filter."""
-    args = [part for arg in args for part in _short_cluster(arg)]
-    filters: list[str] = []
-    paths: list[str] = []
-    plain = True
-    collect_only = False
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        name, eq, _ = arg.partition("=")
-        if arg in _PYTEST_COLLECT:
-            collect_only = True
-        elif arg == "-p" and args[i + 1 : i + 2] in _HARMLESS_PLUGIN_SWITCHES:
-            i += 1
-        elif arg.startswith("-") and not eq and arg in _PYTEST_FILTER_FLAGS:
-            filters.append(_PYTEST_FILTER_FLAGS[arg])
-            plain = False
-            i += 1
-        elif eq and name in _PYTEST_FILTER_FLAGS:
-            filters.append(_PYTEST_FILTER_FLAGS[name])
-            plain = False
-        elif arg in _PYTEST_FILTER_SWITCHES:
-            filters.append(_PYTEST_FILTER_SWITCHES[arg])
-            plain = False
-        elif name in _PYTEST_HARMLESS_VALUES:
-            i += 0 if eq else 1
-        elif name == "--import-mode":
-            mode = arg.partition("=")[2] if eq else (args[i + 1] if i + 1 < len(args) else "")
-            i += 0 if eq else 1
-            if mode not in ("prepend", "append", "importlib"):
-                filters.append("--import-mode, an option the judge cannot tell is harmless")
-                plain = False
-        elif arg in _PYTEST_HARMLESS_SWITCHES or _pytest_regenerates(arg):
-            pass
-        elif arg.startswith("-"):
-            filters.append(f"{name}, an option the judge cannot tell is harmless")
-            plain = False
-        else:
-            paths.append(arg)
-            plain = plain and "::" not in arg and not _unspelled(arg)
-            if arg not in (".", "./"):
-                filters.append(f"only {arg}")
-        i += 1
-    if "PYTEST_ADDOPTS" in env:
-        filters.append("PYTEST_ADDOPTS")
-        plain = False
-    return filters, collect_only, paths if plain else None
-
-
-_WRITERS: Final = {
-    "pytest": frozenset(
-        {"--log-file", "--junitxml", "--junit-xml", "--html", "--benchmark-json",
-         "--report-log", "--resultlog", "--result-log", "--json-report-file", "--debug",
-         "--cov-report", "--basetemp", "--md-report-output"}
-    ),
-    "go test": frozenset(
-        {"-coverprofile", "-cpuprofile", "-memprofile", "-blockprofile", "-mutexprofile",
-         "-trace", "-o", "-outputdir"}
-    ),
-}  # fmt: skip
-"""Options naming a file or directory a test run writes (a log, a report, a profile, the test
-binary, pytest's temporary directory, which it empties first)."""
-_WRITTEN_DIRS: Final = frozenset({"--basetemp", "-outputdir"})
-
-
-def _run_writes(
-    runner: str, args: list[str], cwd: str | None
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]], bool]:
-    """(written, emptied, after): the (option, path) pairs a test run writes and empties that
-    can matter, and whether it may leave code, configuration or tests changed after its own
-    check. Paths under /tmp and outside the session directory do not matter, nor reports and
-    profiles (`report.xml`, `cover.out`, `htmlcov/`), whose text the runner writes; a path
-    among the tests, a configuration file or a runner's own file is the suite rewritten, and a
-    code file (`--log-file=calc.py`) is a change after the check."""
-    writers = _WRITERS[runner]
-    written: list[tuple[str, str]] = []
-    emptied: list[tuple[str, str]] = []
-    after = False
-    i = 0
-    while i < len(args):
-        name, eq, value = args[i].partition("=")
-        if runner == "go test" and name.startswith("--"):
-            name = name[1:]
-        if name not in writers:
-            i += 1
-            continue
-        if not eq:
-            following = args[i + 1] if i + 1 < len(args) else ""
-            optional = name == "--debug" and (not following or following.startswith("-"))
-            value = "pytestdebug.log" if optional else following
-            i += 0 if optional else 1
-        i += 1
-        directory = name in _WRITTEN_DIRS
-        if name == "--cov-report":
-            kind, colon, value = value.partition(":")
-            if not colon or not value:
-                continue
-            directory = kind in ("html", "annotate")
-        if not value or value in _SAFE_TARGETS or value.startswith(_SCRATCH):
-            continue
-        if _outside(value, cwd):
-            continue
-        weakens = (
-            edits.is_test_path(value) or edits.is_harness_path(value) or edits.is_config_path(value)
-        )
-        if name == "--basetemp":
-            emptied.append((name, value))
-        if weakens or _unspelled(value) or (not directory and edits.is_code_path(value)):
-            written.append((name, value))
-            after = after or not directory
-    return written, emptied, after
-
-
-def _outside(path: str, cwd: str | None) -> bool:
-    """An absolute path outside the session directory `cwd`."""
-    if not posixpath.isabs(path) or cwd is None or not posixpath.isabs(cwd):
-        return False
-    return posixpath.relpath(posixpath.normpath(path), posixpath.normpath(cwd)).startswith("..")
-
-
-_UNITTEST_HARMLESS: Final = frozenset(
-    {"-v", "--verbose", "-q", "--quiet", "-b", "--buffer", "-f", "--failfast", "-c", "--catch",
-     "--locals"}
-)  # fmt: skip
-"""`python -m unittest` switches that change only output, stopping early or Ctrl-C handling."""
-_UNITTEST_VALUES: Final = frozenset(
-    {"-s", "--start-directory", "-p", "--pattern", "-t", "--top-level-directory", "-k",
-     "--durations"}
-)  # fmt: skip
-_UNITTEST_DEFAULTS: Final = {
-    "-s": ".", "--start-directory": ".", "-t": ".", "--top-level-directory": ".",
-    "-p": "test*.py", "--pattern": "test*.py",
-}  # fmt: skip
-
-
-def _unittest_filters(args: list[str]) -> tuple[list[str], bool]:
-    """Filters of a `python -m unittest` run, deny-by-default: every option but the few that
-    change only output, and every discover argument but the defaults (start `.`, pattern
-    `test*.py`), narrows or moves the run."""
-    if args[:1] in (["-h"], ["--help"]):
-        return [], True
-    discover = args[:1] == ["discover"]
-    rest = args[1:] if discover else args
-    label = "discover " if discover else ""
-    filters: list[str] = []
-    positional: list[str] = []
-    i = 0
-    while i < len(rest):
-        arg = rest[i]
-        name, eq, value = arg.partition("=")
-        if not arg.startswith("--") and arg[:2] in _UNITTEST_VALUES and len(arg) > 2:
-            name, eq, value = arg[:2], "=", arg[2:]
-        if arg in _UNITTEST_HARMLESS:
-            pass
-        elif name in _UNITTEST_VALUES:
-            if not eq:
-                value = rest[i + 1] if i + 1 < len(rest) else ""
-                i += 1
-            default = _UNITTEST_DEFAULTS.get(name)
-            if name != "--durations" and not (discover and value.strip("/") == default):
-                filters.append(f"{label}{name}")
-        elif arg.startswith("-") and arg != "-":
-            filters.append(f"{label}{name}, an option the judge cannot tell is harmless")
-        else:
-            positional.append(arg)
-        i += 1
-    if discover:
-        defaults = (".", "test*.py", ".")
-        filters.extend(
-            f"discover {a}"
-            for k, a in enumerate(positional)
-            if k >= len(defaults) or a.rstrip("/") != defaults[k].rstrip("/") or a == ""
-        )
-    else:
-        filters.extend(f"only {a}" for a in positional)
-    return filters, False
-
-
-def _js_filters(runner: str, args: list[str]) -> tuple[list[str], bool]:
-    filters: list[str] = []
-    collect_only = False
-    if runner == "vitest" and args[:1] == ["related"]:
-        filters.append("vitest related")
-    if args[:1] and args[0] in _VITEST_SUBCOMMANDS | {"related", "test"}:
-        args = args[1:]
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        name, eq, _ = arg.partition("=")
-        if name in _JS_COLLECT:
-            collect_only = True
-        elif name in _JS_FILTER_FLAGS:
-            filters.append(name)
-            if not eq:
-                i += 1
-        elif name in _JS_FILTER_SWITCHES:
-            filters.append(name)
-        elif arg.startswith("-"):
-            if not eq and arg in _JS_VALUE_FLAGS:
-                i += 1
-            if runner in ("jest", "vitest") and not _js_harmless(name):
-                filters.append(f"{name}, an option the judge cannot tell is harmless")
-        else:
-            filters.append(f"only {arg}")
-        i += 1
-    return filters, collect_only
-
-
-_NODE_TEST_HARMLESS: Final = frozenset(
-    {"--test", "--test-reporter", "--test-reporter-destination", "--test-concurrency",
-     "--test-timeout", "--experimental-test-coverage", "--test-coverage-include",
-     "--test-coverage-exclude", "--test-coverage-lines", "--test-coverage-branches",
-     "--test-coverage-functions", "--test-force-exit", "--enable-source-maps", "--no-warnings",
-     "--trace-warnings", "--trace-uncaught", "--stack-trace-limit", "--max-old-space-size"}
-)  # fmt: skip
-"""`node --test` options that change only output, coverage, workers, timeouts or warnings
-printing. Anything else (`--require`, `--import`, `--env-file`, `--conditions`, a loader) can
-change what the tests load."""
-_NODE_TEST_FILTERS: Final = frozenset(
-    {"--test-name-pattern", "--test-skip-pattern", "--test-only", "--test-shard"}
-)
-_NODE_VALUES: Final = frozenset(
-    {"--test-reporter", "--test-reporter-destination", "--test-concurrency", "--test-timeout",
-     "--test-coverage-include", "--test-coverage-exclude", "--test-coverage-lines",
-     "--test-coverage-branches", "--test-coverage-functions", "--test-name-pattern",
-     "--test-skip-pattern", "--test-shard", "--require", "-r", "--import", "--loader",
-     "--experimental-loader", "--env-file", "--conditions", "-C", "--stack-trace-limit",
-     "--max-old-space-size", "--input-type", "--eval", "-e", "--print", "-p"}
-)  # fmt: skip
-
-
-def _node_test_filters(args: list[str]) -> tuple[list[str], bool]:
-    """(filters, updates snapshots) of a `node --test` run, deny-by-default."""
-    filters: list[str] = []
-    update = False
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        name, eq, _ = arg.partition("=")
-        if name == "--test-update-snapshots":
-            update = True
-        elif name in _NODE_TEST_FILTERS:
-            filters.append(name)
-        elif arg.startswith("-") and name not in _NODE_TEST_HARMLESS:
-            filters.append(f"{name}, an option the judge cannot tell is harmless")
-        elif not arg.startswith("-"):
-            filters.append(f"only {arg}")
-        if not eq and name in _NODE_VALUES:
-            i += 1
-        i += 1
-    return filters, update
-
-
-_TOX_HARMLESS: Final = frozenset(
-    {"-q", "--quiet", "-v", "--verbose", "-vv", "-r", "--recreate", "--no-recreate-pkg",
-     "-p", "--parallel", "--parallel-live", "-o", "--parallel-no-spinner", "--colored",
-     "--no-provision", "--skip-pkg-install", "--develop", "--no-color", "--forcecolor",
-     "--reuse-existing-virtualenvs", "-R", "--no-reuse-existing-virtualenvs", "--no-venv",
-     "--stop-on-first-error", "-x", "--no-error-on-missing-interpreters"}
-)  # fmt: skip
-"""tox and nox options that change only output, parallelism or how environments are reused
-(`nox -x` stops at the first failing session, which only shortens a failing run)."""
-_TOX_ENVS: Final = frozenset({"-e", "--env", "-s", "--session", "--sessions"})
-_TOX_VALUES: Final = frozenset(
-    {"-e", "--env", "-s", "--session", "--sessions", "-k", "--keywords", "-t", "--tags", "-c",
-     "--conf", "-f", "--noxfile", "--override", "-x", "--root", "--workdir", "--installpkg",
-     "--python", "-P", "--force-python", "--db"}
-)  # fmt: skip
-_PYTHON_ENV: Final = re.compile(r"(?:py|pypy)(?:\d+(?:\.\d+)?)?")
-
-
-def _tox_filters(prog: str, args: list[str]) -> list[str]:
-    """Filters of a tox or nox run, deny-by-default: environments other than a Python
-    version's (`py`, `py312`), arguments passed through, and options outside the few that
-    change only output or parallelism."""
-    if args[:1] and args[0] in ("run", "r", "run-parallel", "p"):
-        args = args[1:]
-    filters: list[str] = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg == "--":
-            if args[i + 1 :]:
-                filters.append(f"arguments passed through {prog}")
-            break
-        name, eq, value = arg.partition("=")
-        if not arg.startswith("--") and arg[:2] in _TOX_ENVS and len(arg) > 2:
-            name, eq, value = arg[:2], "=", arg[2:]
-        following = args[i + 1] if i + 1 < len(args) else ""
-        takes = name in _TOX_VALUES and not (prog == "nox" and name == "-x")
-        if name in ("-p", "--parallel", "--python") and not eq:
-            takes = prog == "nox" or following in ("auto", "all") or following.isdigit()
-        if takes and not eq:
-            value = following
-            i += 1
-        if name in _TOX_ENVS:
-            envs = [e for part in value.split(",") for e in part.split() if e]
-            if not envs or not all(_PYTHON_ENV.fullmatch(e) for e in envs):
-                filters.append(name)
-        elif name in ("-p", "--parallel", "--python"):
-            pass
-        elif arg.startswith("-") and not (name in _TOX_HARMLESS and not takes):
-            filters.append(f"{name}, an option the judge cannot tell is harmless")
-        elif not arg.startswith("-"):
-            filters.append(f"only {arg}")
-        i += 1
-    return filters
-
-
-def _js_harmless(name: str) -> bool:
-    return name in _JS_HARMLESS or name.startswith("--coverage.")
-
-
-def _go_filters(args: list[str]) -> tuple[list[str], bool]:
-    filters: list[str] = []
-    packages: list[str] = []
-    collect_only = False
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        name, eq, _ = arg.partition("=")
-        flag = name.replace("--", "-", 1) if name.startswith("--") else name
-        if flag in ("-run", "-skip"):
-            filters.append(flag)
-            if not eq:
-                i += 1
-        elif flag == "-short":
-            filters.append("-short")
-        elif flag == "-list":
-            collect_only = True
-            if not eq:
-                i += 1
-        elif flag == "-args":
-            filters.append("-args, arguments the judge cannot read passed to the test binary")
-            break
-        elif flag in _GO_HARMLESS or _GO_REGEN.fullmatch(arg):
-            if not eq and flag in _GO_VALUE_FLAGS and flag not in _GO_SWITCHES:
-                i += 1
-        elif arg.startswith("-"):
-            filters.append(f"{flag}, an option the judge cannot tell is harmless")
-            if not eq and flag in _GO_VALUE_FLAGS:
-                i += 1
-        else:
-            packages.append(arg)
-        i += 1
-    if not packages:
-        filters.append("only the current package (no ./...)")
-    filters.extend(f"only {p}" for p in packages if not p.endswith("..."))
-    return filters, collect_only
-
-
-def _cargo_filters(args: list[str]) -> tuple[list[str], bool]:
-    filters: list[str] = []
-    collect_only = False
-    binary: list[str] = []
-    if "--" in args:
-        split = args.index("--")
-        args, binary = args[:split], args[split + 1 :]
-    if args[:1] == ["run"]:
-        args = args[1:]
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        name, eq, _ = arg.partition("=")
-        if name in _CARGO_FILTER_FLAGS:
-            filters.append(name)
-            if not eq:
-                i += 1
-        elif name in _CARGO_FILTER_SWITCHES:
-            filters.append(name)
-        elif name in ("--no-run", "--list"):
-            collect_only = True
-        elif name in _CARGO_HARMLESS:
-            if not eq and name in _CARGO_VALUE_FLAGS:
-                i += 1
-        elif arg.startswith("-"):
-            filters.append(f"{name}, an option the judge cannot tell is harmless")
-            if not eq and name in _CARGO_VALUE_FLAGS:
-                i += 1
-        else:
-            filters.append(f"only tests matching {arg}")
-        i += 1
-    for arg in binary:
-        name = arg.partition("=")[0]
-        if arg in _TEST_BINARY_FILTERS:
-            filters.append(arg)
-        elif arg == "--list":
-            collect_only = True
-        elif arg.startswith("-") and name not in _TEST_BINARY_HARMLESS:
-            filters.append(f"{name}, an option the judge cannot tell is harmless")
-        elif not arg.startswith("-") and not arg.isdigit():
-            filters.append(f"only tests matching {arg}")
-    return filters, collect_only
-
-
-_COVERAGE_FLAGS: Final = frozenset({"--coverage", "--experimental-test-coverage", "--no-coverage"})
-"""Coverage switches of jest and vitest (`--coverage`) and `node --test`
-(`--experimental-test-coverage`): passed to a test script whose runner is unknown, each only
-measures (or makes the runner reject the switch, which fails the run)."""
-
-
-def _generic_filters(label: str, args: list[str]) -> list[str]:
-    """Arguments passed to a test script whose runner is unknown narrow it, conservatively;
-    only coverage switches are known to change nothing."""
-    meaningful = [
-        a
-        for a in args
-        if a != "--"
-        and a not in ("--silent", "-s", "--if-present")
-        and a.partition("=")[0] not in _COVERAGE_FLAGS
-    ]
-    return [f"arguments passed to {label}: {' '.join(meaningful)}"] if meaningful else []
-
-
-def _pm_script(pm: str, words: list[str]) -> _Classified:
-    rest = [
-        w for w in words[1:] if w not in ("--silent", "-s", "--if-present", "-w", "--workspaces")
-    ]
-    if not rest:
-        return _Classified(Category.MUTATING, pm, mutation=f"{pm} with no arguments installs")
-    sub = rest[0]
-    args = rest[1:]
-    if sub in ("run", "run-script", "rum", "urn"):
-        if not args:
-            return _Classified(Category.READ_ONLY, pm)
-        sub, args = args[0], args[1:]
-    elif sub in ("t", "tst"):
-        sub = "test"
-    elif sub in _PM_INSTALL:
-        return _Classified(Category.MUTATING, pm, mutation=f"{pm} {sub} changes dependencies")
-    elif why := _tool_config_change(words):
-        return _Classified(Category.MUTATING, pm, mutation=why, touched=[])
-    elif sub in _PM_READ_ONLY:
-        return _Classified(Category.READ_ONLY, pm)
-    elif pm == "bun" and sub == "test":
-        filters, collect = _js_filters("bun", args)
-        return _Classified(Category.TEST, pm, "bun test", filters, collect)
-    label = f"{pm} {sub}" if sub == "test" else f"{pm} run {sub}"
-    if sub == "test" or sub.startswith("test:"):
-        filters = _generic_filters(label, args)
-        if sub != "test":
-            filters.insert(0, f"script {sub} (not the project's test script)")
-        return _Classified(Category.TEST, pm, f"{pm} test", filters)
-    if _BUILD_SCRIPTS.match(sub):
-        return _Classified(Category.BUILD, pm)
-    if _LINT_SCRIPTS.match(sub):
-        fix = any(a in _FIX_FLAGS for a in args) or "fix" in sub
-        return _Classified(
-            Category.LINT, pm, mutation=f"{label} --fix rewrites files" if fix else None
-        )
-    if _TYPECHECK_SCRIPTS.match(sub):
-        return _Classified(Category.TYPECHECK, pm)
-    if _FORMAT_SCRIPTS.match(sub):
-        checking = "check" in sub or any("check" in a for a in args)
-        return _Classified(
-            Category.FORMAT, pm, mutation=None if checking else f"{label} rewrites files"
-        )
-    return _Classified(Category.UNKNOWN, pm, mutation=f"{label} runs a project script")
-
-
-_MAKE_OPTIONS: Final[dict[str, tuple[dict[str, str], frozenset[str]]]] = {
-    "make": (
-        {"-C": "dir", "--directory": "dir", "-f": "file", "--file": "file", "--makefile": "file",
-         "-I": "value", "--include-dir": "value", "-o": "value", "--old-file": "value",
-         "--assume-old": "value", "-W": "value", "--what-if": "value", "--new-file": "value",
-         "--assume-new": "value", "-j": "count", "--jobs": "count", "-l": "count",
-         "--load-average": "count", "--max-load": "count", "-O": "count",
-         "--output-sync": "count"},
-        frozenset({"-s", "--silent", "--quiet", "-k", "--keep-going", "-w", "--print-directory",
-                   "--no-print-directory", "-B", "--always-make", "-r", "--no-builtin-rules",
-                   "-R", "--no-builtin-variables", "--warn-undefined-variables", "-j", "--jobs",
-                   "-l", "-O"}),
-    ),
-    "gmake": ({}, frozenset()),
-    "just": (
-        {"-f": "file", "--justfile": "file", "-d": "dir", "--working-directory": "dir",
-         "--set": "pair", "--shell": "value", "--dotenv-filename": "value",
-         "--dotenv-path": "value", "--color": "value"},
-        frozenset({"-q", "--quiet", "-v", "--verbose", "--color"}),
-    ),
-    "task": (
-        {"-t": "file", "--taskfile": "file", "-d": "dir", "--dir": "dir", "-o": "value",
-         "--output": "value", "-c": "value", "--color": "value", "-C": "count",
-         "--concurrency": "count"},
-        frozenset({"-s", "--silent", "-v", "--verbose", "-o", "--output", "-c", "--color", "-C",
-                   "--concurrency", "-f", "--force"}),
-    ),
-    "mage": ({"-d": "dir", "-w": "dir", "-t": "value"}, frozenset({"-v", "-t"})),
-}  # fmt: skip
-"""For each make-like program, its options that take a value (what the value is) and the
-options that change only output, parallelism or rebuilding. Any other option (`make -e`,
-`make -i`, `just --dotenv-path`) may change what the recipe runs."""
-_MAKE_OPTIONS["gmake"] = _MAKE_OPTIONS["make"]
-
-
-@dataclass(slots=True)
-class _MakeArgs:
-    targets: list[str] = field(default_factory=list[str])
-    assigns: dict[str, str] = field(default_factory=dict[str, str])
-    dirs: list[str] = field(default_factory=list[str])
-    files: list[str] = field(default_factory=list[str])
-    unknown: list[str] = field(default_factory=list[str])
-    dry_run: bool = False
-
-
-def _make_args(prog: str, args: list[str]) -> _MakeArgs:
-    """Targets, `VAR=value` arguments and options of a make-like command line, options
-    anywhere (`make test -C dir`, `make -Cdir -j4 test`)."""
-    takes, harmless = _MAKE_OPTIONS[prog]
-    out = _MakeArgs()
-
-    def option(name: str, value: str | None) -> bool:
-        """Record `name`; True when it took `value`."""
-        kind = takes.get(name)
-        if name in ("-n", "--dry-run", "--just-print", "--recon", "--dry"):
-            out.dry_run = True
-        if kind == "dir":
-            out.dirs.append(_dir_word(value or ""))
-        elif kind == "file":
-            out.files.append(value or "")
-            if not value or _unspelled(value):
-                out.unknown.append(f"{name} {value or ''}".strip())
-        elif kind == "pair" and value is not None:
-            out.assigns[value] = ""
-        if kind == "count":
-            return value is not None and value.isdigit()
-        if name not in harmless and kind not in ("dir", "file") and not out.dry_run:
-            out.unknown.append(name)
-        return kind is not None
-
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        following = args[i + 1] if i + 1 < len(args) else None
-        if arg == "--":
-            out.targets.extend(args[i + 1 :])
-            break
-        if arg.startswith("--"):
-            name, eq, value = arg.partition("=")
-            if eq:
-                option(name, value)
-            elif option(name, following):
-                i += 1
-        elif arg.startswith("-") and len(arg) > 1:
-            for k, letter in enumerate(arg[1:], start=2):
-                name, attached = f"-{letter}", arg[k:]
-                if takes.get(name) is None:
-                    option(name, None)
-                    continue
-                if attached and (takes[name] != "count" or attached.isdigit()):
-                    option(name, attached)
-                elif not attached and option(name, following):
-                    i += 1
-                break
-        elif _ASSIGNMENT.match(arg):
-            name, _, value = arg.partition("=")
-            out.assigns[name] = value
-        else:
-            out.targets.append(arg)
-        i += 1
-    return out
-
-
-_CONFIG_WRITES: Final = frozenset({"set", "delete", "rm", "unset", "edit", "fix"})
-
-
-def _tool_config_change(words: list[str]) -> str | None:
-    """Why the command changes settings a tool reads on every later run (`npm config set
-    node-options=...`, `go env -w GOFLAGS=-run=X`), or None."""
-    prog = program_name(words[0]) if words else ""
-    args = [w for w in words[1:] if not w.startswith("-")]
-    if prog in _PM:
-        verb = args[0] if args[:1] in (["set"], ["unset"]) else None
-        if args[:1] in (["config"], ["c"]) and args[1:2] and args[1] in _CONFIG_WRITES:
-            verb = args[1]
-        if verb is not None:
-            key = next((a for a in args[1:] if a not in _CONFIG_WRITES), "a setting")
-            return f"{prog} config {verb} {key} changes how every later {prog} command runs"
-    if prog == "go" and words[1:2] == ["env"]:
-        flag = next((w for w in words[2:] if w in ("-w", "-u")), None)
-        if flag is not None:
-            key = next((a for a in args[1:]), "a variable")
-            return f"go env {flag} {key} changes how every later go command runs"
-    return None
-
-
-def _make_like(prog: str, words: list[str]) -> _Classified:
-    parsed = _make_args(prog, words[1:])
-    if parsed.dry_run:
-        return _Classified(Category.READ_ONLY, prog)
-    targets = parsed.targets
-    if not targets:
-        return _Classified(Category.BUILD, prog, mutation=f"{prog} runs the default target")
-    target = targets[0]
-    label = f"{prog} {target}"
-    if target in _TEST_TARGETS or target.startswith(("test-", "test_", "tests-")):
-        filters = [] if target in _TEST_TARGETS else [f"target {target}"]
-        filters.extend(f"also runs {t}" for t in targets[1:])
-        filters.extend(
-            f"{name}, an option the judge cannot tell is harmless" for name in parsed.unknown
-        )
-        return _Classified(
-            Category.TEST,
-            prog,
-            label,
-            filters,
-            relocations=parsed.dirs,
-            config_files=[f for f in parsed.files if f],
-            run_env=[
-                name
-                for name, value in parsed.assigns.items()
-                if not run_env_allowed(name) and not _harmless_env(name, value)
-            ],
-        )
-    if target in ("build", "all", "compile", "dist"):
-        return _Classified(Category.BUILD, prog)
-    if target in ("lint", "check-lint", "ruff", "flake8"):
-        return _Classified(Category.LINT, prog)
-    if target in ("typecheck", "type-check", "types", "mypy", "pyright", "tsc"):
-        return _Classified(Category.TYPECHECK, prog)
-    if target in ("fmt", "format"):
-        return _Classified(Category.FORMAT, prog, mutation=f"{label} rewrites files")
-    return _Classified(Category.UNKNOWN, prog, mutation=f"{label} runs a project target")
-
-
-def _maybe_directory(path: str) -> bool:
-    """A path that may name a directory (and so files inside it the command line does not
-    name): a trailing slash, `.`, a glob, or a last component without an extension."""
-    name = posixpath.basename(path.rstrip("/"))
-    return path.endswith("/") or name in ("", ".", "..", "*") or "." not in name.lstrip(".")
-
-
-def _git_paths(sub: str, rest: list[str]) -> list[str] | None:
-    """The files `git checkout`/`restore` rewrite when its command line names them, else None
-    (a branch switch, the whole tree, or a directory)."""
-    if "--" in rest:
-        paths = rest[rest.index("--") + 1 :]
-    elif sub == "restore":
-        paths = _positional(rest, frozenset({"-s", "--source"}))
-    else:
-        return None
-    if not paths or any(_maybe_directory(p) or _unspelled(p) for p in paths):
-        return None
-    return paths
-
-
-def _positional(args: list[str], value_flags: frozenset[str]) -> list[str]:
-    out: list[str] = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg.startswith("-") and arg != "-":
-            if "=" not in arg and arg in value_flags:
-                i += 1
-        else:
-            out.append(arg)
-        i += 1
-    return out
-
-
-def _git(words: list[str]) -> _Classified:
-    args = _flags_then_rest(words[1:], frozenset({"-C", "-c", "--git-dir", "--work-tree"}))
-    sub = args[0] if args else ""
-    rest = args[1:]
-    if sub not in _GIT_MUTATING:
-        return _Classified(Category.READ_ONLY, "git")
-    if sub == "stash" and rest[:1] in (["list"], ["show"]):
-        return _Classified(Category.READ_ONLY, "git")
-    if sub == "worktree" and rest[:1] == ["list"]:
-        return _Classified(Category.READ_ONLY, "git")
-    mutation = f"git {sub} changes the working tree"
-    named = _positional(rest, frozenset({"-m", "-s", "--source"}))
-    if sub == "rm":
-        return _Classified(Category.MUTATING, "git", mutation=mutation, deleted=named, touched=[])
-    if sub == "mv":
-        return _Classified(
-            Category.MUTATING, "git", mutation=mutation, deleted=named[:-1], touched=named[-1:]
-        )
-    if sub in ("init", "update-index") or (
-        sub == "reset" and not {"--hard", "--merge", "--keep"} & set(rest)
-    ):
-        return _Classified(Category.MUTATING, "git", mutation=mutation, touched=[])
-    new_branch = {"checkout": ("-b", "-B"), "switch": ("-c", "-C")}.get(sub, ())
-    if rest[:1] and rest[0] in new_branch and len(named) == 1:
-        return _Classified(Category.MUTATING, "git", mutation=mutation, touched=[])
-    if sub in ("checkout", "restore") and (paths := _git_paths(sub, rest)) is not None:
-        return _Classified(Category.MUTATING, "git", mutation=mutation, touched=paths)
-    return _Classified(
-        Category.MUTATING,
-        "git",
-        mutation=mutation,
-        touched=[],
-        opaque=f"git {sub} can rewrite any file in the working tree",
-    )
-
-
-def _unspelled(path: str) -> bool:
-    """A path the shell builds at run time (a variable, a command substitution, a glob)."""
-    return re.search(r"[$`*?\[]", path) is not None
-
-
-def _sed(args: list[str]) -> _Classified:
-    in_place = False
-    script_given = False
-    files: list[str] = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg in ("-e", "-f", "--expression", "--file", "-l", "--line-length"):
-            script_given = script_given or arg not in ("-l", "--line-length")
-            i += 2
-            continue
-        if arg.startswith(("--expression=", "--file=")):
-            script_given = True
-        elif arg.startswith("--in-place"):
-            in_place = True
-        elif arg.startswith("-") and not arg.startswith("--") and len(arg) > 1:
-            short = arg[1:]
-            if "i" in short:
-                in_place = True
-                if short.endswith("i") and i + 1 < len(args) and args[i + 1] == "":
-                    i += 1
-            if short[-1:] in ("e", "f") and "i" not in short:
-                script_given = True
-                i += 1
-        elif not script_given:
-            script_given = True
-        else:
-            files.append(arg)
-        i += 1
-    if not in_place:
-        return _Classified(Category.READ_ONLY, "sed")
-    return _Classified(Category.MUTATING, "sed", mutation="sed -i edits files", touched=files)
-
-
-def _perl(args: list[str]) -> _Classified:
-    in_place = any(a.startswith("-") and not a.startswith("--") and "i" in a[1:] for a in args)
-    scripts = [i for i, a in enumerate(args) if re.fullmatch(r"-[a-zA-Z0-9]*[eE]", a)]
-    if not in_place or not scripts:
-        return _Classified(
-            Category.MUTATING if in_place else Category.UNKNOWN,
-            "perl",
-            mutation="perl -i edits files" if in_place else "perl runs a program",
-        )
-    skip = {i + 1 for i in scripts}
-    files = [a for i, a in enumerate(args) if i not in skip and not a.startswith("-")]
-    return _Classified(Category.MUTATING, "perl", mutation="perl -i edits files", touched=files)
 
 
 _OPAQUE_WRITERS: Final = frozenset(
     {"tar", "unzip", "patch", "dd", "rsync", "wget", "split", "bunzip2", "gunzip", "7z", "unrar"}
 )
 """File-changing programs whose targets are not (all) the words on their command line."""
+
+
 _DETACHERS: Final = frozenset(
     {"setsid", "disown", "at", "batch", "screen", "tmux", "daemonize", "start-stop-daemon",
      "systemd-run", "launchctl", "crontab", "watchexec", "entr", "fswatch", "inotifywait"}
 )  # fmt: skip
 """Programs that leave something running, or scheduled, after the command returns."""
+
+
 _COPIERS: Final = frozenset({"cp", "mv", "install", "ln", "scp"})
-_SCRATCH: Final = ("/tmp/", "/private/tmp/", "/var/folders/", "/dev/")  # noqa: S108
+
+
 _VERSION_FLAGS: Final = frozenset({"--version", "-V", "-VV", "--help", "-h"})
+
+
 _PYTHON_SIDE_EFFECTS: Final = re.compile(
     r"import|open|exec|eval|compile|__|getattr|setattr|delattr|globals|locals|vars|"
     r"breakpoint|help|input|memoryview"
@@ -1801,10 +338,10 @@ _PYTHON_SIDE_EFFECTS: Final = re.compile(
 
 def _classify_program(
     words: list[str], env: dict[str, str], depth: int, cwd: str | None
-) -> _Classified:
+) -> Classified:
     prog = program_name(words[0])
     args = words[1:]
-    if prog in _SHELLS and depth < MAX_NESTING:
+    if prog in SHELLS and depth < MAX_NESTING:
         script = next(
             (args[i + 1] for i, a in enumerate(args[:-1]) if re.fullmatch(r"-[a-z]*c[a-z]*", a)),
             None,
@@ -1817,17 +354,17 @@ def _classify_program(
                 category = Category.MUTATING
             else:
                 category = nested.categories[-1] if nested.categories else Category.READ_ONLY
-            return _Classified(category, prog, nested=nested)
-        return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs a script")
+            return Classified(category, prog, nested=nested)
+        return Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs a script")
     if prog in ("pytest", "py.test"):
-        filters, collect, paths = _pytest_filters(args, env)
-        regen = next((a for a in args if _pytest_regenerates(a)), None)
-        written, emptied, after = _run_writes("pytest", args, cwd)
+        filters, collect, paths = pytest_filters(args, env)
+        regen = next((a for a in args if pytest_regenerates(a)), None)
+        written, emptied, after = run_writes("pytest", args, cwd)
         why = f"pytest {regen} rewrites expected outputs" if regen else None
         if written or emptied:
             option, path = (written or emptied)[0]
             why = why or f"pytest {option} writes {path}"
-        return _Classified(
+        return Classified(
             Category.TEST,
             prog,
             "pytest",
@@ -1841,10 +378,10 @@ def _classify_program(
             writes_after=after,
         )
     if prog == "unittest":
-        filters, collect = _unittest_filters(args)
-        return _Classified(Category.TEST, prog, "unittest", filters, collect)
+        filters, collect = unittest_filters(args)
+        return Classified(Category.TEST, prog, "unittest", filters, collect)
     if prog in ("jest", "vitest", "mocha", "ava", "tap", "jasmine"):
-        filters, collect = _js_filters(prog, args)
+        filters, collect = js_filters(prog, args)
         if prog == "vitest" and args[:1] in (["bench"], ["list"]):
             collect = True
         mutation = (
@@ -1852,7 +389,7 @@ def _classify_program(
             if any(a in ("-u", "--updateSnapshot", "--update") for a in args)
             else None
         )
-        return _Classified(
+        return Classified(
             Category.TEST,
             prog,
             prog,
@@ -1862,11 +399,11 @@ def _classify_program(
             opaque=f"{prog} -u rewrites the expected snapshots" if mutation else None,
         )
     if prog == "playwright" and args[:1] == ["test"]:
-        filters, collect = _js_filters("playwright", args[1:])
-        return _Classified(Category.TEST, prog, "playwright test", filters, collect)
+        filters, collect = js_filters("playwright", args[1:])
+        return Classified(Category.TEST, prog, "playwright test", filters, collect)
     if prog == "cypress" and args[:1] == ["run"]:
-        filters, collect = _js_filters("cypress", args[1:])
-        return _Classified(Category.TEST, prog, "cypress run", filters, collect)
+        filters, collect = js_filters("cypress", args[1:])
+        return Classified(Category.TEST, prog, "cypress run", filters, collect)
     if prog in ("rspec", "phpunit", "pest", "ctest", "behave", "nosetests", "nose2", "ward"):
         positional = [a for a in args if not a.startswith("-")]
         filters = [f"only {a}" for a in positional]
@@ -1888,11 +425,11 @@ def _classify_program(
                 "--only-failures",
             )
         )
-        return _Classified(Category.TEST, prog, prog, filters)
+        return Classified(Category.TEST, prog, prog, filters)
     if prog in ("node", "nodejs") and "--test" in args:
-        filters, update = _node_test_filters(args)
+        filters, update = node_test_filters(args)
         why = "node --test --test-update-snapshots rewrites the expected snapshots"
-        return _Classified(
+        return Classified(
             Category.TEST,
             prog,
             "node --test",
@@ -1901,16 +438,16 @@ def _classify_program(
             opaque=why if update else None,
         )
     if prog in ("tox", "nox"):
-        return _Classified(Category.TEST, prog, prog, _tox_filters(prog, args))
+        return Classified(Category.TEST, prog, prog, tox_filters(prog, args))
     if prog == "go":
         sub = args[0] if args else ""
         if sub == "test":
-            filters, collect = _go_filters(args[1:])
-            regen = next((a for a in args[1:] if _GO_REGEN.fullmatch(a) and not _off(a)), None)
+            filters, collect = go_filters(args[1:])
+            regen = next((a for a in args[1:] if GO_REGEN.fullmatch(a) and not off(a)), None)
             why = f"go test {regen} rewrites expected outputs" if regen else None
-            written, _, after = _run_writes("go test", args[1:], cwd)
+            written, _, after = run_writes("go test", args[1:], cwd)
             wrote = f"go test {written[0][0]} writes {written[0][1]}" if written else None
-            return _Classified(
+            return Classified(
                 Category.TEST,
                 prog,
                 "go test",
@@ -1922,55 +459,55 @@ def _classify_program(
                 writes_after=after,
             )
         if sub in ("build", "install"):
-            return _Classified(Category.BUILD, prog)
+            return Classified(Category.BUILD, prog)
         if sub == "vet":
-            return _Classified(Category.LINT, prog)
+            return Classified(Category.LINT, prog)
         if sub in ("fmt", "generate", "get") or args[:2] == ["mod", "tidy"]:
-            return _Classified(Category.MUTATING, prog, mutation=f"go {sub} changes files")
-        if why := _tool_config_change(words):
-            return _Classified(Category.MUTATING, prog, mutation=why, touched=[])
+            return Classified(Category.MUTATING, prog, mutation=f"go {sub} changes files")
+        if why := tool_config_change(words):
+            return Classified(Category.MUTATING, prog, mutation=why, touched=[])
         if sub in ("version", "env", "list", "doc", "help") or args[:2] == ["mod", "graph"]:
-            return _Classified(Category.READ_ONLY, prog)
-        return _Classified(Category.UNKNOWN, prog, mutation=f"go {sub} runs a program")
+            return Classified(Category.READ_ONLY, prog)
+        return Classified(Category.UNKNOWN, prog, mutation=f"go {sub} runs a program")
     if prog == "cargo":
         sub = args[0] if args else ""
         if sub in ("test", "t"):
-            filters, collect = _cargo_filters(args[1:])
-            return _Classified(Category.TEST, prog, "cargo test", filters, collect)
+            filters, collect = cargo_filters(args[1:])
+            return Classified(Category.TEST, prog, "cargo test", filters, collect)
         if sub == "insta":
             action = args[1] if len(args) > 1 else ""
             if action in ("accept", "review", "reject") or (
                 action == "test" and any(a in ("--accept", "--review") for a in args)
             ):
                 why = f"cargo insta {action} rewrites expected outputs"
-                return _Classified(Category.MUTATING, prog, mutation=why, opaque=why)
+                return Classified(Category.MUTATING, prog, mutation=why, opaque=why)
             if action == "test":
-                filters, collect = _cargo_filters(args[2:])
-                return _Classified(Category.TEST, prog, "cargo insta test", filters, collect)
+                filters, collect = cargo_filters(args[2:])
+                return Classified(Category.TEST, prog, "cargo insta test", filters, collect)
         if sub == "nextest":
-            filters, collect = _cargo_filters(args[1:])
-            return _Classified(Category.TEST, prog, "cargo nextest", filters, collect)
+            filters, collect = cargo_filters(args[1:])
+            return Classified(Category.TEST, prog, "cargo nextest", filters, collect)
         if sub in ("build", "b"):
-            return _Classified(Category.BUILD, prog)
+            return Classified(Category.BUILD, prog)
         if sub in ("check", "c"):
-            return _Classified(Category.TYPECHECK, prog)
+            return Classified(Category.TYPECHECK, prog)
         if sub == "clippy":
             fix = "--fix" in args
-            return _Classified(
+            return Classified(
                 Category.LINT, prog, mutation="clippy --fix rewrites files" if fix else None
             )
         if sub == "fmt":
             check = "--check" in args
-            return _Classified(
+            return Classified(
                 Category.FORMAT, prog, mutation=None if check else "cargo fmt rewrites files"
             )
         if sub in ("tree", "metadata", "search", "version", "--version", "help", "doc"):
-            return _Classified(Category.READ_ONLY, prog)
-        return _Classified(Category.UNKNOWN, prog, mutation=f"cargo {sub} may change files")
-    if prog in _PM:
-        return _pm_script(prog, words)
+            return Classified(Category.READ_ONLY, prog)
+        return Classified(Category.UNKNOWN, prog, mutation=f"cargo {sub} may change files")
+    if prog in PM:
+        return pm_script(prog, words)
     if prog in ("make", "gmake", "just", "task", "mage"):
-        return _make_like(prog, words)
+        return make_like(prog, words)
     if prog in ("mvn", "mvnw", "gradle", "gradlew"):
         goals = [a for a in args if not a.startswith("-")]
         filters = [
@@ -1979,26 +516,26 @@ def _classify_program(
             if a.startswith(("-Dtest", "-pl", "--tests", "--projects"))
         ]
         if any(g in ("test", "verify", "check", "integration-test") for g in goals):
-            return _Classified(Category.TEST, prog, prog, filters)
+            return Classified(Category.TEST, prog, prog, filters)
         if any(g in ("build", "package", "compile", "install", "assemble") for g in goals):
-            return _Classified(Category.BUILD, prog)
-        return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs a project task")
+            return Classified(Category.BUILD, prog)
+        return Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs a project task")
     if prog == "dotnet":
         sub = args[0] if args else ""
         if sub == "test":
             filters = [a for a in args[1:] if a in ("--filter",)] + [
                 f"only {a}" for a in args[1:2] if not a.startswith("-")
             ]
-            return _Classified(Category.TEST, prog, "dotnet test", filters)
+            return Classified(Category.TEST, prog, "dotnet test", filters)
         if sub == "build":
-            return _Classified(Category.BUILD, prog)
+            return Classified(Category.BUILD, prog)
         if sub == "format":
-            return _Classified(
+            return Classified(
                 Category.FORMAT,
                 prog,
                 mutation=None if "--verify-no-changes" in args else "dotnet format rewrites files",
             )
-        return _Classified(Category.UNKNOWN, prog, mutation=f"dotnet {sub} may change files")
+        return Classified(Category.UNKNOWN, prog, mutation=f"dotnet {sub} may change files")
     if prog in ("deno", "swift", "mix", "bazel", "bazelisk"):
         sub = args[0] if args else ""
         if sub == "test":
@@ -2007,29 +544,29 @@ def _classify_program(
             filters.extend(
                 a for a in args[1:] if a.partition("=")[0] in ("--filter", "--only", "--exclude")
             )
-            return _Classified(Category.TEST, prog, f"{prog} test", filters)
+            return Classified(Category.TEST, prog, f"{prog} test", filters)
         if sub in ("build", "compile"):
-            return _Classified(Category.BUILD, prog)
+            return Classified(Category.BUILD, prog)
         if sub == "lint":
-            return _Classified(Category.LINT, prog)
+            return Classified(Category.LINT, prog)
         if sub == "check":
-            return _Classified(Category.TYPECHECK, prog)
+            return Classified(Category.TYPECHECK, prog)
         if sub in ("fmt", "format"):
-            return _Classified(
+            return Classified(
                 Category.FORMAT,
                 prog,
                 mutation=None if "--check" in args else f"{prog} {sub} rewrites files",
             )
-        return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} {sub} may change files")
+        return Classified(Category.UNKNOWN, prog, mutation=f"{prog} {sub} may change files")
     if prog == "hatch" and args[:1] == ["test"]:
-        return _Classified(
-            Category.TEST, prog, "hatch test", _generic_filters("hatch test", args[1:])
+        return Classified(
+            Category.TEST, prog, "hatch test", generic_filters("hatch test", args[1:])
         )
     if prog == "ruff":
         sub = args[0] if args else ""
         if sub == "format":
             check = any(a in ("--check", "--diff") for a in args)
-            return _Classified(
+            return Classified(
                 Category.FORMAT, prog, mutation=None if check else "ruff format rewrites files"
             )
         fix = any(
@@ -2037,14 +574,14 @@ def _classify_program(
             and not a.endswith("=false")
             for a in args
         )
-        return _Classified(
+        return Classified(
             Category.LINT, prog, mutation="ruff --fix rewrites files" if fix else None
         )
     if prog in ("black", "isort", "autopep8", "yapf", "autoflake"):
         check = any(a in ("--check", "--diff", "--check-only", "-c") for a in args)
         if prog in ("autopep8", "yapf", "autoflake"):
             check = not any(a in ("-i", "--in-place") for a in args)
-        return _Classified(
+        return Classified(
             Category.FORMAT, prog, mutation=None if check else f"{prog} rewrites files"
         )
     if prog in ("prettier", "biome", "dprint"):
@@ -2056,40 +593,40 @@ def _classify_program(
             if prog == "biome" and args[:1] in (["lint"], ["check"], ["ci"])
             else Category.FORMAT
         )
-        return _Classified(category, prog, mutation=f"{prog} rewrites files" if writes else None)
+        return Classified(category, prog, mutation=f"{prog} rewrites files" if writes else None)
     if prog in ("gofmt", "goimports", "rustfmt", "clang-format", "shfmt", "terraform"):
         writes = any(a in ("-w", "-i", "--write") for a in args) or (
             prog == "rustfmt" and "--check" not in args
         )
         if prog == "terraform":
             writes = args[:1] == ["fmt"] and "-check" not in args
-        return _Classified(
+        return Classified(
             Category.FORMAT, prog, mutation=f"{prog} rewrites files" if writes else None
         )
     if prog == "pre-commit":
-        return _Classified(Category.LINT, prog, mutation="pre-commit hooks may rewrite files")
+        return Classified(Category.LINT, prog, mutation="pre-commit hooks may rewrite files")
     if prog in _LINTERS:
-        fix = any(a.partition("=")[0] in _FIX_FLAGS for a in args)
-        return _Classified(
+        fix = any(a.partition("=")[0] in FIX_FLAGS for a in args)
+        return Classified(
             Category.LINT, prog, mutation=f"{prog} fixes rewrite files" if fix else None
         )
     if prog in _TYPECHECKERS:
-        return _Classified(Category.TYPECHECK, prog)
+        return Classified(Category.TYPECHECK, prog)
     if prog == "tsc":
         no_emit = "--noEmit" in args or "--noemit" in args
-        return _Classified(Category.TYPECHECK if no_emit else Category.BUILD, prog)
+        return Classified(Category.TYPECHECK if no_emit else Category.BUILD, prog)
     if prog in ("vite", "next", "nuxt", "astro", "svelte-kit", "ng") and args[:1] == ["build"]:
-        return _Classified(Category.BUILD, prog)
+        return Classified(Category.BUILD, prog)
     if (
         prog in _BUILDERS
         or (prog == "docker" and args[:1] == ["build"])
         or (prog == "cmake" and "--build" in args)
     ):
-        return _Classified(Category.BUILD, prog)
+        return Classified(Category.BUILD, prog)
     if prog in ("build",) or (
         prog in ("uv", "poetry", "hatch", "pdm", "flit") and args[:1] == ["build"]
     ):
-        return _Classified(Category.BUILD, prog)
+        return Classified(Category.BUILD, prog)
     if prog == "uv":
         sub = args[0] if args else ""
         if sub in ("sync", "add", "remove", "lock", "venv", "init", "self", "tool") or args[:2] in (
@@ -2097,33 +634,31 @@ def _classify_program(
             ["pip", "uninstall"],
             ["pip", "sync"],
         ):
-            return _Classified(
-                Category.MUTATING, prog, mutation=f"uv {sub} changes the environment"
-            )
+            return Classified(Category.MUTATING, prog, mutation=f"uv {sub} changes the environment")
         return (
-            _Classified(Category.READ_ONLY, prog)
+            Classified(Category.READ_ONLY, prog)
             if sub in ("pip", "tree", "version", "--version", "help", "python")
-            else _Classified(Category.UNKNOWN, prog, mutation=f"uv {sub} may change files")
+            else Classified(Category.UNKNOWN, prog, mutation=f"uv {sub} may change files")
         )
     if prog in ("pip", "pip3"):
         sub = args[0] if args else ""
         if sub in ("install", "uninstall", "download", "wheel"):
-            return _Classified(
+            return Classified(
                 Category.MUTATING, prog, mutation=f"pip {sub} changes the environment"
             )
-        return _Classified(Category.READ_ONLY, prog)
+        return Classified(Category.READ_ONLY, prog)
     if prog == "git":
-        return _git(words)
+        return git(words)
     if prog == "sed":
-        return _sed(args)
+        return sed(args)
     if prog == "perl":
-        return _perl(args)
+        return perl(args)
     if prog in ("awk", "gawk"):
         program_text = " ".join(args)
         writes = (
             "system(" in program_text or re.search(r"print[^|;]*>\s*\"", program_text) is not None
         )
-        return _Classified(
+        return Classified(
             Category.MUTATING if writes else Category.READ_ONLY,
             prog,
             mutation="awk writes files or runs commands" if writes else None,
@@ -2136,7 +671,7 @@ def _classify_program(
             for a in args
             if a in ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls")
         ]
-        return _Classified(
+        return Classified(
             Category.MUTATING if acting else Category.READ_ONLY,
             prog,
             mutation=f"find {acting[0]} acts on files" if acting else None,
@@ -2151,7 +686,7 @@ def _classify_program(
         ]
         remote = any(a in ("-O", "--remote-name", "--remote-name-all", "-J") for a in args)
         writes = bool(named) or remote
-        return _Classified(
+        return Classified(
             Category.MUTATING if writes else Category.READ_ONLY,
             prog,
             mutation="curl writes a file" if writes else None,
@@ -2160,16 +695,16 @@ def _classify_program(
         )
     if prog in ("rm", "unlink", "shred"):
         deleted = [a for a in args if not a.startswith("-")]
-        return _Classified(
+        return Classified(
             Category.MUTATING, prog, mutation=f"{prog} deletes files", deleted=deleted
         )
     if prog in _COPIERS:
         named = [a for a in args if not a.startswith("-")]
         target = named[-1:] or [""]
-        into_directory = (
-            _maybe_directory(target[0]) and not target[0].startswith(_SCRATCH)
-        ) or any(a in ("-t", "--target-directory") or a.startswith("-t") for a in args)
-        return _Classified(
+        into_directory = (maybe_directory(target[0]) and not target[0].startswith(SCRATCH)) or any(
+            a in ("-t", "--target-directory") or a.startswith("-t") for a in args
+        )
+        return Classified(
             Category.MUTATING,
             prog,
             mutation="mv moves files" if prog == "mv" else f"{prog} changes files",
@@ -2178,32 +713,32 @@ def _classify_program(
             opaque=f"{prog} writes into a directory" if into_directory else None,
         )
     if prog in _OPAQUE_WRITERS:
-        return _Classified(
+        return Classified(
             Category.MUTATING,
             prog,
             mutation=f"{prog} changes files",
             opaque=f"{prog} writes files its command line does not name",
         )
     if prog in _MUTATING:
-        return _Classified(Category.MUTATING, prog, mutation=f"{prog} changes files")
+        return Classified(Category.MUTATING, prog, mutation=f"{prog} changes files")
     if prog in ("xargs", "parallel", "watch", "eval", "source", "."):
-        return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs other commands")
+        return Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs other commands")
     if prog in READ_ONLY_PROGRAMS:
-        return _Classified(Category.READ_ONLY, prog)
+        return Classified(Category.READ_ONLY, prog)
     if "/" not in words[0] and len(args) == 1 and args[0] in _VERSION_FLAGS:
-        return _Classified(Category.READ_ONLY, prog)
-    if _PYTHON.match(prog) and args[:1] == ["-c"] and len(args) >= 2:
+        return Classified(Category.READ_ONLY, prog)
+    if PYTHON.match(prog) and args[:1] == ["-c"] and len(args) >= 2:
         if _PYTHON_SIDE_EFFECTS.search(args[1]) is None:
-            return _Classified(Category.READ_ONLY, prog)
-        return _Classified(Category.UNKNOWN, prog, mutation="python -c runs code that can write")
-    return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} is not a known read-only program")
+            return Classified(Category.READ_ONLY, prog)
+        return Classified(Category.UNKNOWN, prog, mutation="python -c runs code that can write")
+    return Classified(Category.UNKNOWN, prog, mutation=f"{prog} is not a known read-only program")
 
 
-def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
-    wrapped = _Wrapped()
-    words = _unwrap(list(simple.words), wrapped)
+def _classify(simple: Simple, depth: int, cwd: str | None) -> Classified:
+    wrapped = Wrapped()
+    words = unwrap(list(simple.words), wrapped)
     if not words:
-        result = _Classified(Category.READ_ONLY, "")
+        result = Classified(Category.READ_ONLY, "")
     else:
         result = _classify_program(words, simple.env, depth, cwd)
     if result.runner is not None:
@@ -2224,22 +759,22 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
             for name, value in simple.env.items()
             if is_harness_env(name)
             and name != "PYTEST_ADDOPTS"
-            and not _harmless_env(name, value, cwd)
+            and not harmless_env(name, value, cwd)
         ]
         result.filters.extend(f"runs with {name} changed" for name in changed)
         if changed:
             result.paths = None
-        run_env = _command_env(simple)
+        run_env = command_env(simple)
         result.run_env = [
             *result.run_env,
             *(
                 name
                 for name, value in run_env.items()
-                if not run_env_allowed(name) and not _harmless_env(name, value, cwd)
+                if not run_env_allowed(name) and not harmless_env(name, value, cwd)
             ),
         ]
         regen = next(
-            (n for n, v in run_env.items() if regenerates_env(n) and not _off(f"={v}")), None
+            (n for n, v in run_env.items() if regenerates_env(n) and not off(f"={v}")), None
         )
         if regen is not None and result.mutation is None:
             result.mutation = result.opaque = f"{regen} set: the run rewrites expected outputs"
@@ -2251,374 +786,9 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
     if result.opaque is None and result.mutation is not None:
         if result.category in (Category.UNKNOWN, Category.BUILD):
             result.opaque = result.mutation
-        elif built := next((p for p in result.touched if _unspelled(p)), None):
+        elif built := next((p for p in result.touched if unspelled(p)), None):
             result.opaque = f"writes {built}, a path the shell builds at run time"
     return result
-
-
-RUN_ENV_ALLOWED: Final = frozenset(
-    {"PYTHONPATH", "NO_COLOR", "FORCE_COLOR", "TERM", "PYTHONDONTWRITEBYTECODE", "COLUMNS",
-     "PYTHONUNBUFFERED", "PY_COLORS", "CLICOLOR", "CLICOLOR_FORCE", "LINES", "PYTHONHASHSEED",
-     "PYTHONIOENCODING", "PYTHONUTF8", "LANG", "LANGUAGE"}
-)  # fmt: skip
-"""Variables a test command may set without changing which tests run or how they decide. Any
-other variable makes the run unable to prove the suite passes."""
-
-
-def run_env_allowed(name: str) -> bool:
-    return name in RUN_ENV_ALLOWED or name.startswith("LC_")
-
-
-def _command_env(simple: _Simple) -> dict[str, str]:
-    """The variables a simple command sets for its program: leading assignments and those
-    passed through `env`."""
-    env = dict(simple.env)
-    words = simple.words
-    if words and program_name(words[0]) == "env":
-        for word in words[1:]:
-            if word.startswith("-"):
-                continue
-            if not _ASSIGNMENT.match(word):
-                break
-            name, _, value = word.partition("=")
-            env[name] = value
-    return env
-
-
-HARNESS_ENV: Final = frozenset(
-    {"PATH", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTEST_ADDOPTS", "PYTEST_PLUGINS",
-     "NODE_OPTIONS", "NODE_PATH", "GOFLAGS", "RUSTFLAGS", "RUSTC_WRAPPER", "LD_PRELOAD",
-     "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "VIRTUAL_ENV", "BASH_ENV",
-     "ENV", "JEST_CONFIG", "VITEST_CONFIG", "PYTHONOPTIMIZE", "PYTHONWARNINGS", "PYTHONUSERBASE",
-     "PYTHONNOUSERSITE", "PYTHONSAFEPATH", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS",
-     "MAVEN_OPTS", "GRADLE_OPTS", "RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "GOTOOLCHAIN",
-     "ZDOTDIR", "GOENV", "UV_ENV_FILE"}
-)  # fmt: skip
-"""Variables that change which program runs, or how a test runner behaves."""
-_HARNESS_ENV_PREFIX: Final = re.compile(
-    r"^(?:PYTEST_|_PYTEST|JEST_|VITEST_|MOCHA_|NODE_TEST|CARGO_TARGET_\w+_RUNNER$|NEXTEST_|"
-    r"npm_config_|NPM_CONFIG_)"
-)
-
-
-_PYTEST_REGEN_FLAGS: Final = frozenset(
-    {"--snapshot-update", "--force-regen", "--regen-all", "--update-goldens", "--accept",
-     "--update-snapshots", "--update-golden"}
-)  # fmt: skip
-_INLINE_SNAPSHOT_WRITES: Final = frozenset({"fix", "create", "update", "review", "trim"})
-_GO_REGEN: Final = re.compile(r"--?(?:update|regen|golden|bless|accept|overwrite)[\w-]*(?:=.*)?")
-_REGEN_ENV: Final = re.compile(
-    r"UPDATE|REGEN|BLESS|ACCEPT|OVERWRITE|SNAPSHOT|GOLDEN|INSTA_|TRYBUILD", re.IGNORECASE
-)
-_OFF: Final = frozenset({"", "0", "false", "no", "never", "off", "n"})
-
-
-def _off(arg: str) -> bool:
-    """`-update=false`, `INSTA_UPDATE=no`: the switch is spelled but turned off."""
-    _, eq, value = arg.partition("=")
-    return bool(eq) and value.strip("'\"").lower() in _OFF
-
-
-def _pytest_regenerates(arg: str) -> bool:
-    """A pytest switch that writes the expected outputs instead of comparing against them
-    (pytest-regressions, syrupy, inline-snapshot, pytest-goldie and similar plugins)."""
-    name, eq, value = arg.partition("=")
-    if name == "--inline-snapshot":
-        return bool(eq) and not _INLINE_SNAPSHOT_WRITES.isdisjoint(value.split(","))
-    return name in _PYTEST_REGEN_FLAGS and not _off(arg)
-
-
-def regenerates_env(name: str) -> bool:
-    """A variable that, by the usual naming, tells a test run to rewrite its expected outputs
-    (`UPDATE_GOLDEN`, `INSTA_UPDATE`, `TRYBUILD=overwrite`, `SNAPSHOT_UPDATE`)."""
-    return _REGEN_ENV.search(name) is not None
-
-
-def is_harness_env(name: str) -> bool:
-    return name in HARNESS_ENV or _HARNESS_ENV_PREFIX.match(name) is not None
-
-
-_PROJECT_DIR: Final = re.compile(r"^(?:\.|\./|\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`)?$")
-_PROJECT_PREFIX: Final = re.compile(r"^(?:\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`)/")
-_INHERITED_PATH: Final = re.compile(r"^\$\{?PYTHONPATH\}?$")
-_SETTINGS_MODULE: Final = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
-
-
-def _inside_project(entry: str, cwd: str | None) -> bool:
-    """A `PYTHONPATH` entry naming the session directory or a directory inside it (`src`,
-    `$PWD/lib`, an absolute path under `cwd`)."""
-    if _PROJECT_DIR.match(entry):
-        return True
-    entry = _PROJECT_PREFIX.sub("", entry)
-    if entry.startswith("~") or _unspelled(entry):
-        return False
-    norm = posixpath.normpath(entry)
-    if posixpath.isabs(norm):
-        if cwd is None or not posixpath.isabs(cwd):
-            return False
-        norm = posixpath.relpath(norm, posixpath.normpath(cwd))
-    return norm != ".." and not norm.startswith("../")
-
-
-def _harmless_env(name: str, value: str, cwd: str | None = None) -> bool:
-    """A variable that changes no test's selection or outcome: `PYTHONPATH` naming only
-    directories inside the session directory (`.`, `src`, `$PWD/lib`, with the inherited
-    `$PYTHONPATH` after them), which `python -m pytest` and a src layout import from anyway;
-    `DJANGO_SETTINGS_MODULE` naming a module (the settings module is project code, and its
-    edits are checked like any other); and `NODE_ENV=test`, which jest sets itself."""
-    if name == "PYTHONPATH":
-        entries = value.split(":")
-        if len(entries) > 1 and _INHERITED_PATH.match(entries[-1]):
-            entries = entries[:-1]
-        return all(_inside_project(entry, cwd) for entry in entries)
-    if name == "DJANGO_SETTINGS_MODULE":
-        return _SETTINGS_MODULE.fullmatch(value) is not None
-    return name == "NODE_ENV" and value == "test"
-
-
-def _sources(simple: _Simple) -> str | None:
-    """Why a simple command sets variables the command line does not name, or None."""
-    words = simple.words
-    prog = program_name(words[0]) if words else ""
-    if prog in ("source", ".") and words[1:]:
-        return f"{prog} {words[1]} sets whatever variables the file holds"
-    if prog == "eval":
-        return "eval runs text built at run time"
-    if prog == "set" and (
-        "allexport" in words or any(re.fullmatch(r"-[a-z]*a[a-z]*", w) for w in words[1:])
-    ):
-        return "set -a exports every variable set afterwards"
-    if prog in ("export", "declare", "typeset", "readonly") and any(
-        _unspelled(w.partition("=")[0]) for w in words[1:] if not w.startswith("-")
-    ):
-        return f"{prog} sets variables named at run time"
-    return None
-
-
-_FUNCTION_DEF: Final = re.compile(
-    r"(?:^|[;&|\n(]\s*)(?:function\s+[\w.:-]+|[\w.:-]+\s*\(\s*\))\s*\{"
-)
-
-
-_RUNNER_PACKAGES: Final = frozenset(
-    {"pytest", "jest", "vitest", "mocha", "nose2", "tox", "nox", "pytest-asyncio", "pytest-cov"}
-)
-"""Packages an honest session installs to run the tests at all; anything else it installs can
-register a test-runner plugin (a `pytest11` entry point, a jest preset)."""
-_LAUNCH_WRAPPERS: Final = frozenset(
-    {"time", "timeout", "nice", "env", "sudo", "doas", "command", "exec", "nohup", "caffeinate"}
-)
-_PACKAGE_SOURCE: Final = re.compile(
-    r"^(?:\.{1,2}(?:/|$)|/|~|file:|git\+|(?:git|hg|svn|bzr)[+:]|https?://|github:|link:|"
-    r"workspace:|portal:)|\.(?:whl|tar\.gz|tgz|zip)$|\s@\s",
-    re.IGNORECASE,
-)
-_PROJECT_ITSELF: Final = re.compile(r"^\.(?:/)?(?:\[[\w,.-]+\])?$")
-_INSTALL_VALUE_FLAGS: Final = frozenset(
-    {"-r", "--requirement", "-c", "--constraint", "-i", "--index-url", "--extra-index-url",
-     "-f", "--find-links", "--target", "-t", "--prefix", "--root", "--python", "-p",
-     "--group", "--optional", "--extra", "--tag", "--registry", "--save-prefix", "-w",
-     "--workspace", "--filter", "--dev-dep"}
-)  # fmt: skip
-
-
-def _foreign_source(value: str) -> bool:
-    """A package spec naming a path, an archive, a URL or a VCS repository, not a registry name
-    (`@scope/name` is a registry name)."""
-    return _PACKAGE_SOURCE.search(value) is not None or ("/" in value and not value.startswith("@"))
-
-
-def _package_word(value: str, why: str) -> str | None:
-    """Why installing `value` changes the test harness, or None for the project itself and a
-    test runner from the registry."""
-    if _PROJECT_ITSELF.match(value):
-        return None
-    if _foreign_source(value):
-        return f"{why} {value}, a local or VCS package that can hook into the test runner"
-    name = re.split(r"[\[<>=!~;@ ]", value, maxsplit=1)[0].casefold()
-    if name in _RUNNER_PACKAGES:
-        return None
-    return f"{why} {value}, a package the session adds, which can register a test-runner plugin"
-
-
-def _install_targets(args: list[str]) -> list[tuple[str, bool]]:
-    """The packages an install names, each with whether it is editable (`-e path`)."""
-    out: list[tuple[str, bool]] = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg in ("-e", "--editable") and i + 1 < len(args):
-            out.append((args[i + 1], True))
-            i += 2
-            continue
-        if arg.startswith("--editable="):
-            out.append((arg.partition("=")[2], True))
-        elif arg in _INSTALL_VALUE_FLAGS:
-            i += 1
-        elif not arg.startswith("-"):
-            out.append((arg, False))
-        i += 1
-    return out
-
-
-def _package_change(words: list[str]) -> str | None:
-    """Why a command adds code the test runner may load: `uv run --with ./plugin`, `uvx --from
-    git+...`, or installing a package other than the project itself and a test runner."""
-    start = 0
-    while start < len(words) and (
-        program_name(words[start]) in _LAUNCH_WRAPPERS
-        or words[start].startswith("-")
-        or _ASSIGNMENT.match(words[start])
-        or words[start].replace(".", "").isdigit()
-    ):
-        start += 1
-    words = words[start:]
-    if not words:
-        return None
-    prog, args = program_name(words[0]), words[1:]
-    if _PYTHON.match(prog) and args[:2] == ["-m", "pip"]:
-        prog, args = "pip", args[2:]
-    if prog in ("uv", "uvx", "pipx"):
-        for i, arg in enumerate(args):
-            flag, eq, inline = arg.partition("=")
-            if flag not in ("--with", "--with-editable", "--with-requirements", "--from"):
-                continue
-            value = inline if eq else (args[i + 1] if i + 1 < len(args) else "")
-            if flag in ("--with-editable", "--with-requirements"):
-                return f"{prog} {flag} {value} adds packages that can hook into the test runner"
-            if _foreign_source(value):
-                return f"{prog} {flag} {value}, a local or VCS package that can hook into the test runner"
-    if prog == "uv" and args[:2] == ["pip", "install"]:
-        prog, args = "pip", args[1:]
-    adds = {
-        "pip": ("install",),
-        "pip3": ("install",),
-        "uv": ("add",),
-        "poetry": ("add",),
-        "pdm": ("add",),
-        "rye": ("add",),
-        "npm": ("install", "i", "add", "link", "ln"),
-        "pnpm": ("add", "install", "i", "link"),
-        "yarn": ("add", "link"),
-        "bun": ("add", "install", "i", "link"),
-    }.get(prog)
-    if adds is None or not args or args[0] not in adds:
-        return None
-    verb = f"{prog} {args[0]}"
-    targets = _install_targets(args[1:])
-    if prog in _PM and args[0] in ("link", "ln"):
-        return f"{verb} links {targets[0][0] if targets else 'a local package'} into node_modules"
-    for value, editable in targets:
-        if editable and not _PROJECT_ITSELF.match(value):
-            return f"{verb} -e {value}, a local package that can hook into the test runner"
-        if why := _package_word(value, f"{verb} installs"):
-            return why
-    return None
-
-
-def _exports(pipelines: list[_Pipeline], cwd: str | None) -> list[str]:
-    """Variables the command exports to later commands (`export CI=true`), beyond ones that only
-    change output formatting."""
-    names: list[str] = []
-    for pipeline in pipelines:
-        for simple in pipeline.commands:
-            words = simple.words
-            prog = program_name(words[0]) if words else ""
-            exporting = prog == "export" or (
-                prog in ("declare", "typeset") and any(re.fullmatch(r"-\w*x\w*", w) for w in words)
-            )
-            if not exporting:
-                continue
-            for word in words[1:]:
-                name, eq, value = word.partition("=")
-                if word.startswith("-") or not _ASSIGNMENT.match(f"{name}="):
-                    continue
-                if not run_env_allowed(name) and not (eq and _harmless_env(name, value, cwd)):
-                    names.append(name)
-    return names
-
-
-def _harness_change(pipelines: list[_Pipeline], command: str, cwd: str | None) -> str | None:
-    """Why a command changes how later commands run (aliases, functions, PATH, packages the
-    runner may load), or None."""
-    if _FUNCTION_DEF.search(command):
-        return "defines a shell function"
-    for pipeline in pipelines:
-        for simple in pipeline.commands:
-            words = simple.words
-            if why := _package_change(list(words)):
-                return why
-            prog = program_name(words[0]) if words else ""
-            if prog in ("alias", "unalias") and words[1:]:
-                return f"{prog} {words[1].partition('=')[0]}"
-            if why := _tool_config_change(_unwrap(list(words))):
-                return why
-            if prog == "hash" and "-p" in words:
-                return "hash -p remaps a command"
-            if prog in ("export", "declare", "typeset", "readonly", "set"):
-                assignments = (w.partition("=") for w in words[1:] if "=" in w)
-                names = [n for n, _, v in assignments if not _harmless_env(n, v, cwd)]
-                if changed := [n for n in names if is_harness_env(n)]:
-                    return f"{prog} {changed[0]}"
-            if not words and (
-                changed := [
-                    n
-                    for n, v in simple.env.items()
-                    if is_harness_env(n) and not _harmless_env(n, v, cwd)
-                ]
-            ):
-                return f"sets {changed[0]}"
-            if why := _sources(simple):
-                return why
-    return None
-
-
-def _writes_session_store(
-    pipelines: list[_Pipeline],
-    command: str,
-    touched: list[str],
-    deleted: list[str],
-    opaque: str | None,
-) -> bool:
-    """The command writes a session store: it names one as a target, or it names one at all
-    (quotes removed, so `~/.cl""aude` counts) and may write files it does not name. Reading
-    one (`cat ~/.claude/projects/x.jsonl`) does not count."""
-    if any(SESSION_STORE.search(path) for path in [*touched, *deleted]):
-        return True
-    words = [w for p in pipelines for c in p.commands for w in [*c.words, *c.writes]]
-    named = SESSION_STORE.search(command) is not None or any(SESSION_STORE.search(w) for w in words)
-    return named and opaque is not None
-
-
-def _guard_tamper(
-    pipelines: list[_Pipeline],
-    command: str,
-    touched: list[str],
-    deleted: list[str],
-    opaque: str | None,
-) -> str | None:
-    """Why the command can switch off the evidence hooks or the judge they run: it writes or
-    deletes agent configuration or the judge's install, (un)installs the judge, or names one
-    of those places and may write files it does not name."""
-    for path in [*touched, *deleted]:
-        if why := guard_path_reason(path):
-            return hook_switch_reason(why, command)
-        if _JUDGE_NAME.search(path) and _unspelled(path):
-            return f"writes {path}, which can resolve to the evidence-judge executable"
-    for pipeline in pipelines:
-        for simple in pipeline.commands:
-            words = _unwrap(list(simple.words))
-            if (
-                words
-                and any(w in _PACKAGE_VERBS for w in words[1:])
-                and any(_JUDGE_NAME.search(w) for w in words[1:])
-            ):
-                return f"{program_name(words[0])} changes the evidence-judge install the hooks run"
-    if opaque is not None:
-        words = [w for p in pipelines for c in p.commands for w in [*c.words, *c.writes]]
-        if any(AGENT_CONFIG.search(w) or JUDGE_INSTALL.search(w) for w in words):
-            return f"names agent configuration or the judge's install and {opaque}"
-    return None
 
 
 def _empty(reason: str, command: str) -> CommandAnalysis:
@@ -2631,141 +801,13 @@ def _empty(reason: str, command: str) -> CommandAnalysis:
         session_store=SESSION_STORE.search(command) is not None,
         guard_tamper=(
             f"the command could not be parsed and names {m.group(0)}"
-            if (m := AGENT_CONFIG.search(command) or _JUDGE_NAME.search(command))
+            if (m := AGENT_CONFIG.search(command) or JUDGE_NAME.search(command))
             else None
         ),
     )
 
 
-_HEREDOC_BODY: Final = re.compile(
-    r"(?<!<)<<(-?)[ \t]*(['\"]?)([\w.-]+)\2[^\n]*\n(.*?)(?:\n[ \t]*\3[ \t]*(?=\n|$)|\Z)", re.S
-)
-
-
-def _heredocs(command: str) -> list[str | None]:
-    """Each heredoc's text, in order; None for one the shell expands (`$x`, backquotes)."""
-    out: list[str | None] = []
-    for m in _HEREDOC_BODY.finditer(command):
-        body = m.group(4)
-        if m.group(1):
-            body = "\n".join(line.lstrip("\t") for line in body.split("\n"))
-        expands = not m.group(2) and re.search(r"[$`\\]", body) is not None
-        out.append(None if expands else body)
-    return out
-
-
-def _unescape(text: str) -> str:
-    return text.replace("\\n", "\n").replace("\\t", "\t")
-
-
-def _printed(words: list[str]) -> str | None:
-    """What `echo` or `printf` prints, when the command line spells it out."""
-    prog = program_name(words[0])
-    args = words[1:]
-    if prog == "echo":
-        flags = [a for a in args if re.fullmatch(r"-[neE]+", a)]
-        text = " ".join(args[len(flags) :]) if args[: len(flags)] == flags else None
-        if text is not None and any("e" in f for f in flags):
-            text = _unescape(text)
-    elif prog == "printf" and len(args) == 1 and "%" not in args[0].replace("%%", ""):
-        text = _unescape(args[0]).replace("%%", "%")
-    else:
-        return None
-    return None if text is None or re.search(r"[$`]", text) else text
-
-
-def _sed_replacements(args: list[str]) -> str | None:
-    """The text `sed` substitutions insert, when every command is `s/pattern/text/flags`."""
-    scripts: list[str] = []
-    positional: list[str] = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg in ("-e", "--expression"):
-            scripts.extend(args[i + 1 : i + 2])
-            i += 1
-        elif arg.startswith("--expression="):
-            scripts.append(arg.partition("=")[2])
-        elif arg in ("-f", "--file") or arg.startswith("--file="):
-            return None
-        elif arg and not arg.startswith("-"):
-            positional.append(arg)
-        i += 1
-    if not scripts:
-        scripts = positional[:1]
-    inserted: list[str] = []
-    for script in scripts:
-        for part in re.split(r"[;\n]", script):
-            part = part.strip()
-            if not part:
-                continue
-            if len(part) < 2 or part[0] != "s" or part[1].isalnum() or part[1] in "\\ ":
-                return None
-            pieces = re.split(rf"(?<!\\){re.escape(part[1])}", part[2:])
-            if len(pieces) != 3 or not re.fullmatch(r"[gpiImMe0-9]*", pieces[2]):
-                return None
-            inserted.append(_unescape(pieces[1].replace("\\" + part[1], part[1])))
-    return "\n".join(inserted)
-
-
-def _code_findings(path: str, code: str | None) -> list[str]:
-    name = posixpath.basename(path)
-    if code is None:
-        return [f"wrote {name} from the shell with code the judge cannot read"]
-    try:
-        ast.parse(code)
-        chunks = [code]
-    except (SyntaxError, ValueError):
-        chunks = code.splitlines()
-    return [
-        finding
-        for chunk in chunks
-        for finding in edits.suite_findings(path, "modify", [], chunk.splitlines())
-    ]
-
-
-def _written_code(pipelines: list[_Pipeline], command: str) -> list[str]:
-    """Findings on the code the command writes to Python files outside the tests: heredocs,
-    `echo`/`printf` text and `sed` substitutions are checked like an edit's added lines; any
-    other write to such a file is code the judge cannot read."""
-    bodies = _heredocs(command)
-    simples = [simple for pipeline in pipelines for simple in pipeline.commands]
-    if sum(simple.heredoc for simple in simples) != len(bodies):
-        bodies = [None] * len(simples)
-    found: list[str] = []
-    heredoc = 0
-    for pipeline in pipelines:
-        for index, simple in enumerate(pipeline.commands):
-            body = bodies[heredoc] if simple.heredoc else None
-            heredoc += simple.heredoc
-            words = _unwrap(list(simple.words))
-            prog = program_name(words[0]) if words else ""
-            targets = list(simple.writes)
-            if prog == "tee":
-                targets.extend(w for w in words[1:] if not w.startswith("-"))
-            sed = prog == "sed" and any(re.fullmatch(r"-\w*i\S*|--in-place\S*", w) for w in words)
-            if sed:
-                targets.extend(words[2:])
-            targets = [t for t in targets if t.endswith(".py") and not edits.is_test_path(t)]
-            if not targets:
-                continue
-            feeder = _unwrap(list(pipeline.commands[index - 1].words)) if index else []
-            if simple.heredoc and (prog == "tee" or words in (["cat"], ["cat", "-"])):
-                code = body
-            elif sed:
-                code = _sed_replacements(words[1:])
-            elif prog in ("echo", "printf"):
-                code = _printed(words)
-            elif prog == "tee" and feeder and program_name(feeder[0]) in ("echo", "printf"):
-                code = _printed(feeder)
-            else:
-                code = None
-            for target in dict.fromkeys(targets):
-                found.extend(_code_findings(target, code))
-    return found
-
-
-def _cd_step(simple: _Simple) -> str:
+def _cd_step(simple: Simple) -> str:
     """Where a `cd`, `pushd` or `popd` goes: its target as written, or `?` when only the shell
     knows (`popd`, `cd -`, `cd` alone, a variable)."""
     words = simple.words
@@ -2773,14 +815,14 @@ def _cd_step(simple: _Simple) -> str:
     if program_name(words[0]) == "popd" or len(args) != 1:
         return "?"
     target = args[0]
-    return "?" if target == "-" or target.startswith("~") or _unspelled(target) else target
+    return "?" if target == "-" or target.startswith("~") or unspelled(target) else target
 
 
 def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     if len(command) > MAX_COMMAND_CHARS:
         return _empty(f"longer than {MAX_COMMAND_CHARS} characters", command)
     try:
-        pipelines = _parse(_strip_comments(tokenize(command)))
+        pipelines = parse(strip_comments(tokenize(command)))
     except ValueError as exc:
         return _empty(str(exc), command)
 
@@ -2851,8 +893,8 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                     test_paths = nested.test_paths
                     outer = [
                         name
-                        for name, value in _command_env(simple).items()
-                        if not run_env_allowed(name) and not _harmless_env(name, value, cwd)
+                        for name, value in command_env(simple).items()
+                        if not run_env_allowed(name) and not harmless_env(name, value, cwd)
                     ]
                     run_env = [*nested.run_env, *outer]
                     config_files.extend(nested.config_files)
@@ -2900,15 +942,13 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         after_pipe = pipeline.commands[c_index + 1 :]
         if after_pipe:
             output_filter = (
-                program_name(_unwrap(after_pipe[0].words)[0])
-                if _unwrap(after_pipe[0].words)
-                else "?"
+                program_name(unwrap(after_pipe[0].words)[0]) if unwrap(after_pipe[0].words) else "?"
             )
-            if any(program_name((_unwrap(c.words) or ["?"])[0]) != "tail" for c in after_pipe):
+            if any(program_name((unwrap(c.words) or ["?"])[0]) != "tail" for c in after_pipe):
                 output_filter = next(
-                    program_name((_unwrap(c.words) or ["?"])[0])
+                    program_name((unwrap(c.words) or ["?"])[0])
                     for c in after_pipe
-                    if program_name((_unwrap(c.words) or ["?"])[0]) != "tail"
+                    if program_name((unwrap(c.words) or ["?"])[0]) != "tail"
                 )
             if not pipefail:
                 masked = f"its output is piped into {output_filter}"
@@ -2950,31 +990,19 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         lasting_mutation=lasting,
         run_cds=run_cds,
         run_env=run_env,
-        exports=_exports(pipelines, cwd),
+        exports=exports(pipelines, cwd),
         config_files=list(dict.fromkeys(config_files)),
         test_paths=test_paths if len(runners) == 1 else None,
         cd_targets=persisting,
         mutation_after_check=mutation_after,
         session_store=nested_store
-        or _writes_session_store(pipelines, command, touched, deleted, opaque),
-        harness_change=_harness_change(pipelines, command, cwd),
-        guard_tamper=nested_guard or _guard_tamper(pipelines, command, touched, deleted, opaque),
-        source_findings=list(dict.fromkeys([*written, *_written_code(pipelines, command)])),
+        or writes_session_store(pipelines, command, touched, deleted, opaque),
+        harness_change=harness_change(pipelines, command, cwd),
+        guard_tamper=nested_guard or guard_tamper(pipelines, command, touched, deleted, opaque),
+        source_findings=list(dict.fromkeys([*written, *written_code(pipelines, command)])),
     )
 
 
 def analyse(command: str, cwd: str | None = None) -> CommandAnalysis:
     """Parse and classify a shell command line run in `cwd`."""
     return _analyse(command, cwd, 0)
-
-
-def unwrap_shell(argv: Sequence[str]) -> str:
-    """A command recorded as an argument vector, as one shell line (`["bash", "-lc", "x"]` is
-    `x`)."""
-    if (
-        len(argv) == 3
-        and program_name(argv[0]) in _SHELLS
-        and re.fullmatch(r"-[a-z]*c[a-z]*", argv[1])
-    ):
-        return argv[2]
-    return shlex.join(argv)
