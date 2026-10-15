@@ -162,6 +162,23 @@ def test_offline_skips_llm(monkeypatch: pytest.MonkeyPatch, calls: Calls, eviden
     assert calls.options is not None and calls.options.offline
 
 
+NON_FINITE_HAR = (
+    '{"log":{"entries":[{"startedDateTime":"2024-01-01T00:00:00Z",'
+    '"request":{"method":"GET","url":"https://a.test/"},"response":{"status":STATUS}}]}}'
+)
+
+
+@pytest.mark.parametrize("status", ["1e400", "Infinity", "NaN"])
+def test_a_har_with_a_non_finite_status_is_judged_not_an_internal_error(
+    tmp_path: Path, status: str
+) -> None:
+    har = tmp_path / "h.har"
+    har.write_text(NON_FINITE_HAR.replace("STATUS", status), encoding="utf-8")
+    result = runner.invoke(app, ["judge", "--har", str(har), "--offline"])
+    assert result.exit_code != ExitCode.INTERNAL, result.output
+    assert "internal error" not in result.output
+
+
 def test_online_uses_llm(monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path) -> None:
     install(monkeypatch, calls)
     runner.invoke(app, ["judge", "--har", str(evidence)])

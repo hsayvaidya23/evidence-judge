@@ -9,6 +9,7 @@ import pytest
 
 from evidence_judge.core.evidence import Channel
 from evidence_judge.ingest import HarFormatError, load_har
+from evidence_judge.ingest._json import as_float, as_int
 from evidence_judge.ingest._network import BodyPrefix, decode_body, headers_dict
 
 RUNS = Path(__file__).resolve().parent.parent / "fixtures" / "runs"
@@ -272,3 +273,35 @@ def test_headers_dict_lowercases_and_joins_duplicates() -> None:
     ]
 
     assert headers_dict(raw) == {"set-cookie": "a=1, b=2"}
+
+
+HUGE = 10**400
+
+
+@pytest.mark.parametrize(
+    ("value", "number", "integer"),
+    [
+        (200, 200.0, 200),
+        (1.5, 1.5, 1),
+        (HUGE, None, HUGE),
+        (float("inf"), None, None),
+        (float("-inf"), None, None),
+        (float("nan"), None, None),
+        (True, None, None),
+        ("200", None, None),
+    ],
+)
+def test_json_numbers_are_finite_or_none(
+    value: object, number: float | None, integer: int | None
+) -> None:
+    assert as_float(value) == number
+    assert as_int(value) == integer
+
+
+@pytest.mark.parametrize("raw", ["1e400", "-1e400", "Infinity", "NaN"])
+def test_non_finite_status_is_dropped(tmp_path: Path, raw: str) -> None:
+    har = tmp_path / "x.har"
+    text = json.dumps({"log": {"entries": [entry()]}})
+    assert '"status": 200' in text
+    har.write_text(text.replace('"status": 200', f'"status": {raw}'))
+    assert load_har(har).network[0].status is None
