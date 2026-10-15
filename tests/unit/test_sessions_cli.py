@@ -352,3 +352,14 @@ def test_a_string_rerun_command_gets_a_hint(tmp_path: Path) -> None:
         'rerun.command (line 2, column 12): command must be a list of arguments, e.g. ["pytest", "-q"]'
         in output
     )
+
+
+def test_a_codex_edit_without_a_diff_is_not_called_weakening(tmp_path: Path) -> None:
+    out = tmp_path / "verdict.json"
+    args = ["session", "judge", "--offline", "--codex", str(CODEX), "--out", str(out)]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 2, result.output
+    text = out.read_text()
+    assert "code not checkable" in text
+    assert "the code could not be checked" in text
+    assert "weakened" not in text

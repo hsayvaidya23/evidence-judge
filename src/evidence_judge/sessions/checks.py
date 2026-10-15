@@ -21,6 +21,7 @@ from typing import Final
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 from evidence_judge.sessions.edits import (
+    NO_DIFF,
     git_metadata_reason,
     is_config_path,
     is_harness_path,
@@ -81,6 +82,10 @@ class RunOutcome:
     @property
     def whole(self) -> bool:
         return self.partial is None
+
+
+def _blocker(finding: str) -> str:
+    return "the code could not be checked" if NO_DIFF in finding else "the suite was weakened"
 
 
 def glob_regex(pattern: str) -> re.Pattern[str]:
@@ -701,7 +706,7 @@ def check_rerun(predicate: TestResultPredicate, index: SessionIndex) -> Predicat
             return result(Support.CONTRADICTED, reason)
         if index.tampering:
             source, finding = index.tampering[0]
-            weakened = f"{reason}, but the suite was weakened: {source.id} {finding}"
+            weakened = f"{reason}, but {_blocker(finding)}: {source.id} {finding}"
             return PredicateResult(
                 status=Support.NO_EVIDENCE,
                 reason=weakened,
@@ -786,7 +791,7 @@ def check_test_result(predicate: TestResultPredicate, index: SessionIndex) -> Pr
             source, finding = index.tampering[0]
             return _result(
                 Support.NO_EVIDENCE,
-                f"{passes[-1].reason}, but the suite was weakened: {source.id} {finding}",
+                f"{passes[-1].reason}, but {_blocker(finding)}: {source.id} {finding}",
                 passes[-1].event,
                 source,
             )

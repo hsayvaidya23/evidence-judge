@@ -32,6 +32,8 @@ _SKIP_MARKERS: Final = re.compile(
     r"\bpending\s*\(|pytest_collection_modifyitems|collect_ignore",
 )
 
+NO_DIFF = "with no recorded diff"
+
 
 def suite_findings(
     path: str,
@@ -82,7 +84,7 @@ def suite_findings(
         and not (test_file and change != "add")
     ):
         findings.append(
-            f"changed {name} with no recorded diff, so the judge cannot check the code it added "
+            f"changed {name} {NO_DIFF}, so the judge cannot check the code it added "
             "(an object that equals anything, a patch of the test runner)"
         )
     if test_file and change != "delete":

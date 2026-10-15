@@ -116,10 +116,15 @@ class RerunResult(BaseModel):
     config_changes: list[str] = Field(default_factory=list[str])
     problems: list[str] = Field(default_factory=list[str])
     notes: list[str] = Field(default_factory=list[str])
+    copied: str = Field(default="", description="What the re-run copied, and how")
 
     @property
     def total(self) -> int:
         return self.passed + self.failed + self.errors + self.skipped
+
+    @property
+    def verification_reason(self) -> str:
+        return f"{self.reason}; {self.copied}" if self.copied else self.reason
 
     def describe(self) -> str:
         parts = [f"{self.passed} passed"]

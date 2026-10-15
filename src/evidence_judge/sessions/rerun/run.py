@@ -305,7 +305,8 @@ def execute(
         except (CopyError, OSError) as exc:
             return done(RerunStatus.UNKNOWN, f"the re-run could not copy the working tree: {exc}")
         problems.extend(copied.problems)
-        notes = [f"copied {len(copied.paths)} files from {root} by {copied.how}", *copied.notes]
+        summary = f"copied {len(copied.paths)} files from {root} by {copied.how}"
+        notes = list(copied.notes)
         changes = list(copied.config_changes)
         if resolved is None:
             notes.append(
@@ -330,8 +331,14 @@ def execute(
                 config_changes=changes,
                 base=sha,
                 notes=notes,
+                copied=summary,
             )
-        extra: dict[str, object] = {"config_changes": changes, "base": sha, "notes": notes}
+        extra: dict[str, object] = {
+            "config_changes": changes,
+            "base": sha,
+            "notes": notes,
+            "copied": summary,
+        }
         found = configuration_above(copy, runner, env)
         drift = _environment_changes(root, baseline)
         stdout = workspace / "stdout"

@@ -87,6 +87,9 @@ def test_an_honest_pass(tmp_path: Path) -> None:
     assert result.status is RerunStatus.PASS, result.reason
     assert (result.passed, result.failed, result.exit_code) == (3, 0, 0)
     assert result.report_read
+    assert result.copied.startswith("copied ")
+    assert not any(note.startswith("copied ") for note in result.notes)
+    assert result.verification_reason.endswith(result.copied)
 
 
 def test_a_real_failure(tmp_path: Path) -> None:

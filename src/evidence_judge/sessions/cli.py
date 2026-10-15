@@ -423,7 +423,9 @@ def rerun_verdict(result: RerunResult, run_id: str | None = None) -> RunVerdict:
                 citations=[citation],
             )
         ],
-        verification=Verification(method=VerificationMethod.RERUN, reason=result.reason),
+        verification=Verification(
+            method=VerificationMethod.RERUN, reason=result.verification_reason
+        ),
         warnings=[*review, *(f"re-run: {n}" for n in result.notes)],
     )
 

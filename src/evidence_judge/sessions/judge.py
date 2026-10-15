@@ -28,6 +28,7 @@ from evidence_judge.core.verdict import (
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget, run_budget
 from evidence_judge.sessions.checks import CHECKER, SessionIndex, check
+from evidence_judge.sessions.edits import NO_DIFF
 from evidence_judge.sessions.extract import LLMSessionExtractor, claims_fix, heuristic_claims
 from evidence_judge.sessions.models import (
     CallStatus,
@@ -222,7 +223,7 @@ class SessionJudge:
                 method=VerificationMethod.TRANSCRIPT,
                 reason="test results come from the output the session recorded",
             )
-        return Verification(method=VerificationMethod.RERUN, reason=rerun.reason)
+        return Verification(method=VerificationMethod.RERUN, reason=rerun.verification_reason)
 
     @staticmethod
     def _verdict(claim: SessionClaim, index: SessionIndex) -> ClaimVerdict:
@@ -280,7 +281,8 @@ class SessionJudge:
             if guard:
                 state.review.append(f"{_HARNESS_TAMPERING}: {event.id} {guard}")
         for source, finding in index.tampering:
-            state.review.append(f"test suite weakened: {source.id} {finding}")
+            label = "code not checkable" if NO_DIFF in finding else "test suite weakened"
+            state.review.append(f"{label}: {source.id} {finding}")
         if claims_fix(run.final_answer) and not index.source_changed:
             state.review.append(
                 "the answer claims a fix, but the session changed only test files, so the "

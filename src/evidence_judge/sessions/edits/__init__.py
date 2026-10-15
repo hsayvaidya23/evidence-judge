@@ -38,9 +38,10 @@ from evidence_judge.sessions.edits.pyast import (
     opened_paths,
     rebinding_findings,
 )
-from evidence_judge.sessions.edits.suite import suite_findings
+from evidence_judge.sessions.edits.suite import NO_DIFF, suite_findings
 
 __all__ = [
+    "NO_DIFF",
     "adds_tests",
     "changed_constants",
     "changed_sections",
