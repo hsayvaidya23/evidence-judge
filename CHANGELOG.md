@@ -55,6 +55,11 @@ the names exported from `evidence_judge`) is defined under
 - Documentation site: getting started, concepts, a spec cookbook (payment providers, settings
   changes, telemetry), CI, Docker, benchmarking and recording guides, and reference pages.
 
+- Every verdict says how much tampering its source could reveal (`tamper_detection`: `full`
+  for a Playwright trace, `partial` for a browser-use history, `none` for a HAR alone) and warns
+  when it is not `full`; `--require-tamper-evidence` (or the spec's `require_tamper_evidence`)
+  caps such runs at `NEEDS_REVIEW`.
+
 ### Changed
 
 - A run passes only when the site is named: the spec's `site` or `allowed_hosts`, or `--site`.
@@ -133,3 +138,7 @@ the names exported from `evidence_judge`) is defined under
   uses trusted publishing.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
+- **A screenshot alone proves nothing in a run with agent input.** The vision check cannot tell
+  the site's text from an echo of what the agent typed, so in such a run a screenshot supports an
+  `expect` entry only beside a deterministic predicate, and never a claim on its own.
+
