@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import bisect
 import math
-from collections.abc import Iterable
+import re
+from collections.abc import Iterable, Iterator
 from functools import cached_property
-from urllib.parse import urlsplit
+from typing import Final
+from urllib.parse import parse_qsl, quote, quote_plus, unquote, unquote_plus, urlsplit, urlunsplit
 
 from evidence_judge.core.evidence import (
     ActionEvent,
@@ -15,11 +17,30 @@ from evidence_judge.core.evidence import (
     Run,
     Screenshot,
 )
+from evidence_judge.core.predicates import MIN_PAGE_TEXT
 from evidence_judge.textnorm import normalize
 
 FINAL_KEY = "final"
 NAVIGATIONS = frozenset({"goto", "navigate", "visit", "open", "go_to_url", "open_tab"})
 """Action names that only open a page; the first other action starts the agent's work."""
+ACTION_ALIASES: Final = {
+    "navigate": "goto",
+    "visit": "goto",
+    "open": "goto",
+    "type": "fill",
+    "input": "fill",
+    "tap": "click",
+    "press_key": "press",
+}
+TYPING_ACTIONS: Final = frozenset({"fill", "insert_text", "input_text"})
+MASK: Final = "\x00"
+"""Stands in for agent input in masked evidence; it is never part of a predicate."""
+_WORD = re.compile(r"[^\W_]")
+
+
+def canonical_action(name: str) -> str:
+    key = normalize(name).replace(" ", "_")
+    return ACTION_ALIASES.get(key, key)
 
 
 class EvidenceIndex:
@@ -160,6 +181,123 @@ class EvidenceIndex:
         if cached is None:
             cached = self._normalized[key] = normalize(state.text)
         return cached
+
+    def agent_inputs(self) -> tuple[str, ...]:
+        """Normalised text the agent put into the run itself, longest first.
+
+        That is the value of every typing action, each run of single-key presses on one target,
+        the decoded path segments and query values of every URL the agent opened, and the
+        decoded query values of every GET request (a form the agent submitted, or a navigation
+        a HAR cannot attribute). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit
+        are left out.
+        """
+        return self._agent_inputs
+
+    @cached_property
+    def _agent_inputs(self) -> tuple[str, ...]:
+        found = {normalize(text) for text in _raw_inputs(self.run)}
+        kept = [t for t in found if len(t) >= MIN_PAGE_TEXT and _WORD.search(t)]
+        return tuple(sorted(kept, key=lambda t: (-len(t), t)))
+
+    @cached_property
+    def without_agent_input(self) -> EvidenceIndex:
+        """This evidence with every occurrence of every agent input in page text and URLs
+        replaced by MASK, so a predicate that only holds on an echo of that input fails on it.
+
+        Masked page text is normalised; page text and URLs without an occurrence are unchanged.
+        """
+        inputs = self.agent_inputs()
+        if not inputs:
+            return self
+        run = self.run
+        return EvidenceIndex(
+            run.model_copy(
+                update={
+                    "actions": [_masked_url(a, inputs) for a in run.actions],
+                    "network": [_masked_url(n, inputs) for n in run.network],
+                    "snapshots": [_masked_page(s, inputs) for s in run.snapshots],
+                    "initial_state": None
+                    if run.initial_state is None
+                    else _masked_page(run.initial_state, inputs),
+                    "final_state": None
+                    if run.final_state is None
+                    else _masked_page(run.final_state, inputs),
+                }
+            )
+        )
+
+
+def _raw_inputs(run: Run) -> Iterator[str]:
+    keys: list[str] = []
+    target: str | None = None
+    for action in run.actions:
+        name = canonical_action(action.name)
+        if name == "press" and action.value is not None and len(action.value) == 1:
+            if keys and action.selector != target:
+                yield "".join(keys)
+                keys.clear()
+            target = action.selector
+            keys.append(action.value)
+            continue
+        if keys:
+            yield "".join(keys)
+            keys.clear()
+        if name in TYPING_ACTIONS and action.value:
+            yield action.value
+        elif name == "goto" and (url := action.value or action.url):
+            yield from _url_inputs(url, with_path=True)
+    if keys:
+        yield "".join(keys)
+    for event in run.network:
+        if event.method.upper() == "GET":
+            yield from _url_inputs(event.url, with_path=False)
+
+
+def _url_inputs(url: str, *, with_path: bool) -> list[str]:
+    parts = urlsplit(url)
+    values = [value for _, value in parse_qsl(parts.query)]
+    if with_path:
+        values += [unquote(segment) for segment in parts.path.split("/")]
+    return values
+
+
+def _mask(text: str, inputs: tuple[str, ...]) -> str | None:
+    """`text` normalised with every input replaced by MASK, or None if no input occurs in it."""
+    masked = norm = normalize(text)
+    for value in inputs:
+        masked = masked.replace(value, MASK)
+    return None if masked == norm else masked
+
+
+def _mask_url(url: str, inputs: tuple[str, ...]) -> str:
+    parts = urlsplit(url)
+    path = _mask(unquote(parts.path), inputs)
+    query = _mask(unquote_plus(parts.query), inputs)
+    if path is None and query is None:
+        return url
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path if path is None else quote(path, safe="/"),
+            parts.query if query is None else quote_plus(query, safe="=&"),
+            parts.fragment,
+        )
+    )
+
+
+def _masked_url[E: (ActionEvent, NetworkEvent)](event: E, inputs: tuple[str, ...]) -> E:
+    if event.url is None:
+        return event
+    return event.model_copy(update={"url": _mask_url(event.url, inputs)})
+
+
+def _masked_page[S: (PageSnapshot, PageState)](page: S, inputs: tuple[str, ...]) -> S:
+    text = _mask(page.text, inputs)
+    update = {"url": _mask_url(page.url, inputs)}
+    if text is not None:
+        update["text"] = text
+    return page.model_copy(update=update)
 
 
 def is_document_navigation(event: NetworkEvent) -> bool:

@@ -3,8 +3,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from evidence_judge.checks.action import ActionChecker, canonical_action
+from evidence_judge.checks.action import ActionChecker
 from evidence_judge.core.evidence import Channel
+from evidence_judge.core.index import canonical_action
 from evidence_judge.core.predicates import ActionPredicate
 from evidence_judge.core.verdict import Support
 from tests.unit.conftest import ALL_CHANNELS, act, ctx, forged_run, honest_run, make_run

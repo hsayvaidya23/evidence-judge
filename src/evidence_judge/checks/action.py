@@ -1,32 +1,16 @@
 from __future__ import annotations
 
-from typing import Final
-
 from evidence_judge.checks._common import MAX_CITATIONS, plural, quoted, require, result
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.errors import InvalidPredicateError
-from evidence_judge.checks.matching import contains, normalize, url_path
+from evidence_judge.checks.matching import contains, url_path
 from evidence_judge.core.evidence import ActionEvent, Channel
-from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.index import EvidenceIndex, canonical_action
 from evidence_judge.core.predicates import ActionPredicate, Predicate
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 
 KIND = "action"
 FAILED_ATTEMPT_CONFIDENCE = 0.9
-ACTION_ALIASES: Final = {
-    "navigate": "goto",
-    "visit": "goto",
-    "open": "goto",
-    "type": "fill",
-    "input": "fill",
-    "tap": "click",
-    "press_key": "press",
-}
-
-
-def canonical_action(name: str) -> str:
-    key = normalize(name).replace(" ", "_")
-    return ACTION_ALIASES.get(key, key)
 
 
 def action_target(action: ActionEvent) -> str | None:

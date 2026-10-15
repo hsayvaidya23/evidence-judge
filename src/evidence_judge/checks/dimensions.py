@@ -11,7 +11,7 @@ from statistics import fmean
 from typing import Final
 
 from evidence_judge.checks._common import describe_request, took_effect
-from evidence_judge.checks.action import canonical_action, describe_action
+from evidence_judge.checks.action import describe_action
 from evidence_judge.checks.base import EvidenceScope
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.expectations import (
@@ -26,7 +26,7 @@ from evidence_judge.checks.page_text import check_page_text
 from evidence_judge.checks.request import RequestMatcher
 from evidence_judge.checks.url import check_url
 from evidence_judge.core.evidence import ActionEvent, Channel, NetworkEvent, Run
-from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.index import EvidenceIndex, canonical_action
 from evidence_judge.core.predicates import (
     PageTextPredicate,
     Predicate,
