@@ -15,8 +15,8 @@ from rich.console import Console
 from rich.text import Text
 
 from evidence_judge._version import __version__
-from evidence_judge.config import Settings, stable_redaction_key
-from evidence_judge.core.spec_errors import SpecError, load_yaml
+from evidence_judge.config import Settings, describe_settings_error, stable_redaction_key
+from evidence_judge.core.spec_errors import SpecError, json_syntax_problem, load_yaml
 from evidence_judge.core.verdict import (
     Citation,
     ExpectationResult,
@@ -183,7 +183,7 @@ def _settings() -> Settings:
     try:
         return Settings()
     except ValidationError as e:
-        raise _Error(f"invalid settings: {e}", _Exit.USAGE) from e
+        raise _Error(f"invalid settings: {describe_settings_error(e)}", _Exit.USAGE) from e
 
 
 def _redactor(settings: Settings, *, persistent: bool) -> Redactor:
@@ -203,6 +203,12 @@ def _spec(path: Path | None) -> SessionSpec | None:
     try:
         return load_yaml(path.read_text(encoding="utf-8"), SessionSpec)
     except SpecError as e:
+        if any(p.location == "id" and p.type == "extra_forbidden" for p in e.problems):
+            raise _Error(
+                f"invalid session spec {path}: this looks like a browser task spec; use "
+                "evidence-judge judge --spec",
+                _Exit.USAGE,
+            ) from e
         raise _Error(f"invalid session spec {path}:\n{indent(str(e), '  ')}", _Exit.USAGE) from e
     except (OSError, ValueError) as e:
         raise _Error(f"invalid session spec {path}: {e}", _Exit.USAGE) from e
@@ -212,9 +218,13 @@ def _claims(path: Path | None) -> SessionClaimSet | None:
     if path is None:
         return None
     try:
-        return SessionClaimSet.model_validate_json(path.read_bytes())
+        data = path.read_bytes()
     except OSError as e:
         raise _Error(f"cannot read claims file {path}: {e.strerror}", _Exit.USAGE) from e
+    if (problem := json_syntax_problem(data)) is not None:
+        raise _Error(f"--claims: not valid JSON ({problem})", _Exit.USAGE)
+    try:
+        return SessionClaimSet.model_validate_json(data)
     except ValidationError as e:
         problems = "; ".join(
             f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['type']}"

@@ -639,4 +639,5 @@ def test_unparseable_claims_file_is_not_echoed(
     )
     assert result.exit_code == ExitCode.USAGE
     assert "secret-sk-ant-abc" not in result.output
-    assert "json_invalid" in result.output
+    text = " ".join(result.output.split())
+    assert "--claims: not valid JSON (line 1, column 14: Unterminated string starting)" in text

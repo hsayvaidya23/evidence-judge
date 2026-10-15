@@ -20,11 +20,11 @@ from typer.core import TyperGroup
 from evidence_judge import engine, ingest
 from evidence_judge._extras import needs_extra
 from evidence_judge._version import __version__
-from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.config import Settings, describe_settings_error, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
-from evidence_judge.core.spec_errors import SpecError, load_yaml
+from evidence_judge.core.spec_errors import SpecError, json_syntax_problem, load_yaml
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
 from evidence_judge.hooks.cli import hook_app
@@ -231,7 +231,7 @@ def _settings(llm: LLMChoice | None = None) -> Settings:
     try:
         settings = Settings()
     except ValidationError as e:
-        raise CliError(f"invalid settings: {e}", ExitCode.USAGE) from e
+        raise CliError(f"invalid settings: {describe_settings_error(e)}", ExitCode.USAGE) from e
     if llm is None:
         return settings
     return settings.model_copy(update={"llm_backend": llm.value})
@@ -261,6 +261,8 @@ def _load_claims(path: Path) -> ClaimSet:
     except OSError as e:
         reason = e.strerror or type(e).__name__
         raise CliError(f"cannot read claims file {path}: {reason}", ExitCode.USAGE) from e
+    if (problem := json_syntax_problem(data)) is not None:
+        raise CliError(f"--claims: not valid JSON ({problem})", ExitCode.USAGE)
     try:
         return ClaimSet.model_validate_json(data)
     except ValidationError as e:

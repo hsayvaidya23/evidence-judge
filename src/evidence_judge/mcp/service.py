@@ -15,7 +15,7 @@ from typing import Any, Final, Literal, cast
 from pydantic import ValidationError
 
 from evidence_judge import engine, ingest
-from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.config import Settings, describe_settings_error, stable_redaction_key
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
 from evidence_judge.core.taskspec import TaskSpec
@@ -99,7 +99,9 @@ def settings_of(config: ServerConfig) -> Settings:
     try:
         return config.settings()
     except ValidationError as e:
-        raise ToolInputError(f"invalid evidence-judge settings: {e}") from e
+        raise ToolInputError(
+            f"invalid evidence-judge settings: {describe_settings_error(e)}"
+        ) from e
 
 
 def _opt(roots: Roots, value: str | None, what: str, *, directory_ok: bool = False) -> Path | None:

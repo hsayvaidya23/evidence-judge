@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import cast
 
@@ -22,7 +23,7 @@ class SpecProblem(BaseModel):
     line: int | None = Field(default=None, description="1-based line of the location in the YAML")
     column: int | None = Field(default=None, description="1-based column of the location")
     message: str
-    type: str = Field(description="yaml_syntax, yaml_alias, size, or a pydantic error type")
+    type: str = Field(description="yaml_syntax, yaml_alias, size, empty, or a pydantic error type")
 
 
 class SpecError(ValueError):
@@ -43,10 +44,28 @@ def compose(text: str) -> tuple[yaml.Node | None, object]:
 def load_yaml[M: BaseModel](text: str, model: type[M]) -> M:
     """Parse and validate spec YAML; a SpecError lists each problem with its line and column."""
     node, data = compose(text)
+    if data is None:
+        raise SpecError(
+            [SpecProblem(location="<root>", message="the spec file is empty", type="empty")]
+        )
     try:
         return model.model_validate(data)
     except ValidationError as e:
         raise SpecError(validation_problems(e, node)) from e
+
+
+def json_syntax_problem(data: bytes) -> str | None:
+    """Why ``data`` is not JSON, as ``line L, column C: message``, or None when it parses. The
+    message never quotes the data, which is not redacted yet."""
+    try:
+        json.loads(data)
+    except json.JSONDecodeError as e:
+        return f"line {e.lineno}, column {e.colno}: {e.msg.removesuffix(' at')}"
+    except UnicodeDecodeError:
+        return "not UTF-8 text"
+    except RecursionError:
+        return "nested too deeply"
+    return None
 
 
 def validation_problems(e: ValidationError, root: yaml.Node | None) -> list[SpecProblem]:

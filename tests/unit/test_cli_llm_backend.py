@@ -81,7 +81,9 @@ def test_an_unknown_configured_backend_is_a_usage_error(monkeypatch: pytest.Monk
     monkeypatch.setenv("EVJ_LLM_BACKEND", "gpt")
     result = runner.invoke(app, ["judge", "--har", str(RUN / "run.har")])
     assert result.exit_code == ExitCode.USAGE
-    assert "invalid settings" in result.output
+    text = " ".join(result.output.split())
+    assert "EVJ_LLM_BACKEND: must be one of anthropic, claude-code, codex, gemini" in text
+    assert "pydantic" not in text and "'gpt'" not in text
 
 
 def test_a_missing_cli_exits_internal_with_install_advice(

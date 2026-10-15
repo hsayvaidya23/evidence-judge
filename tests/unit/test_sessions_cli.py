@@ -22,6 +22,7 @@ from evidence_judge.sessions.ingest.claude_code import project_slug
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures" / "sessions"
 SUCCESS = FIXTURES / "claude_code" / "honest_success.jsonl"
+BROWSER_SPEC = FIXTURES.parent / "runs" / "honest_success" / "spec.yaml"
 FAILURE = FIXTURES / "claude_code" / "honest_failure.jsonl"
 FILTERED = FIXTURES / "claude_code" / "filtered_tests.jsonl"
 CODEX = FIXTURES / "codex" / "honest_success.exec.jsonl"
@@ -308,6 +309,8 @@ def test_invalid_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EVJ_MAX_COST_USD", "-1")
     result = runner.invoke(app, ["session", "judge", "--offline", "--claude-code", str(SUCCESS)])
     assert result.exit_code == 3 and "invalid settings" in result.output
+    assert "EVJ_MAX_COST_USD: Input should be greater than 0" in " ".join(result.output.split())
+    assert "errors.pydantic.dev" not in result.output
     result = runner.invoke(app, ["session", "inspect", "--claude-code", str(SUCCESS)])
     assert result.exit_code == 3
 
@@ -363,3 +366,50 @@ def test_a_codex_edit_without_a_diff_is_not_called_weakening(tmp_path: Path) -> 
     assert "code not checkable" in text
     assert "the code could not be checked" in text
     assert "weakened" not in text
+
+
+def test_a_claims_file_that_is_not_json(tmp_path: Path) -> None:
+    claims = tmp_path / "claims.json"
+    claims.write_text('{"claims": [\n  "sk-ant-secret')
+    result = runner.invoke(
+        app,
+        ["session", "judge", "--offline", "--claude-code", str(SUCCESS), "--claims", str(claims)],
+    )
+    assert result.exit_code == 3
+    text = " ".join(result.output.split())
+    assert "--claims: not valid JSON (line 2, column 3: Unterminated string starting)" in text
+    assert "sk-ant-secret" not in text
+
+
+@pytest.mark.parametrize("content", ["", "# nothing yet\n"])
+def test_an_empty_spec(tmp_path: Path, content: str) -> None:
+    spec = tmp_path / "spec.yaml"
+    spec.write_text(content)
+    for command in (
+        ["session", "judge", "--offline", "--claude-code", str(SUCCESS), "--spec", str(spec)],
+        ["session", "rerun", "--spec", str(spec)],
+        ["judge", "--offline", "--har", str(BROWSER_SPEC.parent / "run.har"), "--spec", str(spec)],
+    ):
+        result = runner.invoke(app, command)
+        assert result.exit_code == 3
+        assert "the spec file is empty" in result.output
+
+
+def test_a_browser_spec_given_to_a_session_command_gets_a_hint() -> None:
+    for command in (
+        [
+            "session",
+            "judge",
+            "--offline",
+            "--claude-code",
+            str(SUCCESS),
+            "--spec",
+            str(BROWSER_SPEC),
+        ],
+        ["session", "rerun", "--spec", str(BROWSER_SPEC)],
+    ):
+        result = runner.invoke(app, command)
+        assert result.exit_code == 3
+        text = " ".join(result.output.split())
+        assert "this looks like a browser task spec; use evidence-judge judge --spec" in text
+        assert "Extra inputs" not in text

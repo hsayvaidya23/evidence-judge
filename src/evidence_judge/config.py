@@ -3,13 +3,14 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import secrets
 import sys
 import tempfile
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,22 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+
+def describe_settings_error(e: ValidationError) -> str:
+    """Each bad setting as ``EVJ_NAME: problem``, without the value or a pydantic URL."""
+    problems: list[str] = []
+    for err in e.errors(include_url=False, include_input=False):
+        field = str(err["loc"][0]) if err["loc"] else ""
+        info = Settings.model_fields.get(field)
+        alias = info.validation_alias if info else None
+        name = alias if isinstance(alias, str) else f"EVJ_{field.upper()}" if field else "settings"
+        message = err["msg"].removeprefix("Value error, ")
+        if err["type"] == "literal_error":
+            expected = str(err.get("ctx", {}).get("expected", ""))
+            message = "must be one of " + ", ".join(re.findall(r"'([^']*)'", expected))
+        problems.append(f"{name}: {message}")
+    return "; ".join(problems)
 
 
 def stable_redaction_key(settings: Settings) -> bytes | None:
