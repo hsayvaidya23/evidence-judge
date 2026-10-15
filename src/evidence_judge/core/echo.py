@@ -7,7 +7,7 @@ import bisect
 import functools
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Final, cast
 from urllib.parse import quote, quote_plus, unquote, unquote_plus, urlsplit, urlunsplit
 
@@ -36,12 +36,34 @@ def mask(text: str, inputs: tuple[str, ...], *, folded: bool = True) -> str | No
     as "In stock".
     """
     norm = normalize(text)
-    spans = sorted(_echoes(norm, inputs, folded=folded))
+    return _replaced(norm, _echoes(norm, inputs, folded=folded))
+
+
+def mask_covered(text: str, needles: tuple[str, ...], inputs: tuple[str, ...]) -> str | None:
+    """`text` normalised with every occurrence of a needle that the agent's inputs make word by
+    word replaced by MASK, or None if there is none.
+
+    A needle's occurrence is covered when every word of it lies in the echoes of the inputs
+    (`mask`'s echoes, exact or folded, of inputs of any length, and every folded occurrence of an
+    input too short for them): "In" typed in one field and
+    "stock" in another make "In stock" between them. One word the agent did not put in leaves the
+    occurrence alone, so "Red Kettle" searched for does not cover "Thank you for your order".
+    """
+    norm = normalize(text)
+    found = [(at, at + len(n)) for at, n in _occurrences(norm, [*dict.fromkeys(needles)]) if n]
+    if not found:
+        return None
+    covered = _union(_cover_spans(norm, inputs))
+    return _replaced(norm, [span for span in found if _words_covered(norm, span, covered)])
+
+
+def _replaced(norm: str, spans: list[tuple[int, int]]) -> str | None:
+    """`norm` with `spans` replaced by MASK (overlapping ones by one), or None if there are none."""
     if not spans:
         return None
     parts: list[str] = []
     end = 0
-    for start, stop in spans:
+    for start, stop in sorted(spans):
         if start < end:
             end = max(end, stop)
             continue
@@ -49,6 +71,42 @@ def mask(text: str, inputs: tuple[str, ...], *, folded: bool = True) -> str | No
         end = stop
     parts.append(norm[end:])
     return "".join(parts)
+
+
+def _cover_spans(norm: str, inputs: tuple[str, ...]) -> list[tuple[int, int]]:
+    """Every echo of `inputs` in `norm`, and every occurrence, folded, of an input that folds to
+    fewer than MIN_PAGE_TEXT characters: "I" and "n stock" make "In stock" between them. A short
+    input inside another word covers only its own letters, so it never covers a word alone."""
+    spans = _echoes(norm, tuple(i for i in inputs if len(i) >= MIN_PAGE_TEXT), folded=True)
+    short = {f for i in inputs if 0 < len(f := _Folded(i).text) < MIN_PAGE_TEXT}
+    if short:
+        folded = _Folded(norm)
+        spans += [
+            folded.original(at, at + len(value))
+            for at, value in _occurrences(folded.text, sorted(short))
+        ]
+    return spans
+
+
+def _union(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    merged: list[tuple[int, int]] = []
+    for start, stop in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], stop))
+        else:
+            merged.append((start, stop))
+    return merged
+
+
+def _words_covered(norm: str, span: tuple[int, int], covered: list[tuple[int, int]]) -> bool:
+    """Every word of `norm[span]` (as far as it is inside the span) lies in one of `covered`."""
+    words = [m.span() for m in WORD.finditer(norm, *span)]
+    starts = [start for start, _ in covered]
+    for start, stop in words:
+        at = bisect.bisect_right(starts, start) - 1
+        if at < 0 or covered[at][1] < stop:
+            return False
+    return bool(words)
 
 
 type _Part = tuple[str, bool, tuple[tuple[int, int], ...]]
@@ -301,39 +359,53 @@ def masked_url[E: (ActionEvent, NetworkEvent)](event: E, inputs: tuple[str, ...]
 
 def masked_request(event: NetworkEvent, inputs: tuple[str, ...]) -> NetworkEvent:
     masked = event if event.is_mutation else masked_url(event, inputs)
-    body = None if event.response_body is None else _masked_body(event.response_body, inputs)
-    if body is None:
-        return masked
-    return masked.model_copy(update={"response_body": body})
+    return _with_body(masked, event.response_body, lambda text: mask(text, inputs))
 
 
-def _masked_body(body: str, inputs: tuple[str, ...]) -> str | None:
-    """`body` with every echo masked, or None if it has none. JSON keeps its structure."""
+def covered_request(
+    event: NetworkEvent, needles: tuple[str, ...], inputs: tuple[str, ...]
+) -> NetworkEvent:
+    """`event` with every occurrence of a needle its response body holds that the agent's
+    inputs make word by word (`mask_covered`) masked."""
+    return _with_body(event, event.response_body, lambda text: mask_covered(text, needles, inputs))
+
+
+def _with_body(event: NetworkEvent, body: str | None, masker: _Masker) -> NetworkEvent:
+    masked = None if body is None else _masked_body(body, masker)
+    return event if masked is None else event.model_copy(update={"response_body": masked})
+
+
+type _Masker = Callable[[str], str | None]
+"""Text with what it masks replaced by MASK, or None if there is nothing to mask."""
+
+
+def _masked_body(body: str, masker: _Masker) -> str | None:
+    """`body` masked, or None if nothing in it is. JSON keeps its structure."""
     try:
         data: object = json.loads(body)
     except (json.JSONDecodeError, RecursionError):
         data = None
     if isinstance(data, dict | list):
-        masked = _masked_json(cast(object, data), inputs)
+        masked = _masked_json(cast(object, data), masker)
         return None if masked == data else json.dumps(masked, ensure_ascii=False)
     tail = _TRUNCATION_TAIL.search(body)
     cut = tail.start() if tail else len(body)
-    text = mask(body[:cut], inputs)
+    text = masker(body[:cut])
     return None if text is None else text + body[cut:]
 
 
-def _masked_json(data: object, inputs: tuple[str, ...]) -> object:
+def _masked_json(data: object, masker: _Masker) -> object:
     match data:
         case str():
-            masked = mask(data, inputs)
+            masked = masker(data)
             return data if masked is None else masked
         case dict():
             return {
-                mask(key, inputs) or key: _masked_json(value, inputs)
+                masker(key) or key: _masked_json(value, masker)
                 for key, value in cast(dict[str, object], data).items()
             }
         case list():
-            return [_masked_json(v, inputs) for v in cast(list[object], data)]
+            return [_masked_json(v, masker) for v in cast(list[object], data)]
         case _:
             return data
 
@@ -344,3 +416,12 @@ def masked_page[S: (PageSnapshot, PageState)](page: S, inputs: tuple[str, ...]) 
     if text is not None:
         update["text"] = text
     return page.model_copy(update=update)
+
+
+def covered_page[S: (PageSnapshot, PageState)](
+    page: S, needles: tuple[str, ...], inputs: tuple[str, ...]
+) -> S:
+    """`page` with every occurrence of a needle in its text that the agent's inputs make word by
+    word (`mask_covered`) masked."""
+    text = mask_covered(page.text, needles, inputs)
+    return page if text is None else page.model_copy(update={"text": text})

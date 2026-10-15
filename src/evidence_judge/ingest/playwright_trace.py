@@ -46,6 +46,7 @@ from evidence_judge.ingest._calls import (
     action_name,
     action_value,
     is_settle,
+    resolved_text,
     script_sha256,
     taints_run,
     upload_text,
@@ -385,6 +386,8 @@ class _TraceReader:
                 self._on_before(event)
             case "after":
                 self._on_after(event)
+            case "log":
+                self._on_log(event)
             case "frame-snapshot":
                 self._on_frame_snapshot(as_object(event.get("snapshot")))
             case "screencast-frame" | "screenshot":
@@ -458,6 +461,12 @@ class _TraceReader:
             return
         nested = as_object(error.get("error"))
         action.error = as_str(error.get("message")) or as_str(nested.get("message")) or "error"
+
+    def _on_log(self, event: JsonObject) -> None:
+        action = self.actions.get(self._key(as_str(event.get("callId")) or ""))
+        message = as_str(event.get("message"))
+        if action is not None and message is not None:
+            action.target = resolved_text(message) or action.target
 
     def _on_frame_snapshot(self, snapshot: JsonObject) -> None:
         frame_id = as_str(snapshot.get("frameId"))
@@ -643,6 +652,7 @@ class _TraceReader:
                     call_id=raw.call_id,
                     script_sha256=script_sha256(raw.method, raw.params),
                     file_text=upload_text(raw.params) if raw.method == "setInputFiles" else None,
+                    target_text=raw.target,
                 )
             )
         return out

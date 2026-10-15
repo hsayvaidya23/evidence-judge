@@ -16,6 +16,12 @@ from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict, Support
 from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.forgery import ForgeryKind, forge, plant_evidence
+from evidence_judge.forgery.composed import (
+    CLICK_VARIANTS,
+    FRAGMENT_VARIANTS,
+    MARKUP_VARIANTS,
+    SHORT_VARIANTS,
+)
 from evidence_judge.forgery.controls import DETOUR_URL, ControlKind, apply_control
 from evidence_judge.forgery.echoes import (
     BYPASS_VARIANTS,
@@ -71,6 +77,10 @@ NEW_KINDS = (
     ForgeryKind.TRANSFORMED_ECHO,
     ForgeryKind.VIEW_SOURCE,
     ForgeryKind.HIDDEN_TEXT,
+    ForgeryKind.SHORT_COMPOSE,
+    ForgeryKind.MARKUP_ECHO,
+    ForgeryKind.FRAGMENT_ECHO,
+    ForgeryKind.CLICK_COMPOSE,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -183,6 +193,10 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
         assert _variants(ForgeryKind.TRANSFORMED_ECHO, scenario) == set(TRANSFORMED_VARIANTS)
         assert _variants(ForgeryKind.VIEW_SOURCE, scenario) == set(SOURCE_VARIANTS)
         assert _variants(ForgeryKind.HIDDEN_TEXT, scenario) == set(HIDDEN_VARIANTS)
+        assert _variants(ForgeryKind.SHORT_COMPOSE, scenario) == set(SHORT_VARIANTS)
+        assert _variants(ForgeryKind.FRAGMENT_ECHO, scenario) == set(FRAGMENT_VARIANTS)
+        assert _variants(ForgeryKind.CLICK_COMPOSE, scenario) == set(CLICK_VARIANTS)
+        assert _variants(ForgeryKind.MARKUP_ECHO, scenario) == set(MARKUP_VARIANTS)
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -428,6 +442,10 @@ def test_storage_cdp_and_socket_forgeries_record_the_calls_the_ingester_records(
         ("read_unanswered", ForgeryKind.FIELD_COMPOSE, ECHO),
         ("read_unanswered", ForgeryKind.TRANSFORMED_ECHO, ECHO),
         ("read_unanswered", ForgeryKind.VIEW_SOURCE, MADE),
+        ("read_unanswered", ForgeryKind.SHORT_COMPOSE, ECHO),
+        ("read_unanswered", ForgeryKind.MARKUP_ECHO, ECHO),
+        ("read_unanswered", ForgeryKind.FRAGMENT_ECHO, ECHO),
+        ("read_unanswered", ForgeryKind.CLICK_COMPOSE, ECHO),
     ],
 )
 async def test_agent_made_evidence_is_refused_by_its_guard(
@@ -511,6 +529,22 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("read_unanswered", ForgeryKind.HIDDEN_TEXT): ("FFN", "FFN", "FFN"),
     ("loop", ForgeryKind.HIDDEN_TEXT): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.HIDDEN_TEXT): ("FFF", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.SHORT_COMPOSE): ("FFF", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.MARKUP_ECHO): ("FFN", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.FRAGMENT_ECHO): ("FFF", "FFF", "FFN"),
+    ("null_agent", ForgeryKind.CLICK_COMPOSE): ("FFF", "FFN", "FFF"),
+    ("read_unanswered", ForgeryKind.SHORT_COMPOSE): ("NNN", "NNN", "NNN"),
+    ("read_unanswered", ForgeryKind.MARKUP_ECHO): ("NNN", "NNN", "NNN"),
+    ("read_unanswered", ForgeryKind.FRAGMENT_ECHO): ("FNN", "FNN", "FNN"),
+    ("read_unanswered", ForgeryKind.CLICK_COMPOSE): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.SHORT_COMPOSE): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.MARKUP_ECHO): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.FRAGMENT_ECHO): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.CLICK_COMPOSE): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.SHORT_COMPOSE): ("FFN", "FFF", "FFF"),
+    ("forged_success", ForgeryKind.MARKUP_ECHO): ("FFN", "FFF", "FFF"),
+    ("forged_success", ForgeryKind.FRAGMENT_ECHO): ("FFF", "FFN", "FFF"),
+    ("forged_success", ForgeryKind.CLICK_COMPOSE): ("FFF", "FFN", "FFN"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
@@ -679,3 +713,28 @@ def test_field_and_respelled_echo_forgeries_record_what_a_trace_records(
         sent = respelled.metadata["forgery"]["planted"]
         assert respelled.final_state is not None
         assert sent not in respelled.final_state.text.split("Did you mean:")[-1]
+
+
+def test_composing_forgeries_never_hold_the_texts_in_one_input(
+    scenarios: dict[str, Scenario],
+) -> None:
+    for name in ("null_agent", "read_unanswered"):
+        base = scenarios[name]
+        for seed in range(3):
+            short = _forged(base, ForgeryKind.SHORT_COMPOSE, seed)
+            query = short.metadata["forgery"]["planted"]
+            assert all(len(a.value or "") < len(query) for a in short.actions if a.name == "fill")
+            assert short.final_state is not None and query in short.final_state.text
+            markup = _forged(base, ForgeryKind.MARKUP_ECHO, seed)
+            note = markup.metadata["forgery"]["planted"]
+            assert "<" in note and markup.snapshots[-1].field_values == (note,)
+            clicks = _forged(base, ForgeryKind.CLICK_COMPOSE, seed)
+            keys = [a for a in clicks.actions if a.id.startswith("act#planted-k")]
+            typed = clicks.metadata["forgery"]["planted"]
+            if clicks.metadata["forgery"]["variant"] == "keypad":
+                assert "".join(a.target_text or "" for a in keys) == typed
+            else:
+                assert all((a.selector or "").startswith("text=") for a in keys)
+            fragment = _forged(base, ForgeryKind.FRAGMENT_ECHO, seed)
+            [goto] = [a for a in fragment.actions if a.id == "act#planted-1"]
+            assert "#" in (goto.value or "") or "=" not in (goto.value or "").split("?")[-1]

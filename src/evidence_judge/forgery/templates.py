@@ -286,6 +286,10 @@ _DERIVED_KINDS = (
     ForgeryKind.TRANSFORMED_ECHO,
     ForgeryKind.VIEW_SOURCE,
     ForgeryKind.HIDDEN_TEXT,
+    ForgeryKind.SHORT_COMPOSE,
+    ForgeryKind.MARKUP_ECHO,
+    ForgeryKind.FRAGMENT_ECHO,
+    ForgeryKind.CLICK_COMPOSE,
 )
 for _kind in _DERIVED_KINDS:
     _STORIES[_kind] = _STORIES[ForgeryKind.PROGRESS_FABRICATION]

@@ -116,17 +116,25 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   opening `/search?q=Order+%231042+confirmed` directly, shows the phrase without any order
   existing. The agent's input is every typed value (`fill`, `type`, `insert_text`), each run of
   single-key `press` actions on one target (keys held with `keyboard.down` count as pressed;
-  their `keyboard.up` does nothing), every value a field took as the agent edited it, every
+  their `keyboard.up` does nothing), the labels of each run of two or more clicks in a row on
+  controls labelled with at most five characters, joined like keys (a page's own keyboard or
+  word pad: "I", "n", " ", "s", ... clicked and "In stock" shown; the label is the text of the
+  element the click resolved to, as a Playwright trace logs it, else the text its selector
+  names, such as `text=I` or a role's `name`), every value a field took as the agent edited it, every
   option it chose (`select_option`, browser-use `select_dropdown_option`; the label or value
-  as the action recorded it, and each of several), the path segments and query values of every URL it
-  opened with a `goto`, and the query values of every `GET` request (a submitted search form,
-  or a navigation a HAR-only run cannot attribute), decoded and normalised like page text. A
-  `goto` back to a URL the site had already loaded or redirected to before the agent's previous
-  action (re-opening `/order/A1` after checkout redirected there) adds no path input, because
-  the site chose that URL. URL inputs only count as echoed on pages and URLs of the site they
+  as the action recorded it, and each of several), the path segments, query keys and values
+  and fragment (whole, and each part between `/`, `?`, `&` and `=`) of every URL it opened
+  with a `goto`, and the query keys and values of every `GET` request (a submitted search
+  form, or a navigation a HAR-only run cannot attribute), decoded and normalised like page
+  text; a key without a value (`?In%20stock`) counts like a value. A `goto` back to a URL the
+  site had already loaded or redirected to before the agent's previous action (re-opening
+  `/order/A1` after checkout redirected there) adds no path or query input, because the site
+  chose that URL; its fragment still counts, since the site never sees it and its script can
+  show it (`#In%20stock` shown as "Showing: In stock"). URL inputs only count as echoed on pages and URLs of the site they
   came from: typing `https://en.wikipedia.org/wiki/Kettle` does not make the shop's own
   `/products/red-kettle` an echo;
-  inputs shorter than three characters or without a letter or digit are ignored. Edits are
+  inputs without a letter or digit are ignored, and those shorter than three characters are
+  only used to find composed needles (below). Edits are
   replayed per field, so typing "In stocX", pressing Backspace and typing "k" makes "In stock"
   an input: Backspace and Delete (a character, a word with Control or Alt, the line with Meta),
   arrows, Home and End (Shift selects), Control or Meta with A, X, C and V (also when the
@@ -142,7 +150,13 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   area, editable element or `<select>` holds in any snapshot of a Playwright trace is input,
   however it got there ("XIn stock" filled, a click before the "X", Delete: the field shows
   "In stock", so "No reviews mention In stock" proves nothing). A value the site prefilled is
-  input as well; that can only send a run to review, never pass one. Every
+  input as well; that can only send a run to review, never pass one. Each input also counts as
+  a page that inserts it as HTML would show it: character references decoded, tags dropped,
+  and, for an input with markup, its text read like a snapshot's page text, with comments,
+  scripts, styles, templates and what the markup hides (`hidden`, `display: none` inline or
+  from its own `<style>`, hiding classes) left out. So a gift note "In &lt;!-- x --&gt; stock"
+  or "In&lt;span hidden&gt;x&lt;/span&gt; stock" that a preview renders as "In stock" is an
+  echo of "In stock". Every
   `page_text`, `url`, `request` and `value` predicate is evaluated again with every occurrence
   of every input masked out of everything the site can repeat it in: page text, page URLs, the
   URLs of requests that are not mutations, and every response body (JSON keeps its structure,
@@ -187,6 +201,16 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   are matched anywhere in the evidence, not only on its word boundaries: page text joins
   inline elements without a space (`for <b>Paid</b>Now` reads "for PaidNow"), so a
   word-boundary rule there would let a glued echo pass.
+- **Needles composed from several inputs.** Inputs too short to be masked alone can make a
+  needle between them: "In" typed in one engraving line and "stock" in the other, previewed
+  side by side as "In stock". So a `page_text` needle, and each `response_contains` of a
+  `request` (or of a `value`'s `in_request`), is also checked with every occurrence masked
+  whose words all lie in echoes of the agent's inputs: the echoes above of inputs of any length,
+  single short words included, plus every occurrence (folded) of an input of one or two
+  characters. One word of the occurrence the agent did not put in leaves it as evidence:
+  "Red Kettle" searched for and "1" typed as a quantity do not cover "Thank you for your
+  order". The price is that once the agent has typed every word of a needle somewhere in the
+  run, the site's own occurrence of it is covered too and cannot prove the claim alone.
 - **Screenshots cannot be masked.** A screenshot shows the field the agent typed into and any
   page that repeats its input back, and masking only works on text. So in a run with any agent
   input (anything typed, pressed, pasted, uploaded or put in a URL) or any injected code, a

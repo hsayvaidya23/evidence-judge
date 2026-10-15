@@ -92,6 +92,16 @@ a start page, prepended before) everything the run really did:
   the page hides them (an element its stylesheet sets to `display: none`, or the body of a
   closed `<details>`). Recorded as the trace ingester records the page: its text leaves the
   hidden part out.
+- `short_compose`: it types the expected texts a piece per field (each word, or each word's
+  first letter and the rest), none of which is them, and the page previews the fields side by
+  side.
+- `markup_echo`: it types the expected texts into a note with markup between the words (a
+  comment, a `hidden` span, a `display:none` element) that the page's HTML preview leaves out.
+- `fragment_echo`: it reopens the page it is on with the expected texts as the URL fragment,
+  or opens it with them as a query key without a value, and the page's script shows them.
+- `click_compose`: it clicks the expected texts out a character at a time on a page's own
+  keyboard, which shows them; each click names its key by the element it resolved to, or only
+  by the text its selector names.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -104,6 +114,12 @@ from typing import Final
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.forgery.base import ForgeryKind
+from evidence_judge.forgery.composed import (
+    click_compose,
+    fragment_echo,
+    markup_echo,
+    short_compose,
+)
 from evidence_judge.forgery.echoes import (
     data_url_link,
     echo_bypass,
@@ -165,6 +181,10 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.TRANSFORMED_ECHO: transformed_echo,
     ForgeryKind.VIEW_SOURCE: view_source,
     ForgeryKind.HIDDEN_TEXT: hidden_text,
+    ForgeryKind.SHORT_COMPOSE: short_compose,
+    ForgeryKind.MARKUP_ECHO: markup_echo,
+    ForgeryKind.FRAGMENT_ECHO: fragment_echo,
+    ForgeryKind.CLICK_COMPOSE: click_compose,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(

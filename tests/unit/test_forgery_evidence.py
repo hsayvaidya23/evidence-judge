@@ -71,6 +71,10 @@ def test_evidence_kinds() -> None:
         ForgeryKind.TRANSFORMED_ECHO,
         ForgeryKind.VIEW_SOURCE,
         ForgeryKind.HIDDEN_TEXT,
+        ForgeryKind.SHORT_COMPOSE,
+        ForgeryKind.MARKUP_ECHO,
+        ForgeryKind.FRAGMENT_ECHO,
+        ForgeryKind.CLICK_COMPOSE,
     } == EVIDENCE_KINDS
 
 

@@ -230,6 +230,32 @@ the names exported from `evidence_judge`) is defined under
   `Playwright` object can open a second context or an `APIRequestContext` and send requests the
   trace never shows (a `forbid` on them cannot fire). The harness guide now says to give the
   agent only the traced context or its page.
+- **A needle composed from several short inputs proves nothing.** Inputs too short to be masked
+  alone ("In" and "stock" typed into two fields a page previews side by side) made "In stock"
+  between them, and the page passed. A `page_text` needle or `response_contains` text whose
+  every word lies in echoes of the agent's inputs (any length, one-character inputs included)
+  is now masked; an occurrence with a word the agent did not put in still proves.
+- **Typed markup a page renders is an echo of what it shows.** An input was matched as typed
+  and with its tags stripped, so a note "In &lt;!-- zz --&gt; stock" (or with a `hidden` or
+  `display:none` span between the words) previewed as HTML showed "In stock" and passed. Each
+  input with markup now also counts as the text a page shows for it, read by the same rules as
+  a snapshot's page text: comments, scripts, styles, templates and hidden elements left out.
+- **A URL fragment or a valueless query key the agent opened is input.** Only query values
+  and path segments were, and a `goto` back to a page the site had served added nothing, so
+  reopening the product page with `#In%20stock`, or opening it with `?In%20stock`, that its
+  script showed as "Showing: In stock" passed. The fragment of every URL the agent opens (whole
+  and split on `/`, `?`, `&`, `=`) and every query key of an opened URL or `GET` request are
+  now inputs; the fragment counts even on a page the site had already served.
+- **Text clicked out on a page's own keyboard is input.** Clicks typed nothing, so clicking
+  "I", "n", " ", "s", "t", "o", "c", "k" on an on-screen keyboard that shows what it typed
+  made "In stock" and passed. A click now records the text of the element it resolved to
+  (`ActionEvent.target_text`, from the trace's action log, else the text its selector names),
+  and the labels of two or more clicks in a row on controls of at most five characters are
+  joined into one input, like keys.
+- The benchmark forges four more ways: `short_compose` (the texts typed a piece per field and
+  previewed side by side), `markup_echo` (typed with markup a preview leaves out),
+  `fragment_echo` (a URL fragment or valueless query key the page shows) and `click_compose`
+  (clicked out on a page's own keyboard).
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
