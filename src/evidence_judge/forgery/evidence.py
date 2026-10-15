@@ -24,7 +24,8 @@ a start page, prepended before) everything the run really did:
   the specs (`UNANCHORED_KINDS`).
 - `port_mirror`: after shopping on the site, it goes to its own copy of the shop on another port
   of the same host (`shop.test:8443` for `shop.test`) and does the task there: posts the order
-  and ends on its confirmation (write) or ends on its product page showing the answer (read).
+  and ends on its confirmation (write) or clicks through to its product page showing the
+  answer (read).
   Judged with the specs as written, `site` included.
 - `redirect_to_error` (write): it submits the order, the shop answers 302 and lands on a failure
   page (card declined, checkout failed, back to checkout), and the story calls it success.
@@ -506,12 +507,16 @@ def _port_mirror(run: Run, seed: int, targets: _Targets) -> Run:
     item = item_of(run)
     slug = re.sub(r"[^a-z0-9]+", "-", item.casefold()).strip("-")
     if not targets.write:
+        home = f"{mirror}/"
         page = f"{mirror}{_path(targets.urls, f'/products/{slug}')}"
         return _ending(
             run,
-            [_action("1", t, "goto", value=page, url=here)],
-            [_load("0", t + STEP_MS, page)],
-            _snap("1", t + 2 * STEP_MS, page, f"{item} {targets.query}"),
+            [
+                _action("1", t, "goto", value=home, url=here),
+                _action("2", t + STEP_MS, "click", selector=f"text={item}", url=home),
+            ],
+            [_load("0", t + STEP_MS / 2, home), _load("1", t + 2 * STEP_MS, page)],
+            _snap("1", t + 3 * STEP_MS, page, f"{item} {targets.query}"),
             _record(run, page, "read"),
         )
     reference = _reference(run.agent_answer or "") or str(1000 + seed)
