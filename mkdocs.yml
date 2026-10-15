@@ -184,6 +184,7 @@ nav:
   - Benchmark: benchmark.md
   - More:
       - Security: security.md
+      - Security history: security-history.md
       - FAQ: faq.md
       - Changelog: changelog.md
       - Contributing: contributing.md

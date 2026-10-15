@@ -97,6 +97,8 @@ A maintainer cuts releases from `main`:
    run `uv lock`.
 2. In `CHANGELOG.md`, rename `[Unreleased]` to a dated section (`## [0.1.0] - 2026-11-02`),
    add a new empty `[Unreleased]` above it, and update the link references at the bottom.
+   `release.yml` takes the release notes from the `## [X.Y.Z]` section and fails when there is
+   none, so a tag pushed while the notes are still under `[Unreleased]` does not release.
 3. Merge that pull request, then tag the merge commit `vX.Y.Z` and push the tag
    (`git tag -s v0.1.0 -m v0.1.0`, `git push origin v0.1.0`).
 4. `release.yml` runs the full CI, checks that the tag matches the package version, builds the
