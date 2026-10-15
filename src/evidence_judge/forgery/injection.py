@@ -69,7 +69,8 @@ def _fill(value: Any, slots: dict[str, str]) -> Any:
 
 
 def _slots(run: Run) -> dict[str, str]:
-    host = EvidenceIndex(run).primary_host or "http"
+    site = EvidenceIndex(run).primary_site
+    host = site.host if site else "http"
     start = EvidenceIndex(run).baseline.final
     words = (start.text if start else "").split()
     return {"host": host, "start_text": " ".join(words[:3]) or host}

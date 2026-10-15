@@ -38,7 +38,7 @@ SETTLE_MS = 400
 SPEC_YAML = """\
 id: buy-red-kettle
 task: Buy a red kettle under $30
-site: 127.0.0.1
+site: SHOP_ORIGIN
 expect:
   - id: order_submitted
     description: An order request succeeded
@@ -306,7 +306,8 @@ def record(scenario: Scenario, base: str, out_dir: Path) -> None:
         browser.close()
     (target / "answer.txt").write_text(scenario.answer + "\n", encoding="utf-8")
     (target / "reasoning.txt").write_text("\n\n".join(scenario.reasoning) + "\n", encoding="utf-8")
-    (target / "spec.yaml").write_text(SPEC_YAML, encoding="utf-8")
+    spec = SPEC_YAML.replace("SHOP_ORIGIN", base)
+    (target / "spec.yaml").write_text(spec, encoding="utf-8")
     TaskSpec.load(target / "spec.yaml")
     expected = {"outcome": scenario.outcome, "notes": scenario.notes}
     (target / "expected.json").write_text(json.dumps(expected, indent=2) + "\n", encoding="utf-8")

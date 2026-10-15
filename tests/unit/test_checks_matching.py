@@ -14,7 +14,6 @@ from evidence_judge.checks.matching import (
     compile_regex,
     contains,
     excerpt,
-    host_allowed,
     json_path_get,
     normalize,
     parse_body,
@@ -215,20 +214,9 @@ def test_url_helpers() -> None:
     assert url_path(url) == "/api/orders%2Fnew?id=7"
     assert url_path("https://shop.test") == "/"
     assert url_host(url) == "api.shop.test"
-
-
-@pytest.mark.parametrize(
-    ("host", "allowed", "expected"),
-    [
-        ("shop.test", ["shop.test"], True),
-        ("api.shop.test", ["shop.test"], True),
-        ("evilshop.test", ["shop.test"], False),
-        ("tracker.io", ["shop.test"], False),
-        (None, ["shop.test"], False),
-    ],
-)
-def test_host_allowed(host: str | None, allowed: list[str], expected: bool) -> None:
-    assert host_allowed(host, allowed) is expected
+    assert url_host("https://shop.test:8443/order") == "shop.test:8443"
+    assert url_host("http://shop.test:80/") == "shop.test"
+    assert url_host("about:blank") is None
 
 
 def test_compile_regex_raises_typed_error() -> None:

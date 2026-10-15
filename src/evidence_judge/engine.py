@@ -13,14 +13,14 @@ from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.dimensions import assess_dimensions
 from evidence_judge.checks.expectations import evaluate_spec, spec_scope
-from evidence_judge.checks.matching import host_allowed, url_host
 from evidence_judge.checks.outcome import decide
 from evidence_judge.checks.registry import CheckerRegistry, default_registry
 from evidence_judge.config import Settings
 from evidence_judge.core.claims import ClaimSet
-from evidence_judge.core.evidence import Channel, Run, is_web_page_url
-from evidence_judge.core.index import EvidenceIndex, is_document_navigation
-from evidence_judge.core.taskspec import TaskSpec, site_host
+from evidence_judge.core.evidence import Channel, Run
+from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.site import Site
+from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import ClaimVerdict, RunVerdict, Usage
 from evidence_judge.extract import ClaimExtractor, HeuristicExtractor, LLMClaimExtractor, coverage
 from evidence_judge.llm.base import (
@@ -73,43 +73,19 @@ class _FatalErrorTrap:
             raise
 
 
-def _unanchored(spec: TaskSpec | None, scope: EvidenceScope, index: EvidenceIndex) -> str | None:
-    """Why the run cannot pass on its own evidence: nothing but the agent's own navigation says
-    which site it was on, so a run on the agent's choice of host would prove itself."""
+def _unanchored(spec: TaskSpec | None, scope: EvidenceScope) -> str | None:
+    """Why the run cannot pass: no site was named, so nothing but the agent's own navigation
+    says which site it was on, and a run on the agent's choice of host would prove itself."""
     if not scope.inferred:
         return None
-    if spec is not None:
-        host = scope.primary_host or "unknown"
-        return (
-            f"the site host ({host}) was inferred from the run's first page, which the agent may "
-            "have chosen; set `site` in the task spec (or pass --site) so evidence from another "
-            "host cannot prove the task"
-        )
-    sites = _visited_sites(index)
-    if len(sites) > 1:
-        return (
-            f"the run visited several sites ({', '.join(sites)}); which one is the site is "
-            "ambiguous; pass --site"
-        )
-    return None
-
-
-def _visited_sites(index: EvidenceIndex) -> list[str]:
-    """The distinct sites of the run's web pages and document loads, in order of first visit; a
-    host and its subdomains are one site, and a leading 'www.' is ignored."""
-    urls = [
-        *(state.url for state in index.page_states()),
-        *(n.url for n in index.run.network if is_document_navigation(n)),
-    ]
-    sites: list[str] = []
-    for url in urls:
-        host = url_host(url) if is_web_page_url(url) else None
-        if not host:
-            continue
-        host = host.casefold().rstrip(".").removeprefix("www.")
-        if not any(host_allowed(host, [s]) or host_allowed(s, [host]) for s in sites):
-            sites.append(host)
-    return sites
+    if spec is None:
+        return "no site was named; pass --site or set `site` in a spec"
+    host = ", ".join(map(str, scope.sites)) or "unknown"
+    return (
+        f"the site host ({host}) was inferred from the run's first page, which the agent may "
+        "have chosen; set `site` in the task spec (or pass --site) so evidence from another "
+        "host cannot prove the task"
+    )
 
 
 class Judge:
@@ -138,7 +114,7 @@ class Judge:
 
     async def _judge(self, run: Run, opts: JudgeOptions) -> RunVerdict:
         llm = None if opts.offline or self._llm is None else _FatalErrorTrap(self._llm)
-        site = site_host(opts.site) if opts.site else None
+        site = str(Site.parse(opts.site, what="--site")) if opts.site else None
         spec = opts.spec
         if spec is not None and site is not None:
             spec = spec.model_copy(update={"site": site})
@@ -168,7 +144,7 @@ class Judge:
             review_threshold=self._settings.review_coverage_threshold,
             extraction_fallback=extraction.fallback,
             has_spec=spec is not None,
-            unanchored=_unanchored(spec, scope, ctx.index),
+            unanchored=_unanchored(spec, scope),
         )
         return RunVerdict(
             judge_version=__version__,

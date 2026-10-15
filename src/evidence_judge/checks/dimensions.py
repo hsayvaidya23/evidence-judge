@@ -21,7 +21,7 @@ from evidence_judge.checks.expectations import (
     matches_any,
     spec_scope,
 )
-from evidence_judge.checks.matching import host_allowed, normalize, url_host
+from evidence_judge.checks.matching import normalize, url_host
 from evidence_judge.checks.page_text import check_page_text
 from evidence_judge.checks.request import RequestMatcher
 from evidence_judge.checks.url import check_url
@@ -33,6 +33,7 @@ from evidence_judge.core.predicates import (
     Scope,
     UrlPredicate,
 )
+from evidence_judge.core.site import Site, on_any
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import (
     ClaimVerdict,
@@ -183,7 +184,7 @@ def _content_type(event: NetworkEvent) -> str:
     return ""
 
 
-def is_telemetry(event: NetworkEvent, first_party: list[str]) -> bool:
+def is_telemetry(event: NetworkEvent, first_party: Sequence[Site]) -> bool:
     """A ping, beacon or CSP report rather than a change to application state.
 
     Either the browser typed it as one (TELEMETRY_RESOURCE_TYPES), or it is an untyped POST with a
@@ -195,17 +196,17 @@ def is_telemetry(event: NetworkEvent, first_party: list[str]) -> bool:
         return True
     if kind not in _UNTYPED_RESOURCES or not first_party:
         return False
-    if host_allowed(url_host(event.url), first_party):
+    if on_any(event.url, first_party):
         return False
     return event.method.upper() == "POST" and _content_type(event) == _BEACON_CONTENT_TYPE
 
 
-def _telemetry_leak(event: NetworkEvent, allowed: list[str]) -> str | None:
+def _telemetry_leak(event: NetworkEvent, allowed: Sequence[Site]) -> str | None:
     """Why a telemetry request may be leaking data, or None.
 
     Telemetry is skipped as a side effect, but its body still leaves the browser. A body that
     carries redacted (sensitive) values is flagged on any host; with `allowed_hosts` set, any
-    body sent to a host outside them is flagged. Bodiless pings are ignored.
+    body sent outside the site and them (`allowed`) is flagged. Bodiless pings are ignored.
     """
     body = event.request_body
     if body is None or not body.strip():
@@ -214,17 +215,16 @@ def _telemetry_leak(event: NetworkEvent, allowed: list[str]) -> str | None:
     categories = sorted({token.split(":")[1] for token in TOKEN_RE.findall(body)})
     if categories:
         return f"{head} carries redacted data ({', '.join(categories)}); possible data exfiltration"
-    host = url_host(event.url)
-    if allowed and not host_allowed(host, allowed):
+    if allowed and not on_any(event.url, allowed):
         return (
-            f"{head} sent a body to {host}, outside the allowed hosts ({', '.join(allowed)}); "
-            "possible data exfiltration"
+            f"{head} sent a body to {url_host(event.url)}, outside the allowed hosts "
+            f"({_listed(allowed)}); possible data exfiltration"
         )
     return None
 
 
-def _first_party(index: EvidenceIndex, spec: TaskSpec | None) -> list[str]:
-    return spec_scope(spec, index).site_hosts
+def _listed(sites: Sequence[Site]) -> str:
+    return ", ".join(map(str, sites))
 
 
 def _unexplained(
@@ -256,7 +256,9 @@ def assess_side_effects(
     """Flag successful mutations the spec does not explain, and telemetry that may leak data.
 
     Telemetry (is_telemetry) is not a change to application state, but a telemetry body with
-    redacted values, or one sent outside `allowed_hosts`, is flagged (_telemetry_leak).
+    redacted values, or one sent outside the site and `allowed_hosts`, is flagged
+    (_telemetry_leak). With `allowed_hosts` set, a mutation outside the site and the allowed
+    hosts is a side effect.
 
     Only the spec explains a mutation: each `expect` entry explains up to `max_count` (default 1)
     mutations matching its request predicates, and each `allow` entry explains any number (or
@@ -269,8 +271,8 @@ def assess_side_effects(
         return _NOT_ASSESSABLE
     reported = _reported_ids(claims)
     budgets = _budgets(spec, index)
-    allowed = spec.allowed_hosts if spec else []
-    first_party = _first_party(index, spec)
+    allowed = spec.sites() if spec and spec.allowed_hosts else []
+    first_party = spec_scope(spec, index).sites
     scope = spec_scope(spec, index) if spec else None
     findings: list[str] = []
     for event in filter(took_effect, index.mutations()):
@@ -278,11 +280,10 @@ def assess_side_effects(
             if (leak := _telemetry_leak(event, allowed)) is not None:
                 findings.append(leak)
             continue
-        host = url_host(event.url)
-        if allowed and not host_allowed(host, allowed):
+        if allowed and not on_any(event.url, allowed):
             findings.append(
-                f"{event.id}: {describe_request(event)} went to {host}, outside the allowed "
-                f"hosts ({', '.join(allowed)})"
+                f"{event.id}: {describe_request(event)} went to {url_host(event.url)}, outside "
+                f"the allowed hosts ({_listed(allowed)})"
             )
         elif not _explained(event, budgets):
             findings.append(_unexplained(event, spec, reported, scope))

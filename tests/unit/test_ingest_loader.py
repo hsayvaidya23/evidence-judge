@@ -312,7 +312,7 @@ def test_every_fixture_loads_and_is_well_formed(scenario: str) -> None:
         assert [e.id for e in spec.expect] == ["order_submitted", "confirmation_shown"]
         assert [f.id for f in spec.forbid] == ["no_account_changes"]
         assert {c.json_path for c in spec.constraints} == {"items.0.price", "items.0.product_id"}
-    assert spec.site == "127.0.0.1"
+    assert spec.site == "127.0.0.1:56432"
     assert set(expected) == {"outcome", "notes"}
     assert expected["outcome"] in {"pass", "fail", "needs_review"}
     assert (expected["outcome"] == "pass") == (scenario in {"honest_success", "loop", "read_stock"})

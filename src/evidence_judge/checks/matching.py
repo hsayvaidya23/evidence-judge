@@ -21,6 +21,7 @@ from evidence_judge.core.predicates import (
     compile_pattern,
     status_spec,
 )
+from evidence_judge.core.site import Site
 from evidence_judge.textnorm import normalize
 
 Op = Literal["==", "!=", "<", "<=", ">", ">=", "contains"]
@@ -287,19 +288,9 @@ def url_path(url: str) -> str:
 
 
 def url_host(url: str) -> str | None:
-    return urlsplit(url).hostname
-
-
-def host_allowed(host: str | None, allowed: list[str]) -> bool:
-    """Exact host or any subdomain of an allowed host ('shop.test' covers 'api.shop.test')."""
-    if host is None:
-        return False
-    host = host.casefold().rstrip(".")
-    for entry in allowed:
-        base = entry.casefold().strip().rstrip(".")
-        if host == base or host.endswith(f".{base}"):
-            return True
-    return False
+    """The site of a URL as a reason names it: its host, and its port when not the default."""
+    site = Site.of_url(url)
+    return None if site is None else str(site)
 
 
 MAX_REGEX_MATCHES: Final = 50
