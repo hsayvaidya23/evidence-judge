@@ -179,6 +179,11 @@ class CommandAnalysis(BaseModel):
         description="How the command can switch off the evidence hooks or the judge (agent "
         "settings, hook definitions, the evidence-judge install)",
     )
+    source_findings: list[str] = Field(
+        default_factory=list[str],
+        description="Ways code the command writes to a Python file outside the tests weakens "
+        "the suite (a heredoc that patches the runner), or that the judge cannot read that code",
+    )
     parse_error: str | None = None
 
     @property

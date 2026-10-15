@@ -216,6 +216,7 @@ class SessionIndex:
                 out.append((command, f"may have changed test files: {analysis.opaque_write}"))
             if analysis.harness_change:
                 out.append((command, f"changed how later commands run: {analysis.harness_change}"))
+            out.extend((command, finding) for finding in analysis.source_findings)
         return out
 
     @property

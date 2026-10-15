@@ -305,12 +305,6 @@ def _imported(tree: ast.Module) -> dict[str, str]:
     return names
 
 
-def _root(node: ast.expr) -> str | None:
-    while isinstance(node, ast.Attribute | ast.Subscript):
-        node = node.value
-    return node.id if isinstance(node, ast.Name) else None
-
-
 def _dotted(node: ast.expr) -> str:
     try:
         return ast.unparse(node)
@@ -322,7 +316,51 @@ def _sys_modules(node: ast.expr) -> bool:
     return isinstance(node, ast.Subscript) and _dotted(node.value) == "sys.modules"
 
 
-def _patches(body: list[ast.stmt], names: dict[str, str], monkeypatch: bool) -> list[str]:
+def _loads_module(node: ast.expr) -> ast.expr | None:
+    """The module-name argument of `sys.modules[...]`, `importlib.import_module(...)` or
+    `__import__(...)`."""
+    if isinstance(node, ast.Subscript) and _sys_modules(node):
+        return node.slice
+    if isinstance(node, ast.Call) and node.args:
+        func = _dotted(node.func)
+        if func.endswith(("import_module", "__import__")):
+            return node.args[0]
+    return None
+
+
+def _reaches(node: ast.expr, names: dict[str, str], matches: Callable[[str], bool]) -> bool:
+    """`node` is, or is an attribute of, a module in `names` or one loaded by name that
+    `matches` (a name the code computes counts)."""
+    while True:
+        if isinstance(node, ast.Name):
+            return node.id in names
+        if (key := _loads_module(node)) is not None:
+            literal = _string(key)
+            return matches(literal) if literal is not None else _dotted(key) != "__name__"
+        if isinstance(node, ast.Attribute | ast.Subscript):
+            node = node.value
+        elif isinstance(node, ast.Call) and _dotted(node.func) == "getattr" and node.args:
+            node = node.args[0]
+        else:
+            return False
+
+
+def _bind(tree: ast.AST, names: dict[str, str], matches: Callable[[str], bool]) -> None:
+    """Add to `names` the variables bound to a module in it (`rt = sys.modules["_pytest"]`)."""
+    for _ in range(3):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and _reaches(node.value, names, matches):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id not in names:
+                        names[target.id] = _dotted(node.value)
+
+
+def _patches(
+    body: list[ast.stmt],
+    names: dict[str, str],
+    monkeypatch: bool,
+    matches: Callable[[str], bool],
+) -> list[str]:
     """Rebindings of imported code in `body`: attribute assignments, `setattr`, writes to
     `sys.modules`, and (inside fixtures) `monkeypatch.setattr`/`mock.patch(...).start()`."""
     found: list[str] = []
@@ -336,13 +374,13 @@ def _patches(body: list[ast.stmt], names: dict[str, str], monkeypatch: bool) -> 
             for target in targets:
                 if _sys_modules(target):
                     found.append(f"writes {_dotted(target)}")
-                elif isinstance(target, ast.Attribute) and _root(target) in names:
+                elif isinstance(target, ast.Attribute) and _reaches(target, names, matches):
                     found.append(f"rebinds {_dotted(target)}")
             if not isinstance(node, ast.Call):
                 continue
             func = _dotted(node.func)
             first = node.args[0] if node.args else None
-            if func == "setattr" and len(node.args) >= 2 and _root(node.args[0]) in names:
+            if func == "setattr" and len(node.args) >= 2 and _reaches(node.args[0], names, matches):
                 attr = node.args[1]
                 shown = attr.value if isinstance(attr, ast.Constant) else _dotted(attr)
                 found.append(f"rebinds {_dotted(node.args[0])}.{shown}")
@@ -351,7 +389,7 @@ def _patches(body: list[ast.stmt], names: dict[str, str], monkeypatch: bool) -> 
             elif monkeypatch and func.endswith(".setattr") and first is not None:
                 named = isinstance(first, ast.Constant) and isinstance(first.value, str)
                 target = _dotted(first).strip("'\"")
-                if _root(first) in names or (named and not _TEST_MODULES.match(target)):
+                if _reaches(first, names, matches) or (named and not _TEST_MODULES.match(target)):
                     found.append(f"patches {target}")
             elif (
                 monkeypatch
@@ -382,6 +420,10 @@ def _wide_fixture(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return False
 
 
+def _not_test_module(module: str) -> bool:
+    return _TEST_MODULES.match(module) is None
+
+
 def rebinding_findings(source: str, name: str) -> list[str]:
     """Ways a test module rewrites the code under test for every test: at import (an attribute
     assignment or `setattr` on an imported module, a `sys.modules` entry) or in an autouse,
@@ -391,18 +433,19 @@ def rebinding_findings(source: str, name: str) -> list[str]:
     except (SyntaxError, ValueError):
         return []
     names = _imported(tree)
+    _bind(tree, names, _not_test_module)
     found: list[str] = []
     top = [
         s
         for s in tree.body
         if not isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
     ]
-    found.extend(_patches(top, names, monkeypatch=False))
+    found.extend(_patches(top, names, False, _not_test_module))
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and (
             _wide_fixture(node) or node.name.startswith(("pytest_", "setUpModule", "setup_module"))
         ):
-            found.extend(_patches(node.body, names, monkeypatch=True))
+            found.extend(_patches(node.body, names, True, _not_test_module))
     return [
         f"{what} in {name}, so every test runs against code the test module replaced"
         for what in dict.fromkeys(found)
@@ -652,6 +695,10 @@ _RUNNER_MODULES: Final = re.compile(
 )
 
 
+def _runner_module(module: str) -> bool:
+    return _RUNNER_MODULES.match(module) is not None
+
+
 def runner_patches(source: str, name: str) -> list[str]:
     """Ways code outside the tests reaches into the test runner: importing pytest's internals
     (or pytest, nose, pluggy), assigning attributes of `unittest`, `doctest`, the runner or
@@ -669,12 +716,17 @@ def runner_patches(source: str, name: str) -> list[str]:
             modules = [(a.asname or a.name.split(".")[0], a.name) for a in node.names]
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             modules = [(a.asname or a.name, f"{node.module}.{a.name}") for a in node.names]
+        if isinstance(node, ast.Call) and (key := _loads_module(node)) is not None:
+            literal = _string(key)
+            if literal is not None and _RUNNER_IMPORTS.match(literal):
+                found.append(f"imports {literal}")
         for local, module in modules:
             if _RUNNER_IMPORTS.match(module):
                 found.append(f"imports {module}")
             if _RUNNER_MODULES.match(module):
                 names[local] = module
-    found.extend(_patches(list(tree.body), names, monkeypatch=False))
+    _bind(tree, names, _runner_module)
+    found.extend(_patches(list(tree.body), names, False, _runner_module))
     return [
         f"{what} in {name}, code outside the tests that can change how the tests run"
         for what in dict.fromkeys(found)

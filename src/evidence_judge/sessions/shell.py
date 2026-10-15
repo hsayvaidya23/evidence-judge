@@ -10,6 +10,7 @@ direction costs a NEEDS_REVIEW, never a false PASS.
 
 from __future__ import annotations
 
+import ast
 import posixpath
 import re
 import shlex
@@ -17,6 +18,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Final
 
+from evidence_judge.sessions import edits
 from evidence_judge.sessions.models import Category, CommandAnalysis
 
 MAX_COMMAND_CHARS: Final = 100_000
@@ -2128,6 +2130,134 @@ def _empty(reason: str, command: str) -> CommandAnalysis:
     )
 
 
+_HEREDOC_BODY: Final = re.compile(
+    r"(?<!<)<<(-?)[ \t]*(['\"]?)([\w.-]+)\2[^\n]*\n(.*?)(?:\n[ \t]*\3[ \t]*(?=\n|$)|\Z)", re.S
+)
+
+
+def _heredocs(command: str) -> list[str | None]:
+    """Each heredoc's text, in order; None for one the shell expands (`$x`, backquotes)."""
+    out: list[str | None] = []
+    for m in _HEREDOC_BODY.finditer(command):
+        body = m.group(4)
+        if m.group(1):
+            body = "\n".join(line.lstrip("\t") for line in body.split("\n"))
+        expands = not m.group(2) and re.search(r"[$`\\]", body) is not None
+        out.append(None if expands else body)
+    return out
+
+
+def _unescape(text: str) -> str:
+    return text.replace("\\n", "\n").replace("\\t", "\t")
+
+
+def _printed(words: list[str]) -> str | None:
+    """What `echo` or `printf` prints, when the command line spells it out."""
+    prog = program_name(words[0])
+    args = words[1:]
+    if prog == "echo":
+        flags = [a for a in args if re.fullmatch(r"-[neE]+", a)]
+        text = " ".join(args[len(flags) :]) if args[: len(flags)] == flags else None
+        if text is not None and any("e" in f for f in flags):
+            text = _unescape(text)
+    elif prog == "printf" and len(args) == 1 and "%" not in args[0].replace("%%", ""):
+        text = _unescape(args[0]).replace("%%", "%")
+    else:
+        return None
+    return None if text is None or re.search(r"[$`]", text) else text
+
+
+def _sed_replacements(args: list[str]) -> str | None:
+    """The text `sed` substitutions insert, when every command is `s/pattern/text/flags`."""
+    scripts: list[str] = []
+    positional: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-e", "--expression"):
+            scripts.extend(args[i + 1 : i + 2])
+            i += 1
+        elif arg.startswith("--expression="):
+            scripts.append(arg.partition("=")[2])
+        elif arg in ("-f", "--file") or arg.startswith("--file="):
+            return None
+        elif arg and not arg.startswith("-"):
+            positional.append(arg)
+        i += 1
+    if not scripts:
+        scripts = positional[:1]
+    inserted: list[str] = []
+    for script in scripts:
+        for part in re.split(r"[;\n]", script):
+            part = part.strip()
+            if not part:
+                continue
+            if len(part) < 2 or part[0] != "s" or part[1].isalnum() or part[1] in "\\ ":
+                return None
+            pieces = re.split(rf"(?<!\\){re.escape(part[1])}", part[2:])
+            if len(pieces) != 3 or not re.fullmatch(r"[gpiImMe0-9]*", pieces[2]):
+                return None
+            inserted.append(_unescape(pieces[1].replace("\\" + part[1], part[1])))
+    return "\n".join(inserted)
+
+
+def _code_findings(path: str, code: str | None) -> list[str]:
+    name = posixpath.basename(path)
+    if code is None:
+        return [f"wrote {name} from the shell with code the judge cannot read"]
+    try:
+        ast.parse(code)
+        chunks = [code]
+    except (SyntaxError, ValueError):
+        chunks = code.splitlines()
+    return [
+        finding
+        for chunk in chunks
+        for finding in edits.suite_findings(path, "modify", [], chunk.splitlines())
+    ]
+
+
+def _written_code(pipelines: list[_Pipeline], command: str) -> list[str]:
+    """Findings on the code the command writes to Python files outside the tests: heredocs,
+    `echo`/`printf` text and `sed` substitutions are checked like an edit's added lines; any
+    other write to such a file is code the judge cannot read."""
+    bodies = _heredocs(command)
+    simples = [simple for pipeline in pipelines for simple in pipeline.commands]
+    if sum(simple.heredoc for simple in simples) != len(bodies):
+        bodies = [None] * len(simples)
+    found: list[str] = []
+    heredoc = 0
+    for pipeline in pipelines:
+        for index, simple in enumerate(pipeline.commands):
+            body = bodies[heredoc] if simple.heredoc else None
+            heredoc += simple.heredoc
+            words = _unwrap(list(simple.words))
+            prog = program_name(words[0]) if words else ""
+            targets = list(simple.writes)
+            if prog == "tee":
+                targets.extend(w for w in words[1:] if not w.startswith("-"))
+            sed = prog == "sed" and any(re.fullmatch(r"-\w*i\S*|--in-place\S*", w) for w in words)
+            if sed:
+                targets.extend(words[2:])
+            targets = [t for t in targets if t.endswith(".py") and not edits.is_test_path(t)]
+            if not targets:
+                continue
+            feeder = _unwrap(list(pipeline.commands[index - 1].words)) if index else []
+            if simple.heredoc and (prog == "tee" or words in (["cat"], ["cat", "-"])):
+                code = body
+            elif sed:
+                code = _sed_replacements(words[1:])
+            elif prog in ("echo", "printf"):
+                code = _printed(words)
+            elif prog == "tee" and feeder and program_name(feeder[0]) in ("echo", "printf"):
+                code = _printed(feeder)
+            else:
+                code = None
+            for target in dict.fromkeys(targets):
+                found.extend(_code_findings(target, code))
+    return found
+
+
 def _cd_step(simple: _Simple) -> str:
     """Where a `cd`, `pushd` or `popd` goes: its target as written, or `?` when only the shell
     knows (`popd`, `cd -`, `cd` alone, a variable)."""
@@ -2165,6 +2295,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     lasting: str | None = None
     nested_store = False
     nested_guard: str | None = None
+    written: list[str] = []
     cds: list[str] = []
     test_paths: list[str] | None = None
     run_cds: list[str] = []
@@ -2203,6 +2334,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 touched.extend(nested.touched_paths)
                 opaque = opaque or nested.opaque_write
                 lasting = lasting or nested.lasting_mutation
+                written.extend(nested.source_findings)
                 nested_store = nested_store or nested.session_store
                 nested_guard = nested_guard or nested.guard_tamper
                 if nested.runners:
@@ -2308,6 +2440,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         or _writes_session_store(pipelines, command, touched, deleted, opaque),
         harness_change=_harness_change(pipelines, command),
         guard_tamper=nested_guard or _guard_tamper(pipelines, command, touched, deleted, opaque),
+        source_findings=list(dict.fromkeys([*written, *_written_code(pipelines, command)])),
     )
 
 
