@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
@@ -141,91 +141,123 @@ def _tool_call(block: JsonObject, tur: Any, pending: _Pending, ts: datetime | No
     )
 
 
-def load_transcript(path: Path) -> SessionRun:
-    """Read one Claude Code transcript into a SessionRun."""
-    stats = LineStats()
-    pending: dict[str, _Pending] = {}
-    calls: list[ToolCall] = []
+@dataclass(slots=True)
+class _Reading:
+    """What `load_transcript` has gathered so far."""
+
+    pending: dict[str, _Pending] = field(default_factory=dict[str, _Pending])
+    calls: list[ToolCall] = field(default_factory=list[ToolCall])
     session_id: str | None = None
     version: str | None = None
     cwd: str | None = None
     branch: str | None = None
     task: str | None = None
     final_id: str | None = None
-    final_parts: list[str] = []
+    final_parts: list[str] = field(default_factory=list[str])
     first_ts: datetime | None = None
     last_ts: datetime | None = None
-    unknown_blocks: dict[str, int] = {}
+    unknown_blocks: dict[str, int] = field(default_factory=dict[str, int])
 
+
+def _read_header(reading: _Reading, record: JsonObject, sidechain: bool) -> datetime | None:
+    """Take the session's identity from a record; returns the record's timestamp."""
+    reading.session_id = (
+        reading.session_id or as_str(record.get("sessionId")) or as_str(record.get("session_id"))
+    )
+    reading.version = as_str(record.get("version")) or reading.version
+    if not sidechain:
+        reading.cwd = reading.cwd or as_str(record.get("cwd"))
+        reading.branch = reading.branch or as_str(record.get("gitBranch")) or None
+    ts = parse_ts(record.get("timestamp"))
+    if ts is not None:
+        reading.first_ts = reading.first_ts or ts
+        reading.last_ts = ts
+    return ts
+
+
+def _read_assistant(
+    reading: _Reading, record: JsonObject, sidechain: bool, ts: datetime | None
+) -> None:
+    """Queue the tool calls of an assistant record and keep its text as the final answer."""
+    message = as_object(record.get("message"))
+    message_id = as_str(message.get("id"))
+    for block in map(as_object, as_list(message.get("content"))):
+        block_type = as_str(block.get("type"))
+        if block_type == "tool_use":
+            use_id = as_str(block.get("id"))
+            if use_id:
+                reading.pending[use_id] = _Pending(
+                    name=as_str(block.get("name")) or "?",
+                    input=as_object(block.get("input")),
+                    ts=ts,
+                    cwd=as_str(record.get("cwd")),
+                    agent_id="sidechain" if sidechain else None,
+                )
+        elif block_type == "text" and not sidechain:
+            text = as_str(block.get("text")) or ""
+            if message_id != reading.final_id or reading.final_id is None:
+                reading.final_id, reading.final_parts = message_id, []
+            if text.strip():
+                reading.final_parts.append(text)
+        elif block_type not in ("thinking", "redacted_thinking") and block_type:
+            reading.unknown_blocks[block_type] = reading.unknown_blocks.get(block_type, 0) + 1
+
+
+def _read_user(reading: _Reading, record: JsonObject, sidechain: bool, ts: datetime | None) -> None:
+    """Match tool results to their calls, and take the first real prompt as the task."""
+    content = as_object(record.get("message")).get("content")
+    prompt = not sidechain and record.get("isMeta") is not True
+    if isinstance(content, str):
+        if reading.task is None and prompt and not _COMMAND_PROMPT.match(content):
+            reading.task = content
+        return
+    blocks = [as_object(b) for b in as_list(content)]
+    results = [b for b in blocks if b.get("type") == "tool_result"]
+    tur = record.get("toolUseResult") if len(results) == 1 else None
+    for block in results:
+        use_id = as_str(block.get("tool_use_id"))
+        match = reading.pending.pop(use_id, None) if use_id else None
+        if match is not None:
+            reading.calls.append(_tool_call(block, tur, match, ts))
+    if not results and reading.task is None and prompt:
+        text = _text_of(content)
+        if text and not _COMMAND_PROMPT.match(text):
+            reading.task = text
+
+
+def _notes(stats: LineStats, reading: _Reading, dropped: int) -> list[str]:
+    notes = stats.notes()
+    for kind, count in sorted(stats.skipped_types.items()):
+        notes.append(f"skipped {count} record(s) of unknown type {kind!r}")
+    for kind, count in sorted(reading.unknown_blocks.items()):
+        notes.append(f"skipped {count} content block(s) of unknown type {kind!r}")
+    if reading.pending:
+        notes.append(f"{len(reading.pending)} tool call(s) have no recorded result")
+    if dropped:
+        notes.append(f"{dropped} event(s) over the event cap were dropped")
+    return notes
+
+
+def load_transcript(path: Path) -> SessionRun:
+    """Read one Claude Code transcript into a SessionRun."""
+    stats = LineStats()
+    reading = _Reading()
     for _, record in iter_records(path, stats):
         kind = as_str(record.get("type")) or "<none>"
         if kind not in ("user", "assistant"):
             if kind not in _IGNORED_TYPES:
                 stats.skip(kind)
             continue
-        session_id = (
-            session_id or as_str(record.get("sessionId")) or as_str(record.get("session_id"))
-        )
-        version = as_str(record.get("version")) or version
         sidechain = record.get("isSidechain") is True
-        agent_id = "sidechain" if sidechain else None
-        record_cwd = as_str(record.get("cwd"))
-        if not sidechain:
-            cwd = cwd or record_cwd
-            branch = branch or as_str(record.get("gitBranch")) or None
-        ts = parse_ts(record.get("timestamp"))
-        if ts is not None:
-            first_ts = first_ts or ts
-            last_ts = ts
-        message = as_object(record.get("message"))
-        content = message.get("content")
+        ts = _read_header(reading, record, sidechain)
         if kind == "assistant":
-            message_id = as_str(message.get("id"))
-            for block in map(as_object, as_list(content)):
-                block_type = as_str(block.get("type"))
-                if block_type == "tool_use":
-                    use_id = as_str(block.get("id"))
-                    if use_id:
-                        pending[use_id] = _Pending(
-                            name=as_str(block.get("name")) or "?",
-                            input=as_object(block.get("input")),
-                            ts=ts,
-                            cwd=record_cwd,
-                            agent_id=agent_id,
-                        )
-                elif block_type == "text" and not sidechain:
-                    text = as_str(block.get("text")) or ""
-                    if message_id != final_id or final_id is None:
-                        final_id, final_parts = message_id, []
-                    if text.strip():
-                        final_parts.append(text)
-                elif block_type not in ("thinking", "redacted_thinking") and block_type:
-                    unknown_blocks[block_type] = unknown_blocks.get(block_type, 0) + 1
-            continue
-        if isinstance(content, str):
-            if (
-                task is None
-                and not sidechain
-                and record.get("isMeta") is not True
-                and not _COMMAND_PROMPT.match(content)
-            ):
-                task = content
-            continue
-        blocks = [as_object(b) for b in as_list(content)]
-        results = [b for b in blocks if b.get("type") == "tool_result"]
-        tur = record.get("toolUseResult") if len(results) == 1 else None
-        for block in results:
-            use_id = as_str(block.get("tool_use_id"))
-            match = pending.pop(use_id, None) if use_id else None
-            if match is not None:
-                calls.append(_tool_call(block, tur, match, ts))
-        if not results and task is None and not sidechain and record.get("isMeta") is not True:
-            text = _text_of(content)
-            if text and not _COMMAND_PROMPT.match(text):
-                task = text
+            _read_assistant(reading, record, sidechain, ts)
+        else:
+            _read_user(reading, record, sidechain, ts)
 
-    for leftover in pending.values():
-        calls.append(
+    calls = [
+        *reading.calls,
+        *(
             ToolCall(
                 name=leftover.name,
                 input=leftover.input,
@@ -234,32 +266,24 @@ def load_transcript(path: Path) -> SessionRun:
                 cwd=leftover.cwd,
                 agent_id=leftover.agent_id,
             )
-        )
-
-    events, dropped = build_events(calls, cwd)
-    notes = stats.notes()
-    for kind, count in sorted(stats.skipped_types.items()):
-        notes.append(f"skipped {count} record(s) of unknown type {kind!r}")
-    for kind, count in sorted(unknown_blocks.items()):
-        notes.append(f"skipped {count} content block(s) of unknown type {kind!r}")
-    if pending:
-        notes.append(f"{len(pending)} tool call(s) have no recorded result")
-    if dropped:
-        notes.append(f"{dropped} event(s) over the event cap were dropped")
+            for leftover in reading.pending.values()
+        ),
+    ]
+    events, dropped = build_events(calls, reading.cwd)
     return SessionRun(
         source=SessionSource.CLAUDE_CODE,
         evidence=EvidenceKind.TRANSCRIPT,
-        session_id=session_id,
-        harness_version=version,
-        cwd=cwd,
-        git_branch=branch,
-        task=task,
-        final_answer="\n\n".join(final_parts) or None,
-        started_at=first_ts,
-        ended_at=last_ts,
+        session_id=reading.session_id,
+        harness_version=reading.version,
+        cwd=reading.cwd,
+        git_branch=reading.branch,
+        task=reading.task,
+        final_answer="\n\n".join(reading.final_parts) or None,
+        started_at=reading.first_ts,
+        ended_at=reading.last_ts,
         events=events,
         complete=not stats.damaged and not dropped,
-        notes=notes,
+        notes=_notes(stats, reading, dropped),
     )
 
 
