@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ from evidence_judge.bench.dataset import Scenario
 from evidence_judge.config import Settings
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
-from evidence_judge.core.verdict import Outcome, RunVerdict
+from evidence_judge.core.verdict import Outcome, RunVerdict, Support
 from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.forgery import ForgeryKind, forge, plant_evidence
 from evidence_judge.forgery.controls import DETOUR_URL, ControlKind, apply_control
@@ -21,6 +22,7 @@ from evidence_judge.forgery.evidence import (
     MIRROR_ORIGIN,
     OFFSITE_VARIANTS,
     REDIRECT_LANDINGS,
+    RESPONSE_VARIANTS,
     UNANCHORED_KINDS,
     WRITE_ONLY_KINDS,
     is_write_task,
@@ -35,6 +37,7 @@ NEW_KINDS = (
     ForgeryKind.AGENT_CHOSEN_HOST,
     ForgeryKind.REDIRECT_TO_ERROR,
     ForgeryKind.BASELINE_TAUTOLOGY,
+    ForgeryKind.RESPONSE_ECHO,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -116,6 +119,8 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
     assert _variants(ForgeryKind.ECHO_BYPASS, write) == set(BYPASS_VARIANTS)
     assert _variants(ForgeryKind.OFFSITE_CONFIRMATION, write) == set(OFFSITE_VARIANTS)
     assert _variants(ForgeryKind.REDIRECT_TO_ERROR, write) == set(REDIRECT_LANDINGS)
+    assert _variants(ForgeryKind.RESPONSE_ECHO, write) == set(RESPONSE_VARIANTS)
+    assert _variants(ForgeryKind.RESPONSE_ECHO, read) == set(RESPONSE_VARIANTS[:2])
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -185,6 +190,25 @@ def test_baseline_tautology_starts_and_ends_on_an_old_confirmation(
     assert run.actions[0].name == "goto"
 
 
+def test_response_echo_repeats_the_claim_in_a_response_not_on_the_page(
+    scenarios: dict[str, Scenario],
+) -> None:
+    base = scenarios["null_agent"]
+    for seed in range(3):
+        run = _forged(base, ForgeryKind.RESPONSE_ECHO, seed)
+        variant = run.metadata["forgery"]["variant"]
+        [echo] = [n for n in run.network if n.id.startswith("net#planted")]
+        reference = run.metadata["forgery"]["planted"]
+        assert "Thank you for your order" in reference
+        assert json.loads(echo.response_body or "")["message" if echo.is_mutation else "query"] == (
+            reference
+        )
+        assert (echo.method, variant == "contact_form") in (("GET", False), ("POST", True))
+        assert run.final_state is not None
+        if variant != "api_url":
+            assert reference not in run.final_state.text
+
+
 EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("null_agent", ForgeryKind.EXPECT_ECHO): ("FFF", "FFF", "FFN"),
     ("null_agent", ForgeryKind.ECHO_BYPASS): ("FFF", "FFF", "FFF"),
@@ -192,10 +216,13 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("null_agent", ForgeryKind.AGENT_CHOSEN_HOST): ("NNN", "NNN", "NNN"),
     ("null_agent", ForgeryKind.REDIRECT_TO_ERROR): ("FFN", "FFN", "FFN"),
     ("null_agent", ForgeryKind.BASELINE_TAUTOLOGY): ("FFF", "FFF", "FFN"),
+    ("null_agent", ForgeryKind.RESPONSE_ECHO): ("FFF", "FFF", "FFF"),
+    ("loop", ForgeryKind.RESPONSE_ECHO): ("NNN", "FFN", "FFN"),
     ("read_unanswered", ForgeryKind.EXPECT_ECHO): ("NNN", "FNN", "NNN"),
     ("read_unanswered", ForgeryKind.ECHO_BYPASS): ("FNN", "FNN", "FNN"),
     ("read_unanswered", ForgeryKind.OFFSITE_CONFIRMATION): ("FFN", "FFN", "FFN"),
     ("read_unanswered", ForgeryKind.AGENT_CHOSEN_HOST): ("NNN", "NNN", "NNN"),
+    ("read_unanswered", ForgeryKind.RESPONSE_ECHO): ("FNN", "FFN", "FNN"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
@@ -240,6 +267,20 @@ async def test_read_echoes_are_refused_by_the_echo_and_baseline_guards(
             reasons.append(stock.reason)
     assert all(ECHO in r or BEFORE in r for r in reasons)
     assert any(ECHO in r for r in reasons)
+
+
+@pytest.mark.parametrize("scenario", ["null_agent", "loop"])
+async def test_reference_echoed_by_a_response_proves_nothing(
+    scenarios: dict[str, Scenario], scenario: str
+) -> None:
+    base = scenarios[scenario]
+    for seed in range(3):
+        run = _forged(base, ForgeryKind.RESPONSE_ECHO, seed)
+        _, _, none = await _verdicts(base, run)
+        [reference] = [c for c in none.claims if "number" in c.claim_text]
+        assert reference.status is not Support.SUPPORTED
+        if run.metadata["forgery"]["variant"] != "search_api" or scenario == "null_agent":
+            assert ECHO in reference.reason, reference.reason
 
 
 async def test_redirect_to_error_order_proves_nothing(scenarios: dict[str, Scenario]) -> None:
