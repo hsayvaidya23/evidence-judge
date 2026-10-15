@@ -52,7 +52,7 @@ def _paths(data: bytes) -> list[str]:
     return [p for p in data.decode("utf-8", "surrogateescape").split("\0") if p]
 
 
-def git_files(root: Path, env: dict[str, str]) -> list[str] | None:
+def _git_files(root: Path, env: dict[str, str]) -> list[str] | None:
     """Tracked files, and untracked files the tree's `.gitignore` files do not ignore, under
     `root`; None outside a git tree. The personal exclude files (`.git/info/exclude`,
     `core.excludesFile`) are not read: they are not part of the project, and anything running
@@ -195,7 +195,7 @@ def _copy_tree(src: Path, dst: Path, budget: _Budget) -> None:
 
 
 @dataclass(slots=True)
-class Copied:
+class _Copied:
     """What the copy holds and how it was chosen, with what the choice needs said about it."""
 
     paths: list[str]
@@ -232,7 +232,7 @@ def copy_tree(
     env: dict[str, str],
     base: Base | None = None,
     include: list[str] | None = None,
-) -> Copied:
+) -> _Copied:
     """Copy the working tree into `dest`. In a git tree: every tracked file still present and
     every untracked file the project's `.gitignore` files do not ignore (so the agent's new
     files come along, caches and build output do not), plus what `base` tracked and what
@@ -241,7 +241,7 @@ def copy_tree(
     dependency directories. Paths matching `include` are copied either way. Dependency
     directories (`.venv`, `venv`, `node_modules`) are linked, not copied."""
     budget = _Budget()
-    listed = git_files(root, env)
+    listed = _git_files(root, env)
     if listed is not None and not _work_tree_holds(root, env):
         listed = None
         problems = [
@@ -253,9 +253,9 @@ def copy_tree(
     if listed is None:
         how = "the whole directory" + ("" if problems else " (not a git tree)")
         _copy_tree(root, dest, budget)
-        result = Copied(_files_under(dest, "."), how, problems=problems)
+        result = _Copied(_files_under(dest, "."), how, problems=problems)
     else:
-        result = Copied([], "git ls-files (tracked, and untracked not ignored by .gitignore)")
+        result = _Copied([], "git ls-files (tracked, and untracked not ignored by .gitignore)")
         wanted = set(listed)
         if base is not None:
             wanted.update(base.files)

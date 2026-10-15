@@ -157,7 +157,7 @@ class BlobStore(Mapping[str, bytes]):
     def __copy__(self) -> Self:
         return self
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+    def __deepcopy__(self, _memo: dict[int, Any]) -> Self:
         return self
 
     def union(self, other: Mapping[str, bytes]) -> BlobStore:
