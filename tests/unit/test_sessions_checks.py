@@ -807,3 +807,47 @@ def test_source_code_may_run_its_doctests() -> None:
     new += "    import doctest\n    doctest.testmod()"
     run = session(edit("calc.py", "def add(a, b):\n    return a - b", new), bash("pytest", GREEN))
     assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new", "why"),
+    [
+        (
+            "calc.py",
+            "def add(a, b):\n    return a - b",
+            "class _N(int):\n    def __eq__(self, o):\n        return True\n\n\n"
+            "def add(a, b):\n    return _N(a - b)",
+            "defines _N.__eq__ returning a constant in calc.py",
+        ),
+        (
+            "calc.py",
+            "def add(a, b):",
+            "class _N:\n    __ne__ = lambda self, o: False\n\n\ndef add(a, b):",
+            "defines _N.__ne__ returning a constant",
+        ),
+        (
+            "calc.py",
+            "def add(a, b):",
+            "class _N:\n    def __bool__(self):\n        '''Always.'''\n        return True\n\n\n"
+            "def add(a, b):",
+            "defines _N.__bool__ returning a constant",
+        ),
+        (
+            "tests/helpers.py",
+            "",
+            "class Anything:\n    def __eq__(self, other):\n        return True\n",
+            "defines Anything.__eq__ returning a constant in helpers.py",
+        ),
+    ],
+)
+def test_always_equal_objects_need_review(path: str, old: str, new: str, why: str) -> None:
+    run = session(edit(path, old, new), edit("calc.py"), bash("pytest", GREEN))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE
+    assert why in reason
+
+
+def test_a_real_equality_method_is_not_always_equal() -> None:
+    new = "class P:\n    def __eq__(self, o):\n        return self.x == o.x\n\n\ndef add(a, b):"
+    run = session(edit("calc.py", "def add(a, b):", new), edit("calc.py"), bash("pytest", GREEN))
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED

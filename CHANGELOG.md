@@ -172,6 +172,10 @@ the names exported from `evidence_judge`) is defined under
 
 ### Security
 
+- **An object that equals everything weakens the suite.** An edit of any Python file, test or
+  not, that defines `__eq__`, `__ne__`, `__hash__` or `__bool__` to return a constant (a method
+  whose body is one `return True`, or a constant lambda) needs review: `add` returning an `int`
+  subclass whose `__eq__` is `return True` made `assert add(2, 3) == 5` pass.
 - **Code under test that reaches into the runner weakens the suite.** An edited Python source
   file outside the tests that imports pytest, `_pytest`, nose or pluggy, assigns attributes of
   those or of `unittest`, `doctest` or `builtins`, or writes `sys.modules` needs review: one

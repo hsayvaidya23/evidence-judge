@@ -17,7 +17,7 @@ import difflib
 import posixpath
 import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Final
 
 from evidence_judge.ingest._json import as_list, as_object
@@ -429,22 +429,14 @@ def suite_findings(
                     f"test file {name} (test data, fixtures or helpers can decide what passes)"
                 )
     if test_file and change != "delete":
-        findings.extend(_new_rebindings(name, added, texts))
+        findings.extend(_new_findings(rebinding_findings, name, added, texts))
     if not test_file:
         findings.extend(_config_findings(path, change, removed, added, texts))
         if path.endswith((".py", ".pyw")) and change != "delete":
-            findings.extend(_new_runner_patches(name, added, texts))
+            findings.extend(_new_findings(runner_patches, name, added, texts))
+    if path.endswith((".py", ".pyw")) and change != "delete":
+        findings.extend(_new_findings(constant_comparisons, name, added, texts))
     return findings
-
-
-def _new_rebindings(name: str, added: list[str] | None, texts: tuple[str, str] | None) -> list[str]:
-    """Rebindings of the code under test that the edit adds to a test module."""
-    if texts is not None:
-        before = set(rebinding_findings(texts[0], name))
-        return [f for f in rebinding_findings(texts[1], name) if f not in before]
-    if added is None:
-        return []
-    return rebinding_findings("\n".join(added), name)
 
 
 _OPENERS: Final = re.compile(
@@ -551,12 +543,59 @@ def runner_patches(source: str, name: str) -> list[str]:
     ]
 
 
-def _new_runner_patches(
-    name: str, added: list[str] | None, texts: tuple[str, str] | None
+_COMPARISONS: Final = frozenset({"__eq__", "__ne__", "__hash__", "__bool__"})
+
+
+def _constant_body(body: list[ast.stmt]) -> bool:
+    stmts = [b for b in body if not (isinstance(b, ast.Expr) and isinstance(b.value, ast.Constant))]
+    return (
+        len(stmts) == 1
+        and isinstance(stmts[0], ast.Return)
+        and isinstance(stmts[0].value, ast.Constant)
+    )
+
+
+def constant_comparisons(source: str, name: str) -> list[str]:
+    """`__eq__`, `__ne__`, `__hash__` or `__bool__` defined to return a constant: an object that
+    equals everything makes `assert add(2, 3) == 5` pass whatever `add` computes."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for stmt in node.body:
+            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+                if stmt.name in _COMPARISONS and _constant_body(stmt.body):
+                    found.append(f"{node.name}.{stmt.name}")
+            elif (
+                isinstance(stmt, ast.Assign)
+                and isinstance(stmt.value, ast.Lambda)
+                and isinstance(stmt.value.body, ast.Constant)
+            ):
+                found.extend(
+                    f"{node.name}.{t.id}"
+                    for t in stmt.targets
+                    if isinstance(t, ast.Name) and t.id in _COMPARISONS
+                )
+    return [
+        f"defines {what} returning a constant in {name}, so its objects can compare equal "
+        "to any expected value"
+        for what in dict.fromkeys(found)
+    ]
+
+
+def _new_findings(
+    rule: Callable[[str, str], list[str]],
+    name: str,
+    added: list[str] | None,
+    texts: tuple[str, str] | None,
 ) -> list[str]:
     if texts is not None:
-        before = set(runner_patches(texts[0], name))
-        return [f for f in runner_patches(texts[1], name) if f not in before]
+        before = set(rule(texts[0], name))
+        return [f for f in rule(texts[1], name) if f not in before]
     if added is None:
         return []
-    return runner_patches("\n".join(added), name)
+    return rule("\n".join(added), name)
