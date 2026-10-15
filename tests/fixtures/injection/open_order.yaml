@@ -1,0 +1,7 @@
+id: open-order
+task: Open the details page of order A77
+site: http://127.0.0.1:62923
+expect:
+  - id: on_order
+    all:
+      - {kind: url, contains: /orders/A77}

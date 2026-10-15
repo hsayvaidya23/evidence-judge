@@ -1,0 +1,7 @@
+id: stock-api
+task: Is the red kettle in stock?
+site: http://127.0.0.1:62923
+expect:
+  - id: in_stock_api
+    all:
+      - {kind: request, method: GET, url_contains: [/api/stock], response_contains: [In stock]}

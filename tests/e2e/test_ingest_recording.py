@@ -160,3 +160,16 @@ def test_final_state_stays_on_the_main_tab(tmp_path: Path) -> None:
     assert final is not None
     assert (final.url, final.text) == ("https://shop.test/cart", "Order #1042 pending")
 
+
+def test_fresh_recordings_show_the_agent_made_evidence(tmp_path: Path) -> None:
+    from scripts.record_injection_fixtures import MODES, record, running_shop
+
+    with running_shop() as base:
+        runs = {mode: load_playwright_trace(record(mode, base, tmp_path)) for mode in MODES}
+
+    assert [a.name for a in runs["evaluate"].actions] == ["goto", "click", "inject"]
+    assert [a.name for a in runs["init_script"].actions] == ["inject", "goto", "click"]
+    assert [n.synthetic for n in runs["route_fulfill"].network] == [False, False, True]
+    assert [(n.method, n.synthetic) for n in runs["route_continue"].network][-1] == ("POST", True)
+    assert [a.id for a in runs["data_link"].actions] == ["act#1", "act#2", "act#3.goto", "act#3"]
+    assert runs["data_link"].actions[2].value == f"{base}/orders/A77"
