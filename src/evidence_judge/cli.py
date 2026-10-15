@@ -24,6 +24,7 @@ from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
+from evidence_judge.hooks.cli import hook_app
 from evidence_judge.ingest import MismatchedEvidenceError
 from evidence_judge.integrations import exporters
 from evidence_judge.llm import factory
@@ -103,6 +104,7 @@ app = typer.Typer(
     add_completion=False,
     pretty_exceptions_enable=False,
 )
+app.add_typer(hook_app)
 
 
 def _load_run(**kwargs: Any) -> Run:

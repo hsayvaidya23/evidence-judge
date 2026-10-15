@@ -1,0 +1,10 @@
+{"type":"user","message":{"role":"user","content":"Earlier prompt: open the docs"},"timestamp":"2026-01-01T09:00:00.000Z","sessionId":"0b7e3c1a-1111-4222-8333-944455556666"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Opened the docs."}]},"timestamp":"2026-01-01T09:00:05.000Z"}
+{"type":"user","message":{"role":"user","content":"Buy a red kettle under $30 on the test shop"},"timestamp":"${PROMPT_TS}","sessionId":"0b7e3c1a-1111-4222-8333-944455556666"}
+{"type":"user","isMeta":true,"message":{"role":"user","content":"<system-reminder>meta text is not a prompt</system-reminder>"},"timestamp":"${PROMPT_TS}"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"..."},{"type":"tool_use","id":"toolu_01","name":"mcp__playwright__browser_navigate","input":{"url":"http://127.0.0.1:8000/"},"caller":{"type":"direct"}}]},"timestamp":"${PROMPT_TS}"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"Navigated"}]},"timestamp":"${PROMPT_TS}"}
+{"type":"attachment","timestamp":"${PROMPT_TS}"}
+not json at all
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I placed the order, order #1042 confirmed. The Red Kettle cost $24.00."}]},"timestamp":"${PROMPT_TS}"}
+{"type":"last-prompt"}

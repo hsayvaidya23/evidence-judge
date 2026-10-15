@@ -1,0 +1,13 @@
+{
+  "session_id": "01a13ade-0000-7000-8000-000000000001",
+  "transcript_path": "/nonexistent/rollout.jsonl",
+  "cwd": "/work/shop",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-5.5-codex",
+  "permission_mode": "default",
+  "turn_id": "turn-2",
+  "tool_name": "Bash",
+  "tool_use_id": "call_01",
+  "tool_input": {"command": "pytest -q"},
+  "tool_response": "Process exited with code 2\n1 failed, 4 passed"
+}
