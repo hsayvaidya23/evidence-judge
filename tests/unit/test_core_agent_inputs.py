@@ -16,8 +16,8 @@ def _inputs(
 def test_typing_actions_are_inputs_under_any_alias() -> None:
     actions = [
         act(1, "fill", "#q", value="Order  A77"),
-        act(2, "type", "#q", value="Refund"),
-        act(3, "insert_text", value="Total: $500"),
+        act(2, "type", "#r", value="Refund"),
+        act(3, "insert_text", "#t", value="Total: $500"),
         act(4, "input", "#name", value="Ada"),
         act(5, "click", "#go", value="Ignored click value"),
     ]
@@ -32,7 +32,7 @@ def test_single_key_presses_on_one_target_form_one_input() -> None:
         *[act(21 + i, "press", "#q", value=c) for i, c in enumerate("xyz")],
         *[act(30 + i, "press", "#other", value=c) for i, c in enumerate("abc")],
     ]
-    assert _inputs(actions=actions) == ("a77 ok", "abc", "xyz")
+    assert _inputs(actions=actions) == ("a77 okxyz", "a77 ok", "abc", "xyz")
 
 
 def test_goto_paths_and_queries_and_get_queries_are_inputs() -> None:
@@ -88,7 +88,11 @@ def test_pressed_text_is_input_but_key_names_and_chords_are_not() -> None:
         act(12, "send_keys", "#q", value="Order A77 confirmed"),
         act(13, "press", "#q", value="London"),
     ]
-    assert _inputs(actions=actions) == ("order a77 confirmed", "london")
+    assert _inputs(actions=actions) == (
+        "order a77 confirmedlondon",
+        "order a77 confirmed",
+        "london",
+    )
 
 
 def test_typed_markup_is_also_input_as_rendered_text() -> None:
@@ -190,3 +194,120 @@ def test_masking_keeps_evidence_without_agent_input() -> None:
     run = honest_run()
     masked = EvidenceIndex(run).without_agent_input
     assert masked.final == run.final_state
+
+
+def _keys(*steps: tuple[str, str]) -> list[ActionEvent]:
+    return [act(1 + i, name, "#q", value=value) for i, (name, value) in enumerate(steps)]
+
+
+def test_edits_are_replayed_and_the_edited_value_is_an_input() -> None:
+    typo = _keys(("fill", "In stocX"), ("press", "Backspace"), ("press", "k"))
+    assert _inputs(actions=typo) == ("in stock", "in stocx")
+
+
+def test_edits_sent_as_one_key_sequence_are_replayed() -> None:
+    sequence = _keys(("fill", "XXIn stock"), ("send_keys", "Home Delete Delete"))
+    assert _inputs(actions=sequence) == ("xxin stock", "xin stock", "in stock")
+
+
+def test_cursor_moves_and_selections_are_replayed() -> None:
+    insert = _keys(("fill", "Order confirmed"), ("press", "Control+ArrowLeft"))
+    insert += [act(10 + i, "press", "#q", value=c) for i, c in enumerate("A77 ")]
+    assert "order a77 confirmed" in _inputs(actions=insert)
+    shift = _keys(("fill", "Order pending"), ("press", "Shift+Home"), ("type", "Paid"))
+    assert "paid" in _inputs(actions=shift)
+    words = _keys(("fill", "Paid in full not"), ("press", "Alt+Backspace"))
+    assert "paid in full" in _inputs(actions=words)
+    line = _keys(("fill", "abc"), ("press", "Meta+Backspace"), ("press", "KeyX Digit7 Space KeyZ"))
+    assert "x7 z" in _inputs(actions=line)
+
+
+def test_select_all_replaces_and_undo_starts_the_field_over() -> None:
+    replaced = _keys(("fill", "kettle"), ("press", "Control+a"), ("type", "In stock"))
+    assert _inputs(actions=replaced) == ("in stock", "kettle")
+    undone = _keys(("fill", "Order A77"), ("press", "Control+z"), ("type", "Paid now"))
+    assert _inputs(actions=undone) == ("order a77", "paid now")
+
+
+def test_text_cut_or_copied_from_a_field_is_pasted_into_the_value() -> None:
+    actions = [
+        *_keys(("fill", "In stock"), ("press", "Meta+A"), ("press", "Meta+X")),
+        act(10, "fill", "#other", value="Status: "),
+        act(11, "press", "#other", value="Meta+V"),
+        act(12, "press", "#other", value="Shift+ArrowLeft Shift+ArrowLeft Control+c"),
+        act(13, "press", "#other", value="End Control+v"),
+    ]
+    assert _inputs(actions=actions) == ("status: in stockck", "in stock", "status:")
+
+
+def test_text_copied_from_the_page_makes_each_of_its_lines_and_sentences_an_input() -> None:
+    run = make_run(
+        actions=[
+            act(1, "goto", url=f"{HOST}/p/blue"),
+            act(2, "press", "#stock", value="Control+a"),
+            act(3, "press", value="Control+c"),
+            act(4, "click", "#filter"),
+            act(5, "press", value="Control+v"),
+        ],
+        snapshots=[snap(1, "/p/blue", "Blue Kettle\nIn stock. Ships today!")],
+    )
+    inputs = EvidenceIndex(run).agent_inputs()
+    assert inputs == ("ships today!", "blue kettle", "in stock.", "blue")
+
+
+def test_a_copy_reads_the_page_on_screen_and_a_paste_without_a_copy_reads_every_page() -> None:
+    copy_then_snapshot = make_run(
+        actions=[act(1, "click", "#a"), act(2, "press", value="Control+c")],
+        snapshots=[snap(2, "/", "Later page")],
+    )
+    assert EvidenceIndex(copy_then_snapshot).agent_inputs() == ("later page",)
+    last_copy = make_run(
+        actions=[act(1, "press", value="Meta+c")], final_state=final("/", "Final page")
+    )
+    assert EvidenceIndex(last_copy).agent_inputs() == ("final page",)
+    paste = make_run(
+        actions=[act(3, "press", "#q", value="Control+v"), act(4, "press", "#q", value="Paid")],
+        snapshots=[snap(1, "/", "First page"), snap(2, "/b", "Second page")],
+    )
+    assert EvidenceIndex(paste).agent_inputs() == ("second page", "first page", "paid")
+
+
+def test_masking_covers_parts_of_an_input_from_any_word_start() -> None:
+    assert _masked_final(["zz In stock"], "Showing In stock items") == f"showing {MASK} items"
+    assert _masked_final(["Kettle In stock now"], "Kettle In stock") == MASK
+    assert _masked_final(["Order #A77 confirmed today"], "Order A77 confirmed") == (f"order {MASK}")
+
+
+def test_parts_never_start_inside_a_word_and_later_parts_end_at_a_word_end() -> None:
+    assert _masked_final(["unconfirmed booking"], "Booking confirmed") == "Booking confirmed"
+    assert _masked_final(["Order #A77 confirmation"], "Order A77 confirmed") == (
+        "Order A77 confirmed"
+    )
+    assert _masked_final(["zz Order A77 confirmation"], "Order A77 confirmed") == (
+        f"{MASK}confirmed"
+    )
+
+
+def test_parts_never_start_inside_a_redaction_token() -> None:
+    card = "[REDACTED:card:8be88632]"
+    text = "Card [REDACTED:card:96a7866f] on file"
+    assert _masked_final([f"Use {card} today"], text) == text
+
+
+def test_word_and_line_moves_are_replayed() -> None:
+    words = _keys(
+        ("fill", "Order A77 -- "),
+        ("press", "Control+Backspace"),
+        ("press", "Meta+ArrowLeft"),
+        ("press", "Control+Delete"),
+        ("type", "Paid"),
+    )
+    assert _inputs(actions=words) == ("order a77 --", "order", "paid")
+    ends = _keys(("fill", " -- tail"), ("press", "Home Control+Delete"), ("type", "Paid"))
+    assert "paid" in _inputs(actions=ends)
+
+
+def test_many_inputs_are_matched_in_one_pass_over_the_text() -> None:
+    typed = [f"Product {i:03d} in stock" for i in range(80)]
+    text = "Catalogue: product 007 in stock, item 999 sold out"
+    assert _masked_final(typed, text) == f"catalogue: {MASK}, item 999 sold out"
