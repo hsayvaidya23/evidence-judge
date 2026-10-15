@@ -306,6 +306,17 @@ def test_invalid_spec_names_line_and_column(
     assert "expect.0.method (line 5, column 13)" in " ".join(result.output.split())
 
 
+def test_a_rerun_block_in_a_browser_spec_points_to_session_specs(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path
+) -> None:
+    install(monkeypatch, calls)
+    spec = tmp_path / "spec.yaml"
+    spec.write_text("id: x\ntask: t\nrerun:\n  command: [pytest]\n", encoding="utf-8")
+    result = runner.invoke(app, ["judge", "--har", str(evidence), "--spec", str(spec)])
+    assert result.exit_code == ExitCode.USAGE
+    assert "rerun belongs in a session spec" in " ".join(result.output.split())
+
+
 def test_invalid_claims_exit_3(
     monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path
 ) -> None:

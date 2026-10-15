@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 _HINTS = {
     ("rerun.command", "list_type"): 'command must be a list of arguments, e.g. ["pytest", "-q"]',
+    ("rerun", "extra_forbidden"): "rerun belongs in a session spec (session judge --rerun, "
+    "session rerun), not a browser task spec",
 }
 
 
