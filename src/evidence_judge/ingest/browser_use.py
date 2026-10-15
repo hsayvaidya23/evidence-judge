@@ -40,8 +40,52 @@ SOURCE: Final = "browser-use"
 HISTORY_FILE: Final = "history.json"
 
 _VALUE_KEYS: Final = ("url", "text", "keys", "query", "path")
-_CODE_KEYS: Final = ("code", "script", "expression", "js")
-"""Parameters holding the code of a JavaScript action (browser-use ``evaluate``)."""
+_CODE_KEYS: Final = ("code", "script", "expression", "js", "javascript")
+"""Parameters holding code: an action that carries any is an INJECT, whatever its name."""
+BUILT_IN_TOOLS: Final = frozenset(
+    {
+        "search",
+        "navigate",
+        "go_back",
+        "wait",
+        "click",
+        "input",
+        "upload_file",
+        "scroll",
+        "find_text",
+        "send_keys",
+        "evaluate",
+        "switch",
+        "close",
+        "extract",
+        "screenshot",
+        "dropdown_options",
+        "select_dropdown",
+        "write_file",
+        "read_file",
+        "replace_file",
+        "search_google",
+        "go_to_url",
+        "open_tab",
+        "switch_tab",
+        "close_tab",
+        "click_element",
+        "click_element_by_index",
+        "input_text",
+        "scroll_down",
+        "scroll_up",
+        "scroll_to_text",
+        "extract_content",
+        "extract_structured_data",
+        "get_dropdown_options",
+        "select_dropdown_option",
+        "replace_file_str",
+        "drag_drop",
+    }
+)
+"""browser-use's built-in tools, current and 0.x names. Any other action is a custom tool: its
+code ran in the agent's process with the browser at hand (cookies, storage, CDP), so it is
+recorded as an INJECT (deny by default)."""
 _DONE = "done"
 _REASONING_FIELDS: Final = (
     ("thinking", "Thinking"),
@@ -171,12 +215,12 @@ class _HistoryBuilder:
         ts: float,
         state: JsonObject,
     ) -> None:
-        canonical = known_action(name) or OTHER
+        canonical = _canonical(name, params)
         sha: str | None = None
         if canonical == INJECT:
-            value = injected(
-                name, next((v for k in _CODE_KEYS if (v := as_str(params.get(k)))), None)
-            )
+            code = next((v for k, v in params.items() if k.lower() in _CODE_KEYS), None)
+            shown = code if isinstance(code, str) else json.dumps(params, ensure_ascii=False)
+            value = injected(name, shown)
         else:
             value = next((v for k in _VALUE_KEYS if (v := as_str(params.get(k)))), None)
         if canonical == GOTO and is_script_url(value):
@@ -318,6 +362,14 @@ class _HistoryBuilder:
             title=as_str(self.last_state.get("title")),
             screenshot_id=self.last_state_screenshot,
         )
+
+
+def _canonical(name: str, params: JsonObject) -> str:
+    """The canonical name of a browser-use action: INJECT for a custom tool (not in
+    BUILT_IN_TOOLS) and for any action that carries code (_CODE_KEYS)."""
+    if name not in BUILT_IN_TOOLS or any(k.lower() in _CODE_KEYS for k in params):
+        return INJECT
+    return known_action(name) or OTHER
 
 
 def _single_action(raw: object) -> tuple[str, JsonObject] | None:

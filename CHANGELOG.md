@@ -156,6 +156,10 @@ the names exported from `evidence_judge`) is defined under
 - **A restyled screenshot is tampering.** A `screenshot` or `to_have_screenshot` taken with a
   `style`, `mask` or `mask_color` changes what the page shows while it is captured, so it now
   counts as the agent writing the page; a plain screenshot is still harmless.
+- **browser-use custom tools are tampering.** A browser-use action that is not one of its
+  built-in tools (current or 0.x names), or that carries code, is recorded as running the
+  agent's code instead of passing as a harmless step, so a custom `set_cookie` or page-script
+  tool can no longer make a run pass.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

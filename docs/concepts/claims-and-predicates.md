@@ -186,7 +186,10 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   does not prove the order went through.
 - **Evidence the agent made in the browser.** An agent that runs its own code in the page
   (`page.evaluate`, `$eval`, `wait_for_function`, `add_init_script`, `add_script_tag`,
-  `add_style_tag`, `set_content`, `expose_binding`; browser-use's `evaluate`; a `goto` of a
+  `add_style_tag`, `set_content`, `expose_binding`; browser-use's `evaluate`, any custom tool
+  (an action that is not one of browser-use's built-in tools, current or 0.x: its code ran in
+  the agent's process with the browser at hand, so `set_cookie` or `run_page_script` is named
+  with its parameters) and any action carrying code; a `goto` of a
   `javascript:` or `vbscript:` URL, in Playwright or browser-use) can write any text
   and push any URL; one whose route handler answers a request (`route.fulfill`) or rewrites it
   (`route.continue` or `route.fallback` with a new URL, method, headers or body) makes the

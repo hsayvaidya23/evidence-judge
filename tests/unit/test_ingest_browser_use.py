@@ -48,6 +48,48 @@ def test_actions_are_normalised_and_done_is_not_an_action() -> None:
     assert [a.ts for a in run.actions] == [0.0, 6500.0, 13000.0, 13000.0, 19500.0, 26000.0, 32500.0]
 
 
+def _acting(*actions: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "model_output": {"action": [action]},
+            "result": [{"extracted_content": "ok"}],
+            "state": {"url": "https://shop.test/"},
+        }
+        for action in actions
+    ]
+
+
+def test_built_in_tools_keep_their_names_and_custom_tools_are_injections(tmp_path: Path) -> None:
+    history = write_history(
+        tmp_path / "h.json",
+        *_acting(
+            {"navigate": {"url": "https://shop.test/"}},
+            {"go_to_url": {"url": "https://shop.test/a"}},
+            {"select_dropdown": {"index": 4, "text": "In stock"}},
+            {"scroll": {"down": True}},
+            {"extract_structured_data": {"query": "price"}},
+            {"set_cookie": {"name": "paid", "value": "1"}},
+            {"run_page_script": {"code": "document.title = 'Paid'"}},
+            {"click": {"index": 2, "javascript": "document.body.innerHTML = 'Paid'"}},
+            {"fill": {"index": 1, "text": "x"}},
+        ),
+    )
+
+    run = load_browser_use_history(history)
+
+    assert [(a.name, a.value) for a in run.actions] == [
+        ("goto", "https://shop.test/"),
+        ("goto", "https://shop.test/a"),
+        ("select", "In stock"),
+        ("other", None),
+        ("other", "price"),
+        ("inject", 'set_cookie({"name": "paid", "value": "1"})'),
+        ("inject", "run_page_script(document.title = 'Paid')"),
+        ("inject", "click(document.body.innerHTML = 'Paid')"),
+        ("inject", 'fill({"index": 1, "text": "x"})'),
+    ]
+
+
 def test_actions_without_results_were_not_executed() -> None:
     run = load_browser_use_history(HISTORY)
 

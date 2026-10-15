@@ -34,7 +34,8 @@ Only a trace and a browser-use history show whether the agent made evidence itse
 records code it ran in the page (`evaluate`, `add_init_script`, `set_content`, ...) as `inject`
 actions and marks responses its route handler supplied (`route.fulfill`) or requests it rewrote
 (`route.continue` with overrides) as `synthetic`; a browser-use history records its `evaluate`
-action. A HAR alone shows neither, so a HAR-only run cannot reveal it. See
+action, every custom tool (any action that is not one of browser-use's built-in tools) and any
+action that carries code (`code`, `script`, `js`, `javascript` or `expression`) as `inject`. A HAR alone shows neither, so a HAR-only run cannot reveal it. See
 [evidence that proves nothing](claims-and-predicates.md#evidence-that-proves-nothing).
 
 Every verdict states this as `tamper_detection`, with a `level` and a `reason`, and adds a
@@ -43,7 +44,7 @@ warning when the level is not `full`:
 | Level | Source | What it can show |
 | --- | --- | --- |
 | `full` | A Playwright trace (with or without a HAR or history) | Every call the agent made through Playwright: scripts, route handlers, storage and cookie writes, CDP sessions |
-| `partial` | A browser-use history (without a trace) | The model's actions, including its `evaluate`; not what ran beneath them (CDP calls, request changes) |
+| `partial` | A browser-use history (without a trace) | The model's actions, including its `evaluate` and custom tools; not what ran beneath them (CDP calls, request changes) |
 | `none` | A HAR alone, or any source without a call log | Nothing: a forged HAR looks the same as a recorded one |
 
 No source shows state that existed before recording started (a persistent profile, cookies,
