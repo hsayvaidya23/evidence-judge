@@ -81,8 +81,22 @@ def merge_citations(results: Iterable[PredicateResult]) -> list[Citation]:
     return list(seen.values())
 
 
+def lower_first(text: str) -> str:
+    """`text` with its first letter lower-cased to continue a sentence, unless it starts an
+    acronym or a name such as `POST` or `URL`."""
+    if len(text) > 1 and text[0].isupper() and text[1].islower():
+        return text[0].lower() + text[1:]
+    return text
+
+
+def join_clauses(clauses: Iterable[str]) -> str:
+    """Distinct clauses as one sentence: `; `-separated, later ones lower-cased."""
+    unique = list(dict.fromkeys(clauses))
+    return "; ".join(unique[:1] + [lower_first(c) for c in unique[1:]])
+
+
 def join_reasons(results: Iterable[PredicateResult]) -> str:
-    return "; ".join(dict.fromkeys(r.reason for r in results))
+    return join_clauses(r.reason for r in results)
 
 
 def checker_names(results: Iterable[PredicateResult]) -> str:

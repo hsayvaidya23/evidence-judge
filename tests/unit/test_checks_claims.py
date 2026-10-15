@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from evidence_judge.checks._common import WEAK_CONTRADICTION_CONFIDENCE
+from evidence_judge.checks._common import WEAK_CONTRADICTION_CONFIDENCE, join_clauses
 from evidence_judge.checks.claims import NO_PREDICATE_REASON, judge_claim
 from evidence_judge.checks.registry import default_registry
 from evidence_judge.core.claims import Claim, ClaimKind
@@ -61,8 +61,8 @@ async def test_forged_claim_is_contradicted_by_every_predicate() -> None:
     )
     assert verdict.status is Support.CONTRADICTED
     assert "No POST request whose URL contains '/api/orders'" in verdict.reason
-    assert "Final page text does not contain 'Thank you for your order'" in verdict.reason
-    assert "Final URL is /cart" in verdict.reason
+    assert "; final page text does not contain 'Thank you for your order'" in verdict.reason
+    assert "; final URL is /cart" in verdict.reason
     assert verdict.checker == "request+page_text+url"
     assert verdict.confidence == 1.0
 
@@ -85,7 +85,7 @@ async def test_uncaptured_channel_keeps_claim_unverified() -> None:
     )
     assert verdict.status is Support.NO_EVIDENCE
     assert verdict.reason.startswith("Network traffic was not captured")
-    assert "; also Final page text does not contain" in verdict.reason
+    assert "; also final page text does not contain" in verdict.reason
     assert verdict.checker == "request"
 
 
@@ -113,8 +113,8 @@ async def test_support_against_a_confident_contradiction_is_a_weak_conflict() ->
     assert verdict.status is Support.CONTRADICTED
     assert verdict.confidence == WEAK_CONTRADICTION_CONFIDENCE
     assert verdict.reason.startswith("conflicting evidence: ")
-    assert "Final page (/) contains 'Thank you'" in verdict.reason
-    assert "No POST request whose URL contains '/api/orders'" in verdict.reason
+    assert "evidence: final page (/) contains 'Thank you'" in verdict.reason
+    assert "but no POST request whose URL contains '/api/orders'" in verdict.reason
     assert {c.evidence_id for c in verdict.citations} >= {"final", "net#1"}
     assert verdict.checker == "page_text+request"
 
@@ -160,3 +160,9 @@ async def test_screenshot_only_claim() -> None:
     assert verdict.status is Support.CONTRADICTED
     assert verdict.confidence == WEAK_CONTRADICTION_CONFIDENCE
     assert [c.evidence_id for c in verdict.citations] == ["shot#4"]
+
+
+def test_joined_clauses_continue_the_sentence_but_keep_acronyms() -> None:
+    joined = join_clauses(["No POST request", "Network traffic was not captured", "URL lacks x"])
+    assert joined == "No POST request; network traffic was not captured; URL lacks x"
+    assert join_clauses(["A", "A", "Final page"]) == "A; final page"

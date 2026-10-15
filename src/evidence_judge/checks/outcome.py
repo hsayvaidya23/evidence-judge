@@ -33,7 +33,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Final
 
-from evidence_judge.checks._common import CONFIDENT_CONTRADICTION, plural
+from evidence_judge.checks._common import CONFIDENT_CONTRADICTION, lower_first, plural
 from evidence_judge.checks.expectations import CONSTRAINT, EXPECT, FORBID
 from evidence_judge.core.verdict import (
     ClaimVerdict,
@@ -84,10 +84,7 @@ def score(
 
 
 def _clause(reason: str) -> str:
-    text = reason.strip().rstrip(".")
-    if len(text) > 1 and text[0].isupper() and text[1].islower():
-        return text[0].lower() + text[1:]
-    return text
+    return lower_first(reason.strip().rstrip("."))
 
 
 def _claim(verdict: ClaimVerdict) -> str:

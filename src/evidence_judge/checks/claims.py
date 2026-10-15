@@ -24,6 +24,7 @@ from evidence_judge.checks._common import (
     WEAK_CONTRADICTION_CONFIDENCE,
     checker_names,
     join_reasons,
+    lower_first,
     merge_citations,
     result,
 )
@@ -138,8 +139,8 @@ def combine(claim: Claim, results: Sequence[PredicateResult]) -> ClaimVerdict:
         return _verdict(
             claim,
             Support.CONTRADICTED,
-            f"conflicting evidence: {join_reasons(supported)} supports the claim, but "
-            f"{join_reasons(confident)} contradicts it",
+            f"conflicting evidence: {lower_first(join_reasons(supported))} supports the claim, "
+            f"but {lower_first(join_reasons(confident))} contradicts it",
             [*supported, *confident],
             WEAK_CONTRADICTION_CONFIDENCE,
         )
@@ -162,7 +163,7 @@ def combine(claim: Claim, results: Sequence[PredicateResult]) -> ClaimVerdict:
     undecided = [r for r in results if r.status is Support.NO_EVIDENCE]
     reason = join_reasons(undecided)
     if contradicted:
-        reason = f"{reason}; also {join_reasons(contradicted)}"
+        reason = f"{reason}; also {lower_first(join_reasons(contradicted))}"
     return _verdict(
         claim,
         Support.NO_EVIDENCE,

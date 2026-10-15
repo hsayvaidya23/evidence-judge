@@ -34,6 +34,7 @@ from typing import Final
 from evidence_judge.checks._common import (
     MAX_CITATIONS,
     describe_request,
+    join_clauses,
     plural,
     quoted,
     require,
@@ -219,11 +220,11 @@ def _observe(
         observations.extend(pages)
         if partial:
             reason = _partial_reason(partial)
-            unread = reason if unread is None else f"{unread}; {reason}"
+            unread = reason if unread is None else join_clauses((unread, reason))
             gaps.append(reason)
         elif not pages:
             gaps.append(f"No recorded page text matches /{predicate.page_regex}/")
-    return observations, "; ".join(gaps), unread, unsure
+    return observations, join_clauses(gaps), unread, unsure
 
 
 def check_value(
