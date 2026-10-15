@@ -63,6 +63,7 @@ optional extra.
 | `langfuse` | Langfuse SDK | `--langfuse-trace-id` and `push_to_langfuse(...)` |
 | `phoenix` | `arize-phoenix-client` | `push_to_phoenix(...)` |
 | `inspect` | Inspect AI | `evidence_judge_scorer()` |
+| `mcp` | MCP Python SDK | `evidence-judge mcp` ([MCP server](../guides/mcp.md)) |
 | `all` | all of the above | everything |
 
 Without the `anthropic` extra, or without `ANTHROPIC_API_KEY`, Evidence Judge judges offline:

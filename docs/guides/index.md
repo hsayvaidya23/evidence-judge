@@ -1,5 +1,5 @@
 ---
-description: Practical guides for Evidence Judge - spec recipes, CI, Docker, integrations, benchmarking and recording.
+description: Practical guides for Evidence Judge - spec recipes, CI, Docker, integrations, the MCP server, benchmarking and recording.
 ---
 
 # Guides
@@ -30,6 +30,12 @@ description: Practical guides for Evidence Judge - spec recipes, CI, Docker, int
     ---
 
     OpenTelemetry, Langfuse, Arize Phoenix and Inspect AI.
+
+-   :material-robot-outline:{ .lg .middle } __[MCP server](mcp.md)__
+
+    ---
+
+    Judge, inspect and explain runs as tools from Claude Code, Codex CLI or Gemini CLI.
 
 -   :material-flask-outline:{ .lg .middle } __[Benchmark your own agent](benchmark-your-agent.md)__
 

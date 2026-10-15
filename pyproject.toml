@@ -36,7 +36,8 @@ otel = [
 langfuse = ["langfuse>=3.0"]
 phoenix = ["arize-phoenix-client>=1.0"]
 inspect = ["inspect-ai>=0.3.100"]
-all = ["evidence-judge[anthropic,otel,langfuse,phoenix,inspect]"]
+mcp = ["mcp>=2.3,<3"]
+all = ["evidence-judge[anthropic,otel,langfuse,phoenix,inspect,mcp]"]
 
 [project.scripts]
 evidence-judge = "evidence_judge.cli:app"
@@ -65,6 +66,7 @@ dev = [
   "langfuse>=3.0",
   "arize-phoenix-client>=1.0",
   "inspect-ai>=0.3.100",
+  "mcp>=2.3,<3",
 ]
 docs = [
     "mkdocs-material>=9.6",

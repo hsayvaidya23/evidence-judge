@@ -167,6 +167,7 @@ nav:
       - CI with the GitHub Action: guides/github-action.md
       - Docker: guides/docker.md
       - Integrations: integrations.md
+      - MCP server: guides/mcp.md
       - Benchmark your own agent: guides/benchmark-your-agent.md
       - Recording recipes: guides/recording-recipes.md
   - Reference:

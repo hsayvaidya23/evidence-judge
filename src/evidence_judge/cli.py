@@ -528,6 +528,51 @@ def version() -> None:
     typer.echo(f"evidence-judge {__version__}")
 
 
+@app.command("mcp")
+def mcp_server(
+    root: Annotated[
+        list[Path] | None,
+        typer.Option(
+            help=(
+                "Directory clients may read and write files in; repeat for more. "
+                "Default: the working directory"
+            ),
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
+    http: Annotated[
+        bool,
+        typer.Option("--http", help="Serve streamable HTTP on 127.0.0.1 instead of stdio"),
+    ] = False,
+    port: Annotated[
+        int, typer.Option(min=1, max=65535, help="Port for --http (endpoint /mcp)")
+    ] = 8000,
+    offline_only: Annotated[
+        bool,
+        typer.Option("--offline-only", help="Refuse judge_run calls that ask for a model"),
+    ] = False,
+) -> None:
+    """Run an MCP server so coding agents can judge, inspect and explain runs as tools."""
+    try:
+        from evidence_judge.mcp import Roots, ServerConfig, serve
+    except ImportError as e:
+        _stderr().print(
+            Text.assemble(
+                ("error: ", "bold red"),
+                f"the MCP server needs the mcp extra: pip install 'evidence-judge[mcp]' ({e})",
+            )
+        )
+        raise typer.Exit(int(ExitCode.USAGE)) from None
+    config = ServerConfig(
+        roots=Roots.of(root or [Path.cwd()]),
+        allow_llm=not offline_only,
+    )
+    serve(config, transport="streamable-http" if http else "stdio", port=port)
+
+
 def _bench_llm(settings: Settings, calls: int) -> LLMClient | None:
     """The benchmark's LLM with one budget for all ``calls``; None when no call needs a model."""
     if not calls:

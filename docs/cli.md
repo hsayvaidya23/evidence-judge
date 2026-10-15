@@ -8,6 +8,7 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | --- | --- |
 | `judge` | Judge one agent run |
 | `inspect` | Summarise the evidence in a trace, HAR or browser-use run without judging it |
+| `mcp` | Run an MCP server so coding agents can judge, inspect and explain runs as tools |
 | `schema` | Print the JSON Schema of the verdict format |
 | `version` | Print the evidence-judge version |
 
@@ -119,6 +120,26 @@ evidence-judge bench RUNS_DIR [--seeds 3] [--out results.json] [--markdown resul
 | `--no-redact` | Judge unredacted evidence and agent text |
 | `--quiet`, `-q` | Do not print the report |
 | `--debug` / `--no-debug` | Show tracebacks for internal errors |
+
+## `evidence-judge mcp`
+
+Runs an MCP server exposing `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and
+`find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp]"`); without it the
+command exits `3`. See the [MCP server guide](guides/mcp.md) for client setup.
+
+```bash
+evidence-judge mcp [--root DIR]... [--http] [--port 8000] [--offline-only]
+```
+
+| Option | Description |
+| --- | --- |
+| `--root DIR` | Directory clients may read and write files in; repeat for more. Paths resolve with every symlink followed, and anything outside every root is refused. Relative paths in tool calls resolve against the first root. Default: the working directory |
+| `--http` | Serve streamable HTTP at `http://127.0.0.1:<port>/mcp` instead of stdio. Binds to loopback only, with DNS-rebinding protection and no authentication |
+| `--port N` | Port for `--http` (default 8000) |
+| `--offline-only` | Refuse `judge_run` calls with `offline: false`, so the server never calls a model even when `ANTHROPIC_API_KEY` is set |
+
+Settings come from the server's environment as for every command; `EVJ_REDACT` decides whether
+tool results are redacted.
 
 ## `evidence-judge schema`
 
