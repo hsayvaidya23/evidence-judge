@@ -16,7 +16,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-from evidence_judge.core.evidence import ActionEvent, Channel, PageState, Run, Screenshot
+from evidence_judge.core.evidence import (
+    ActionEvent,
+    Channel,
+    PageState,
+    Run,
+    Screenshot,
+    is_web_page_url,
+)
 from evidence_judge.ingest._json import (
     JsonObject,
     as_float,
@@ -25,7 +32,6 @@ from evidence_judge.ingest._json import (
     as_str,
     read_capped,
 )
-from evidence_judge.ingest._network import is_web_page_url
 from evidence_judge.ingest.errors import BrowserUseFormatError
 
 SOURCE: Final = "browser-use"

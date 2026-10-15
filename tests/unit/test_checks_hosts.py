@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.dimensions import assess_side_effects
 from evidence_judge.checks.expectations import evaluate_expectation, evaluate_spec
 from evidence_judge.checks.registry import default_registry
 from evidence_judge.config import Settings
-from evidence_judge.core.claims import Claim, ClaimKind
-from evidence_judge.core.evidence import PageState, Run
+from evidence_judge.core.claims import Claim, ClaimKind, ClaimSet
+from evidence_judge.core.evidence import PageState, Run, is_web_page_url
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import PageTextPredicate, RequestPredicate, Scope, UrlPredicate
 from evidence_judge.core.taskspec import Expectation, TaskSpec
@@ -78,6 +80,51 @@ async def test_final_data_page_cannot_show_a_confirmation() -> None:
     res = await _check(CONFIRMED, _scoped(run))
     assert res.status is Support.NO_EVIDENCE
     assert "data:" in res.reason
+
+
+NON_WEB_PAGES = [
+    "view-source:https://shop.test/static/app.js",
+    "chrome-error://chromewebdata/",
+    "chrome-extension://abcdef/popup.html",
+    "edge://settings",
+    "moz-extension://abcdef/page.html",
+    "file:///tmp/order.html",
+    "about:blank",
+    "data:text/html,Thank you for your order",
+]
+
+
+@pytest.mark.parametrize("url", NON_WEB_PAGES)
+def test_only_http_and_https_pages_are_web_pages(url: str) -> None:
+    assert not is_web_page_url(url)
+    assert not EvidenceScope(primary_host="shop.test").page_allowed(url)
+
+
+@pytest.mark.parametrize("url", ["https://shop.test/order", "http://127.0.0.1:8000/order"])
+def test_site_pages_on_http_and_https_are_allowed(url: str) -> None:
+    assert is_web_page_url(url)
+    assert EvidenceScope(primary_host="shop.test").page_allowed(url)
+
+
+@pytest.mark.parametrize("url", NON_WEB_PAGES[:2])
+async def test_a_final_non_web_page_cannot_pass_an_order(url: str) -> None:
+    claim = Claim(
+        id="c1",
+        text="Order placed",
+        quote="Order placed",
+        kind=ClaimKind.OUTCOME,
+        key=True,
+        predicates=[PageTextPredicate(contains="Thank you for your order", scope=Scope.FINAL)],
+    )
+    run = make_run(
+        actions=[act(1, "goto", url="https://shop.test/"), act(2, "goto", url=url)],
+        network=[net(1, "GET", "/")],
+        snapshots=[snap(1, "/", "Welcome")],
+        final_state=PageState(url=url, text='el.textContent = "Thank you for your order!"'),
+    )
+    judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
+    verdict = await judge.judge(run, JudgeOptions(offline=True, claims=ClaimSet(claims=[claim])))
+    assert verdict.outcome is not Outcome.PASS
 
 
 async def test_any_scope_ignores_pages_off_the_allowed_hosts() -> None:

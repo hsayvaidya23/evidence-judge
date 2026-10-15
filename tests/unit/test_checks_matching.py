@@ -8,6 +8,7 @@ import pytest
 from evidence_judge.checks.errors import InvalidPredicateError, RegexTimeoutError
 from evidence_judge.checks.matching import (
     MAX_REGEX_INPUT,
+    MAX_REGEX_MATCHES,
     MISSING,
     compare,
     compile_regex,
@@ -18,6 +19,7 @@ from evidence_judge.checks.matching import (
     normalize,
     parse_body,
     parse_number,
+    regex_findall,
     regex_search,
     status_matches,
     url_contains,
@@ -296,3 +298,19 @@ def test_regex_search_reads_only_the_bounded_head_and_tail() -> None:
     assert match is not None
     assert match.group(1) == "2"
     assert regex_search(regex, "needle 3" + "x" * (3 * MAX_REGEX_INPUT)) is not None
+
+
+def test_regex_findall_reports_whether_it_read_every_match() -> None:
+    regex = compile_regex(r"n(\d)")
+    found = regex_findall(regex, "n1 n2")
+    assert [m.group(1) for m in found.matches] == ["1", "2"]
+    assert found.complete
+    exact = regex_findall(regex, "n1 " * MAX_REGEX_MATCHES)
+    assert len(exact.matches) == MAX_REGEX_MATCHES
+    assert exact.complete
+    capped = regex_findall(regex, "n1 " * (MAX_REGEX_MATCHES + 1))
+    assert len(capped.matches) == MAX_REGEX_MATCHES
+    assert not capped.complete
+    windowed = regex_findall(regex, "n1" + "x" * (2 * MAX_REGEX_INPUT) + "n2")
+    assert [m.group(1) for m in windowed.matches] == ["1", "2"]
+    assert not windowed.complete

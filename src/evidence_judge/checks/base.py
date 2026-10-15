@@ -3,18 +3,14 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Final, Protocol
-from urllib.parse import urlsplit
+from typing import Protocol
 
 from evidence_judge.checks.matching import host_allowed, url_host
-from evidence_judge.core.evidence import NetworkEvent
+from evidence_judge.core.evidence import NetworkEvent, is_web_page_url
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import Predicate
 from evidence_judge.core.verdict import PredicateResult, Usage
 from evidence_judge.llm.base import LLMClient
-
-NON_SITE_SCHEMES: Final = frozenset({"data", "about", "blob", "javascript", "chrome", "devtools"})
-"""Page URLs that are never the site under test, and that an agent can fill with its own text."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,8 +20,8 @@ class EvidenceScope:
     With `allowed_hosts` set, only requests and page states on those hosts (or their subdomains)
     count. Without it, a mutation must go to the run's primary host or a subdomain of it (a
     leading 'www.' is ignored), so a POST to a third party cannot prove "order placed"; reads
-    and page states on any host still count. Page states on data:, about:, blob: and similar
-    URLs never count.
+    and page states on any host still count. Only http and https page states count: data:,
+    about:, view-source:, file:, browser-internal and extension pages never do.
     """
 
     allowed_hosts: tuple[str, ...] = ()
@@ -52,7 +48,7 @@ class EvidenceScope:
         return not hosts or host_allowed(url_host(event.url), hosts)
 
     def page_allowed(self, url: str) -> bool:
-        if urlsplit(url).scheme.lower() in NON_SITE_SCHEMES:
+        if not is_web_page_url(url):
             return False
         return not self.allowed_hosts or host_allowed(url_host(url), list(self.allowed_hosts))
 

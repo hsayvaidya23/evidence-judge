@@ -162,6 +162,23 @@ def test_offline_skips_llm(monkeypatch: pytest.MonkeyPatch, calls: Calls, eviden
     assert calls.options is not None and calls.options.offline
 
 
+NON_FINITE_HAR = (
+    '{"log":{"entries":[{"startedDateTime":"2024-01-01T00:00:00Z",'
+    '"request":{"method":"GET","url":"https://a.test/"},"response":{"status":STATUS}}]}}'
+)
+
+
+@pytest.mark.parametrize("status", ["1e400", "Infinity", "NaN"])
+def test_a_har_with_a_non_finite_status_is_judged_not_an_internal_error(
+    tmp_path: Path, status: str
+) -> None:
+    har = tmp_path / "h.har"
+    har.write_text(NON_FINITE_HAR.replace("STATUS", status), encoding="utf-8")
+    result = runner.invoke(app, ["judge", "--har", str(har), "--offline"])
+    assert result.exit_code != ExitCode.INTERNAL, result.output
+    assert "internal error" not in result.output
+
+
 def test_online_uses_llm(monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path) -> None:
     install(monkeypatch, calls)
     runner.invoke(app, ["judge", "--har", str(evidence)])
@@ -341,6 +358,28 @@ def test_schema_stdout_and_file(tmp_path: Path) -> None:
     out = tmp_path / "s.json"
     assert runner.invoke(app, ["schema", "--out", str(out)]).exit_code == 0
     assert out.read_text(encoding="utf-8") == schema_to_json()
+
+
+@pytest.mark.parametrize("flag", ["--out", "--html"])
+def test_unwritable_output_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path, flag: str
+) -> None:
+    install(monkeypatch, calls)
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    target = blocker / "report"
+    result = runner.invoke(app, ["judge", "--har", str(evidence), flag, str(target), "-q"])
+    assert result.exit_code == ExitCode.USAGE, result.output
+    assert "cannot write" in result.output
+    assert "internal error" not in result.output
+
+
+def test_schema_to_an_unwritable_path_is_a_usage_error(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    result = runner.invoke(app, ["schema", "--out", str(blocker / "s.json")])
+    assert result.exit_code == ExitCode.USAGE, result.output
+    assert "cannot write" in result.output
 
 
 def test_version() -> None:

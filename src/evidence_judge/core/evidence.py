@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from enum import StrEnum
-from typing import Annotated, Any, Self, cast
+from typing import Annotated, Any, Final, Self, cast
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, PlainValidator
 
@@ -156,6 +157,18 @@ class ConsoleEvent(_Frozen):
     ts: float
     level: str
     text: str
+
+
+WEB_SCHEMES: Final = frozenset({"http", "https"})
+
+
+def is_web_page_url(url: str) -> bool:
+    """Whether `url` is a page a site served: http or https, never about:, data:, view-source:,
+    file:, browser-internal or extension pages, which an agent can fill with its own text."""
+    try:
+        return urlsplit(url).scheme.lower() in WEB_SCHEMES
+    except ValueError:
+        return False
 
 
 class PageState(_Frozen):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, cast
 
@@ -35,12 +36,20 @@ def as_str(value: object) -> str | None:
 
 
 def as_float(value: object) -> float | None:
+    """A JSON number as a finite float; None for anything else, NaN and infinities included."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
 
 
 def as_int(value: object) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    if isinstance(value, bool):
         return None
-    return int(value)
+    if isinstance(value, int):
+        return value
+    number = as_float(value)
+    return None if number is None else int(number)
