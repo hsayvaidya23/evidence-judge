@@ -86,6 +86,26 @@ async def test_both_bodies_within_the_cap_are_supported_and_cited() -> None:
     ]
 
 
+PLAN = ValuePredicate(field="plan", json_path="plan", in_request=ORDERS, op="==", value="team")
+
+
+@pytest.mark.parametrize(
+    ("body", "response", "status"),
+    [
+        ({"plan": "team"}, {"plan": {"id": "p_1", "name": "Team"}}, Support.SUPPORTED),
+        ({"plan": "team"}, {"plan": ["team"]}, Support.SUPPORTED),
+        ({"plan": "team"}, {"plan": "enterprise"}, Support.CONTRADICTED),
+        ({"sku": "K-1"}, {"plan": {"id": "p_1"}}, Support.CONTRADICTED),
+    ],
+    ids=["object", "array", "other-plain-value", "response-only"],
+)
+async def test_a_structured_response_field_under_a_plain_request_field_is_another_field(
+    body: object, response: object, status: Support
+) -> None:
+    run = make_run(network=[net(1, "POST", "/api/orders", 201, body=body, response=response)])
+    assert (await ValueChecker().evaluate(PLAN, ctx(run))).status is status
+
+
 async def test_an_html_response_is_not_read_as_a_form() -> None:
     page = '<a href="/cart?sku=K-1&total=999">Back</a>'
     order = net(1, "POST", "/api/orders", 201, body={"total": 20}, response=page)

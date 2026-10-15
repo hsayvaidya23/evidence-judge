@@ -8,7 +8,8 @@ matches on every recorded page state (snapshots and the final page). Every obser
 satisfy the comparison: one violating observation makes the predicate CONTRADICTED, which is
 what a guardrail needs, and satisfying observations that differ are noted. So a request that
 asked for a total of 20 answered with a total of 999 violates 'total <= 30', and a path should
-name the field it means in both bodies. A page_regex should likewise anchor on a label
+name the field it means in both bodies (an object or array in the response where the request
+sent a plain value is another field, and is not read). A page_regex should likewise anchor on a label
 ('Total:\\s*\\$([\\d.,]+)'): a bare price pattern also reads shipping fees, coupons and other
 products.
 
@@ -99,17 +100,31 @@ def _bodies(event: NetworkEvent) -> list[tuple[str, str | None, bool]]:
 
 
 def _read_bodies(event: NetworkEvent, path: str) -> list[Observation]:
-    """Every value `path` names in either body of `event`. A value holding MASK is the site
-    repeating the agent's own input (EvidenceIndex.without_agent_input): no reading at all."""
+    """Every value `path` names in either body of `event`.
+
+    A value holding MASK is the site repeating the agent's own input
+    (EvidenceIndex.without_agent_input): no reading at all. Where the request sent a plain
+    value, an object or array at the same path of the response is another field under the same
+    name (`plan: "team"` answered with `plan: {"id": ...}`), not a reading of this one.
+    """
     observations: list[Observation] = []
+    sent_plain = False
     for label, body, form in _bodies(event):
         values = body_values(body, path, form=form)
+        if label == "request":
+            sent_plain = bool(values) and not any(_structured(v) for v in values)
+        elif sent_plain:
+            values = [v for v in values if not _structured(v)]
         where = f"the {label} of {describe_request(event)}"
         repeated = len(values) > 1
         observations.extend(
             Observation(v, event.id, where, repeated) for v in values if MASK not in as_text(v)
         )
     return observations
+
+
+def _structured(value: object) -> bool:
+    return isinstance(value, dict | list)
 
 
 def _truncated(event: NetworkEvent) -> bool:
