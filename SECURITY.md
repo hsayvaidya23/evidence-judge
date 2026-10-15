@@ -171,6 +171,40 @@ Two limits remain, and the verdicts say so:
   the agent. Gemini CLI's hook input does not show which tools ran, so there missing or junk
   traces are only a notice.
 
+## Re-running the tests
+
+`session judge --rerun`, `session rerun` and the stop hooks with a session spec's `rerun:` block
+run the project's test suite. What they execute, and what they protect against:
+
+- **The spec author chooses the command, never the agent.** The command is an argv list in the
+  session spec, which the hooks snapshot outside the workspace when the turn starts; a spec
+  changed during the turn is reported and the snapshot is used. Keep the spec out of the
+  agent's reach (`EVJ_HOOK_SESSION_SPEC=/absolute/path`) when the verdict matters.
+- **It runs the project's own test code.** That is the same trust as running the suite
+  yourself: code the agent wrote runs as your user. The run happens on a copy of the working
+  tree in a temporary directory, without a shell, in an environment built from scratch (a
+  judge `HOME` and `TMPDIR`, the judge's `PATH` without relative entries, `LANG`, toolchain
+  cache locations and the spec's `env`), so rc files, `BASH_ENV`, aliases, exported variables,
+  `PYTEST_ADDOPTS`, `GOFLAGS`, `NODE_OPTIONS` and `~/.npmrc` do not apply. It is not a
+  sandbox: the code can still read and write anything your user can, use the network, and
+  reach the dependency directories (`.venv`, `node_modules`), which are linked into the copy.
+  Run it in a container or VM when the code is not yours to trust.
+- **The code under test can still lie, within limits.** The verdict comes from the runner's
+  machine-readable report, written to a judge path outside the copy, never from stdout: a
+  summary printed at exit or an exit code forced with `os._exit(0)` does not change it, and a
+  report with failures fails. Code under test that finds the report path (it is in its own
+  `argv`) can rewrite the report; a rewrite that leaves it inconsistent with itself (test cases
+  against stated totals) is needs review, but a careful forgery of a whole, consistent report
+  is not detected. A source change that does this is a runner patch the transcript analysis
+  reports, so such a run still needs review when the session record shows it.
+- **Weakened tests stay weakened.** A re-run of a suite whose assertions were removed passes.
+  Edits to tests, test data, snapshots and runner configuration, and source that patches the
+  runner, are still found in the session record, and runner configuration in the copy is also
+  compared with the base revision; either keeps the run at needs review.
+- **Bounded.** The copy is limited to 200,000 files and 2 GiB, the run to the spec's timeout
+  (its whole process group is killed), and the report to 64 MB; a report that declares a DTD or
+  entities is refused.
+
 The MCP server applies the same rule to what it returns. Page- and agent-derived text is
 fenced in `<untrusted_data>` tags. `judge_run` never replaces a file that is not an earlier
 evidence-judge report unless the caller passes `overwrite: true`.

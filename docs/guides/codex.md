@@ -149,6 +149,12 @@ It is the same check as the [Claude Code Stop hook](claude-code.md#what-the-stop
 The `EVJ_HOOK_*` settings are the same as for
 [Claude Code](claude-code.md#configuration).
 
+With a session spec whose `rerun:` block names the test command, `codex-stop` also runs the
+suite itself, on a copy of the project in a clean environment, and judges the answer against
+the runner's own report, reading the session from the evidence log and the rollout at
+`transcript_path` ([Re-running the tests](claude-code.md#re-running-the-tests)). It runs at
+every stop, so the `Stop` hook's `timeout` above and `EVJ_HOOK_TIMEOUT_S` must cover the suite.
+
 If `evidence-judge` is not on `PATH`, the hook command fails to start. Codex treats any exit
 code other than 0 and 2 as a failed hook and carries on, so a missing CLI never blocks Codex.
 

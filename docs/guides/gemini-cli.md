@@ -130,6 +130,15 @@ Gemini's fields:
   judge crash) allow the response with a notice; stdout always holds exactly one JSON object,
   as Gemini requires.
 
+With a session spec whose `rerun:` block names the test command
+([Re-running the tests](claude-code.md#re-running-the-tests)), `gemini-after-agent` also runs
+the suite itself, on a copy of the project in a clean environment, and denies a response the
+runner's own report contradicts. Gemini has no transcript the judge reads, so the session comes
+from the evidence log when `gemini-after-agent` has `--log-dir`; without one the hook judges the
+re-run on its own (`evidence-judge session rerun`): a failing suite is denied whatever the
+answer says. The `AfterAgent` hook's `timeout` (milliseconds) and `EVJ_HOOK_TIMEOUT_S` must
+cover the suite.
+
 Hooks run with a sanitized environment plus `GEMINI_PROJECT_DIR`. If you set
 `security.environmentVariableRedaction`, allow the `EVJ_HOOK_*` variables you use (and `HOME`,
 which the log path above relies on).

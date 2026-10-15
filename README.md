@@ -301,6 +301,8 @@ Coding agents: check the agent's answer against its own browser trace before it 
 - **Codex CLI**: `evidence-judge hook codex-stop` as a blocking `Stop` hook, `codex-record` as a `PostToolUse` recorder, and `codex mcp add evidence-judge -- evidence-judge mcp`. See [docs/guides/codex.md](docs/guides/codex.md).
 - **Gemini CLI**: an extension whose `AfterAgent` hook makes Gemini retry a contradicted answer, plus an `AfterTool` recorder and the MCP server. See [docs/guides/gemini-cli.md](docs/guides/gemini-cli.md).
 
+Coding-agent sessions: `evidence-judge session judge` checks "all tests pass", "I fixed the bug" and "I didn't touch the tests" against the session's tool-call log. With `--rerun` (or a `rerun:` block in the session spec the stop hooks use) it does not trust the recorded test output at all: it runs the suite itself on a copy of the project, in a clean environment, and reads the runner's own report. See [Coding-agent sessions](docs/design/coding-agent-sessions.md#independent-re-run).
+
 GitHub Actions: gate a pull request on a recorded run.
 
 ```yaml

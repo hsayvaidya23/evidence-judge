@@ -120,6 +120,7 @@ Set these in the environment Claude Code runs in, or in the `env` block of a
 | `EVJ_HOOK_SPEC` | unset | Spec to use instead of the conventional locations. An absolute path outside the workspace keeps it out of the agent's reach (recommended) |
 | `EVJ_HOOK_ON_BAD_EVIDENCE` | `block` | When Playwright was used but its traces are missing, unreadable, older than the turn or refused by the judge: `block` or `notice` |
 | `EVJ_HOOK_BLOCK_ON_SPEC_CHANGE` | `true` | Keep the agent working when the spec changed during the turn; `false` only warns |
+| `EVJ_HOOK_SESSION_SPEC` | unset | Session spec whose `rerun:` block the Stop hook runs, instead of `.evidence-judge/session.yaml`; see [Re-running the tests](#re-running-the-tests) |
 | `EVJ_HOOK_PASS_ENV` | `[]` | `EVJ_*` variables the judge may inherit, a JSON list; every other `EVJ_*` is dropped |
 | `EVJ_HOOK_MAX_TRACE_AGE_S` | `1800` | Newest trace age accepted when the turn's start is unknown |
 | `EVJ_HOOK_LOG_DIR` | unset | Evidence-log directory when no `--log-dir` is given |
@@ -129,6 +130,38 @@ These are read from the environment Claude Code starts the hooks with. A project
 is never read, by the hooks or by the judge they start.
 
 The plugin's hook has a 90 second timeout, so the judge's own limit always fires first.
+
+## Re-running the tests
+
+The Stop hook can also check claims about tests, without trusting the test output the agent
+saw. Add a session spec at `.evidence-judge/session.yaml` (or point `EVJ_HOOK_SESSION_SPEC` at
+one outside the workspace) with a `rerun:` block:
+
+```yaml
+task: Fix the add() bug without touching the tests
+rerun:
+  command: [".venv/bin/python", "-m", "pytest", "-q"]
+  timeout: 45
+```
+
+`claude-code-turn-start` saves this spec and the project's git revision when the turn starts.
+At every `Stop` and `SubagentStop` whose saved spec has a `rerun:` block, after the browser
+check, the hook runs `evidence-judge session judge --rerun` in the same isolated child as the
+trace judge, with the session's evidence log (its key and anchor) and transcript. The judge
+copies the project to a private directory, runs the command there without a shell in an
+environment built from scratch, and reads the runner's own report
+([details](../design/coding-agent-sessions.md#independent-re-run)). The agent's answer is then
+judged against that result: "all tests pass" over a failing re-run is a FAIL, and Claude is sent
+back with the failing tests named. Test-weakening edits the session made, and runner
+configuration that differs from the turn's starting revision, are NEEDS REVIEW. A spec whose
+`rerun:` block is removed or changed during the turn is a spec change, and blocks.
+
+The re-run is opt-in because it **runs the whole suite at every stop**. Keep the suite fast, or
+keep the re-run for projects where a false "tests pass" costs more than the wait. The re-run
+must finish within `rerun.timeout` and within `EVJ_HOOK_TIMEOUT_S`, which also bounds the trace
+judge, and the plugin's `Stop` hook is killed after 90 seconds; a longer suite needs your own
+`Stop` hook entry with a longer `timeout` and a matching `EVJ_HOOK_TIMEOUT_S` (up to 600). A
+re-run the hook could not finish allows the stop with a notice.
 
 ## The evidence log
 

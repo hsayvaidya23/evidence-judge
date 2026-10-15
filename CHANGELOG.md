@@ -10,6 +10,18 @@ the names exported from `evidence_judge`) is defined under
 
 ### Added
 
+- Independent re-run for coding-agent sessions. A session spec's `rerun:` block (an argv
+  `command`, `runner`, `timeout`, `env`, `min_tests`, `base`) lets `session judge --rerun` copy
+  the working tree to a judge-owned directory, run the suite there without a shell in an
+  environment built from scratch, and decide `test_result` predicates from the runner's own
+  report (pytest JUnit XML, `go test -json`, jest/vitest JSON, node's JUnit reporter, libtest
+  JSON, a unittest helper) instead of the output the session recorded. A missing, stale or
+  inconsistent report or a timeout is needs review, never a pass; runner configuration that
+  differs from the base revision and the session's test-weakening findings still need review.
+  Verdicts gain `verification` (`rerun` or `transcript`); `--require-rerun` refuses a pass
+  without a re-run; `session rerun` judges a re-run without a session record. The Claude Code,
+  Codex and Gemini CLI stop hooks run it when the session spec saved at turn start
+  (`.evidence-judge/session.yaml` or `EVJ_HOOK_SESSION_SPEC`) has a `rerun:` block.
 - Recorded round-17 red-team sessions: unknown pytest options (`--record-mode=rewrite`,
   `--regtest-reset`), clustered `-qopython_functions=...` and `-qpno:warnings`, `-W ignore`,
   `RECORD_MODE=all` on every run, expected values read through path pieces or imported from a
