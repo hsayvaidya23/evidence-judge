@@ -216,13 +216,15 @@ def status_matches(status: int | None, spec: str | None, *, failed: bool = False
     return status == int(value)
 
 
+def _segments(path: str) -> list[str]:
+    normalized = _INDEX_BRACKETS.sub(r".\1", path.strip()).removeprefix("$").strip(".")
+    return normalized.split(".") if normalized else []
+
+
 def json_path_get(obj: object, path: str) -> object:
     """Follow a dotted path ('items.0.price', 'items[0].price', '$.total') or return MISSING."""
-    normalized = _INDEX_BRACKETS.sub(r".\1", path.strip()).removeprefix("$").strip(".")
-    if not normalized:
-        return obj
     current: object = obj
-    for segment in normalized.split("."):
+    for segment in _segments(path):
         current = _step(current, segment)
         if current is MISSING:
             return MISSING
@@ -242,18 +244,65 @@ def _step(current: object, segment: str) -> object:
     return MISSING
 
 
-def parse_body(body: str | None) -> object:
-    """Parse a JSON or form-encoded body into Python data, or return MISSING."""
+class _Repeated(list[object]):
+    """Every value of a key that one JSON object or form body names more than once, in order."""
+
+
+def _merge_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    merged: dict[str, object] = {}
+    for key, value in pairs:
+        if key not in merged:
+            merged[key] = value
+            continue
+        prior = merged[key]
+        merged[key] = _Repeated([*prior, value] if isinstance(prior, _Repeated) else [prior, value])
+    return merged
+
+
+def _parse(body: str | None, *, form: bool, repeated: bool) -> object:
     if body is None or not body.strip():
         return MISSING
     try:
-        return json.loads(body)
+        return json.loads(body, object_pairs_hook=_merge_pairs if repeated else None)
     except (json.JSONDecodeError, RecursionError):
         pass
-    if "=" not in body:
+    if not form or "=" not in body:
         return MISSING
     pairs = parse_qsl(body.strip(), keep_blank_values=True)
-    return dict(pairs) if pairs else MISSING
+    if not pairs:
+        return MISSING
+    return _merge_pairs(list[tuple[str, object]](pairs)) if repeated else dict(pairs)
+
+
+def parse_body(body: str | None) -> object:
+    """Parse a JSON or form-encoded body into Python data, or return MISSING.
+
+    A repeated key keeps its last value; body_values reads every one.
+    """
+    return _parse(body, form=True, repeated=False)
+
+
+def _step_all(current: object, segment: str) -> list[object]:
+    value = _step(current, segment)
+    if value is MISSING:
+        return []
+    return list(value) if isinstance(value, _Repeated) else [value]
+
+
+def body_values(body: str | None, path: str, *, form: bool = True) -> list[object]:
+    """Every value `path` names in a JSON body, or with `form` also in a form-encoded one.
+
+    Where parse_body keeps the last value of a repeated key, this reads them all: 'a=1&a=2' and
+    '{"a": 1, "a": 2}' both name two values of 'a', and servers differ on which one they use. A
+    body that does not parse, or lacks the path, names none.
+    """
+    tree = _parse(body, form=form, repeated=True)
+    if tree is MISSING:
+        return []
+    values = [tree]
+    for segment in _segments(path):
+        values = [found for current in values for found in _step_all(current, segment)]
+    return values
 
 
 def url_contains(url: str, needle: str) -> bool:

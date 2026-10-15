@@ -1,23 +1,34 @@
 """ValuePredicate checker.
 
-Values are read from JSON (or form-encoded) bodies via `json_path` - from the requests matching
-`in_request`, or from every mutation that took effect (2xx or 3xx, not failed) when it is
-unset, so a rejected attempt cannot break a constraint - and/or from page text via `page_regex`:
-the matches on every recorded page state (snapshots and the final page). Every observation must
+Values are read via `json_path` from both bodies - the request's (JSON or form-encoded) and the
+response's (JSON, or form-encoded when its MIME type says so) - of the requests matching
+`in_request`, or of every mutation that took effect (2xx or 3xx, not failed) when it is unset,
+so a rejected attempt cannot break a constraint; and/or from page text via `page_regex`: the
+matches on every recorded page state (snapshots and the final page). Every observation must
 satisfy the comparison: one violating observation makes the predicate CONTRADICTED, which is
-what a guardrail needs, and satisfying observations that differ are noted. A page_regex should
-therefore anchor on a label ('Total:\\s*\\$([\\d.,]+)'): a bare price pattern also reads
-shipping fees, coupons and other products. A candidate whose body ingest truncated before the
-path keeps the predicate from being SUPPORTED: the unread part could hold a violating value, so
-the result is NO_EVIDENCE. So does a page state that page_regex could not read in full (over
-MAX_REGEX_MATCHES matches, or text longer than the head and tail it searches): a violating value
-found in the read part still contradicts. So is an ordering comparison (<, <=, >, >=) on a
-value that does not parse as a number: text is never ordered.
+what a guardrail needs, and satisfying observations that differ are noted. So a request that
+asked for a total of 20 answered with a total of 999 violates 'total <= 30', and a path should
+name the field it means in both bodies. A page_regex should likewise anchor on a label
+('Total:\\s*\\$([\\d.,]+)'): a bare price pattern also reads shipping fees, coupons and other
+products.
+
+A body that repeats the key ('price=999&price=20', '{"price": 999, "price": 20}') names every
+value; servers differ on which one they use. If all of them violate, that contradicts; if only
+some do, the result is NO_EVIDENCE, since the record does not show which value took effect.
+
+A candidate with a truncated body keeps the predicate from being SUPPORTED: the unread part could
+hold a violating (or repeated) value, so the result is NO_EVIDENCE; only a response recorded as
+HTML or XML, which json_path never reads, is exempt. So does a page state that page_regex could
+not read in full (over MAX_REGEX_MATCHES matches, or text longer than the head and tail it
+searches). A violating value found in the read part still contradicts. So is an ordering
+comparison (<, <=, >, >=) on a value that does not parse as a number: text is never ordered.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
+from typing import Final
 
 from evidence_judge.checks._common import (
     MAX_CITATIONS,
@@ -31,25 +42,27 @@ from evidence_judge.checks._common import (
 from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.matching import (
-    MISSING,
     as_text,
+    body_values,
     compare,
     compile_regex,
     is_truncated,
-    json_path_get,
-    parse_body,
     parse_number,
     regex_findall,
     url_path,
 )
 from evidence_judge.checks.request import RequestMatcher, matching_requests
 from evidence_judge.core.evidence import Channel, NetworkEvent
-from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.index import MASK, EvidenceIndex
 from evidence_judge.core.predicates import Predicate, ValuePredicate
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 
 KIND = "value"
 MAX_LISTED_VALUES = 4
+FORM_MIME: Final = "application/x-www-form-urlencoded"
+MARKUP_MIMES: Final = frozenset(
+    {"text/html", "application/xhtml+xml", "text/xml", "application/xml"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +70,7 @@ class Observation:
     value: object
     evidence_id: str
     where: str
+    repeated: bool = False
 
 
 def format_value(value: object) -> str:
@@ -74,25 +88,40 @@ def _candidates(
     return [e for e in index.mutations() if e.ok and (scope is None or scope.request_allowed(e))]
 
 
-def _read_bodies(event: NetworkEvent, path: str) -> Observation | None:
-    for body, label in ((event.request_body, "request"), (event.response_body, "response")):
-        value = json_path_get(parse_body(body), path)
-        if value is not MISSING:
-            return Observation(value, event.id, f"the {label} of {describe_request(event)}")
-    return None
+def _essence(mime_type: str | None) -> str:
+    return (mime_type or "").split(";", 1)[0].strip().lower()
 
 
-def _truncated_without(event: NetworkEvent, path: str) -> bool:
-    bodies = (event.request_body, event.response_body)
-    return any(is_truncated(b) for b in bodies) and _read_bodies(event, path) is None
+def _bodies(event: NetworkEvent) -> list[tuple[str, str | None, bool]]:
+    """(label, body, whether a form-encoded body is read) for both bodies of `event`."""
+    form_response = _essence(event.mime_type) == FORM_MIME
+    return [("request", event.request_body, True), ("response", event.response_body, form_response)]
 
 
-def _truncated_reason(events: list[NetworkEvent], path: str) -> str:
+def _read_bodies(event: NetworkEvent, path: str) -> list[Observation]:
+    """Every value `path` names in either body of `event`. A value holding MASK is the site
+    repeating the agent's own input (EvidenceIndex.without_agent_input): no reading at all."""
+    observations: list[Observation] = []
+    for label, body, form in _bodies(event):
+        values = body_values(body, path, form=form)
+        where = f"the {label} of {describe_request(event)}"
+        repeated = len(values) > 1
+        observations.extend(
+            Observation(v, event.id, where, repeated) for v in values if MASK not in as_text(v)
+        )
+    return observations
+
+
+def _truncated(event: NetworkEvent) -> bool:
+    """A body of `event` was cut short and the cut part could hold a value json_path names."""
+    request, response = event.request_body, event.response_body
+    markup = _essence(event.mime_type) in MARKUP_MIMES
+    return is_truncated(request) or (is_truncated(response) and not markup)
+
+
+def _truncated_reason(events: list[NetworkEvent]) -> str:
     ids = ", ".join(e.id for e in events[-MAX_CITATIONS:])
-    return (
-        f"{plural(len(events), 'candidate request')} ({ids}) had a truncated body without "
-        f"{quoted(path)} in its recorded part"
-    )
+    return f"{plural(len(events), 'candidate request')} ({ids}) had a truncated body"
 
 
 def _missing_json_reason(
@@ -151,11 +180,11 @@ def _observe(
     unread: str | None = None
     if predicate.json_path is not None:
         candidates = _candidates(predicate, index, scope)
-        found = [o for e in candidates if (o := _read_bodies(e, predicate.json_path)) is not None]
+        found = [o for e in candidates for o in _read_bodies(e, predicate.json_path)]
         observations.extend(found)
-        truncated = [e for e in candidates if _truncated_without(e, predicate.json_path)]
+        truncated = [e for e in candidates if _truncated(e)]
         if truncated:
-            unread = _truncated_reason(truncated, predicate.json_path)
+            unread = _truncated_reason(truncated)
             gaps.append(unread)
         elif not found:
             gaps.append(_missing_json_reason(predicate, predicate.json_path, candidates, index))
@@ -180,7 +209,7 @@ def check_value(
     if not observations:
         return result(Support.NO_EVIDENCE, f"{gaps}, so {quoted(field)} could not be read", KIND)
     verdicts = [(o, compare(o.value, predicate.op, predicate.value)) for o in observations]
-    violations = [o for o, holds in verdicts if holds is False]
+    violations, ambiguous = _violations(verdicts)
     incomparable = [o for o, holds in verdicts if holds is None]
     if violations:
         worst = violations[-1]
@@ -191,6 +220,17 @@ def check_value(
             f"{field} was {format_value(worst.value)} in {worst.where}, expected {expected}{tail}",
             KIND,
             _cite(violations),
+        )
+    if ambiguous:
+        worst, group = ambiguous
+        shown = ", ".join(format_value(o.value) for o in group[:MAX_LISTED_VALUES])
+        return result(
+            Support.NO_EVIDENCE,
+            f"{field} is repeated in {worst.where} with differing values ({shown}) and "
+            f"{format_value(worst.value)} would violate {expected}: the record does not show "
+            f"which one the server used",
+            KIND,
+            _cite(group),
         )
     if incomparable:
         odd = incomparable[-1]
@@ -217,6 +257,34 @@ def check_value(
         KIND,
         _cite(observations),
     )
+
+
+def _violations(
+    verdicts: list[tuple[Observation, bool | None]],
+) -> tuple[list[Observation], tuple[Observation, list[Observation]] | None]:
+    """The violations that decide, and the last repeated key whose values only partly violate.
+
+    The values of a repeated key are one group: it violates for certain only if every value in
+    it does, since the server used one of them and the record does not show which.
+    """
+    groups: defaultdict[tuple[str, str], list[tuple[Observation, bool | None]]] = defaultdict(list)
+    for observation, holds in verdicts:
+        if observation.repeated:
+            groups[observation.evidence_id, observation.where].append((observation, holds))
+    decided: list[Observation] = []
+    ambiguous: tuple[Observation, list[Observation]] | None = None
+    for observation, holds in verdicts:
+        if holds is not False:
+            continue
+        if not observation.repeated:
+            decided.append(observation)
+            continue
+        group = groups[observation.evidence_id, observation.where]
+        if all(h is False for _, h in group):
+            decided.append(observation)
+        else:
+            ambiguous = (observation, [o for o, _ in group])
+    return decided, ambiguous
 
 
 def _disagreement(observations: list[Observation]) -> str:

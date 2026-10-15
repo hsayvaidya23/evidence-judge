@@ -54,6 +54,102 @@ async def test_reads_response_body_when_request_lacks_path() -> None:
     assert "the response of POST /api/orders" in res.reason
 
 
+TOTAL_CAP = ValuePredicate(field="total", json_path="total", in_request=ORDERS, op="<=", value=30)
+
+
+async def test_a_response_value_over_the_cap_contradicts_a_request_within_it() -> None:
+    """The request asked for 20 and the site charged 999: the response is what took effect, so
+    a request that has the path does not stop the response from being read."""
+    order = net(1, "POST", "/api/orders", 201, body={"total": 20}, response={"total": 999})
+    res = await ValueChecker().evaluate(TOTAL_CAP, ctx(make_run(network=[order])))
+    assert res.status is Support.CONTRADICTED
+    assert res.reason == (
+        "total was 999.0 in the response of POST /api/orders → 201, expected <= 30; "
+        "1 other observation satisfied it"
+    )
+
+
+async def test_a_request_value_over_the_cap_contradicts_a_response_within_it() -> None:
+    order = net(1, "POST", "/api/orders", 201, body={"total": 999}, response={"total": 20})
+    res = await ValueChecker().evaluate(TOTAL_CAP, ctx(make_run(network=[order])))
+    assert res.status is Support.CONTRADICTED
+    assert "999.0 in the request" in res.reason
+
+
+async def test_both_bodies_within_the_cap_are_supported_and_cited() -> None:
+    order = net(1, "POST", "/api/orders", 201, body={"total": 20}, response={"total": 24})
+    res = await ValueChecker().evaluate(TOTAL_CAP, ctx(make_run(network=[order])))
+    assert res.status is Support.SUPPORTED
+    assert [c.excerpt for c in res.citations] == [
+        "24 (the response of POST /api/orders → 201)",
+        "20 (the request of POST /api/orders → 201)",
+    ]
+
+
+async def test_an_html_response_is_not_read_as_a_form() -> None:
+    page = '<a href="/cart?sku=K-1&total=999">Back</a>'
+    order = net(1, "POST", "/api/orders", 201, body={"total": 20}, response=page)
+    run = make_run(network=[order.model_copy(update={"mime_type": "text/html; charset=utf-8"})])
+    res = await ValueChecker().evaluate(TOTAL_CAP, ctx(run))
+    assert res.status is Support.SUPPORTED
+
+
+async def test_a_form_encoded_response_is_read() -> None:
+    order = net(1, "POST", "/api/orders", 201, body={"total": 20}, response="total=999")
+    run = make_run(
+        network=[order.model_copy(update={"mime_type": "application/x-www-form-urlencoded"})]
+    )
+    res = await ValueChecker().evaluate(TOTAL_CAP, ctx(run))
+    assert res.status is Support.CONTRADICTED
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["sku=K-1&total=999&total=20", '{"sku": "K-1", "total": 999, "total": 20}'],
+    ids=["form", "json"],
+)
+async def test_a_repeated_key_with_a_violating_value_is_no_evidence(body: str) -> None:
+    """Servers differ on which value of a repeated key they use; the record does not say."""
+    run = make_run(network=[net(1, "POST", "/api/orders", 201, body=body)])
+    res = await ValueChecker().evaluate(TOTAL_CAP, ctx(run))
+    assert res.status is Support.NO_EVIDENCE
+    assert "total is repeated in the request of POST /api/orders → 201" in res.reason
+    assert "would violate <= 30" in res.reason
+    assert len(res.citations) == 2
+
+
+@pytest.mark.parametrize(
+    ("body", "status"),
+    [
+        ("total=999&total=500", Support.CONTRADICTED),
+        ("total=10&total=20", Support.SUPPORTED),
+        ('{"total": {"a": 1}, "total": 20}', Support.NO_EVIDENCE),
+    ],
+    ids=["all-violate", "all-satisfy", "one-incomparable"],
+)
+async def test_a_repeated_key_is_decided_by_all_of_its_values(body: str, status: Support) -> None:
+    run = make_run(network=[net(1, "POST", "/api/orders", 201, body=body)])
+    assert (await ValueChecker().evaluate(TOTAL_CAP, ctx(run))).status is status
+
+
+async def test_a_repeated_key_does_not_hide_a_violation_elsewhere() -> None:
+    run = make_run(
+        network=[
+            net(1, "POST", "/api/orders", 201, body="total=999&total=20"),
+            net(2, "POST", "/api/orders", 201, body={"total": 45}),
+        ]
+    )
+    res = await ValueChecker().evaluate(TOTAL_CAP, ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert "total was 45.0" in res.reason
+
+
+async def test_an_equality_claim_on_a_repeated_key_with_differing_values_is_not_proven() -> None:
+    run = make_run(network=[net(1, "POST", "/api/orders", 201, body="qty=2&qty=1")])
+    pred = ValuePredicate(field="qty", json_path="qty", in_request=ORDERS, op="==", value=2)
+    assert (await ValueChecker().evaluate(pred, ctx(run))).status is Support.NO_EVIDENCE
+
+
 async def test_missing_request_is_no_evidence_not_contradicted() -> None:
     res = await ValueChecker().evaluate(PRICE_CAP, ctx(forged_run()))
     assert res.status is Support.NO_EVIDENCE
@@ -248,6 +344,37 @@ async def test_truncated_candidate_keeps_a_guardrail_from_passing() -> None:
     res = await ValueChecker().evaluate(PRICE_CAP, ctx(make_run(network=[readable, truncated])))
     assert res.status is Support.NO_EVIDENCE
     assert "net#2" in res.reason
+
+
+@pytest.mark.parametrize(
+    ("mime_type", "status"),
+    [
+        ("application/json", Support.NO_EVIDENCE),
+        (None, Support.NO_EVIDENCE),
+        ("text/html", Support.SUPPORTED),
+    ],
+)
+async def test_a_truncated_response_is_unread_unless_it_is_markup(
+    mime_type: str | None, status: Support
+) -> None:
+    """The cut part of a JSON response could hold a total of 999 next to the request's 24."""
+    event = net(1, "POST", "/api/orders", 201, body={"items": [{"price": 24}]}).model_copy(
+        update={"response_body": TRUNCATED_JSON, "mime_type": mime_type}
+    )
+    res = await ValueChecker().evaluate(PRICE_CAP, ctx(make_run(network=[event])))
+    assert res.status is status, res.reason
+
+
+async def test_a_truncated_form_body_with_the_path_is_unread() -> None:
+    """The cut part could repeat the key with another value."""
+    body = "sku=K-1&total=24&note=" + "x" * 40 + "…[truncated 9000 chars]"
+    event = net(1, "POST", "/api/orders", 201, body=body)
+    res = await ValueChecker().evaluate(TOTAL_CAP, ctx(make_run(network=[event])))
+    assert res.status is Support.NO_EVIDENCE
+    assert res.reason.endswith(
+        "1 candidate request (net#1) had a truncated body, so not every observation can be "
+        "shown to satisfy <= 30"
+    )
 
 
 @pytest.mark.parametrize(("status", "failed"), [(500, False), (409, False), (None, True)])
