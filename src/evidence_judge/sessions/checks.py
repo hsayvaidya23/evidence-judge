@@ -388,10 +388,19 @@ class SessionIndex:
                 count += event.tests_added
         return count
 
+    def _new_test_files(self, after: int) -> bool:
+        return any(
+            isinstance(event, FileEditEvent) and event.change == "add" and event.test_file
+            for position, event, _ in self.changes
+            if position > after
+        )
+
     def covered(self, outcomes: list[RunOutcome], minimum: int | None = None) -> RunOutcome | None:
         """Passing runs over disjoint paths (`pytest tests`, `cd pkg_b && pytest`) that together
         ran exactly the tests of an earlier whole-suite run, when no change since that run can
-        have added a test: then they ran every test of it. Overlapping paths could count a
+        have added a test it cannot count: then they ran every test of it. When several paths
+        are combined and the session added tests or test files since, that run's output must
+        name every test file it ran, or a new file could stand in for one left out. Overlapping paths could count a
         test twice, and a new test could stand in for one left out, so either rules it out."""
         candidates = [
             (o, scopes, total)
@@ -429,6 +438,9 @@ class SessionIndex:
             taken.extend(scopes)
         if sum(total for _, _, total in chosen) != size + added:
             return None
+        changed = added or self._new_test_files(baseline.seq)
+        if len(taken) > 1 and changed and _every_file(baseline, size) is None:
+            return None
         skipped = sum(o.event.summary.skipped for o, _, _ in chosen if o.event.summary)
         if baseline.summary is not None and skipped > baseline.summary.skipped:
             return None
@@ -461,6 +473,22 @@ class SessionIndex:
 _NAMED_TEST_FILE: Final = re.compile(r"([\w./-]+\.\w+)(?:::|:\d+:)")
 """A test file a run's output names: in a node id (`tests/x.py::test_a`) or a traceback line
 (`tests/x.py:5: AssertionError`)."""
+
+
+_NODE_ID: Final = re.compile(r"([\w./-]+\.\w+)::\S+")
+_PROGRESS: Final = re.compile(r"^([\w./-]+\.\w+) ([.FEsxX]+)\s*(?:\[\s*\d+%\])?\s*$", re.M)
+
+
+def _every_file(event: CommandEvent, size: int) -> set[str] | None:
+    """The test files a run's output names when it names one for every test it ran (`-v`
+    lines, `-rA` summaries or per-file progress lines), else None."""
+    nodes = {m.group(0) for m in _NODE_ID.finditer(event.output)}
+    if len(nodes) >= size:
+        return {node.partition("::")[0] for node in nodes}
+    progress = _PROGRESS.findall(event.output)
+    if progress and sum(len(marks) for _, marks in progress) >= size:
+        return {path for path, _ in progress}
+    return None
 
 
 def _inside(path: str, scope: str) -> bool:

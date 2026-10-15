@@ -376,7 +376,7 @@ class EventBuilder:
                 test_file=edits.is_test_path(rel),
                 test_findings=findings,
                 adds_tests=call.status is not CallStatus.DENIED and edits.adds_tests(added),
-                tests_added=edits.tests_added(removed, added) if edits.adds_tests(added) else 0,
+                tests_added=edits.tests_added(removed, added, rel),
                 session_store=shell.SESSION_STORE.search(path) is not None,
                 guard_tamper=_guard_tamper(path, rel, added, call.status),
                 **common,

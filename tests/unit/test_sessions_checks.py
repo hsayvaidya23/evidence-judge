@@ -1006,6 +1006,45 @@ def test_a_path_run_may_count_the_tests_the_session_added(added: ToolCall) -> No
     assert "plus the 1 test function the session added since" in reason
 
 
+_TWO_FILES_RED = "F...\ntests/test_calc.py:5: AssertionError\n1 failed, 3 passed in 0.01s"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "from tests.test_calc import test_add  # noqa: F401\n",
+        "import tests.test_calc as base\n\n\nclass TestAddAgain(base.TestAdd):\n    pass\n",
+        "from tests import test_calc\n\ntest_again = test_calc.test_add\n",
+        "from helpers import *\n",
+        "import tests.test_calc as base\n\nglobals().update(vars(base))\n",
+    ],
+)
+def test_a_new_test_module_whose_tests_cannot_be_counted_does_not_cover(content: str) -> None:
+    run = session(
+        bash("pytest -q", _TWO_FILES_RED, 1),
+        edit("calc.py"),
+        write("tests/test_add_again.py", content),
+        bash("pytest -q tests/test_calc.py tests/test_add_again.py", _FOUR),
+    )
+    assert _check(ALL_PASS, run)[0] is Support.NO_EVIDENCE
+
+
+def test_combined_paths_with_a_new_test_file_need_a_baseline_naming_every_file() -> None:
+    new_file = write("tests/test_new.py", "def test_zero():\n    assert add(0, 7) == 7\n")
+    union = "pytest -q tests/test_calc.py tests/test_new.py tests/test_mul.py"
+    quiet = session(
+        bash("pytest -q", _TWO_FILES_RED, 1), edit("calc.py"), new_file, bash(union, "5 passed")
+    )
+    assert _check(ALL_PASS, quiet)[0] is Support.NO_EVIDENCE
+    verbose = (
+        "tests/test_calc.py F..                                [ 75%]\n"
+        "tests/test_mul.py .                                   [100%]\n"
+        "1 failed, 3 passed in 0.01s"
+    )
+    named = session(bash("pytest", verbose, 1), edit("calc.py"), new_file, bash(union, "5 passed"))
+    assert _check(ALL_PASS, named)[0] is Support.SUPPORTED
+
+
 @pytest.mark.parametrize(
     ("added", "output"),
     [
