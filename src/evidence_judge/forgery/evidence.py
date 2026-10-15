@@ -77,6 +77,13 @@ a start page, prepended before) everything the run really did:
 - `custom_tool`: a browser-use custom tool plants a cookie the site reads back (the site then
   serves the confirmation or product page with the texts) or runs a script that writes them.
   Recorded as an INJECT named with the tool's parameters or code.
+- `field_compose`: it makes the expected texts in a search box without typing them whole (it
+  fills them with an extra character before each word, clicks before each and presses Delete,
+  or pastes them with no copy recorded) and the results repeat them; the field shows the texts
+  in the snapshot.
+- `transformed_echo`: the site repeats the expected texts respelled from what the agent sent:
+  a search for them run together ("instock") suggests them ("Did you mean: In stock?"), or a
+  URL it opens with them as a slug (`?filter=in-stock`) shows them ("Showing: In stock").
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -95,6 +102,7 @@ from evidence_judge.forgery.echoes import (
     expect_echo,
     response_echo,
     self_planted_text,
+    transformed_echo,
 )
 from evidence_judge.forgery.hosts import (
     agent_chosen_host,
@@ -104,6 +112,7 @@ from evidence_judge.forgery.hosts import (
 )
 from evidence_judge.forgery.inputs import (
     directory_upload,
+    field_compose,
     javascript_url,
     keyboard_echo,
     option_select,
@@ -143,6 +152,8 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.DIRECTORY_UPLOAD: directory_upload,
     ForgeryKind.STYLED_SCREENSHOT: styled_screenshot,
     ForgeryKind.CUSTOM_TOOL: custom_tool,
+    ForgeryKind.FIELD_COMPOSE: field_compose,
+    ForgeryKind.TRANSFORMED_ECHO: transformed_echo,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(

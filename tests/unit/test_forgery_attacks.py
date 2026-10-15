@@ -22,10 +22,12 @@ from evidence_judge.forgery.echoes import (
     ECHO_VARIANTS,
     LINK_VARIANTS,
     RESPONSE_VARIANTS,
+    TRANSFORMED_VARIANTS,
 )
 from evidence_judge.forgery.evidence import UNANCHORED_KINDS, WRITE_ONLY_KINDS, unanchored
 from evidence_judge.forgery.hosts import MIRROR_ORIGIN, OFFSITE_VARIANTS, port_mirror_origin
 from evidence_judge.forgery.inputs import (
+    COMPOSE_VARIANTS,
     KEYBOARD_VARIANTS,
     SCRIPT_URL_VARIANTS,
     SELECT_VARIANTS,
@@ -64,6 +66,8 @@ NEW_KINDS = (
     ForgeryKind.DIRECTORY_UPLOAD,
     ForgeryKind.STYLED_SCREENSHOT,
     ForgeryKind.CUSTOM_TOOL,
+    ForgeryKind.FIELD_COMPOSE,
+    ForgeryKind.TRANSFORMED_ECHO,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -172,6 +176,8 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
         assert _variants(ForgeryKind.DIRECTORY_UPLOAD, scenario) == set(UPLOAD_VARIANTS)
         assert _variants(ForgeryKind.STYLED_SCREENSHOT, scenario) == set(SCREENSHOT_VARIANTS)
         assert _variants(ForgeryKind.CUSTOM_TOOL, scenario) == set(CUSTOM_TOOL_VARIANTS)
+        assert _variants(ForgeryKind.FIELD_COMPOSE, scenario) == set(COMPOSE_VARIANTS)
+        assert _variants(ForgeryKind.TRANSFORMED_ECHO, scenario) == set(TRANSFORMED_VARIANTS)
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -390,6 +396,8 @@ def test_storage_cdp_and_socket_forgeries_record_the_calls_the_ingester_records(
         ("read_unanswered", ForgeryKind.DIRECTORY_UPLOAD, MADE),
         ("read_unanswered", ForgeryKind.STYLED_SCREENSHOT, MADE),
         ("read_unanswered", ForgeryKind.CUSTOM_TOOL, MADE),
+        ("read_unanswered", ForgeryKind.FIELD_COMPOSE, ECHO),
+        ("read_unanswered", ForgeryKind.TRANSFORMED_ECHO, ECHO),
     ],
 )
 async def test_agent_made_evidence_is_refused_by_its_guard(
@@ -457,6 +465,14 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("forged_success", ForgeryKind.DIRECTORY_UPLOAD): ("FFF", "FFN", "FFF"),
     ("forged_success", ForgeryKind.STYLED_SCREENSHOT): ("FFF", "FFF", "FFF"),
     ("forged_success", ForgeryKind.CUSTOM_TOOL): ("FFF", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.FIELD_COMPOSE): ("FFN", "FFN", "FFF"),
+    ("null_agent", ForgeryKind.TRANSFORMED_ECHO): ("FFF", "FFF", "FFF"),
+    ("read_unanswered", ForgeryKind.FIELD_COMPOSE): ("FNN", "FNN", "FNN"),
+    ("read_unanswered", ForgeryKind.TRANSFORMED_ECHO): ("FNN", "FNN", "FNN"),
+    ("loop", ForgeryKind.FIELD_COMPOSE): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.TRANSFORMED_ECHO): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.FIELD_COMPOSE): ("FFF", "FFF", "FFF"),
+    ("forged_success", ForgeryKind.TRANSFORMED_ECHO): ("FFF", "FFF", "FFF"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
@@ -610,3 +626,18 @@ def test_new_input_and_tool_forgeries_record_what_the_ingesters_record(
         tool = _forged(base, ForgeryKind.CUSTOM_TOOL, seed)
         [inject] = [a for a in tool.actions if a.name == "inject"]
         assert (inject.value or "").split("(")[0] in ("set_cookie", "run_page_script")
+
+
+def test_field_and_respelled_echo_forgeries_record_what_a_trace_records(
+    scenarios: dict[str, Scenario],
+) -> None:
+    base = scenarios["null_agent"]
+    for seed in range(2):
+        composed = _forged(base, ForgeryKind.FIELD_COMPOSE, seed)
+        planted = composed.metadata["forgery"]["planted"]
+        assert composed.snapshots[-1].field_values == (planted,)
+        assert all(a.value != planted for a in composed.actions)
+        respelled = _forged(base, ForgeryKind.TRANSFORMED_ECHO, seed)
+        sent = respelled.metadata["forgery"]["planted"]
+        assert respelled.final_state is not None
+        assert sent not in respelled.final_state.text.split("Did you mean:")[-1]
