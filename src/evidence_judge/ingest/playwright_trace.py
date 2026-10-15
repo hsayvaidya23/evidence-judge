@@ -507,7 +507,7 @@ class _TraceReader:
                 continue
             if 200 <= status < 300 and "css" in mime:
                 self.css_entries[url] = content
-            elif status >= 400 and url not in self.css_entries:
+            elif (status >= 400 or _load_failed(entry, response)) and url not in self.css_entries:
                 self.css_entries[url] = None
         for raw in self.pending:
             try:
@@ -539,7 +539,8 @@ class _TraceReader:
 
     def _stylesheet(self, url: str) -> str | None:
         """The text of the last stylesheet the context recorded from `url`, "" when the
-        recording shows it failed to load, or None when the recording does not hold it (or it is
+        recording shows it failed to load (an error status, or a request that failed without
+        a response, `_load_failed`), or None when the recording does not hold it (or it is
         longer than MAX_SHEET_CHARS characters)."""
         if url not in self.css:
             if url not in self.css_entries:
@@ -890,3 +891,15 @@ def _trace_prefixes(archive: zipfile.ZipFile) -> list[str]:
             ordinal = match.group("ordinal")
             found.append((int(ordinal) if ordinal else -1, name.removesuffix(".trace")))
     return [prefix for _, prefix in sorted(found)]
+
+
+def _load_failed(entry: JsonObject, response: JsonObject) -> bool:
+    """The recording shows the request failed without a response (``_failureText``: a refused
+    connection, an unsafe port, a DNS error), so the browser applied nothing from it. An abort
+    by the agent's route handler (``_wasAborted``) is not: that is the agent's doing."""
+    status = as_int(response.get("status")) or 0
+    return (
+        status <= 0
+        and bool(as_str(response.get("_failureText")))
+        and (entry.get("_wasAborted") is not True)
+    )

@@ -67,7 +67,8 @@ constructed stylesheets, and the linked and `@import`ed stylesheets the trace ho
 root is its own scope). Text whose visibility depends on something the judge does not fully
 model (a condition or selector it cannot evaluate, `var()`, near-zero opacity or font size, a
 transparent colour, clipping, off-screen offsets, a utility class no recorded sheet defines, or
-a stylesheet the trace does not hold) goes to `unsure_text` instead: it never proves a
+a stylesheet the trace does not hold; one the trace records as failed, with an error status or
+without a response, applied nothing and counts as empty) goes to `unsure_text` instead: it never proves a
 predicate and keeps its absence from contradicting one. `opaque` marks a page with an empty
 custom element, which may render a closed shadow root no snapshot holds, or with a shown element
 a `::before` or `::after` rule gives text (`content` with a letter or digit, `attr()` or a

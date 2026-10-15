@@ -133,6 +133,9 @@ the names exported from `evidence_judge`) is defined under
 
 ### Fixed
 
+- A linked stylesheet whose request the trace records as failed without a response (a refused
+  connection, an unsafe port) counts as an empty sheet, like one with an error status, instead
+  of leaving the whole page's text unsure. One the agent's route handler aborted does not.
 - The value of a shown `readonly` or `disabled` field is text the page may show: a status a
   site puts in one sends the run to review instead of failing it, and still proves nothing.
 - A page whose `::before` or `::after` rule gives a shown element text (`content` with a letter

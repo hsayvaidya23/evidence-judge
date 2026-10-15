@@ -654,6 +654,37 @@ def test_linked_stylesheets_come_from_the_recorded_responses(
     assert (run.final_state.text, run.final_state.unsure_text) == text
 
 
+@pytest.mark.parametrize(
+    ("failure", "aborted", "text"),
+    [
+        ("net::ERR_CONNECTION_REFUSED", False, FAILED_SHEET),
+        ("net::ERR_UNSAFE_PORT", False, FAILED_SHEET),
+        ("net::ERR_FAILED", True, UNSURE_WITHOUT_SHEET),
+        ("", False, UNSURE_WITHOUT_SHEET),
+    ],
+    ids=["refused", "unsafe-port", "aborted-by-a-route", "no-failure-recorded"],
+)
+def test_a_stylesheet_request_that_failed_is_an_empty_sheet(
+    tmp_path: Path, failure: str, aborted: bool, text: tuple[str, str]
+) -> None:
+    def change(name: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for event in events:
+            entry = event.get("snapshot", {})
+            if event["type"] == "resource-snapshot" and entry["request"]["url"].endswith(".css"):
+                content = {"size": -1, "mimeType": "x-unknown"}
+                entry["response"] = {**entry["response"], "status": -1, "content": content}
+                entry["response"]["_failureText"] = failure
+                if aborted:
+                    entry["_wasAborted"] = True
+        return events
+
+    trace = rewrite_trace(FIXTURES / "css_link.zip", tmp_path / "t.zip", change)
+    run = load_playwright_trace(trace)
+
+    assert run.final_state is not None
+    assert (run.final_state.text, run.final_state.unsure_text) == text
+
+
 def _stored(source: Path, target: Path) -> Path:
     with zipfile.ZipFile(source) as zin, zipfile.ZipFile(target, "w") as zout:
         for name in zin.namelist():
