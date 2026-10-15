@@ -184,8 +184,8 @@ shape the pipeline:
 | `ingest/_calls.py` | Recorded Playwright calls: user actions, the deny-by-default INJECT allowlist, action values, route handler calls |
 | `ingest/har.py`, `ingest/_network.py` | HAR logs and HAR entries → network events |
 | `ingest/browser_use.py` | browser-use histories → `Run` |
-| `ingest/_dom.py` | Playwright frame snapshots → page text, minus what they show hidden |
-| `ingest/_css.py` | The snapshot's stylesheets: which elements `display`, `visibility` and `content-visibility` hide |
+| `ingest/_dom.py` | Playwright frame snapshots → page text (shown), text the page may hide, and what they show hidden; shadow roots and slots |
+| `ingest/_css.py` | The cascade of a tree scope's stylesheets: whether each element shows, is hidden for certain, or may be hidden by styles the reader does not fully model |
 | `core/evidence.py` | `Run` and its events |
 | `core/index.py` | `EvidenceIndex`, the read side every checker uses |
 | `core/agent_input.py` | What the agent put into the run: typed and replayed field values, copied page text, uploads, URL values |

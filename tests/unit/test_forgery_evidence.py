@@ -75,6 +75,7 @@ def test_evidence_kinds() -> None:
         ForgeryKind.MARKUP_ECHO,
         ForgeryKind.FRAGMENT_ECHO,
         ForgeryKind.CLICK_COMPOSE,
+        ForgeryKind.UNMODELLED_HIDING,
     } == EVIDENCE_KINDS
 
 

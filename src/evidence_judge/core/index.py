@@ -103,7 +103,7 @@ class EvidenceIndex:
         if cut == math.inf:
             start = self.run.final_state
         elif last is not None:
-            start = PageState(url=last.url, title=last.title, text=last.text, snapshot_id=last.id)
+            start = PageState.of(last)
         else:
             start = self.run.initial_state
         run = self.run.model_copy(
@@ -160,10 +160,7 @@ class EvidenceIndex:
 
     @cached_property
     def _page_states(self) -> list[PageState]:
-        states = [
-            PageState(url=s.url, title=s.title, text=s.text, snapshot_id=s.id)
-            for s in self.run.snapshots
-        ]
+        states = [PageState.of(s) for s in self.run.snapshots]
         if self.final:
             states.append(self.final)
         return states

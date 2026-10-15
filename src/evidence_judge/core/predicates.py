@@ -101,6 +101,15 @@ def _page_regex(value: str) -> str:
     return value
 
 
+def _url_path(value: str) -> str:
+    stripped = _non_blank(value)
+    if not stripped.startswith("/") or any(c in stripped for c in "?#"):
+        raise ValueError(
+            f"path {stripped!r} must be a URL path starting with '/', without a query or fragment"
+        )
+    return stripped
+
+
 def _json_path(value: str) -> str:
     """A dotted path ('items.0.price'), with optional [n] indexes and a leading '$'."""
     stripped = _non_blank(value)
@@ -138,6 +147,7 @@ Substring = Annotated[str, AfterValidator(_substring)]
 PageText = Annotated[str, AfterValidator(_page_text)]
 Pattern = Annotated[str, AfterValidator(_pattern)]
 PageRegex = Annotated[str, AfterValidator(_page_regex)]
+UrlPath = Annotated[str, AfterValidator(_url_path)]
 JsonPath = Annotated[str, AfterValidator(_json_path)]
 
 
@@ -219,13 +229,23 @@ class UrlPredicate(_Pred):
     query_contains: Substring | None = Field(
         default=None, description="Substring of the decoded query string"
     )
+    path: UrlPath | None = Field(
+        default=None,
+        description="The whole decoded path, exactly (case-insensitive; the query, the fragment "
+        "and a trailing slash do not count): '/p/red-kettle' is not met by '/p/red-kettle-lid'",
+    )
     regex: Pattern | None = Field(default=None, description="Matched against the full URL")
     scope: Scope = Scope.FINAL
 
     @model_validator(mode="after")
     def _has_criteria(self) -> UrlPredicate:
-        if self.contains is None and self.query_contains is None and self.regex is None:
-            raise ValueError("url predicate needs 'contains', 'query_contains' or 'regex'")
+        if (
+            self.contains is None
+            and self.query_contains is None
+            and self.path is None
+            and self.regex is None
+        ):
+            raise ValueError("url predicate needs 'contains', 'query_contains', 'path' or 'regex'")
         return self
 
 

@@ -360,6 +360,15 @@ def url_path_contains(url: str, needle: str) -> bool:
     return url_contains(urlsplit(url).path, needle)
 
 
+def url_path_is(url: str, path: str) -> bool:
+    """Whether the decoded path of `url` is `path`, ignoring case and a trailing slash."""
+    return _bare_path(urlsplit(url).path) == _bare_path(path)
+
+
+def _bare_path(path: str) -> str:
+    return unquote(path).casefold().rstrip("/") or "/"
+
+
 def url_query_contains(url: str, needle: str) -> bool:
     return needle.casefold() in unquote_plus(urlsplit(url).query).casefold()
 

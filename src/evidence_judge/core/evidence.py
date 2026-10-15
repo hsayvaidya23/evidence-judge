@@ -225,6 +225,18 @@ class PageSnapshot(_Frozen):
     url: str
     title: str | None = None
     text: str = Field(default="", description="Visible text, whitespace-normalised")
+    unsure_text: str = Field(
+        default="",
+        description="Text the page may hide, whitespace-normalised: its visibility depends on "
+        "styles the reader does not fully model (opacity, colour, clipping, a selector or "
+        "condition it cannot evaluate). It never proves the page showed something, and keeps "
+        "its absence from proving the page did not",
+    )
+    opaque: bool = Field(
+        default=False,
+        description="The page may show text the snapshot does not hold (an empty custom "
+        "element may render a closed shadow root), so text missing from it is not proven absent",
+    )
     html: str | None = None
     call_id: str | None = None
     field_values: tuple[str, ...] = Field(
@@ -267,8 +279,22 @@ class PageState(_Frozen):
     url: str
     title: str | None = None
     text: str = ""
+    unsure_text: str = Field(default="", description="As PageSnapshot.unsure_text")
+    opaque: bool = Field(default=False, description="As PageSnapshot.opaque")
     snapshot_id: str | None = None
     screenshot_id: str | None = None
+
+    @classmethod
+    def of(cls, snapshot: PageSnapshot) -> PageState:
+        """The page state a snapshot records."""
+        return cls(
+            url=snapshot.url,
+            title=snapshot.title,
+            text=snapshot.text,
+            unsure_text=snapshot.unsure_text,
+            opaque=snapshot.opaque,
+            snapshot_id=snapshot.id,
+        )
 
 
 class Run(BaseModel):

@@ -5,6 +5,7 @@ import pytest
 from evidence_judge.checks.errors import InvalidPredicateError
 from evidence_judge.checks.matching import MAX_REGEX_INPUT, MAX_REGEX_MATCHES
 from evidence_judge.checks.value import ValueChecker, format_value
+from evidence_judge.core.evidence import PageState
 from evidence_judge.core.predicates import RequestPredicate, ValuePredicate
 from evidence_judge.core.verdict import Support
 from tests.unit.conftest import (
@@ -432,3 +433,29 @@ async def test_redirected_mutation_is_a_default_candidate() -> None:
     pred = ValuePredicate(field="price", json_path="price", op="<=", value=30)
     res = await ValueChecker().evaluate(pred, ctx(run))
     assert res.status is Support.CONTRADICTED
+
+
+TOTAL = ValuePredicate(field="total", page_regex=r"Total:\s*\$([\d.]+)", op="<=", value=30)
+
+
+def _unsure_final(text: str, unsure: str) -> PageState:
+    return final("/checkout", text).model_copy(update={"unsure_text": unsure})
+
+
+async def test_a_page_regex_match_only_in_text_the_page_may_hide_proves_nothing() -> None:
+    run = make_run(final_state=_unsure_final("Checkout", "Total: $25.00"))
+    res = await ValueChecker().evaluate(TOTAL, ctx(run))
+
+    assert res.status is Support.NO_EVIDENCE
+    assert "total was '25.00' in text the page may hide on /checkout, so 'total'" in res.reason
+
+
+async def test_a_violation_in_text_the_page_may_hide_keeps_a_shown_value_from_passing() -> None:
+    run = make_run(final_state=_unsure_final("Total: $25.00", "Total: $45.00"))
+    res = await ValueChecker().evaluate(TOTAL, ctx(run))
+    assert res.status is Support.NO_EVIDENCE
+    assert "'45.00' in text the page may hide" in res.reason
+    agreeing = make_run(final_state=_unsure_final("Total: $25.00", "Total: $20.00"))
+    assert (await ValueChecker().evaluate(TOTAL, ctx(agreeing))).status is Support.SUPPORTED
+    shown = make_run(final_state=_unsure_final("Total: $45.00", "Total: $20.00"))
+    assert (await ValueChecker().evaluate(TOTAL, ctx(shown))).status is Support.CONTRADICTED

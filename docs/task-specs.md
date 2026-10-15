@@ -537,31 +537,56 @@ part still matches.
 
 `scope` is `final` (the final page, the default) or `any` (any snapshot during the run).
 
-Page text is the text of the DOM snapshot minus what the snapshot shows hidden: elements with
-the `hidden` attribute, a closed `<dialog>`, the body of a closed `<details>` (its `<summary>`
-stays), and whatever the page's styles set to `display: none`, `visibility: hidden` or
-`content-visibility: hidden`, from inline styles, `<style>` elements, constructed stylesheets
-and the `<link rel=stylesheet>` sheets the trace holds (Playwright records them with the
-network), with `@media` rules read at the recorded viewport. Common hiding classes (`hidden`,
-`d-none`, `sr-only`, `visually-hidden`, `invisible`) count as hidden even when their stylesheet
-is not in the trace. It is not exactly what a person saw: text hidden by a stylesheet the
-trace does not hold, by a selector the reader cannot match (`:hover`, sibling combinators,
-`:nth-child`), by script, or by layout (off-screen, zero size, clipped, covered, same colour as
-the background) still counts. Prefer phrases the page shows only in the state you expect, and
-pair a read with a `url` or `request` predicate when a page carries the phrase hidden.
+Page text is the text of the DOM snapshot the page shows. The judge reads the page's styles
+(inline styles, `<style>` elements, constructed stylesheets, and the `<link rel=stylesheet>`
+and `@import` sheets the trace holds, which Playwright records with the network) and sorts each
+piece of text three ways:
+
+- **Shown**: page text. Only it can meet a `page_text` predicate.
+- **Hidden**, when the judge is certain: elements with the `hidden` attribute and a closed
+  `<dialog>` (unless the page's own styles show them), the body of a closed `<details>` (its
+  `<summary>` stays), an SVG `<title>` or `<desc>` (a tooltip), children of a shadow host that no
+  `<slot>` shows, and what the cascade sets to `display: none`, `visibility: hidden` or
+  `content-visibility: hidden`: `!important`, specificity, order, `@layer` order, inline
+  styles, `@media` rules read at the recorded viewport and simple `@supports` tests. Each shadow
+  root is its own scope: its stylesheets style only its tree, and the page's do not reach in.
+- **Text the page may hide**, when visibility depends on something the judge does not fully
+  model: an `@media` query it cannot read (resolution, `calc()`), an `@supports` test it does not
+  know the answer to, `@container` or `@scope`; a selector it cannot evaluate (`:hover`,
+  `:focus`, `:checked`, `:has()`, or one it cannot parse); `var()` in `display` or
+  `visibility`; `opacity` near 0, a tiny `font-size`, a transparent text colour or one equal to
+  the background, `clip` or `clip-path` that cut it away, a `transform` that scales it to
+  nothing, far off-screen positions, margins or `text-indent`, a zero-size box that clips its
+  overflow; a hiding utility class (`hidden`, `d-none`, `sr-only`, `visually-hidden`,
+  `invisible`) that no recorded stylesheet defines; and all text of a page whose stylesheets
+  the trace does not fully hold.
+
+Text the page may hide never meets a `page_text` predicate, and it keeps its absence from
+contradicting one: when the phrase appears only there, the result is `no_evidence` ("text the
+page may hide"), so the run goes to review instead of passing or failing. The same holds when a
+page has an empty custom element (`<x-badge></x-badge>`): it may render a closed shadow root,
+whose text no snapshot holds, so a phrase missing from that page is not proven missing. The
+judge still cannot see text a script hides or that another element covers. Prefer phrases the
+page shows only in the state you expect, and pair a read with a `url` or `request` predicate
+when a page carries the phrase hidden.
 
 ### `url`: the page URL matched
 
 ```yaml
 - {kind: url, contains: /order/confirmation}
 - {kind: url, contains: /search, query_contains: q=red kettle}
+- {kind: url, path: /p/red-kettle}
 - {kind: url, regex: '/orders/\d+$', scope: any}
 ```
 
 `contains` matches the scheme, host and path only, like a request's `url_contains`, so a final
 URL of `/login?next=/order/confirmation` does not count as reaching `/order/confirmation`.
-`query_contains` matches the decoded query string, and `regex` the full URL. When several are
-given, all must hold.
+`query_contains` matches the decoded query string, `path` the whole decoded path (ignoring case
+and a trailing slash), and `regex` the full URL. When several are given, all must hold.
+
+`contains` is a substring: `contains: /p/red-kettle` is also met by `/p/red-kettle-lid` or
+`/shop/p/red-kettle`. To name one page exactly, use `path: /p/red-kettle`, or a `regex`
+anchored on the path's end (`regex: '/p/red-kettle/?(?:[?#]|$)'`).
 
 With `scope: any`, visited URLs come from page snapshots, the page URL of each action and
 document navigations in the network log (GET requests for a `document`, or answered with
@@ -620,7 +645,10 @@ page), and every value it reads must satisfy the comparison: one violation makes
 `contradicted`, so a total of `$45.00` on the checkout page is not hidden by a `$5 off` coupon on
 the confirmation page. When the values differ but all satisfy it, the reason says so. Anchor
 the pattern on a label such as `Total:`: a bare price pattern like `\$([\d.]+)` also reads
-shipping fees, coupons and every other product listed on the way.
+shipping fees, coupons and every other product listed on the way. A match in text the page may
+hide (see [`page_text`](#page_text-the-pages-text-contains-a-phrase)) never proves the
+comparison: it is `no_evidence` when it is the only value read, or when it would break the
+comparison where the shown values keep it.
 
 Numbers are read from JSON numbers and from strings as prices are usually written: currency
 symbols or codes (`$24.00`, `1500 EUR`), thousands grouped with commas, dots, spaces or

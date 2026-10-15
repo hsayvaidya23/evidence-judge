@@ -57,7 +57,8 @@ def reads_short_word(predicate: Predicate) -> bool:
             return is_short_word(predicate.contains)
         case UrlPredicate():
             needles = [predicate.contains, predicate.query_contains]
-            return predicate.regex is not None or any(n and is_short_word(n) for n in needles)
+            exact = predicate.regex is not None or predicate.path is not None
+            return exact or any(n and is_short_word(n) for n in needles)
         case RequestPredicate():
             needles = [
                 *predicate.url_contains,

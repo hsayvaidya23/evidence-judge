@@ -17,6 +17,7 @@ from evidence_judge.checks.matching import (
     regex_search,
     url_location_contains,
     url_path,
+    url_path_is,
     url_query_contains,
 )
 from evidence_judge.checks.page_text import off_site
@@ -33,10 +34,11 @@ class UrlMatcher:
         if (
             predicate.contains is None
             and predicate.query_contains is None
+            and predicate.path is None
             and predicate.regex is None
         ):
             raise InvalidPredicateError(
-                "url predicate needs 'contains', 'query_contains' or 'regex'"
+                "url predicate needs 'contains', 'query_contains', 'path' or 'regex'"
             )
         self.predicate = predicate
         self._regex = compile_regex(predicate.regex) if predicate.regex else None
@@ -47,6 +49,8 @@ class UrlMatcher:
             parts.append(f"contain {quoted(self.predicate.contains)}")
         if self.predicate.query_contains is not None:
             parts.append(f"have a query containing {quoted(self.predicate.query_contains)}")
+        if self.predicate.path is not None:
+            parts.append(f"have the path {quoted(self.predicate.path)}")
         if self.predicate.regex is not None:
             parts.append(f"match /{self.predicate.regex}/")
         return " and ".join(parts)
@@ -56,6 +60,8 @@ class UrlMatcher:
         if p.contains is not None and not url_location_contains(url, p.contains):
             return False
         if p.query_contains is not None and not url_query_contains(url, p.query_contains):
+            return False
+        if p.path is not None and not url_path_is(url, p.path):
             return False
         return self._regex is None or regex_search(self._regex, url) is not None
 

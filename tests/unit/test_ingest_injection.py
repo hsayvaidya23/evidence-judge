@@ -173,7 +173,7 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("select_filter", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("view_source", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
         ("css_hidden", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
-        ("css_link", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("css_link", "stock", "Yes, it is In stock.", "needs_review", [None, True], "may hide"),
         ("details_closed", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("css_shown", "out_of_stock", "No, Out of stock.", "fail", [False, True], "not contain"),
         ("two_fields", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
@@ -181,6 +181,12 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("fragment", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("query_key", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("keypad", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
+        ("css_faded", "stock", "Yes, it is In stock.", "needs_review", [None, True], "may hide"),
+        ("css_var", "stock", "Yes, it is In stock.", "needs_review", [None, True], "may hide"),
+        ("css_sibling", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("css_shadow", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("css_layered", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("css_unhidden", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
     ],
 )
 async def test_agent_made_evidence_never_passes(
@@ -580,28 +586,59 @@ def test_page_text_leaves_out_what_the_page_hides(mode: str, text: str) -> None:
     assert [a.name for a in run.actions][-1] in ("goto", "click")
 
 
-SHOWN_WITHOUT_SHEET = "Red Kettle In stockIn stock Out of stock"
-"""css_link's text when the trace does not hold kettle.css: only the utility classes hide."""
+@pytest.mark.parametrize(
+    ("mode", "unsure"),
+    [
+        ("css_faded", "In stock"),
+        ("css_var", "In stock"),
+        ("css_sibling", ""),
+        ("css_shadow", ""),
+        ("css_supports", ""),
+        ("css_layered", ""),
+        ("css_unhidden", ""),
+    ],
+)
+def test_text_a_page_may_hide_is_kept_apart(mode: str, unsure: str) -> None:
+    run = load_playwright_trace(FIXTURES / f"{mode}.zip")
+
+    assert run.final_state is not None
+    assert (run.final_state.text, run.final_state.unsure_text) == (
+        "Red Kettle Out of stock",
+        unsure,
+    )
+    assert not run.final_state.opaque
+
+
+UNSURE_WITHOUT_SHEET = ("", "Red Kettle In stockIn stock In stockIn stock Out of stock")
+"""css_link's (text, unsure_text) when the trace does not hold kettle.css: the page's styles
+are unknown, so all of its text may be hidden."""
+FAILED_SHEET = ("Red Kettle In stockIn stock Out of stock", "In stockIn stock")
+"""css_link's when kettle.css failed to load: only the utility classes, which no sheet defines,
+may hide."""
 KETTLE_CSS = ".badge{display:none}@media (min-width:600px){.wide-hidden{display:none}}"
 
 
 @pytest.mark.parametrize(
     ("content", "status", "text"),
     [
-        ({"mimeType": "text/css", "text": KETTLE_CSS}, 200, "Red Kettle Out of stock"),
+        (
+            {"mimeType": "text/css", "text": KETTLE_CSS},
+            200,
+            ("Red Kettle Out of stock", "In stockIn stock"),
+        ),
         (
             {"text": base64.b64encode(KETTLE_CSS.encode()).decode(), "encoding": "base64"},
             200,
-            "Red Kettle Out of stock",
+            ("Red Kettle Out of stock", "In stockIn stock"),
         ),
-        ({"mimeType": "text/css", "_sha1": "missing.css"}, 200, SHOWN_WITHOUT_SHEET),
-        ({"mimeType": "text/html", "text": KETTLE_CSS}, 200, SHOWN_WITHOUT_SHEET),
-        ({"mimeType": "text/css", "text": KETTLE_CSS}, 404, SHOWN_WITHOUT_SHEET),
-        ({"mimeType": "text/css"}, 200, SHOWN_WITHOUT_SHEET),
+        ({"mimeType": "text/css", "_sha1": "missing.css"}, 200, UNSURE_WITHOUT_SHEET),
+        ({"mimeType": "text/html", "text": KETTLE_CSS}, 200, UNSURE_WITHOUT_SHEET),
+        ({"mimeType": "text/css", "text": KETTLE_CSS}, 404, FAILED_SHEET),
+        ({"mimeType": "text/css"}, 200, UNSURE_WITHOUT_SHEET),
     ],
 )
 def test_linked_stylesheets_come_from_the_recorded_responses(
-    tmp_path: Path, content: dict[str, Any], status: int, text: str
+    tmp_path: Path, content: dict[str, Any], status: int, text: tuple[str, str]
 ) -> None:
     def change(name: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for event in events:
@@ -614,7 +651,7 @@ def test_linked_stylesheets_come_from_the_recorded_responses(
     run = load_playwright_trace(trace)
 
     assert run.final_state is not None
-    assert run.final_state.text == text
+    assert (run.final_state.text, run.final_state.unsure_text) == text
 
 
 def _stored(source: Path, target: Path) -> Path:
@@ -635,7 +672,7 @@ def test_a_corrupt_stylesheet_is_skipped_with_a_warning(tmp_path: Path) -> None:
     run = load_playwright_trace(trace)
 
     assert run.final_state is not None
-    assert run.final_state.text == SHOWN_WITHOUT_SHEET
+    assert (run.final_state.text, run.final_state.unsure_text) == UNSURE_WITHOUT_SHEET
     assert any(w.startswith("stylesheet resources/") for w in run.metadata["warnings"])
 
 
@@ -645,7 +682,7 @@ def test_a_stylesheet_over_the_resource_limit_is_skipped(tmp_path: Path) -> None
     )
 
     assert run.final_state is not None
-    assert run.final_state.text == SHOWN_WITHOUT_SHEET
+    assert (run.final_state.text, run.final_state.unsure_text) == UNSURE_WITHOUT_SHEET
     assert any("larger than 50 bytes" in w for w in run.metadata["warnings"])
 
 
@@ -657,6 +694,13 @@ def test_a_stylesheet_over_the_resource_limit_is_skipped(tmp_path: Path) -> None
         ("details_closed", "out_of_stock", "No, it is Out of stock."),
         ("css_shown", "stock", "Yes, it is In stock."),
         ("details_open", "stock", "Yes, it ships once In stock."),
+        ("css_faded", "out_of_stock", "No, it is Out of stock."),
+        ("css_var", "out_of_stock", "No, it is Out of stock."),
+        ("css_sibling", "out_of_stock", "No, it is Out of stock."),
+        ("css_shadow", "out_of_stock", "No, it is Out of stock."),
+        ("css_supports", "out_of_stock", "No, it is Out of stock."),
+        ("css_layered", "out_of_stock", "No, it is Out of stock."),
+        ("css_unhidden", "out_of_stock", "No, it is Out of stock."),
     ],
 )
 async def test_honest_answers_on_pages_with_hidden_text_pass(

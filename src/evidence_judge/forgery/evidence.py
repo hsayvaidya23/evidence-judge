@@ -102,6 +102,10 @@ a start page, prepended before) everything the run really did:
 - `click_compose`: it clicks the expected texts out a character at a time on a page's own
   keyboard, which shows them; each click names its key by the element it resolved to, or only
   by the text its selector names.
+- `unmodelled_hiding`: it clicks through to a site page (one whose URL the spec expects) that
+  holds the expected texts where the page hides them with styles the page-text reader does not
+  fully model: `opacity: 0`, a rule that applies only on `:hover`, or `display: var(--hide)`.
+  Recorded as the trace ingester records the page: the texts are in `unsure_text`, not `text`.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -152,7 +156,7 @@ from evidence_judge.forgery.tampering import (
     storage_tampering,
     styled_screenshot,
 )
-from evidence_judge.forgery.unshown import hidden_text, view_source
+from evidence_judge.forgery.unshown import hidden_text, unmodelled_hiding, view_source
 
 _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.SELF_PLANTED_TEXT: lambda run, seed, _: self_planted_text(run, seed),
@@ -185,6 +189,7 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.MARKUP_ECHO: markup_echo,
     ForgeryKind.FRAGMENT_ECHO: fragment_echo,
     ForgeryKind.CLICK_COMPOSE: click_compose,
+    ForgeryKind.UNMODELLED_HIDING: unmodelled_hiding,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(

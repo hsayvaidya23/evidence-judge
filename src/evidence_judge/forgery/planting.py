@@ -88,8 +88,8 @@ def _expected_pages(spec: TaskSpec) -> tuple[list[str], list[str]]:
         for predicate in [*expectation.all, *expectation.any]:
             if isinstance(predicate, PageTextPredicate):
                 texts.append(predicate.contains)
-            elif isinstance(predicate, UrlPredicate) and predicate.contains:
-                urls.append(predicate.contains)
+            elif isinstance(predicate, UrlPredicate) and (predicate.path or predicate.contains):
+                urls.append(predicate.path or predicate.contains or "")
     return texts, urls
 
 
@@ -196,8 +196,10 @@ def planted_load(n: str, ts: float, url: str, status: int = 200) -> NetworkEvent
     )
 
 
-def planted_snapshot(n: str, ts: float, url: str, text: str) -> PageSnapshot:
-    return PageSnapshot(id=f"snap#planted-{n}", ts=ts, url=url, text=text)
+def planted_snapshot(
+    n: str, ts: float, url: str, text: str, *, unsure_text: str = ""
+) -> PageSnapshot:
+    return PageSnapshot(id=f"snap#planted-{n}", ts=ts, url=url, text=text, unsure_text=unsure_text)
 
 
 def planted_api_load(n: str, ts: float, url: str, response: object) -> NetworkEvent:
@@ -226,7 +228,7 @@ def ending_on(
             "actions": [*run.actions, *actions],
             "network": [*run.network, *network],
             "snapshots": [*run.snapshots, page],
-            "final_state": PageState(url=page.url, text=page.text, snapshot_id=page.id),
+            "final_state": PageState.of(page),
             "metadata": metadata,
         }
     )

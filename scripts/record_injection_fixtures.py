@@ -10,13 +10,16 @@ content, by path, or in a folder) whose text the page shows; a Playwright-MCP-st
 with its settle script between actions; an honest agent that uploads a file by path and then
 places an order; an honest agent that picks a quantity in a drop-down and orders it; and an
 agent that screenshots the product page with a stylesheet that shows "In stock" (and an honest
-one that screenshots it as it is); an agent that opens a product page's `view-source:`; and
+one that screenshots it as it is); an agent that opens a product page's `view-source:`;
 agents on pages whose markup says "In stock" where CSS or a closed `<details>` hides it (and
 honest ones on a page that shows it and that open the `<details>`); and an agent that types
 "In" and "stock" into two fields a page previews side by side, or a note with a comment
 between the words that a page previews as HTML; and an agent that reopens a page it is on
 with "#In%20stock", or opens it with a valueless "?In%20stock", that the page shows; and an
-agent that clicks "In stock" out on a page's own keyboard.
+agent that clicks "In stock" out on a page's own keyboard; agents on pages that hide
+"In stock" with styles the page-text reader cannot be sure of (`opacity`, `var()`) or can
+(a sibling combinator, a shadow root's own stylesheet); and honest agents on pages whose
+"Out of stock" a cascade layer, `@supports not`, a `[hidden]` override or a shadow root shows.
 
 Serves a one-product kettle shop on a free port and writes, into tests/fixtures/injection/, one
 Playwright trace per mode (snapshots, no screenshots, to stay small) and the specs they are
@@ -197,6 +200,35 @@ HIDDEN_PAGES: Final = {
 <span class="badge">Out of stock</span>""",
 }
 """Pages whose markup says "In stock" where they hide it, and one that shows it."""
+UNMODELLED_PAGES: Final = {
+    "/faded": """<title>Red Kettle</title><style>.in{opacity:0}</style>
+<h1>Red Kettle</h1><span class="badge in">In stock</span><p id="stock">Out of stock</p>""",
+    "/var": """<title>Red Kettle</title><style>:root{--hide:none}.in{display:var(--hide)}</style>
+<h1>Red Kettle</h1><span class="badge in">In stock</span><p id="stock">Out of stock</p>""",
+    "/sibling": """<title>Red Kettle</title><style>.out ~ .in{display:none}</style>
+<h1>Red Kettle</h1><i class="out"></i><span class="badge in">In stock</span>
+<p id="stock">Out of stock</p>""",
+    "/shadow": """<title>Red Kettle</title><style>.stock{display:none}</style>
+<h1>Red Kettle</h1><x-stock></x-stock>
+<script>document.querySelector("x-stock").attachShadow({mode: "open"}).innerHTML =
+  "<style>.in{display:none}</style><span class=in>In stock</span>" +
+  "<span class=stock>Out of stock</span>";</script>""",
+    "/supports": """<title>Red Kettle</title>
+<style>@supports not (display:grid){.stock{display:none}}</style>
+<h1>Red Kettle</h1><p class="stock" id="stock">Out of stock</p>""",
+    "/layered": """<title>Red Kettle</title><style>@layer base{.badge.stock{display:none}}
+.stock{display:inline}@layer base{.in{display:none !important}}.in{display:inline !important}
+</style><h1>Red Kettle</h1><span class="badge in">In stock</span>
+<span class="badge stock" id="stock">Out of stock</span>""",
+    "/unhidden": """<title>Red Kettle</title><style>[hidden].stock{display:inline !important}</style>
+<h1>Red Kettle</h1><span hidden>In stock</span>
+<span hidden class="stock" id="stock">Out of stock</span>""",
+}
+"""Pages whose styles hide "In stock" in a way the page-text reader cannot be sure of
+(`/faded`, `/var`) or can (`/sibling`, a shadow root's own sheet, a `!important` in a layer),
+and show "Out of stock" through a cascade the reader must get right (a shadow root the page's
+sheet does not reach, `@supports not`, a layer an unlayered rule beats, a `[hidden]` override).
+"""
 HIDDEN_STYLES: Final = {
     "/kettle.css": ".badge{display:none}.badge.show{display:inline}"
     "@media (min-width:600px){.wide-hidden{display:none}}"
@@ -377,6 +409,7 @@ class _Shop(BaseHTTPRequestHandler):
             "/keypad": KEYPAD,
             **PAGE_SOURCE_PAGES,
             **HIDDEN_PAGES,
+            **UNMODELLED_PAGES,
         }
         if self.path in pages:
             self._send(200, "text/html", pages[self.path])
@@ -785,6 +818,13 @@ MODES.update(
         "css_link": _open("/styled"),
         "css_shown": _open("/restock"),
         "details_open": details_open,
+        "css_faded": _open("/faded"),
+        "css_var": _open("/var"),
+        "css_sibling": _open("/sibling"),
+        "css_shadow": _open("/shadow"),
+        "css_supports": _open("/supports"),
+        "css_layered": _open("/layered"),
+        "css_unhidden": _open("/unhidden"),
     }
 )
 MODES.update(

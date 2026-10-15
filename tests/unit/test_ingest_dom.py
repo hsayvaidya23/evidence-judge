@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from evidence_judge.ingest._dom import FrameSnapshotStore, SnapshotDecodeError
+from evidence_judge.ingest._dom import FrameSnapshotStore, RenderedPage, SnapshotDecodeError
 
 PAGE = [
     "HTML",
@@ -353,21 +353,23 @@ def test_linked_stylesheets_resolve_against_the_base_url() -> None:
                 ["LINK", {"rel": "alternate stylesheet", "href": "/alt.css"}],
                 ["LINK", {"rel": "stylesheet", "href": "/alt.css", "disabled": ""}],
                 ["LINK", {"rel": "stylesheet", "href": "http://[::1"}],
-                ["LINK", {"rel": "stylesheet", "href": "/missing.css"}],
+                ["LINK", {"rel": "stylesheet", "href": "/failed.css", "media": "(min-width:1px)"}],
                 ["LINK", {"rel": "icon", "href": "/favicon.ico"}],
             ),
         ),
     )
 
+    sheets["https://shop.test/failed.css"] = ""
     page = store.render("frame@1", 0, viewport=(800, 600), stylesheets=source)
 
-    assert page.text == "Out of stock"
+    assert (page.text, page.unsure_text) == ("Out of stock", "")
     assert asked == [
         "https://shop.test/css/site.css",
         "https://cdn.test/print.css",
-        "https://shop.test/missing.css",
+        "https://shop.test/failed.css",
     ]
-    assert store.render("frame@1", 0).text == "In stock Out of stock"
+    unread = store.render("frame@1", 0)
+    assert (unread.text, unread.unsure_text) == ("", "In stock Out of stock")
 
 
 def test_media_rules_follow_the_viewport() -> None:
@@ -403,3 +405,163 @@ def test_many_distinct_stylesheets_render_with_a_bounded_cache() -> None:
         )
 
         assert store.render("main", index).text == ""
+
+
+def _rendered(*children: object, head: tuple[object, ...] = ()) -> RenderedPage:
+    store = FrameSnapshotStore()
+    store.add("frame@1", _page(*children, head=head))
+    return store.render("frame@1", 0, viewport=(1000, 800), url="https://shop.test/p/kettle")
+
+
+def _shadow(*children: object) -> list[object]:
+    return ["template", {"__playwright_shadow_root_": "open"}, *children]
+
+
+def test_text_of_unsure_visibility_is_kept_apart() -> None:
+    page = _rendered(
+        ["P", {"style": "opacity:0"}, "In stock"],
+        ["P", {}, "Out ", ["SPAN", {"style": "font-size:0"}, "maybe"], "of stock"],
+        ["STYLE", {}, ".x:hover{display:none}"],
+        ["P", {"class": "x"}, "Hover me"],
+    )
+
+    assert page.text == "Out of stock"
+    assert page.unsure_text == "In stock maybe Hover me"
+
+
+def test_a_page_whose_styles_are_unknown_is_all_unsure() -> None:
+    page = _rendered(
+        ["P", {}, "Out of stock"], head=(["LINK", {"rel": "stylesheet", "href": "/x.css"}],)
+    )
+
+    assert (page.text, page.unsure_text) == ("", "Out of stock")
+
+
+def test_a_shadow_roots_styles_stay_inside_it() -> None:
+    page = _rendered(
+        ["STYLE", {}, ".stock{display:none}"],
+        [
+            "X-C",
+            {},
+            _shadow(
+                ["STYLE", {}, "b{display:none}"],
+                ["SPAN", {"class": "stock"}, "Out of stock"],
+                ["B", {}, "gone"],
+            ),
+        ],
+        ["B", {}, "Bold"],
+        ["SPAN", {"class": "stock"}, "In stock"],
+    )
+
+    assert page.text == "Out of stock Bold"
+
+
+def test_host_rules_and_inherited_visibility_cross_the_shadow_boundary() -> None:
+    page = _rendered(
+        ["X-A", {}, _shadow(["STYLE", {}, ":host{display:none !important}"], "In stock")],
+        ["DIV", {"style": "visibility:hidden"}, ["X-B", {}, _shadow(["P", {}, "Hidden too"])]],
+        ["X-D", {"style": "opacity:0"}, _shadow(["P", {}, "Faded"])],
+        ["P", {}, "Out of stock"],
+    )
+
+    assert (page.text, page.unsure_text) == ("Out of stock", "Faded")
+
+
+def test_slots_show_the_light_children_assigned_to_them() -> None:
+    page = _rendered(
+        [
+            "X-S",
+            {},
+            _shadow(["B", {}, "Title: "], ["SLOT", {"name": "price"}, "no price"], ["SLOT", {}]),
+            ["SPAN", {"slot": "price"}, "$24"],
+            ["SPAN", {"slot": "missing"}, "In stock"],
+            "Out of stock",
+        ],
+        ["X-N", {}, _shadow(["B", {}, "x"]), ["SPAN", {}, "unslotted"]],
+        ["X-F", {}, _shadow(["SLOT", {"name": "a"}, "fallback"])],
+    )
+
+    assert page.text == "Title: $24Out of stock x fallback"
+
+
+def test_the_page_styles_slotted_light_children() -> None:
+    page = _rendered(
+        ["STYLE", {}, ".in{display:none}"],
+        ["X-S", {}, _shadow(["SLOT", {}]), ["SPAN", {"class": "in"}, "In stock"], "Out of stock"],
+    )
+
+    assert page.text == "Out of stock"
+
+
+def test_slotted_and_part_rules_make_what_they_reach_unsure() -> None:
+    page = _rendered(
+        ["STYLE", {}, "x-p::part(label){visibility:hidden}"],
+        [
+            "X-S",
+            {},
+            _shadow(["STYLE", {}, "::slotted(*){opacity:0}"], ["SLOT", {}]),
+            ["SPAN", {}, "Slotted"],
+        ],
+        ["X-P", {}, _shadow(["SPAN", {"part": "label"}, "Part"], ["SPAN", {}, "Plain"])],
+    )
+
+    assert (page.text, page.unsure_text) == ("Plain", "Slotted Part")
+
+
+def test_an_empty_custom_element_may_hold_a_closed_shadow_root() -> None:
+    assert _rendered(["X-B", {}], ["P", {}, "Kettle"]).opaque
+    assert not _rendered(["X-B", {}, "text"], ["DIV", {}]).opaque
+    assert not _rendered(["X-B", {"style": "display:none"}]).opaque
+
+
+def test_tooltips_and_the_hidden_attribute_the_page_overrides() -> None:
+    page = _rendered(
+        ["SVG", {}, ["title", {}, "In stock"], ["desc", {}, "A badge"], ["text", {}, "Badge"]],
+        ["STYLE", {}, "[hidden].shown{display:inline !important}"],
+        ["SPAN", {"hidden": "", "class": "shown"}, "Out of stock"],
+        ["SPAN", {"hidden": ""}, "Secret"],
+        ["SPAN", {"hidden": "until-found"}, "Found later"],
+    )
+
+    assert page.text == "Badge Out of stock"
+
+
+def test_details_content_rules_make_closed_details_unsure() -> None:
+    page = _rendered(
+        ["STYLE", {}, "details::details-content{content-visibility:visible}"],
+        ["DETAILS", {}, ["SUMMARY", {}, "Delivery"], ["P", {}, "In stock"]],
+    )
+
+    assert (page.text, page.unsure_text) == ("Delivery", "In stock")
+
+
+def test_sibling_selectors_see_the_snapshot_siblings() -> None:
+    page = _rendered(
+        ["STYLE", {}, ".out ~ .in{display:none} li:nth-child(2){display:none}"],
+        ["I", {"class": "out"}],
+        ["SCRIPT", {}, "x"],
+        ["SPAN", {"class": "in"}, "In stock"],
+        ["UL", {}, ["LI", {}, "one"], ["LI", {}, "two"], ["LI", {}, "three"]],
+    )
+
+    assert page.text == "one three"
+
+
+def test_imports_resolve_against_the_importing_sheet() -> None:
+    sheets = {
+        "https://shop.test/css/a.css": "@import 'b.css';",
+        "https://shop.test/css/b.css": ".in{display:none}",
+    }
+    store = FrameSnapshotStore()
+    store.add(
+        "frame@1",
+        _page(
+            ["SPAN", {"class": "in"}, "In stock"],
+            ["P", {}, "Out of stock"],
+            head=(["LINK", {"rel": "stylesheet", "href": "/css/a.css"}],),
+        ),
+    )
+
+    page = store.render("frame@1", 0, stylesheets=sheets.get, url="https://shop.test/p/kettle")
+
+    assert (page.text, page.unsure_text) == ("Out of stock", "")
