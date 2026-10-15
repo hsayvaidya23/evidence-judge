@@ -23,7 +23,8 @@ from tests.unit.test_report_fixtures import EVIL, PNG_1PX, make_run, make_verdic
 def test_outcome_banner(outcome: Outcome, label: str, css: str) -> None:
     html = render_html(make_verdict(outcome), make_run())
     assert f'class="banner {css}"' in html
-    assert f'<span class="verdict-pill" role="status">{label}</span>' in html
+    assert f'<span class="verdict-pill">{label}</span>' in html
+    assert '<div class="score" role="img" aria-label="Score 42 out of 100">' in html
     assert ">42<small>/100</small>" in html
     assert "The order request returned 500" in html
 

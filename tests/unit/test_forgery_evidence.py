@@ -71,9 +71,9 @@ def test_text_only_kinds_leave_evidence_alone(null_agent: Run) -> None:
 
 
 @pytest.mark.parametrize("seed", range(3))
-async def test_self_planted_text_never_passes(null_agent: Run, seed: int) -> None:
+async def test_self_planted_text_fails(null_agent: Run, seed: int) -> None:
     run = _planted(null_agent, ForgeryKind.SELF_PLANTED_TEXT, seed)
-    assert await _outcome(run) is not Outcome.PASS
+    assert await _outcome(run) is Outcome.FAIL
 
 
 @pytest.mark.parametrize("seed", range(3))

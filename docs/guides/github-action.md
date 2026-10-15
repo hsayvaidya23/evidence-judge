@@ -63,12 +63,13 @@ At least one of `trace`, `har` or `browser-use` is needed.
 
 1. Installs `uv` and then evidence-judge with the `anthropic` extra.
 2. Runs `evidence-judge judge` with the inputs you gave, writing `verdict.json` and
-   `report.html` to `$RUNNER_TEMP/evidence-judge`.
+   `report.html` to a fresh `$RUNNER_TEMP/evidence-judge.XXXXXX` directory, so a second
+   invocation in the same job never reads the first one's verdict.
 3. Writes the outcome, score and summary to the **job summary** (with
    `python -m evidence_judge.ci_summary`, which escapes the summary text).
 4. Exits: `pass` → success; `needs_review` → success, or failure with `fail-on-review: "true"`;
-   `fail` → failure. If no verdict was written (bad input, internal error), the step fails with
-   evidence-judge's exit code.
+   `fail` → failure. On bad input (exit 3) or an internal error (exit 4), or if no verdict was
+   written, the step fails with evidence-judge's exit code.
 
 ## LLM extraction in CI
 

@@ -17,6 +17,7 @@ import re
 import secrets
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping
+from functools import partial
 from typing import Any
 from urllib.parse import quote, unquote, unquote_plus, urlsplit, urlunsplit
 
@@ -390,6 +391,9 @@ def _is_secret_header(name: str) -> bool:
     return n in _SECRET_HEADERS or any(p in n for p in _SECRET_HEADER_PARTS)
 
 
+_TextRepl = Callable[[Counter[str], re.Match[str]], str]
+
+
 class Redactor:
     """Produces redacted copies of runs, text and models.
 
@@ -530,100 +534,105 @@ class Redactor:
         if not text:
             return text
         form = "=" in text and _FORM_RE.fullmatch(text) is not None
-
-        def html_input(m: re.Match[str]) -> str:
-            return self._input_tag(m.group(0), counts)
-
-        def jwt(m: re.Match[str]) -> str:
-            return self._token("jwt", m.group(0), counts)
-
-        def bearer(m: re.Match[str]) -> str:
-            return m.group(1) + self._token("bearer", m.group(2), counts)
-
-        def api_key(m: re.Match[str]) -> str:
-            return self._token("api_key", m.group(0), counts)
-
-        def json_secret(m: re.Match[str]) -> str:
-            category = self._field_category(m.group(2), m.group(3), in_url=False)
-            if category is None:
-                return m.group(0)
-            return m.group(1) + self._token(category, m.group(3), counts) + m.group(4)
-
-        def json_number(m: re.Match[str]) -> str:
-            category = self._field_category(m.group(2), m.group(3), in_url=False)
-            if category is None:
-                return m.group(0)
-            return f'{m.group(1)}"{self._token(category, m.group(3), counts)}"'
-
-        def kv_secret(m: re.Match[str]) -> str:
-            value = unquote_plus(m.group(3))
-            category = self._field_category(m.group(1), value, in_url=False)
-            if category is None:
-                return m.group(0)
-            return m.group(1) + m.group(2) + self._token(category, value, counts)
-
-        def email(m: re.Match[str]) -> str:
-            return self._token("email", m.group(0), counts)
-
-        def card(m: re.Match[str]) -> str:
-            digits = self._card_digits(m)
-            return m.group(0) if digits is None else self._token("card", digits, counts)
-
-        def ssn(m: re.Match[str]) -> str:
-            if not _ssn_valid(m) or not _ssn_in_context(m.string, m.start()):
-                return m.group(0)
-            return self._token("ssn", m.group(0), counts)
-
-        def url(m: re.Match[str]) -> str:
-            return self._url_in_text(m.group(0), counts, escaped=False)
-
-        def escaped_url(m: re.Match[str]) -> str:
-            return self._url_in_text(m.group(0), counts, escaped=True)
-
-        def basic(m: re.Match[str]) -> str:
-            if not _is_basic_credential(m.group(2)):
-                return m.group(0)
-            return m.group(1) + self._token("auth", m.group(2), counts)
-
-        def auth_text(m: re.Match[str]) -> str:
-            if not _looks_like_secret(m.group(2)):
-                return m.group(0)
-            return m.group(1) + self._token("auth", m.group(2), counts)
-
-        def text_pair(m: re.Match[str]) -> str:
-            prefix, name, quote_char, value = m.group(1, 2, 3, 4)
-            kept = value if quote_char else value.rstrip(_URL_TRAILING)
-            if (
-                not kept
-                or _norm_param(name) in _PAIR_EXCLUDED_NAMES
-                or not _is_secret_param(name, in_url=False)
-                or not _looks_like_secret(kept)
-            ):
-                return m.group(0)
-            return prefix + self._token("secret_param", kept, counts) + value[len(kept) :]
-
-        steps: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
-            (_INPUT_TAG_RE, html_input),
-            (_ESCAPED_URL_RE, escaped_url),
-            (_URL_IN_TEXT_RE, url),
-            (_JWT_RE, jwt),
-            (_BEARER_RE, bearer),
-            (_BASIC_RE, basic),
-            (_API_KEY_RE, api_key),
-            (_JSON_SECRET_RE, json_secret),
-            (_JSON_SECRET_NUMBER_RE, json_number),
-            (_AUTH_TEXT_RE, auth_text),
-            (_KV_SECRET_RE, kv_secret),
-            (_TEXT_PAIR_RE, text_pair),
-            (_EMAIL_RE, email),
-            (_CARD_RE, card),
-            (_SSN_RE, ssn),
-        ]
-        for pattern, repl in steps:
+        for pattern, repl in self._text_steps(counts):
             text = self._outside_tokens(text, lambda s, p=pattern, r=repl: p.sub(r, s))
         if "%" in text:
             text = self._outside_tokens(text, lambda s: self._percent_runs(s, counts, form=form))
         return text
+
+    def _text_steps(
+        self, counts: Counter[str]
+    ) -> list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]]:
+        """The free-text substitutions in the order they run, each counting into ``counts``."""
+        handlers: tuple[tuple[re.Pattern[str], _TextRepl], ...] = (
+            (_INPUT_TAG_RE, self._sub_input_tag),
+            (_ESCAPED_URL_RE, self._sub_escaped_url),
+            (_URL_IN_TEXT_RE, self._sub_url),
+            (_JWT_RE, self._sub_jwt),
+            (_BEARER_RE, self._sub_bearer),
+            (_BASIC_RE, self._sub_basic),
+            (_API_KEY_RE, self._sub_api_key),
+            (_JSON_SECRET_RE, self._sub_json_secret),
+            (_JSON_SECRET_NUMBER_RE, self._sub_json_number),
+            (_AUTH_TEXT_RE, self._sub_auth_text),
+            (_KV_SECRET_RE, self._sub_kv_secret),
+            (_TEXT_PAIR_RE, self._sub_text_pair),
+            (_EMAIL_RE, self._sub_email),
+            (_CARD_RE, self._sub_card),
+            (_SSN_RE, self._sub_ssn),
+        )
+        return [(pattern, partial(handler, counts)) for pattern, handler in handlers]
+
+    def _sub_input_tag(self, counts: Counter[str], m: re.Match[str]) -> str:
+        return self._input_tag(m.group(0), counts)
+
+    def _sub_jwt(self, counts: Counter[str], m: re.Match[str]) -> str:
+        return self._token("jwt", m.group(0), counts)
+
+    def _sub_bearer(self, counts: Counter[str], m: re.Match[str]) -> str:
+        return m.group(1) + self._token("bearer", m.group(2), counts)
+
+    def _sub_api_key(self, counts: Counter[str], m: re.Match[str]) -> str:
+        return self._token("api_key", m.group(0), counts)
+
+    def _sub_json_secret(self, counts: Counter[str], m: re.Match[str]) -> str:
+        category = self._field_category(m.group(2), m.group(3), in_url=False)
+        if category is None:
+            return m.group(0)
+        return m.group(1) + self._token(category, m.group(3), counts) + m.group(4)
+
+    def _sub_json_number(self, counts: Counter[str], m: re.Match[str]) -> str:
+        category = self._field_category(m.group(2), m.group(3), in_url=False)
+        if category is None:
+            return m.group(0)
+        return f'{m.group(1)}"{self._token(category, m.group(3), counts)}"'
+
+    def _sub_kv_secret(self, counts: Counter[str], m: re.Match[str]) -> str:
+        value = unquote_plus(m.group(3))
+        category = self._field_category(m.group(1), value, in_url=False)
+        if category is None:
+            return m.group(0)
+        return m.group(1) + m.group(2) + self._token(category, value, counts)
+
+    def _sub_email(self, counts: Counter[str], m: re.Match[str]) -> str:
+        return self._token("email", m.group(0), counts)
+
+    def _sub_card(self, counts: Counter[str], m: re.Match[str]) -> str:
+        digits = self._card_digits(m)
+        return m.group(0) if digits is None else self._token("card", digits, counts)
+
+    def _sub_ssn(self, counts: Counter[str], m: re.Match[str]) -> str:
+        if not _ssn_valid(m) or not _ssn_in_context(m.string, m.start()):
+            return m.group(0)
+        return self._token("ssn", m.group(0), counts)
+
+    def _sub_url(self, counts: Counter[str], m: re.Match[str]) -> str:
+        return self._url_in_text(m.group(0), counts, escaped=False)
+
+    def _sub_escaped_url(self, counts: Counter[str], m: re.Match[str]) -> str:
+        return self._url_in_text(m.group(0), counts, escaped=True)
+
+    def _sub_basic(self, counts: Counter[str], m: re.Match[str]) -> str:
+        if not _is_basic_credential(m.group(2)):
+            return m.group(0)
+        return m.group(1) + self._token("auth", m.group(2), counts)
+
+    def _sub_auth_text(self, counts: Counter[str], m: re.Match[str]) -> str:
+        if not _looks_like_secret(m.group(2)):
+            return m.group(0)
+        return m.group(1) + self._token("auth", m.group(2), counts)
+
+    def _sub_text_pair(self, counts: Counter[str], m: re.Match[str]) -> str:
+        prefix, name, quote_char, value = m.group(1, 2, 3, 4)
+        kept = value if quote_char else value.rstrip(_URL_TRAILING)
+        if (
+            not kept
+            or _norm_param(name) in _PAIR_EXCLUDED_NAMES
+            or not _is_secret_param(name, in_url=False)
+            or not _looks_like_secret(kept)
+        ):
+            return m.group(0)
+        return prefix + self._token("secret_param", kept, counts) + value[len(kept) :]
 
     def _url_in_text(self, found: str, counts: Counter[str], *, escaped: bool) -> str:
         """Redact a URL found inside free text as ``_url`` would, leaving it unchanged otherwise."""

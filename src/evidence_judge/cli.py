@@ -27,6 +27,7 @@ from evidence_judge.ingest import MismatchedEvidenceError
 from evidence_judge.integrations import exporters
 from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
+from evidence_judge.llm.budget import Budget
 from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import (
     print_evidence_summary,
@@ -225,20 +226,89 @@ def _describe(report: RedactionReport) -> str:
     return f"redacted {report.total} values ({parts})"
 
 
+def _require_evidence(trace: Path | None, har: Path | None, browser_use: Path | None) -> None:
+    if not (trace or har or browser_use):
+        raise InputUsageError("provide evidence with --trace, --har and/or --browser-use")
+
+
+def _check_exporters(otel: bool, langfuse_trace_id: str | None) -> None:
+    try:
+        exporters.check(otel=otel, langfuse_trace_id=langfuse_trace_id)
+    except (ImportError, ValueError) as e:
+        raise CliError(str(e), ExitCode.USAGE) from e
+
+
+def _redact_inputs(
+    redactor: Redactor, run: Run, spec: TaskSpec | None, claims: ClaimSet | None
+) -> tuple[Run, TaskSpec | None, ClaimSet | None, RedactionReport]:
+    run, report = redactor.redact_run(run)
+    if spec is not None:
+        spec, _ = redactor.redact_model(spec)
+    if claims is not None:
+        claims, _ = redactor.redact_model(claims)
+    return run, spec, claims, report
+
+
+def _warn_about_model(
+    err: Console, settings: Settings, llm: LLMClient | None, *, offline: bool
+) -> None:
+    if llm is None and not offline:
+        err.print(Text("no LLM configured; judging offline", style="yellow"))
+    if llm is not None and settings.screenshots_to_llm:
+        err.print(
+            Text(
+                "screenshots: unredacted screenshots may be sent to the model provider "
+                "(EVJ_SCREENSHOTS_TO_LLM=true)",
+                style="yellow",
+            ),
+            soft_wrap=True,
+        )
+
+
+def _print_written(err: Console, outputs: tuple[tuple[str, Path | None], ...]) -> None:
+    for label, path in outputs:
+        if path:
+            err.print(Text.assemble((f"wrote {label} ", "dim"), str(path)))
+
+
 _FileOpt = dict[str, Any]
 _IN_FILE: _FileOpt = {"exists": True, "dir_okay": False, "readable": True, "resolve_path": True}
 _IN_ANY: _FileOpt = {"exists": True, "readable": True, "resolve_path": True}
 _OUT_FILE: _FileOpt = {"dir_okay": False, "writable": True, "resolve_path": True}
 
+_Trace = Annotated[Path | None, typer.Option(help="Playwright trace .zip", **_IN_FILE)]
+_Har = Annotated[Path | None, typer.Option(help="HAR file", **_IN_FILE)]
+_BrowserUse = Annotated[
+    Path | None,
+    typer.Option("--browser-use", help="browser-use history JSON or run directory", **_IN_ANY),
+]
+_Debug = Annotated[bool, typer.Option(help="Show tracebacks for internal errors")]
+_AllowMismatch = Annotated[
+    bool,
+    typer.Option("--allow-mismatch", help="Accept a HAR that does not appear to match the trace"),
+]
+_ScreenshotRoot = Annotated[
+    Path | None,
+    typer.Option(
+        help="Directory browser-use screenshots may be read from (default: next to the history)"
+    ),
+]
+_Otel = Annotated[
+    bool,
+    typer.Option(
+        "--otel", help="Emit gen_ai.evaluation.result events via OpenTelemetry (OTEL_* env)"
+    ),
+]
+_LangfuseTraceId = Annotated[
+    str | None, typer.Option(help="Push scores to this Langfuse trace (LANGFUSE_* env)")
+]
+
 
 @app.command()
 def judge(
-    trace: Annotated[Path | None, typer.Option(help="Playwright trace .zip", **_IN_FILE)] = None,
-    har: Annotated[Path | None, typer.Option(help="HAR file", **_IN_FILE)] = None,
-    browser_use: Annotated[
-        Path | None,
-        typer.Option("--browser-use", help="browser-use history JSON or run directory", **_IN_ANY),
-    ] = None,
+    trace: _Trace = None,
+    har: _Har = None,
+    browser_use: _BrowserUse = None,
     task: Annotated[str | None, typer.Option(help="Task given to the agent")] = None,
     answer: Annotated[str | None, typer.Option(help="The agent's final answer")] = None,
     answer_file: Annotated[
@@ -264,42 +334,21 @@ def judge(
         bool, typer.Option("--no-redact", help="Keep secrets and PII in evidence and reports")
     ] = False,
     run_id: Annotated[str | None, typer.Option(help="Override the run id")] = None,
-    allow_mismatch: Annotated[
-        bool,
-        typer.Option(
-            "--allow-mismatch", help="Accept a HAR that does not appear to match the trace"
-        ),
-    ] = False,
-    screenshot_root: Annotated[
-        Path | None,
-        typer.Option(
-            help="Directory browser-use screenshots may be read from (default: next to the history)"
-        ),
-    ] = None,
+    allow_mismatch: _AllowMismatch = False,
+    screenshot_root: _ScreenshotRoot = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
-    debug: Annotated[bool, typer.Option(help="Show tracebacks for internal errors")] = False,
-    otel: Annotated[
-        bool,
-        typer.Option(
-            "--otel", help="Emit gen_ai.evaluation.result events via OpenTelemetry (OTEL_* env)"
-        ),
-    ] = False,
-    langfuse_trace_id: Annotated[
-        str | None, typer.Option(help="Push scores to this Langfuse trace (LANGFUSE_* env)")
-    ] = None,
+    debug: _Debug = False,
+    otel: _Otel = False,
+    langfuse_trace_id: _LangfuseTraceId = None,
 ) -> None:
     """Judge one agent run. Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
-    if not (trace or har or browser_use):
-        raise InputUsageError("provide evidence with --trace, --har and/or --browser-use")
+    _require_evidence(trace, har, browser_use)
     if answer is not None and answer_file is not None:
         raise InputUsageError("use either --answer or --answer-file, not both")
 
     err = _stderr()
     try:
-        try:
-            exporters.check(otel=otel, langfuse_trace_id=langfuse_trace_id)
-        except (ImportError, ValueError) as e:
-            raise CliError(str(e), ExitCode.USAGE) from e
+        _check_exporters(otel, langfuse_trace_id)
         settings = _settings()
         task_spec = _load_spec(spec) if spec else None
         claim_set = _load_claims(claims) if claims else None
@@ -320,27 +369,13 @@ def judge(
         llm = None if offline else _build_llm(settings)
         if settings.redact and not no_redact:
             redactor = _redactor(settings, persistent=llm is not None)
-            run, report = redactor.redact_run(run)
-            if task_spec is not None:
-                task_spec, _ = redactor.redact_model(task_spec)
-            if claim_set is not None:
-                claim_set, _ = redactor.redact_model(claim_set)
+            run, task_spec, claim_set, report = _redact_inputs(redactor, run, task_spec, claim_set)
             if not quiet:
                 err.print(Text(_describe(report), style="dim"))
         elif not quiet:
             err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
-
-        if llm is None and not offline and not quiet:
-            err.print(Text("no LLM configured; judging offline", style="yellow"))
-        if llm is not None and settings.screenshots_to_llm and not quiet:
-            err.print(
-                Text(
-                    "screenshots: unredacted screenshots may be sent to the model provider "
-                    "(EVJ_SCREENSHOTS_TO_LLM=true)",
-                    style="yellow",
-                ),
-                soft_wrap=True,
-            )
+        if not quiet:
+            _warn_about_model(err, settings, llm, offline=offline)
         verdict = _run_judge(
             settings, llm, run, offline=offline or llm is None, spec=task_spec, claims=claim_set
         )
@@ -359,9 +394,7 @@ def judge(
 
     if not quiet:
         print_verdict(verdict, Console(highlight=False))
-        for label, path in (("json", out), ("html", html)):
-            if path:
-                err.print(Text.assemble((f"wrote {label} ", "dim"), str(path)))
+        _print_written(err, (("json", out), ("html", html)))
         for warning in export_warnings:
             err.print(Text(warning, style="yellow"))
     raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
@@ -369,19 +402,15 @@ def judge(
 
 @app.command()
 def inspect(
-    trace: Annotated[Path | None, typer.Option(help="Playwright trace .zip", **_IN_FILE)] = None,
-    har: Annotated[Path | None, typer.Option(help="HAR file", **_IN_FILE)] = None,
-    browser_use: Annotated[
-        Path | None,
-        typer.Option("--browser-use", help="browser-use history JSON or run directory", **_IN_ANY),
-    ] = None,
+    trace: _Trace = None,
+    har: _Har = None,
+    browser_use: _BrowserUse = None,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable JSON")] = False,
     no_redact: Annotated[bool, typer.Option("--no-redact", help="Show raw URLs")] = False,
-    debug: Annotated[bool, typer.Option(help="Show tracebacks for internal errors")] = False,
+    debug: _Debug = False,
 ) -> None:
     """Summarise the evidence in a trace, HAR or browser-use run without judging it."""
-    if not (trace or har or browser_use):
-        raise InputUsageError("provide evidence with --trace, --har and/or --browser-use")
+    _require_evidence(trace, har, browser_use)
     try:
         settings = _settings()
         run = _load_run(
@@ -426,6 +455,21 @@ def version() -> None:
     typer.echo(f"evidence-judge {__version__}")
 
 
+def _bench_llm(settings: Settings, calls: int) -> LLMClient | None:
+    """The benchmark's LLM with one budget for all ``calls``; None when no call needs a model."""
+    if not calls:
+        return None
+    try:
+        llm = factory.build_llm(settings, budget=Budget(settings.max_cost_usd * calls))
+    except LLMError as e:
+        raise CliError(f"could not initialise the LLM client: {e}", ExitCode.INTERNAL) from e
+    if llm is None:
+        raise CliError(
+            "--with-llm-baseline and --online need an LLM; set ANTHROPIC_API_KEY", ExitCode.USAGE
+        )
+    return llm
+
+
 @app.command()
 def bench(
     runs_dir: Annotated[
@@ -464,7 +508,7 @@ def bench(
         bool, typer.Option("--no-redact", help="Judge unredacted evidence and agent text")
     ] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Do not print the report")] = False,
-    debug: Annotated[bool, typer.Option(help="Show tracebacks for internal errors")] = False,
+    debug: _Debug = False,
 ) -> None:
     """Benchmark judges on forged runs: false-PASS rates and accuracy on honest controls."""
     from evidence_judge.baselines import TranscriptLLMJudge
@@ -477,7 +521,6 @@ def bench(
         write_json,
         write_markdown,
     )
-    from evidence_judge.llm.budget import Budget
 
     try:
         settings = _settings()
@@ -486,20 +529,8 @@ def bench(
         except ValueError as e:
             raise CliError(str(e), ExitCode.USAGE) from e
         config = BenchConfig(seeds=seeds, offline=offline)
-        llm: LLMClient | None = None
         calls = llm_calls_upper_bound(scenarios, config, baseline=with_llm_baseline)
-        if calls:
-            try:
-                llm = factory.build_llm(settings, budget=Budget(settings.max_cost_usd * calls))
-            except LLMError as e:
-                raise CliError(
-                    f"could not initialise the LLM client: {e}", ExitCode.INTERNAL
-                ) from e
-            if llm is None:
-                raise CliError(
-                    "--with-llm-baseline and --online need an LLM; set ANTHROPIC_API_KEY",
-                    ExitCode.USAGE,
-                )
+        llm = _bench_llm(settings, calls)
         runner = BenchmarkRunner(
             settings,
             config,
@@ -529,6 +560,4 @@ def bench(
 
     if not quiet:
         typer.echo(to_markdown(result), nl=False)
-        for label, path in (("json", out), ("markdown", markdown)):
-            if path:
-                _stderr().print(Text.assemble((f"wrote {label} ", "dim"), str(path)))
+        _print_written(_stderr(), (("json", out), ("markdown", markdown)))

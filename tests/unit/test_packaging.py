@@ -110,3 +110,20 @@ def test_action_summary_goes_through_the_escaping_module() -> None:
     assert "-m evidence_judge.ci_summary" in script
     assert "GITHUB_STEP_SUMMARY" not in script
     assert "['summary']" not in script
+
+
+def test_action_never_reuses_an_earlier_verdict() -> None:
+    judge = next(s for s in _action()["runs"]["steps"] if s.get("id") == "judge")
+    script: str = judge["run"]
+    assert 'out=$(mktemp -d "$RUNNER_TEMP/evidence-judge.XXXXXX")' in script
+    assert 'if [ "$code" -ge 3 ] ||' in script
+
+
+def test_ci_exercises_the_action_failure_path() -> None:
+    import yaml
+
+    ci = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    steps = ci["jobs"]["action"]["steps"]
+    broken = next(s for s in steps if s.get("id") == "broken")
+    assert broken["continue-on-error"] is True
+    assert 'test "$BROKEN_STEP" = failure' in steps[-1]["run"]

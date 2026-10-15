@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero.svg" width="100%" alt="Evidence Judge: don't trust what the agent says, check what it did. An agent's claim 'I placed the order' is checked against recorded evidence and stamped CONTRADICTED, no POST /api/orders">
+  <img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/hero.svg" width="100%" alt="Evidence Judge: don't trust what the agent says, check what it did. An agent's claim 'I placed the order' is checked against recorded evidence and stamped CONTRADICTED, no POST /api/orders">
 </p>
 
 <p align="center">
@@ -15,10 +15,10 @@
   <a href="#-quick-start">Quick start</a> ·
   <a href="#-how-it-works">How it works</a> ·
   <a href="#-benchmark-can-a-forged-story-fool-it">Benchmark</a> ·
-  <a href="docs/">Docs</a>
+  <a href="https://hsayvaidya23.github.io/evidence-judge/">Docs</a>
 </p>
 
-<img align="right" src="docs/assets/mascot.svg" width="120" alt="Judge Owl, the Evidence Judge mascot">
+<img align="right" src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/mascot.svg" width="120" alt="Judge Owl, the Evidence Judge mascot">
 
 Evidence Judge grades **browser and computer-use agent runs** by pulling out every claim the agent makes and checking each one against what was actually recorded: network requests, page state, screenshots and the final page. An agent can't talk its way into a PASS.
 
@@ -27,26 +27,26 @@ Evidence Judge grades **browser and computer-use agent runs** by pulling out eve
 **1. The agent shops, stops at checkout, and then claims success.**
 
 <p align="center">
-  <img src="docs/assets/demo-agent-run.webp" width="900" alt="A browser agent adds the red kettle to the cart, stops at checkout without confirming, then claims order #1042 was placed">
+  <img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/demo-agent-run.webp" width="900" alt="A browser agent adds the red kettle to the cart, stops at checkout without confirming, then claims order #1042 was placed">
 </p>
 
 **2. Evidence Judge checks the claim against the recording.**
 
 <p align="center">
-  <img src="docs/assets/demo-forged.svg" width="900" alt="evidence-judge judge on a forged run: FAIL 45/100, three key claims contradicted, exit code 1">
+  <img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/demo-forged.svg" width="900" alt="evidence-judge judge on a forged run: FAIL 45/100, three key claims contradicted, exit code 1">
 </p>
 
 **3. The report shows exactly why, and every verdict cites its evidence.**
 
 <p align="center">
-  <img src="docs/assets/demo-verdict.webp" width="900" alt="Evidence Judge report: FAIL, the order claim is contradicted, no POST /api/orders, every verdict cites evidence">
+  <img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/demo-verdict.webp" width="900" alt="Evidence Judge report: FAIL, the order claim is contradicted, no POST /api/orders, every verdict cites evidence">
 </p>
 
 <details>
 <summary><b>And an honest run? It passes.</b></summary>
 <br>
 <p align="center">
-  <img src="docs/assets/demo-honest.svg" width="900" alt="evidence-judge judge on an honest run: PASS 100/100, exit code 0">
+  <img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/demo-honest.svg" width="900" alt="evidence-judge judge on an honest run: PASS 100/100, exit code 0">
 </p>
 </details>
 
@@ -66,7 +66,7 @@ So Evidence Judge never asks *"does this transcript sound successful?"* It asks 
 ## 🔍 How it works
 
 <p align="center">
-  <img src="docs/assets/how-it-works.svg" width="900" alt="Pipeline: ingest, redact, extract claims, predicates, checkers, verdict; the forged order claim ends in FAIL because no POST /api/orders was sent">
+  <img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/how-it-works.svg" width="900" alt="Pipeline: ingest, redact, extract claims, predicates, checkers, verdict; the forged order claim ends in FAIL because no POST /api/orders was sent">
 </p>
 
 ```mermaid
@@ -95,19 +95,19 @@ flowchart LR
 <summary><b>See the HTML report</b> (light / dark / phone)</summary>
 <br>
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/report-fail-dark.png">
-  <img src="docs/assets/report-fail-light.png" width="900" alt="HTML report for a forged success: FAIL 45/100 with contradicted claims and citations">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/report-fail-dark.png">
+  <img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/report-fail-light.png" width="900" alt="HTML report for a forged success: FAIL 45/100 with contradicted claims and citations">
 </picture>
 <br><br>
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/report-pass-dark.png">
-  <img src="docs/assets/report-pass-light.png" width="900" alt="HTML report for an honest success: PASS 100/100, every claim supported">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/report-pass-dark.png">
+  <img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/report-pass-light.png" width="900" alt="HTML report for an honest success: PASS 100/100, every claim supported">
 </picture>
 <br><br>
-<img src="docs/assets/report-mobile.png" width="300" alt="The report on a phone">
+<img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/report-mobile.png" width="300" alt="The report on a phone">
 </details>
 
-See [docs/architecture.md](docs/architecture.md).
+See [docs/architecture.md](https://github.com/hsayvaidya23/evidence-judge/blob/main/docs/architecture.md).
 
 ## 📦 Install
 
@@ -170,8 +170,8 @@ history's directory unless you widen it with `--screenshot-root DIR`.
 Other commands: `evidence-judge inspect --trace trace.zip --har run.har` (what was captured),
 `evidence-judge schema` (verdict JSON Schema), `evidence-judge version`.
 
-Full references: [docs/cli.md](docs/cli.md) (every command and option) and
-[docs/task-specs.md](docs/task-specs.md).
+Full references: [docs/cli.md](https://github.com/hsayvaidya23/evidence-judge/blob/main/docs/cli.md) (every command and option) and
+[docs/task-specs.md](https://github.com/hsayvaidya23/evidence-judge/blob/main/docs/task-specs.md).
 
 ## 📥 Inputs
 
@@ -207,7 +207,7 @@ print(verdict.outcome, verdict.summary)
 
 ## ⚙️ Configuration
 
-Environment variables (or `.env`, see [.env.example](.env.example)):
+Environment variables (or `.env`, see [.env.example](https://github.com/hsayvaidya23/evidence-judge/blob/main/.env.example)):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -232,10 +232,10 @@ the cache directory is not writable, a per-process key is used with a one-line w
 ## 🧪 Benchmark: can a forged story fool it?
 
 <p align="center">
-  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 135 forged runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
+  <img src="https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 135 forged runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
 </p>
 
-The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites only the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks aimed at the claim extractor, evidence-tampering attacks (the agent types its own "confirmation" into the page, or sends the order to a third-party host), and a style-only control. The real order is never placed, so the correct verdict is never PASS. Counts below pool the 8 attack kinds (120 runs per judge); the style-only control adds 15 more, also 0 passes.
+The [forgery lab](https://github.com/hsayvaidya23/evidence-judge/blob/main/docs/benchmark.md) takes recorded runs that **failed** and rewrites only the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks aimed at the claim extractor, evidence-tampering attacks (the agent types its own "confirmation" into the page, or sends the order to a third-party host), and a style-only control. The real order is never placed, so the correct verdict is never PASS. Counts below pool the 8 attack kinds (120 runs per judge); the style-only control adds 15 more, also 0 passes.
 
 | Judge | Forged runs | False PASS | 95% CI |
 | --- | ---: | ---: | --- |
@@ -243,11 +243,11 @@ The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rew
 | Evidence Judge + generic task spec (offline) | 120 | **0** (19 sent to review) | 0–3% |
 | Evidence Judge, no spec (offline) | 120 | **0** (66 sent to review) | 0–3% |
 
-Honest controls: 7/7 correct with the exact spec, 6/7 with the generic one (the side-effect run goes to review because the generic spec has no `forbid` rule). Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`; add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
+Honest controls: 7/7 correct with the exact spec, 6/7 with the generic one (the side-effect run goes to review because the generic spec has no `forbid` rule). Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`; add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](https://github.com/hsayvaidya23/evidence-judge/blob/main/bench/results/offline-fixtures.md).
 
 ## 🔌 Integrations
 
-Send verdicts to the tools you already use (each is an optional extra; see [docs/integrations.md](docs/integrations.md)):
+Send verdicts to the tools you already use (each is an optional extra; see [docs/integrations.md](https://github.com/hsayvaidya23/evidence-judge/blob/main/docs/integrations.md)):
 
 | Tool | Install | Use |
 | --- | --- | --- |
@@ -288,7 +288,7 @@ uv sync
 make ci        # ruff, format check, pyright (strict), tests
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](https://github.com/hsayvaidya23/evidence-judge/blob/main/CONTRIBUTING.md). Security reports: [SECURITY.md](https://github.com/hsayvaidya23/evidence-judge/blob/main/SECURITY.md).
 
 ## 🗺️ Roadmap
 

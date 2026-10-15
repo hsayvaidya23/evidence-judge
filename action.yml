@@ -82,8 +82,7 @@ runs:
         EJ_OFFLINE: ${{ inputs.offline }}
         EJ_FAIL_ON_REVIEW: ${{ inputs.fail-on-review }}
       run: |
-        out="$RUNNER_TEMP/evidence-judge"
-        mkdir -p "$out"
+        out=$(mktemp -d "$RUNNER_TEMP/evidence-judge.XXXXXX")
         args=(judge --out "$out/verdict.json" --html "$out/report.html")
         [ -n "$EJ_TRACE" ] && args+=(--trace "$EJ_TRACE")
         [ -n "$EJ_HAR" ] && args+=(--har "$EJ_HAR")
@@ -100,9 +99,9 @@ runs:
         code=$?
         set -e
         echo "::$stop_token::"
-        if [ ! -f "$out/verdict.json" ]; then
-          echo "::error::evidence-judge exited $code without a verdict"
-          exit "$code"
+        if [ "$code" -ge 3 ] || [ ! -f "$out/verdict.json" ]; then
+          echo "::error::evidence-judge exited $code without a usable verdict"
+          [ "$code" -ne 0 ] && exit "$code" || exit 4
         fi
         # Agent text in the summary is escaped so the job summary cannot render it as markup.
         outcome=$("$(uv tool dir)/evidence-judge/bin/python" -m evidence_judge.ci_summary \
