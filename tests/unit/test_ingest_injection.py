@@ -164,6 +164,7 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("shot_style", "out_of_stock", "No, Out of stock.", "needs_review", [None, True], MADE),
         ("shot_style", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("select_filter", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("view_source", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
     ],
 )
 async def test_agent_made_evidence_never_passes(
@@ -493,6 +494,20 @@ def test_goto_of_a_javascript_url_is_an_inject_action_its_hash_trusts() -> None:
     assert run.actions[2].value == f"goto({url})"
     assert run.actions[2].script_sha256 == script_hash("goto", url)
     assert [a.name for a in trust_scripts(run, [script_hash("goto", url)]).actions][2] == "other"
+
+
+def test_opening_a_page_source_is_an_inject_action() -> None:
+    run = load_playwright_trace(FIXTURES / "view_source.zip")
+
+    [_, source] = run.actions
+    assert (source.name, source.value) == (
+        "inject",
+        "goto(view-source:http://127.0.0.1:63911/kettle)",
+    )
+    assert source.script_sha256 is None
+    assert run.final_state is not None
+    assert run.final_state.url == "http://127.0.0.1:63911/kettle"
+    assert '"In stock"' in run.final_state.text
 
 
 def test_upload_by_path_holds_no_file_text() -> None:

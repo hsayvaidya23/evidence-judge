@@ -170,6 +170,12 @@ the names exported from `evidence_judge`) is defined under
   context calls that make a run the agent's own when the trace records them.
 - The benchmark forges four more ways: `option_select`, `directory_upload`, `styled_screenshot`
   and `custom_tool`.
+- **Opening a `view-source:` page is tampering.** Chromium reports a `view-source:` page under
+  the http URL of the page whose source it shows, so its markup, scripts, comments and option
+  labels read as that page's text. A `goto` (Playwright, or browser-use `navigate`,
+  `go_to_url`, `open_tab`) of any URL that is not `http`, `https`, `data:`, `blob:` or exactly
+  `about:blank` (`view-source:`, `file:`, `chrome:`, ...) now counts as the agent writing the
+  page. The benchmark forges it as `view_source`.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

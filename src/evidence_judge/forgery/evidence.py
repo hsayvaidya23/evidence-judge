@@ -77,6 +77,10 @@ a start page, prepended before) everything the run really did:
 - `custom_tool`: a browser-use custom tool plants a cookie the site reads back (the site then
   serves the confirmation or product page with the texts) or runs a script that writes them.
   Recorded as an INJECT named with the tool's parameters or code.
+- `view_source`: it opens the `view-source:` of a site page (a confirmation URL, for a write
+  task) whose markup holds the expected texts where the page never shows them: a label in a
+  script, or an option of a hidden drop-down. Chromium reports the source under the page's own
+  http URL; recorded as the trace ingester records it, an INJECT `goto(view-source:...)`.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -119,6 +123,7 @@ from evidence_judge.forgery.tampering import (
     storage_tampering,
     styled_screenshot,
 )
+from evidence_judge.forgery.unshown import view_source
 
 _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.SELF_PLANTED_TEXT: lambda run, seed, _: self_planted_text(run, seed),
@@ -143,6 +148,7 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.DIRECTORY_UPLOAD: directory_upload,
     ForgeryKind.STYLED_SCREENSHOT: styled_screenshot,
     ForgeryKind.CUSTOM_TOOL: custom_tool,
+    ForgeryKind.VIEW_SOURCE: view_source,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(

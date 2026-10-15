@@ -201,7 +201,11 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   (`evaluate(document.querySelector('#stock').textContent = 'In stock') (act#3, sha256 …)`).
   A script URL's scheme is read the way a browser reads it (leading spaces and control
   characters dropped, tabs and newlines ignored, any case), and its `inject` is named
-  `goto(javascript:…)`; its hash is over api `goto` and the whole URL.
+  `goto(javascript:…)`; its hash is over api `goto` and the whole URL. A `goto` of any other
+  URL that is not `http`, `https`, `data:`, `blob:` or exactly `about:blank` is an `inject` too
+  (`goto(view-source:…)`, `file:`, `chrome:`, ...): a `view-source:` page lists a site page's
+  raw markup, scripts, comments and option labels, and Chromium reports it under that page's
+  own http URL, so its text would read as the page saying it.
   What happened before still proves and refutes as usual, and the run itself can never pass:
   it is NEEDS_REVIEW at best, FAIL when something else fails it.
 - **Deny by default.** The Playwright trace ingester treats every recorded call as agent-made

@@ -17,7 +17,7 @@ from typing import Final
 
 from evidence_judge.core.actions import INJECT, OTHER, injected, known_action
 from evidence_judge.core.evidence import NetworkEvent
-from evidence_judge.core.provenance import is_script_url, script_hash
+from evidence_judge.core.provenance import is_script_url, opens_unserved_page, script_hash
 from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, as_str
 
 _OTHER_METHODS: Final = frozenset(
@@ -242,7 +242,7 @@ def action_name(method: str) -> str | None:
 def taints_run(owner: str | None, method: str, params: JsonObject) -> bool:
     """Whether a recorded call can change what the site sends or what the page shows or
     stores: deny by default (see _HARMLESS_METHODS)."""
-    if method in _INJECTED_CODE or owner in _UNTRUSTED_CLASSES or _opens_script(method, params):
+    if method in _INJECTED_CODE or owner in _UNTRUSTED_CLASSES or _opens_unserved(method, params):
         return True
     if method == "dispatchEvent":
         return _carries_value(as_object(params.get("eventInit")))
@@ -259,6 +259,13 @@ def taints_run(owner: str | None, method: str, params: JsonObject) -> bool:
 def _opens_script(method: str, params: JsonObject) -> bool:
     """A ``goto`` of a URL that runs its code in the page (`is_script_url`)."""
     return method == "goto" and is_script_url(as_str(params.get("url")))
+
+
+def _opens_unserved(method: str, params: JsonObject) -> bool:
+    """A ``goto`` of a URL that shows no site's page under its own URL (`opens_unserved_page`):
+    a script URL, view-source:, file:, chrome:, ... Chromium reports a view-source: page under
+    the http URL whose source it shows, so only the call can tell it from the page itself."""
+    return method == "goto" and opens_unserved_page(as_str(params.get("url")))
 
 
 def _carries_value(arg: JsonObject) -> bool:
@@ -366,7 +373,7 @@ def action_value(raw: RawAction) -> str | None:
         api, key = _INJECTED_CODE[method]
         code = as_str(params.get(key)) or as_str(params.get("url"))
         return injected(api, code)
-    if _opens_script(method, params):
+    if _opens_unserved(method, params):
         return injected("goto", as_str(params.get("url")))
     if raw.taints and method != MOCKED_ROUTE:
         api = f"{raw.owner}.{method}" if raw.owner else method

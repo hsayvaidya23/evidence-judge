@@ -146,7 +146,10 @@ def load_playwright_trace(
 
     ``final_state`` is the last snapshot of the main page that shows a page a site served:
     only ``http`` and ``https`` snapshots count (``is_web_page_url``), never ``about:``,
-    ``data:``, ``view-source:`` or browser-internal URLs. The main page is the page (``pageId``) of the agent's last
+    ``data:``, ``blob:`` or browser-internal URLs. A ``view-source:`` page is not told apart
+    here: Chromium reports it under the http URL of the page whose source it shows, so the
+    ``goto`` that opens it is an INJECT (``opens_unserved_page``) and evidence from then on is
+    not the site's. The main page is the page (``pageId``) of the agent's last
     action that has such a snapshot, so a tab opened after that action (a popup, an ad, a page
     the agent never acted on) is ignored, and a tab the agent did act in last is followed. With
     no such action, it is the first page opened. Its screenshot is the last screencast frame of

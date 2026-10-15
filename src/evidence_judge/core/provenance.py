@@ -10,7 +10,10 @@ ingester also records as INJECT every call it does not know to be harmless (deny
 storage and cookie writes, CDP sessions, WebSocket routes, ...).
 
 Opening a `javascript:` or `vbscript:` URL runs its code in the page the way `evaluate` does;
-ingesters record that navigation as an INJECT (`is_script_url`).
+ingesters record that navigation as an INJECT (`is_script_url`). So is opening any URL that
+shows something other than a site's page under that page's URL (`opens_unserved_page`): a
+`view-source:` page lists a site page's raw markup, scripts and comments, and Chromium reports
+it under the http URL of the page whose source it shows, so its text would read as that page's.
 
 A file the agent uploads by path, folder or stream (or a binary one), or an upload the
 recording names no file for, is not in the recording, and the page may show its contents: page text after such an upload (`unseen_uploads`) may be the
@@ -22,7 +25,7 @@ them still proves.
 A script the spec's author vouched for is not the agent writing the page: `trust_scripts`
 records an INJECT whose `script_sha256` the spec's `trusted_scripts` lists as OTHER.
 
-A page the agent opened that no site served (data:, blob:, about:, javascript:, file: ...) holds
+A page the agent opened that no site served (data:, blob:, about:blank ...) holds
 whatever the agent wrote into it, links included, so following one of its links is the agent
 choosing the URL. `mark_agent_page_navigations` records such a navigation as a GOTO of its
 target, which makes the target's URL agent input like any URL the agent typed.
@@ -45,8 +48,14 @@ NAVIGATION_SUFFIX: Final = ".goto"
 """Suffix of the id of a GOTO that `mark_agent_page_navigations` adds after an action."""
 SCRIPT_SCHEMES: Final = ("javascript:", "vbscript:")
 """URL schemes whose navigation runs the URL's code in the current page."""
+NAVIGABLE_SCHEMES: Final = frozenset({"http", "https", "data", "blob"})
+"""Schemes an agent may open without tainting the run: a site's pages, and pages the agent wrote
+(data:, blob:) that Chromium reports under their own URL, which never counts as a site's
+(`is_agent_page`)."""
 _URL_SPACE = re.compile(r"[\t\n\r]")
 _URL_LEADING = "".join(chr(c) for c in range(0x21))
+_SCHEME = re.compile(r"([a-z][a-z0-9+.\-]*):(.*)", re.DOTALL)
+_PORT = re.compile(r"\d+(?:[/?#]|$)")
 
 
 def is_script_url(url: str | None) -> bool:
@@ -56,6 +65,21 @@ def is_script_url(url: str | None) -> bool:
     if not url:
         return False
     return _URL_SPACE.sub("", url).lstrip(_URL_LEADING).lower().startswith(SCRIPT_SCHEMES)
+
+
+def opens_unserved_page(url: str | None) -> bool:
+    """Opening `url` shows something other than a site's page or a page reported under its own
+    URL: a script URL (`is_script_url`), or any scheme but NAVIGABLE_SCHEMES (view-source:,
+    file:, chrome:, about: other than exactly about:blank, ...). The scheme is read as
+    `is_script_url` reads it; a URL without one ("shop.test/cart") or that starts with a host
+    and port ("localhost:8000/") is a site's page."""
+    if not url:
+        return False
+    text = _URL_SPACE.sub("", url).strip(_URL_LEADING).lower()
+    match = _SCHEME.match(text)
+    if match is None or _PORT.match(match.group(2)) or text == "about:blank":
+        return False
+    return match.group(1) not in NAVIGABLE_SCHEMES
 
 
 def script_hash(api: str, code: str, arg: object = None) -> str:

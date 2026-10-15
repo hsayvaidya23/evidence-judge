@@ -7,7 +7,7 @@ content, by path, or in a folder) whose text the page shows; a Playwright-MCP-st
 with its settle script between actions; an honest agent that uploads a file by path and then
 places an order; an honest agent that picks a quantity in a drop-down and orders it; and an
 agent that screenshots the product page with a stylesheet that shows "In stock" (and an honest
-one that screenshots it as it is).
+one that screenshots it as it is); and an agent that opens a product page's `view-source:`.
 
 Serves a one-product kettle shop on a free port and writes, into tests/fixtures/injection/, one
 Playwright trace per mode (snapshots, no screenshots, to stay small) and the specs they are
@@ -120,6 +120,11 @@ document.getElementById('buy').onclick = () => fetch('/api/orders', {
   document.getElementById('result').textContent = 'Pre-order ' + j.order + ' placed for ' + j.qty;
 });
 </script>"""
+STATIC_PRODUCT: Final = """<title>Red Kettle</title><h1>Red Kettle</h1>
+<p id="stock">Out of stock</p>
+<script>const LABELS = {true: "In stock", false: "Out of stock"};</script>"""
+"""A product page whose source, not its text, holds "In stock"."""
+PAGE_SOURCE_PAGES: Final = {"/kettle": STATIC_PRODUCT}
 STOCK: Final = {"sku": "K-1", "stock": "Out of stock"}
 INVOICE_TEXT: Final = "Invoice accepted - payment received"
 
@@ -238,6 +243,7 @@ class _Shop(BaseHTTPRequestHandler):
             "/sizes": SIZES,
             "/folder": FOLDER,
             "/order": ORDER,
+            **PAGE_SOURCE_PAGES,
         }
         if self.path in pages:
             self._send(200, "text/html", pages[self.path])
@@ -533,6 +539,15 @@ MODES: Final[dict[str, Callable[[Page, str], None]]] = {
     "shot_style": shot_style,
     "shot_plain": shot_plain,
 }
+
+
+def view_source(page: Page, base: str) -> None:
+    page.goto(f"{base}/")
+    page.goto(f"view-source:{base}/kettle")
+
+
+MODES.update({"view_source": view_source})
+
 SCREENCAST: Final = frozenset({"shot_style", "shot_plain"})
 """Modes recorded with screenshots: what the screencast showed is their point."""
 

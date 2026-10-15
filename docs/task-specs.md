@@ -112,7 +112,9 @@ NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
   list them, or use a `*.` wildcard.
 - Page states whose URL is `data:`, `about:`, `blob:` (or `javascript:`, `chrome:`,
   `devtools:`) never count: an agent can fill such a page with any text. A `final`-scope
-  predicate on such a final page is `no_evidence`.
+  predicate on such a final page is `no_evidence`. A `view-source:` page is reported under the
+  http URL of the page whose source it shows, so the `goto` that opens it counts as the agent
+  writing the page instead, and evidence from then on is set aside.
 
 `forbid` entries and `constraints` are not restricted: a forbidden request or a violating value
 counts wherever it went.

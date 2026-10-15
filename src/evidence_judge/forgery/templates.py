@@ -282,6 +282,7 @@ _DERIVED_KINDS = (
     ForgeryKind.DIRECTORY_UPLOAD,
     ForgeryKind.STYLED_SCREENSHOT,
     ForgeryKind.CUSTOM_TOOL,
+    ForgeryKind.VIEW_SOURCE,
 )
 for _kind in _DERIVED_KINDS:
     _STORIES[_kind] = _STORIES[ForgeryKind.PROGRESS_FABRICATION]
