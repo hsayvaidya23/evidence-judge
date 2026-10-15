@@ -153,6 +153,9 @@ the names exported from `evidence_judge`) is defined under
 - **A folder upload cuts page evidence too.** Uploading a directory (`set_input_files` with a
   folder, or a streamed folder or files over a remote connection) now counts as an upload whose
   contents are not in the recording, as does any upload the recording names no file for.
+- **A restyled screenshot is tampering.** A `screenshot` or `to_have_screenshot` taken with a
+  `style`, `mask` or `mask_color` changes what the page shows while it is captured, so it now
+  counts as the agent writing the page; a plain screenshot is still harmless.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

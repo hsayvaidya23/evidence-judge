@@ -213,7 +213,9 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   offline mode, permissions, the clock, a `route.abort` of anything but an image, font or media
   (blocking those to save bandwidth cannot change what a page says; blocking a document, script,
   stylesheet or API call can, and an abort no recorded request is marked for counts too),
-  `request.fetch` from the test, a
+  `request.fetch` from the test, a screenshot (`screenshot`, `to_have_screenshot`) taken with a
+  `style`, `mask` or `mask_color` (they restyle the page while it is captured, and the
+  screencast records that; a screenshot without them is harmless), a
   `dispatch_event` that carries event data, a dialog accepted with prompt text, and any method
   the allowlist does not know, including ones a later Playwright adds. A `route.fallback` with
   overrides marks no request, so its `inject` is placed where the first route handler was

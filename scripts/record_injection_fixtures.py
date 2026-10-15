@@ -5,7 +5,9 @@ plants local storage or cookies, drives the browser over CDP, mocks a WebSocket,
 editable element, picks "In stock" in an availability filter, or uploads a file (sent with its
 content, by path, or in a folder) whose text the page shows; a Playwright-MCP-style honest agent that waits
 with its settle script between actions; an honest agent that uploads a file by path and then
-places an order; and an honest agent that picks a quantity in a drop-down and orders it.
+places an order; an honest agent that picks a quantity in a drop-down and orders it; and an
+agent that screenshots the product page with a stylesheet that shows "In stock" (and an honest
+one that screenshots it as it is).
 
 Serves a one-product kettle shop on a free port and writes, into tests/fixtures/injection/, one
 Playwright trace per mode (snapshots, no screenshots, to stay small) and the specs they are
@@ -456,6 +458,20 @@ def select_order(page: Page, base: str) -> None:
     page.wait_for_selector("text=Pre-order P-1 placed")
 
 
+RESTYLE: Final = "#stock{font-size:0} #stock::after{content:'In stock';font-size:16px}"
+"""A screenshot stylesheet that hides the stock text and shows "In stock" in its place."""
+
+
+def shot_style(page: Page, base: str) -> None:
+    _open_product(page, base)
+    page.screenshot(style=RESTYLE)
+
+
+def shot_plain(page: Page, base: str) -> None:
+    _open_product(page, base)
+    page.screenshot(full_page=True)
+
+
 def goto_js(page: Page, base: str) -> None:
     _open_product(page, base)
     with suppress(PlaywrightError):
@@ -514,7 +530,11 @@ MODES: Final[dict[str, Callable[[Page, str], None]]] = {
     "select_filter": select_filter,
     "select_order": select_order,
     "dir_upload": dir_upload,
+    "shot_style": shot_style,
+    "shot_plain": shot_plain,
 }
+SCREENCAST: Final = frozenset({"shot_style", "shot_plain"})
+"""Modes recorded with screenshots: what the screencast showed is their point."""
 
 
 def record(mode: str, base: str, out_dir: Path) -> Path:
@@ -522,7 +542,7 @@ def record(mode: str, base: str, out_dir: Path) -> Path:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         context = browser.new_context(viewport={"width": 640, "height": 480})
-        context.tracing.start(snapshots=True)
+        context.tracing.start(snapshots=True, screenshots=mode in SCREENCAST)
         page = context.new_page()
         MODES[mode](page, base)
         page.wait_for_timeout(SETTLE_MS)

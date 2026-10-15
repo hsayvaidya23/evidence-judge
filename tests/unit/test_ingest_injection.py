@@ -161,6 +161,8 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("kd_note", "stock", "Yes, In stock.", "fail", [False, True], "does not contain"),
         ("goto_js", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
         ("dir_upload", "invoice", "The invoice was accepted.", "needs_review", [None], FOLDER),
+        ("shot_style", "out_of_stock", "No, Out of stock.", "needs_review", [None, True], MADE),
+        ("shot_style", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("select_filter", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
     ],
 )
@@ -517,3 +519,38 @@ async def test_an_order_of_the_quantity_chosen_in_a_drop_down_passes() -> None:
 
     assert got is Outcome.PASS, text
     assert results == [("two_ordered", True)]
+
+
+async def test_a_screenshot_that_leaves_the_page_alone_is_harmless() -> None:
+    run = load_playwright_trace(FIXTURES / "shot_plain.zip")
+
+    assert [a.name for a in run.actions] == ["goto", "click"]
+    assert run.screenshots
+    got, text, _ = await _judge("shot_plain", "out_of_stock", "No, it is Out of stock.")
+    assert got is Outcome.PASS, text
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        {"style": "#stock{visibility:hidden}"},
+        {"mask": [{"frame": {"guid": "frame@1"}, "selector": "#stock"}]},
+        {"maskColor": "#00FF00"},
+    ],
+)
+@pytest.mark.parametrize("method", ["screenshot", "expectScreenshot"])
+def test_a_screenshot_that_restyles_the_page_is_an_injection(
+    tmp_path: Path, method: str, option: dict[str, Any]
+) -> None:
+    def change(event: dict[str, Any]) -> None:
+        event["method"] = method
+        event["params"] = {**event["params"], **option}
+
+    trace = rewrite_trace(
+        FIXTURES / "shot_plain.zip", tmp_path / "t.zip", _rewrite("screenshot", change)
+    )
+    run = load_playwright_trace(trace)
+
+    [inject] = [a for a in run.actions if a.name == "inject"]
+    assert inject.value is not None and inject.value.startswith(f"Page.{method}(")
+    assert next(iter(option)) in inject.value
