@@ -106,10 +106,22 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   containing `://` or the shop's host, `GET` with `url_contains: ["//"]`, or a `goto` whose value
   contains `http`, is met by an agent that did nothing. State and value claims may still cite
   text of the start page ("the kettle costs $24").
-- **Echoes of the agent's own input.** Page text the agent typed into a field (a `fill`
-  action's value), or a URL fragment it typed into a `goto`, does not prove that the site
-  produced it: typing "Order #1042 confirmed" into a search box and landing on its results page
-  proves nothing.
+- **Echoes of the agent's own input.** A site that repeats what the agent sent it proves
+  nothing: typing "Order #1042 confirmed" into a search box and landing on its results page, or
+  opening `/search?q=Order+%231042+confirmed` directly, shows the phrase without any order
+  existing. The agent's input is every typed value (`fill`, `type`, `insert_text`), each run of
+  single-key `press` actions on one target, the path segments and query values of every URL it
+  opened with a `goto`, and the query values of every `GET` request (a submitted search form,
+  or a navigation a HAR-only run cannot attribute), decoded and normalised like page text;
+  inputs shorter than three characters or without a letter or digit are ignored. A `page_text`,
+  `url` or `value` (`page_regex`) predicate is evaluated again with every occurrence of every
+  input masked out of page text and URLs; if it no longer holds, it cannot support the claim.
+  So a needle that only partly overlaps an input ("Order #1042 confirmed" on a page that echoes
+  the typed "#1042 confirmed") is caught too. The price is that page text containing anything
+  the agent typed, even a search term the real confirmation also names ("Red Kettle" after a
+  search for "kettle"), cannot prove a claim on its own; another predicate (a mutation request,
+  text the agent did not type) has to. Values read from request bodies (`json_path`) are not
+  masked.
 - **Key outcome claims need an outcome.** A key claim of kind `outcome` can only be supported
   by a mutation request (`POST`, `PUT`, `PATCH`, `DELETE`) or by the final page: `final`-scope
   `page_text`, `url` or `screenshot`. A click on *Place order* or text seen on some earlier page

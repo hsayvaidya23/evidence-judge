@@ -211,7 +211,8 @@ with the scenario's spec, with a generic spec and with no spec.
   start page already meets is `no_evidence`, and a key outcome claim needs a mutation request
   or the final page, so every such run is NEEDS_REVIEW without a spec.
 - **Planted evidence does not count.** In `self_planted_text` the confirmation the agent typed
-  itself is on the final page, but a phrase the agent typed into a field cannot support a claim.
+  itself is on the final page, but page text that no longer matches once the agent's own input
+  is masked out cannot support a claim.
   In `third_party_order` an order request and the claimed order number are in the network log,
   but they went to httpbin.org: only mutations on the run's own host (or the spec's
   `allowed_hosts`) can prove a claim or meet an expectation, so the generic spec's
