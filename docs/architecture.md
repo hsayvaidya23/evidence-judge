@@ -25,7 +25,7 @@ right. It turns the answer into checkable claims and checks each one against evi
 | Stage | Module | Input → output |
 | --- | --- | --- |
 | Ingest | `ingest/` | Playwright trace, HAR, browser-use history → `Run` with ids (`act#`, `net#`, `snap#`, `shot#`, `con#`) and `captured` channels |
-| Redact | `redact.py` | `Run` → `Run` with secrets and PII replaced by HMAC-fingerprinted tokens |
+| Redact | `redact/` | `Run` → `Run` with secrets and PII replaced by HMAC-fingerprinted tokens |
 | Extract claims | `extract/` | Agent answer and reasoning → `ClaimSet` of atomic claims, each with a verbatim quote. LLM-based, or heuristic with `--offline` |
 | Compile predicates | `extract/` | Each claim → one or more `Predicate`s (request, page_text, url, action, value, screenshot) that would prove it |
 | Deterministic checkers | `checks/` | Predicate + `EvidenceIndex` → `PredicateResult` (supported / contradicted / no_evidence + citations) |
@@ -191,7 +191,8 @@ shape the pipeline:
 | `core/echo.py` | Finding and masking echoes of agent input in evidence (`MASK`) |
 | `core/site.py` | `Site`: hosts and ports a spec names and a page or request is on |
 | `core/provenance.py` | Evidence the agent made rather than the site |
-| `redact.py` | `Redactor`: secret and PII detection and replacement |
+| `redact/redactor.py` | `Redactor`: replaces secrets and PII in runs, text and models with fingerprinted tokens |
+| `redact/detectors.py` | What counts as a secret or personal value: patterns, field names, headers |
 | `extract/` | Claim extraction (LLM and heuristic) and predicate compilation |
 | `checks/` | One checker per predicate kind, expectations, dimensions, outcome |
 | `engine.py` | `Judge`: the pipeline above |
