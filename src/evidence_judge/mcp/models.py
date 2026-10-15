@@ -6,8 +6,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from evidence_judge.core.spec_errors import SpecProblem
 from evidence_judge.core.verdict import Citation, Outcome, RunVerdict, TamperDetection
-from evidence_judge.mcp.specs import SpecCheck, SpecProblem
+from evidence_judge.mcp.specs import SpecCheck
 
 __all__ = [
     "EvidenceSource",

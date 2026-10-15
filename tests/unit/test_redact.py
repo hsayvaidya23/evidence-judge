@@ -477,3 +477,15 @@ def test_percent_scan_is_linear_on_long_unescaped_runs(r: Redactor) -> None:
     started = time.perf_counter()
     assert red(r, text) == text
     assert time.perf_counter() - started < 1.0
+
+
+@pytest.mark.parametrize(
+    ("counts", "text"),
+    [
+        ({}, "redaction: nothing sensitive found"),
+        ({"email": 1}, "redacted 1 value (email 1)"),
+        ({"phone": 1, "email": 2}, "redacted 3 values (email 2, phone 1)"),
+    ],
+)
+def test_redaction_report_describe(counts: dict[str, int], text: str) -> None:
+    assert RedactionReport(counts=counts).describe() == text

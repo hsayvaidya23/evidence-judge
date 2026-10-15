@@ -117,10 +117,6 @@ class Site:
             return other.host.endswith(f".{self.host}")
         return _base(other.host) == _base(self.host)
 
-    def covers_url(self, url: str) -> bool:
-        site = Site.of_url(url)
-        return site is not None and self.covers(site)
-
     def __str__(self) -> str:
         host = f"[{self.host}]" if ":" in self.host else self.host
         port = "" if self.port is None else f":{self.port}"

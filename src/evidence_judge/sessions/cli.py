@@ -6,16 +6,17 @@ import asyncio
 import json
 from enum import IntEnum
 from pathlib import Path
+from textwrap import indent
 from typing import Annotated, Any
 
 import typer
-import yaml
 from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 
 from evidence_judge import __version__
 from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.core.spec_errors import SpecError, load_yaml
 from evidence_judge.core.verdict import (
     Citation,
     ExpectationResult,
@@ -27,7 +28,7 @@ from evidence_judge.core.verdict import (
 from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.redact import Redactor
-from evidence_judge.report.console import print_verdict
+from evidence_judge.report.console import StdoutConsole, print_verdict
 from evidence_judge.report.json_report import write_json
 from evidence_judge.sessions.ingest import load_session, locate
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
@@ -125,7 +126,8 @@ _LogAnchor = Annotated[
     Path | None,
     typer.Option(
         "--log-anchor",
-        help="Evidence-log head anchor (default: the hooks' state dir, by session)",
+        help="Evidence-log head anchor (default: by session, in --log-key's directory, else "
+        "the hooks' state dir)",
         **_IN_FILE,
     ),
 ]
@@ -185,8 +187,10 @@ def _spec(path: Path | None) -> SessionSpec | None:
     if path is None:
         return None
     try:
-        return SessionSpec.load(path)
-    except (OSError, ValueError, yaml.YAMLError) as e:
+        return load_yaml(path.read_text(encoding="utf-8"), SessionSpec)
+    except SpecError as e:
+        raise _Error(f"invalid session spec {path}:\n{indent(str(e), '  ')}", _Exit.USAGE) from e
+    except (OSError, ValueError) as e:
         raise _Error(f"invalid session spec {path}: {e}", _Exit.USAGE) from e
 
 
@@ -302,8 +306,9 @@ def judge_command(
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: _Debug = False,
 ) -> None:
-    """Judge a coding-agent session. Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input,
-    4 internal."""
+    """Judge a coding-agent session.
+
+    Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
     err = _stderr()
     try:
         settings = _settings()
@@ -330,7 +335,7 @@ def judge_command(
             session_spec = redact_spec(redactor, session_spec) if session_spec else None
             claim_set = redact_claims(redactor, claim_set) if claim_set else None
             if not quiet:
-                err.print(Text(f"redacted {report.total} value(s)", style="dim"))
+                err.print(Text(report.describe(), style="dim"))
         elif not quiet:
             err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
         if llm is None and not offline and not quiet:
@@ -358,7 +363,7 @@ def judge_command(
             raise
         raise _internal(e) from None
     if not quiet:
-        print_verdict(verdict, Console(highlight=False))
+        print_verdict(verdict, StdoutConsole())
         if out:
             err.print(Text.assemble(("wrote json ", "dim"), str(out)))
     raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
@@ -435,9 +440,9 @@ def rerun_command(
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: _Debug = False,
 ) -> None:
-    """Re-run the spec's test command on a copy of the project, in a clean environment, and
-    judge the runner's own report, without a session record. Exit code: 0 pass, 1 fail, 2 needs
-    review, 3 bad input, 4 internal."""
+    """Re-run the spec's tests on a clean copy of the project and judge the runner's report.
+
+    Needs no session record. Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
     try:
         rerun_spec = _rerun_spec(_spec(spec))
         verdict = rerun_verdict(
@@ -455,7 +460,7 @@ def rerun_command(
             raise
         raise _internal(e) from None
     if not quiet:
-        print_verdict(verdict, Console(highlight=False))
+        print_verdict(verdict, StdoutConsole())
     raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
 
 
@@ -495,4 +500,4 @@ def inspect_command(
     if as_json:
         typer.echo(json.dumps(summarize(run), indent=2, ensure_ascii=False))
     else:
-        print_session(run, Console(highlight=False))
+        print_session(run, StdoutConsole())

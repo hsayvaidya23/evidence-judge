@@ -8,12 +8,16 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | --- | --- |
 | `judge` | Judge one agent run |
 | `inspect` | Summarise the evidence in a trace, HAR or browser-use run without judging it |
+| `bench` | Benchmark judges on forged runs: false-PASS rates and accuracy on honest controls |
 | `mcp` | Run an MCP server so coding agents can judge, inspect and explain runs as tools |
+| `hook` | Entry points coding agents run as hooks: stop checks, evidence recorders, guards |
 | `session judge` | Judge a coding-agent session (Claude Code, Codex) against its tool-call log |
 | `session inspect` | Summarise a coding-agent session without judging it |
 | `session rerun` | Re-run a spec's test command on a copy of the project and judge the runner's own report |
 | `schema` | Print the JSON Schema of the verdict format |
-| `version` | Print the evidence-judge version |
+| `version` | Print the evidence-judge version (also `evidence-judge --version`) |
+
+Until v0.1.0 is on PyPI, install from GitHub: `uv tool install "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install "evidence-judge[...]"` forms below work once the release is on PyPI.
 
 Settings (models, budget, redaction, cache) come from environment variables or a `.env` file;
 see the configuration table in the [README](../README.md#configuration).
@@ -170,7 +174,7 @@ the final answer when the log lacks them.
 | `--codex FILE` | Codex `exec --json` output saved by the harness, or a rollout file from `~/.codex/sessions` |
 | `--evidence-log FILE` | Evidence-recorder log (format version 1), written by a harness hook after every tool call; the only transcript-independent source. Its `tamper_detection` is `full` only when its HMAC chain and head anchor verify **and** `--trusted-log` is given; otherwise `partial`, with the reason |
 | `--log-key FILE` | The evidence-log key (default: `log-key` in the hooks' state directory, `EVJ_HOOK_STATE_DIR` or `~/.evidence-judge/state`) |
-| `--log-anchor FILE` | The evidence log's head anchor (default: `<state>/<session>/log-head.json`) |
+| `--log-anchor FILE` | The evidence log's head anchor (default: `<session>/log-head.json` in the `--log-key` directory, else `<state>/<session>/log-head.json`) |
 | `--trusted-log` | Assert that the log, its key and anchor were out of the agent's reach (a sandbox that denies the state directory, a container, another OS user). Without it, an agent running as your user could have read the key and signed a forged log, so a verified log is still `partial`. The spec's `trusted_evidence_log: true` does the same |
 | `--answer TEXT` / `--answer-file FILE` | Judge this final answer instead of the recorded one |
 | `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block |
@@ -252,6 +256,9 @@ always exits 0.
 | `claude-code-turn-start` | Claude Code `UserPromptSubmit` (synchronous) | nothing; saves the turn's task spec to the state directory |
 | `codex-turn-start` | Codex `UserPromptSubmit` (synchronous) | nothing; as above |
 | `gemini-turn-start` | Gemini CLI `BeforeAgent` | `{}`; as above |
+| `claude-code-guard` | Claude Code `PreToolUse` | `{"hookSpecificOutput": {"permissionDecision": "deny", ...}}` for a write that would switch off the hooks or the judge (agent settings, hook files, the evidence-judge install, evidence logs); else nothing |
+| `codex-guard` | Codex `PreToolUse` | as `claude-code-guard` |
+| `gemini-guard` | Gemini CLI `BeforeTool` | `{"decision": "deny", "reason": ...}` for such a write; else `{}` |
 
 | Option | Description |
 | --- | --- |

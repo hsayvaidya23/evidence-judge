@@ -156,6 +156,19 @@ def test_an_explicit_key_and_anchor(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert integrity(run)[0] == "full"
 
 
+def test_the_anchor_defaults_to_the_key_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _log(tmp_path)
+    monkeypatch.setenv("EVJ_HOOK_STATE_DIR", str(tmp_path / "elsewhere"))
+    run = load_evidence_log(path, key_file=tmp_path / "state" / LOG_KEY_FILE)
+    assert integrity(run)[0] == "full"
+    log_head_path(tmp_path / "state", SESSION).unlink()
+    level, reason = integrity(load_evidence_log(path, key_file=tmp_path / "state" / LOG_KEY_FILE))
+    assert level == "partial"
+    assert "no head anchor" in reason
+
+
 def test_an_unkeyed_log_is_partial(tmp_path: Path) -> None:
     path = append(tmp_path / "logs", _tool("pytest -q", 0, "5 passed"))
     level, reason = integrity(load_evidence_log(path))

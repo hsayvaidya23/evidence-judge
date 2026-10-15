@@ -38,7 +38,7 @@ def test_errors_point_at_their_yaml_line() -> None:
     assert problem.location.endswith("status")
     assert (problem.line, problem.column) == (8, 17)
     assert "status" in describe(check)
-    assert "(line 8)" in describe(check)
+    assert "(line 8, column 17)" in describe(check)
 
 
 def test_a_missing_field_points_at_its_mapping() -> None:

@@ -6,10 +6,10 @@ import zipfile
 from collections.abc import Callable
 from enum import IntEnum, StrEnum
 from pathlib import Path
+from textwrap import indent
 from typing import Annotated, Any
 
 import typer
-import yaml
 from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
@@ -22,6 +22,7 @@ from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
+from evidence_judge.core.spec_errors import SpecError, load_yaml
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
 from evidence_judge.hooks.cli import hook_app
@@ -32,6 +33,7 @@ from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget
 from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import (
+    StdoutConsole,
     print_evidence_summary,
     print_verdict,
     summarize_evidence,
@@ -100,11 +102,34 @@ class _Group(TyperGroup):
 app = typer.Typer(
     cls=_Group,
     name="evidence-judge",
-    help="Grade browser-agent runs by checking every claim against recorded evidence.",
+    help="Grade browser-agent runs and coding-agent sessions against the evidence.",
     no_args_is_help=True,
     add_completion=False,
     pretty_exceptions_enable=False,
 )
+
+
+def _print_version(value: bool) -> None:
+    if value:
+        typer.echo(f"evidence-judge {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    _version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version",
+            help="Print the version and exit",
+            callback=_print_version,
+            is_eager=True,
+        ),
+    ] = None,
+) -> None:
+    pass
+
+
 app.add_typer(hook_app)
 app.add_typer(session_app, name="session")
 
@@ -204,8 +229,10 @@ def _settings(llm: LLMChoice | None = None) -> Settings:
 
 def _load_spec(path: Path) -> TaskSpec:
     try:
-        return TaskSpec.load(path)
-    except (OSError, ValueError, yaml.YAMLError) as e:
+        return load_yaml(path.read_text(encoding="utf-8"), TaskSpec)
+    except SpecError as e:
+        raise CliError(f"invalid task spec {path}:\n{indent(str(e), '  ')}", ExitCode.USAGE) from e
+    except (OSError, ValueError) as e:
         raise CliError(f"invalid task spec {path}: {e}", ExitCode.USAGE) from e
 
 
@@ -240,13 +267,6 @@ def _write_output(path: Path, write: Callable[[Path], object]) -> None:
     except OSError as e:
         reason = e.strerror or str(e)
         raise CliError(f"cannot write {path}: {reason}", ExitCode.USAGE) from e
-
-
-def _describe(report: RedactionReport) -> str:
-    if not report.total:
-        return "redaction: nothing sensitive found"
-    parts = ", ".join(f"{k} {v}" for k, v in sorted(report.counts.items()))
-    return f"redacted {report.total} values ({parts})"
 
 
 def _require_evidence(trace: Path | None, har: Path | None, browser_use: Path | None) -> None:
@@ -306,7 +326,7 @@ def _redact_for_judging(
     redactor = _redactor(settings, persistent=persistent)
     run, spec, claims, report = _redact_inputs(redactor, run, spec, claims)
     if err is not None:
-        err.print(Text(_describe(report), style="dim"))
+        err.print(Text(report.describe(), style="dim"))
     return run, spec, claims
 
 
@@ -495,7 +515,7 @@ def judge(
         raise _internal(e) from None
 
     if not quiet:
-        print_verdict(verdict, Console(highlight=False))
+        print_verdict(verdict, StdoutConsole())
         _print_written(err, (("json", out), ("html", html)))
         for warning in export_warnings:
             err.print(Text(warning, style="yellow"))
@@ -530,7 +550,7 @@ def inspect(
     if as_json:
         typer.echo(json.dumps(summary.to_dict(), indent=2, ensure_ascii=False))
     else:
-        print_evidence_summary(summary, Console(highlight=False))
+        print_evidence_summary(summary, StdoutConsole())
 
 
 @app.command()

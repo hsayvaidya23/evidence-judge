@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -205,7 +207,7 @@ def test_redacts_by_default(monkeypatch: pytest.MonkeyPatch, calls: Calls, evide
     assert calls.run is not None and calls.run.agent_answer is not None
     assert EMAIL not in calls.run.agent_answer
     assert "[REDACTED:email:" in calls.run.agent_answer
-    assert "redacted 1 values (email 1)" in result.output
+    assert "redacted 1 value (email 1)" in result.output
 
 
 def test_no_redact(monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path) -> None:
@@ -291,6 +293,17 @@ def test_invalid_spec_exit_3(
     result = runner.invoke(app, ["judge", "--har", str(evidence), "--spec", str(spec)])
     assert result.exit_code == ExitCode.USAGE
     assert "invalid task spec" in result.output
+
+
+def test_invalid_spec_names_line_and_column(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path
+) -> None:
+    install(monkeypatch, calls)
+    spec = tmp_path / "bad.yaml"
+    spec.write_text("id: x\ntask: t\nexpect:\n  - id: a\n    method: GETT\n", encoding="utf-8")
+    result = runner.invoke(app, ["judge", "--har", str(evidence), "--spec", str(spec)])
+    assert result.exit_code == ExitCode.USAGE
+    assert "expect.0.method (line 5, column 13)" in " ".join(result.output.split())
 
 
 def test_invalid_claims_exit_3(
@@ -411,6 +424,34 @@ def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert result.stdout.strip() == f"evidence-judge {__version__}"
+
+
+@pytest.mark.parametrize("args", [["--version"], ["--version", "judge"], ["judge", "--version"]])
+def test_version_option(args: list[str]) -> None:
+    result = runner.invoke(app, args)
+    if args[0] == "judge":
+        assert result.exit_code == ExitCode.USAGE
+        return
+    assert result.exit_code == 0
+    assert result.stdout.strip() == f"evidence-judge {__version__}"
+
+
+@pytest.mark.parametrize("read_lines", [0, 1])
+def test_a_closed_stdout_keeps_the_verdict_exit_code(read_lines: int) -> None:
+    run = Path(__file__).resolve().parents[1] / "fixtures" / "runs" / "honest_success"
+    args = ["judge", "--har", str(run / "run.har"), "--spec", str(run / "spec.yaml")]
+    process = subprocess.Popen(
+        [sys.executable, "-m", "evidence_judge", *args, "--offline"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    for _ in range(read_lines):
+        process.stdout.readline()
+    process.stdout.close()
+    _, err = process.communicate(timeout=60)
+    assert process.returncode == ExitCode.NEEDS_REVIEW
+    assert b"Traceback" not in err and b"BrokenPipe" not in err
 
 
 def test_redaction_key_is_stable_across_invocations(tmp_path: Path) -> None:

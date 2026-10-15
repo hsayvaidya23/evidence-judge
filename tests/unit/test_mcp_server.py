@@ -177,7 +177,7 @@ async def test_judge_run_respects_redaction_settings(workspace: Path) -> None:
             {"trace": "forged_success/trace.zip", "spec": "x", "spec_yaml": "id: x"},
             "either spec or spec_yaml",
         ),
-        ({"trace": "forged_success/trace.zip", "spec_yaml": "id: x\n"}, "task (line 1)"),
+        ({"trace": "forged_success/trace.zip", "spec_yaml": "id: x\n"}, "task (line 1, column 1)"),
         ({"trace": "forged_success/trace.zip", "site": "github.com/org"}, "site"),
         ({"trace": "nope.zip"}, "does not exist"),
         ({"trace": "forged_success/answer.txt"}, "could not load evidence"),

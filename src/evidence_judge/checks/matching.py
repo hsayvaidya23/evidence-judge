@@ -256,16 +256,6 @@ def _segments(path: str) -> list[str]:
     return normalized.split(".") if normalized else []
 
 
-def json_path_get(obj: object, path: str) -> object:
-    """Follow a dotted path ('items.0.price', 'items[0].price', '$.total') or return MISSING."""
-    current: object = obj
-    for segment in _segments(path):
-        current = _step(current, segment)
-        if current is MISSING:
-            return MISSING
-    return current
-
-
 def _step(current: object, segment: str) -> object:
     if isinstance(current, dict):
         mapping = cast(dict[str, object], current)
