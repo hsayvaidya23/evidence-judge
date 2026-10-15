@@ -21,6 +21,7 @@ from evidence_judge.core.evidence import (
     Screenshot,
 )
 from evidence_judge.core.predicates import MIN_PAGE_TEXT, WORD
+from evidence_judge.redact import TOKEN_RE
 from evidence_judge.textnorm import normalize
 
 FINAL_KEY = "final"
@@ -32,6 +33,10 @@ _KEY_NAME = re.compile(
     re.IGNORECASE,
 )
 _TAG = re.compile(r"</?[a-z][^<>]*>", re.IGNORECASE)
+_REDACTION_TOKEN = re.compile(TOKEN_RE.pattern, re.IGNORECASE)
+MIN_ECHO_PREFIX: Final = 8
+"""Shortest prefix of an agent input that counts as a cut-short echo of it. Shorter shared
+prefixes are mostly common word stems ("confirm" in "confirmation" and "confirmed")."""
 MASK: Final = "\x00"
 """Stands in for agent input in masked evidence; it is never part of a predicate."""
 
@@ -185,6 +190,10 @@ class EvidenceIndex:
         (a form the agent submitted, or a navigation a HAR cannot attribute). Each is also kept
         as a page rendering it as HTML would show it (tags dropped, character references
         decoded). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit are left out.
+
+        Request bodies are not inputs: whatever the agent typed into a form already comes from
+        its typing action, so a body only adds what the site put in the form (hidden fields,
+        product ids, option values), and masking that would hide the site's own text.
         """
         return self._agent_inputs
 
@@ -196,7 +205,8 @@ class EvidenceIndex:
 
     @cached_property
     def without_agent_input(self) -> EvidenceIndex:
-        """This evidence with every occurrence of every agent input in page text and URLs
+        """This evidence with every echo of every agent input in page text and URLs (an
+        occurrence of the input or of a prefix of at least MIN_ECHO_PREFIX characters of it)
         replaced by MASK, so a predicate that only holds on an echo of that input fails on it.
 
         Masked page text is normalised; page text and URLs without an occurrence are unchanged.
@@ -286,11 +296,54 @@ def _url_inputs(url: str, *, with_path: bool) -> list[str]:
 
 
 def _mask(text: str, inputs: tuple[str, ...]) -> str | None:
-    """`text` normalised with every input replaced by MASK, or None if no input occurs in it."""
-    masked = norm = normalize(text)
-    for value in inputs:
-        masked = masked.replace(value, MASK)
-    return None if masked == norm else masked
+    """`text` normalised with every echo of an input replaced by MASK, or None if it has none.
+
+    An echo is an occurrence of the whole input or of a prefix of at least MIN_ECHO_PREFIX
+    characters (a field's maxlength, or the site, cut the input short); overlapping echoes
+    become one MASK.
+    """
+    norm = normalize(text)
+    spans = sorted(span for value in inputs for span in _echoes(norm, value))
+    if not spans:
+        return None
+    parts: list[str] = []
+    end = 0
+    for start, stop in spans:
+        if start < end:
+            end = max(end, stop)
+            continue
+        parts += [norm[end:start], MASK]
+        end = stop
+    parts.append(norm[end:])
+    return "".join(parts)
+
+
+def _echoes(text: str, value: str) -> Iterator[tuple[int, int]]:
+    """The span of every echo of `value` in `text`, each extended as far as `value` matches.
+
+    A cut-short echo never ends inside a redaction token: distinct tokens share a long prefix.
+    """
+    head = value[:MIN_ECHO_PREFIX]
+    tokens = [m.span() for m in _REDACTION_TOKEN.finditer(value)]
+    at = text.find(head)
+    while at != -1:
+        length = _match_length(text, at, value, len(head))
+        length = next((start for start, end in tokens if start < length < end), length)
+        if length == len(value) or length >= MIN_ECHO_PREFIX:
+            yield at, at + length
+        at = text.find(head, at + (length if length == len(value) else 1))
+
+
+def _match_length(text: str, at: int, value: str, known: int) -> int:
+    """How many leading characters of `value` occur at `text[at:]`; the first `known` do."""
+    low, high = known, len(value)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if text.startswith(value[known:mid], at + known):
+            low = mid
+        else:
+            high = mid - 1
+    return low
 
 
 def _mask_url(url: str, inputs: tuple[str, ...]) -> str:

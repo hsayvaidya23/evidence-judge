@@ -112,6 +112,49 @@ def test_masking_replaces_every_occurrence_in_text_and_urls() -> None:
     assert masked.run.snapshots[0].url == f"{HOST}/"
 
 
+def _masked_final(typed: list[str], text: str) -> str:
+    actions = [act(1 + i, "fill", f"#f{i}", value=value) for i, value in enumerate(typed)]
+    masked = EvidenceIndex(make_run(actions=actions, final_state=final("/", text)))
+    state = masked.without_agent_input.final
+    assert state is not None
+    return state.text
+
+
+def test_masking_covers_echoes_cut_short_of_the_input() -> None:
+    text = "Hello Order A77 confirmed. Again: Order A77 c and Order A"
+    assert _masked_final(["Order A77 confirmed!!!!!!"], text) == (
+        f"hello {MASK}. again: {MASK} and order a"
+    )
+
+
+def test_masking_ignores_shared_prefixes_shorter_than_min_echo_prefix() -> None:
+    text = "Your order is confirmed"
+    assert _masked_final(["confirmation code"], text) == text
+    assert _masked_final(["confirmXYZ"], text) == text
+    assert _masked_final(["confirmeX"], text) == f"your order is {MASK}d"
+    assert _masked_final(["confirmed by phone"], text) == f"your order is {MASK}"
+
+
+def test_cut_short_echoes_never_end_inside_a_redaction_token() -> None:
+    card = "[REDACTED:card:8be88632]"
+    text = f"Card [REDACTED:card:96a7866f] for [REDACTED:email:68cc336b] Ship to {card} Main St"
+    assert _masked_final([f"{card} Main Street"], text) == (
+        f"card [redacted:card:96a7866f] for [redacted:email:68cc336b] ship to {MASK}"
+    )
+
+
+def test_masking_merges_overlapping_echoes() -> None:
+    text = "Ship to 12 Long Street London today"
+    assert _masked_final(["12 Long Street", "Long Street London"], text) == (
+        f"ship to {MASK} today"
+    )
+
+
+def test_masking_extends_each_occurrence_on_repetitive_text() -> None:
+    text = "ab" * 6 + "x " + "ab" * 3
+    assert _masked_final(["abababababab"], text) == f"{MASK}x ababab"
+
+
 def test_masking_keeps_evidence_without_agent_input() -> None:
     index = EvidenceIndex(make_run(network=[net(1, "GET", "/")], final_state=final("/", "Hi")))
     assert index.without_agent_input is index

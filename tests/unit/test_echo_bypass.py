@@ -65,9 +65,17 @@ ECHOES = {
         act(2, "fill", "#bio", value="Order&#32;A77 confirmed"),
         "Bio: Order A77 confirmed",
     ),
+    "echo cut short by maxlength": (
+        act(2, "fill", "#name", value="Order A77 confirmed!!!!!!"),
+        "Hello Order A77 confirmed",
+    ),
 }
 
 GENUINE = {
+    "typed text shares only a short stem": (
+        act(2, "fill", "#q", value="Order #A77 confirmation"),
+        "Order A77 confirmed",
+    ),
     "key chord press": (
         act(2, "press", "#q", value="Control+Enter"),
         "Order A77 confirmed",
