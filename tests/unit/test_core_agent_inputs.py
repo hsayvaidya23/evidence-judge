@@ -50,6 +50,21 @@ def test_goto_paths_and_queries_and_get_queries_are_inputs() -> None:
     assert inputs == ("order a77 confirmed", "payment=success", "receipt", "orders", "a 77")
 
 
+def test_uploaded_file_names_with_and_without_extension_are_inputs() -> None:
+    actions = [
+        act(1, "upload", "#a", value=r"C:\fakepath\Order A77.pdf"),
+        act(2, "setInputFiles", "#b", value="scan one.png, notes"),
+    ]
+    assert _inputs(actions=actions) == (
+        "scan one.png, notes",
+        "order a77.pdf",
+        "scan one.png",
+        "order a77",
+        "scan one",
+        "notes",
+    )
+
+
 def test_short_or_symbol_only_inputs_are_ignored() -> None:
     assert _inputs(actions=[act(1, "fill", value="ab"), act(2, "fill", value="--- ")]) == ()
 

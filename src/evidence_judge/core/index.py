@@ -4,10 +4,11 @@ import bisect
 import math
 from collections.abc import Iterable, Iterator
 from functools import cached_property
+from pathlib import PureWindowsPath
 from typing import Final
 from urllib.parse import parse_qsl, quote, quote_plus, unquote, unquote_plus, urlsplit, urlunsplit
 
-from evidence_judge.core.actions import FILL, GOTO, PRESS, canonical_action
+from evidence_judge.core.actions import FILL, GOTO, PRESS, UPLOAD, canonical_action
 from evidence_judge.core.evidence import (
     ActionEvent,
     Channel,
@@ -168,7 +169,7 @@ class EvidenceIndex:
         """Normalised text the agent put into the run itself, longest first.
 
         That is the value of every typing action, each run of single-key presses on one target,
-        the decoded path segments and query values of every URL the agent opened, and the
+        the name (with and without extension) of every uploaded file, the decoded path segments and query values of every URL the agent opened, and the
         decoded query values of every GET request (a form the agent submitted, or a navigation
         a HAR cannot attribute). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit
         are left out.
@@ -226,6 +227,8 @@ def _raw_inputs(run: Run) -> Iterator[str]:
             keys.clear()
         if name == FILL and action.value:
             yield action.value
+        elif name == UPLOAD and action.value:
+            yield from _file_names(action.value)
         elif name == GOTO and (url := action.value or action.url):
             yield from _url_inputs(url, with_path=True)
     if keys:
@@ -233,6 +236,17 @@ def _raw_inputs(run: Run) -> Iterator[str]:
     for event in run.network:
         if event.method.upper() == "GET":
             yield from _url_inputs(event.url, with_path=False)
+
+
+def _file_names(value: str) -> Iterator[str]:
+    """Each uploaded file's name with and without its extension; an upload's value is one
+    path or name, or several joined by ", "."""
+    for part in {value, *value.split(", ")}:
+        name = PureWindowsPath(part).name
+        yield name
+        stem, dot, _ = name.rpartition(".")
+        if dot and stem:
+            yield stem
 
 
 def _url_inputs(url: str, *, with_path: bool) -> list[str]:
