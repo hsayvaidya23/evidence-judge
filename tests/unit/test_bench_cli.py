@@ -80,9 +80,9 @@ def test_baseline_runs_with_a_configured_llm(monkeypatch: pytest.MonkeyPatch) ->
     result = runner.invoke(app, ["bench", str(RUNS), "--seeds", "1", "--with-llm-baseline"])
 
     assert result.exit_code == ExitCode.PASS, result.output
-    assert "| `llm-transcript` | **all manipulations** | 93 | 93 | 100% |" in result.output
+    assert "| `llm-transcript` | **all manipulations** | 111 | 111 | 100% |" in result.output
     assert budgets[0] is not None
-    assert budgets[0].max_cost_usd == pytest.approx(Settings().max_cost_usd * (9 + 9 + 99))
+    assert budgets[0].max_cost_usd == pytest.approx(Settings().max_cost_usd * (9 + 9 + 117))
 
 
 @pytest.mark.parametrize("flag", ["--out", "--markdown"])

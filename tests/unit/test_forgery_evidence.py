@@ -55,6 +55,9 @@ def test_evidence_kinds() -> None:
         ForgeryKind.REDIRECT_TO_ERROR,
         ForgeryKind.BASELINE_TAUTOLOGY,
         ForgeryKind.RESPONSE_ECHO,
+        ForgeryKind.SCRIPT_INJECTION,
+        ForgeryKind.MOCKED_RESPONSE,
+        ForgeryKind.DATA_URL_LINK,
     } == EVIDENCE_KINDS
 
 
