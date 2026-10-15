@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from evidence_judge.ingest._dom import FrameSnapshotStore, RenderedPage, SnapshotDecodeError
@@ -622,3 +624,31 @@ def test_imports_resolve_against_the_importing_sheet() -> None:
     page = store.render("frame@1", 0, stylesheets=sheets.get, url="https://shop.test/p/kettle")
 
     assert (page.text, page.unsure_text) == ("Out of stock", "")
+
+
+@pytest.mark.parametrize(
+    ("urls", "rect", "opaque"),
+    [
+        ({"https://shop.test/chat"}, None, True),
+        ({"https://video.example/embed"}, None, False),
+        ({"https://video.example/embed", "https://shop.test/x"}, None, True),
+        (set[str](), None, True),
+        ({"https://shop.test/chat"}, {"left": 8, "top": 9, "right": 8, "bottom": 9}, False),
+        ({"https://shop.test/chat"}, {"left": -900, "top": 0, "right": -600, "bottom": 50}, False),
+        ({"https://shop.test/chat"}, {"left": 8, "top": 9, "right": 308, "bottom": 159}, True),
+        ({"https://shop.test/chat"}, "not json", True),
+    ],
+)
+def test_a_recorded_frame_is_judged_by_its_urls_and_measured_box(
+    urls: set[str], rect: object, opaque: bool
+) -> None:
+    attrs: dict[str, str] = {"src": "/snapshot/frame@child"}
+    if rect is not None:
+        attrs["__playwright_bounding_rect__"] = rect if isinstance(rect, str) else json.dumps(rect)
+    store = FrameSnapshotStore()
+    for url in urls:
+        store.add("frame@child", ["HTML", {}, ["BODY", {}, "Hi"]], url=url)
+    store.add("frame@1", _page(["IFRAME", attrs], ["P", {}, "Kettle"]))
+    page = store.render("frame@1", 0, viewport=(1000, 800), url="https://shop.test/p/kettle")
+
+    assert page.opaque is opaque

@@ -39,10 +39,11 @@ off-screen, or holding another site's page does not count.
 
 from __future__ import annotations
 
+import json
 import re
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from typing import Any, Final
+from typing import Any, Final, cast
 from urllib.parse import urljoin, urlsplit
 
 from evidence_judge.core.site import registrable_domain
@@ -137,6 +138,9 @@ _SHADOW_ROOT_ATTR = "__playwright_shadow_root_"
 _VALUE_ATTR = "__playwright_value_"
 _SELECTED_ATTR = "__playwright_selected_"
 _DIALOG_OPEN_ATTR = "__playwright_dialog_open_"
+_RECT_ATTR = "__playwright_bounding_rect__"
+_RECORDED_FRAME = re.compile(r"^/snapshot/(frame@[^/?#]+)")
+"""The ``src`` Playwright gives a frame it recorded: its frame id."""
 _STYLE_SHEET_ATTR = "__playwright_style_sheet_"
 """The text of a constructed (adopted) stylesheet, or of one a script changed."""
 MAX_SNAPSHOT_CSS: Final = 8 * 1024 * 1024
@@ -209,10 +213,14 @@ class FrameSnapshotStore:
     def __init__(self, *, max_visits: int = DEFAULT_MAX_VISITS) -> None:
         self.max_visits = max_visits
         self._roots: dict[str, list[object]] = {}
+        self.frame_urls: dict[str, set[str]] = {}
+        """Every URL each frame's snapshots were taken at."""
         self._nodes: dict[tuple[str, int], list[object]] = {}
         self._sheets: dict[tuple[tuple[Sheet, ...], Viewport | None, bool], StyleSheets] = {}
 
-    def add(self, frame_id: str, html: object) -> int:
+    def add(self, frame_id: str, html: object, *, url: str | None = None) -> int:
+        if url:
+            self.frame_urls.setdefault(frame_id, set()).add(url)
         roots = self._roots.setdefault(frame_id, [])
         roots.append(html)
         return len(roots) - 1
@@ -454,11 +462,19 @@ class _Renderer:
         return not style.removed and style.text != HIDDEN and not scope.sheets.collapsed(element)
 
     def _same_site(self, attrs: JsonObject) -> bool:
+        """The frame may hold a page of this page's site: its ``srcdoc``, or a URL of the same
+        registrable domain (for a frame Playwright recorded, any URL it had)."""
+        src = as_str(attrs.get("src")) or ""
         if as_str(attrs.get("srcdoc")) or self._url is None:
             return True
+        if (recorded := _RECORDED_FRAME.match(src)) is not None:
+            urls = self._store.frame_urls.get(recorded.group(1))
+            return not urls or any(self._same_site_url(u) for u in urls)
+        return self._same_site_url(urljoin(self._document or self._url, src))
+
+    def _same_site_url(self, url: str) -> bool:
         try:
-            frame = urlsplit(urljoin(self._document or self._url, as_str(attrs.get("src")) or ""))
-            page = urlsplit(self._url)
+            frame, page = urlsplit(url), urlsplit(self._url or "")
         except ValueError:
             return True
         if not frame.hostname or not page.hostname or frame.scheme not in ("http", "https"):
@@ -888,11 +904,25 @@ def _svg_number(value: str | None) -> float | None:
 
 
 def _tiny(attrs: JsonObject) -> bool:
-    """A frame whose ``width`` or ``height`` attribute is at most a pixel."""
-    return any(
+    """A frame whose ``width`` or ``height`` attribute is at most a pixel, or whose box as
+    the recording measured it is, or lies above or left of the page."""
+    if any(
         (size := _svg_number(as_str(attrs.get(name)))) is not None and size <= 1
         for name in ("width", "height")
-    )
+    ):
+        return True
+    try:
+        rect = json.loads(as_str(attrs.get(_RECT_ATTR)) or "null")
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(rect, dict):
+        return False
+    box = cast(dict[str, object], rect)
+    left, top, right, bottom = (box.get(k) for k in ("left", "top", "right", "bottom"))
+    if not all(isinstance(v, int | float) for v in (left, top, right, bottom)):
+        return False
+    left, top, right, bottom = (float(cast(float, v)) for v in (left, top, right, bottom))
+    return right - left <= 1 or bottom - top <= 1 or right <= 0 or bottom <= 0
 
 
 def _text_attrs(attrs: JsonObject) -> dict[str, str]:
