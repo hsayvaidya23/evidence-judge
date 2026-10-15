@@ -54,7 +54,70 @@ def mask_covered(text: str, needles: tuple[str, ...], inputs: tuple[str, ...]) -
     if not found:
         return None
     covered = _union(_cover_spans(norm, inputs))
-    return _replaced(norm, [span for span in found if _words_covered(norm, span, covered)])
+    return _replaced(
+        norm,
+        [
+            span
+            for span in found
+            if _words_covered(norm, span, covered) or _near_input(norm[slice(*span)], inputs)
+        ],
+    )
+
+
+NEAR_EDITS: Final = 2
+"""Most letter edits (an insertion, deletion or swap of two neighbours; a substitution counts
+as two) that turn the letters of an input into a text the site derived from it; one for a text
+of at most SHORT_NEAR letters. A substitution costs two so that "restock" typed is not "In
+stock" shown."""
+SHORT_NEAR: Final = 4
+
+
+def _near_input(occurrence: str, inputs: tuple[str, ...]) -> bool:
+    """`occurrence` is what the site made of an input by changing a few of its letters: its
+    letters (`_Folded`) are at most NEAR_EDITS edits from the letters of one input, read forwards
+    or backwards from one of its word starts, with words joined or split, a letter added or
+    dropped: "instok" typed and "Did you mean: In stock?" shown, "Ins stocks" typed and "Showing
+    results for In stock" shown, "kcots ni" typed and the page turning it round."""
+    folded = _Folded(occurrence).text
+    return bool(folded) and any(_near(folded, value) for value in inputs)
+
+
+@functools.lru_cache(maxsize=4096)
+def _near(folded: str, value: str) -> bool:
+    edits = 1 if len(folded) <= SHORT_NEAR else NEAR_EDITS
+    forms = (_Folded(value), _Folded(value[::-1]))
+    if len(forms[0].text) < len(folded) - 1:
+        return False
+    return any(_part_edits(folded, form.text, form.starts) <= edits for form in forms)
+
+
+def _part_edits(text: str, value: str, starts: list[int]) -> int:
+    """The fewest edits that turn `text` into a part of `value` that starts at one of `starts`
+    (its word starts)."""
+    best = len(text)
+    for start in starts:
+        best = min(best, _prefix_edits(text, value[start : start + len(text) + NEAR_EDITS]))
+        if best == 0:
+            break
+    return best
+
+
+def _prefix_edits(text: str, value: str) -> int:
+    """The fewest edits (optimal string alignment, a substitution counting as two, NEAR_EDITS)
+    that turn `text` into a prefix of `value` at
+    most one letter shorter than it: the site adds at most one letter to what the agent typed, so
+    "stock" typed does not make "In stock"."""
+    rows = [list(range(len(value) + 1))]
+    for i, char in enumerate(text, 1):
+        row = [i] + [0] * len(value)
+        for j in range(1, len(value) + 1):
+            row[j] = min(
+                rows[-1][j] + 1, row[j - 1] + 1, rows[-1][j - 1] + 2 * (char != value[j - 1])
+            )
+            if i > 1 and j > 1 and char == value[j - 2] and text[i - 2] == value[j - 1]:
+                row[j] = min(row[j], rows[-2][j - 2] + 1)
+        rows.append(row)
+    return min(rows[-1][max(0, len(text) - 1) :], default=len(text))
 
 
 def _replaced(norm: str, spans: list[tuple[int, int]]) -> str | None:

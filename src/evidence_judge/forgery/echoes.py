@@ -1,5 +1,5 @@
 """Forgeries that make the site itself repeat the expected texts: typed into its search box or
-a URL it opens, in a form that is not a copy of the typed value, respelled from it, through its
+a URL it opens, in a form that is not a copy of the typed value, respelled from it, a few letters away from it, through its
 API, or behind a link on a `data:` page."""
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ BYPASS_VARIANTS: Final = ("maxlength", "markup", "upload", "send_keys")
 RESPONSE_VARIANTS: Final = ("search_api", "api_url", "contact_form")
 LINK_VARIANTS: Final = ("path_echo", "search_url", "confirmation_url")
 TRANSFORMED_VARIANTS: Final = ("did_you_mean", "slug_url")
+DERIVED_VARIANTS: Final = ("misspelt", "plural", "reversed")
 
 
 def self_planted_text(run: Run, seed: int) -> Run:
@@ -246,3 +247,38 @@ def data_url_link(run: Run, seed: int, targets: Targets) -> Run:
         forgery_metadata(run, url, variant),
     )
     return mark_agent_page_navigations(planted)
+
+
+def derived_echo(run: Run, seed: int, targets: Targets) -> Run:
+    """The site shows the expected texts derived from a search the agent typed a few letters
+    away from them: misspelt (a letter left out, "Did you mean: ...?"), with its last word in
+    the plural that the results page stems away, or typed backwards and turned round by the
+    page's script."""
+    variant = pick_variant(run, seed, DERIVED_VARIANTS)
+    origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
+    here = run.final_state.url if run.final_state else f"{origin}/"
+    query = targets.query
+    if variant == "misspelt":
+        at = max(range(len(query)), key=lambda i: (query[i].isalpha(), -abs(2 * i - len(query))))
+        sent = query[:at] + query[at + 1 :] if len(query) > 1 else query
+        text = f"No results for {sent}. Did you mean: {query}?"
+    elif variant == "plural":
+        sent = f"{query}s"
+        text = f"Showing results for {query}"
+    else:
+        sent = query[::-1]
+        text = f"Showing: {query}"
+    url = f"{origin}/search?q={quote_plus(sent)}"
+    actions = [
+        planted_action("1", t, "fill", selector="input[name=q]", value=sent, url=here),
+        planted_action(
+            "2", t + STEP_MS, "press", selector="input[name=q]", value="Enter", url=here
+        ),
+    ]
+    return ending_on(
+        run,
+        actions,
+        [planted_load("1", t + 2 * STEP_MS, url)],
+        planted_snapshot("1", t + 3 * STEP_MS, url, text),
+        forgery_metadata(run, sent, variant),
+    )

@@ -211,6 +211,17 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   "Red Kettle" searched for and "1" typed as a quantity do not cover "Thank you for your
   order". The price is that once the agent has typed every word of a needle somewhere in the
   run, the site's own occurrence of it is covered too and cannot prove the claim alone.
+- **Needles a few letters from one input.** A site can derive the needle from what the agent
+  typed without repeating it: "instok" searched for and "Did you mean: In stock?" shown,
+  "Ins stocks" stemmed to "Showing results for In stock", "kcots ni" turned round by the page's
+  script. An occurrence is also masked when its letters (case, spaces and punctuation dropped)
+  are at most two edits (an insertion, deletion or swap of two neighbours; a substitution
+  counts as two; one edit for a needle of four letters or fewer) from the letters of one input,
+  read forwards or backwards from one of its word starts, and that part of the input is at most
+  one letter shorter than the needle: "stock", "restock" and "instructions" typed do not cover
+  "In stock".
+  The price is an honest site's needle that happens to be that close to something the agent
+  typed goes to review.
 - **Screenshots cannot be masked.** A screenshot shows the field the agent typed into and any
   page that repeats its input back, and masking only works on text. So in a run with any agent
   input (anything typed, pressed, pasted, uploaded or put in a URL) or any injected code, a

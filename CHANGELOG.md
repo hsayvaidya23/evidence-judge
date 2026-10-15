@@ -151,6 +151,10 @@ the names exported from `evidence_judge`) is defined under
 
 ### Security
 
+- **A needle the site derives from one input a few letters off proves nothing.** "instok"
+  searched for and "Did you mean: In stock?" shown, a plural stemmed away, or the input turned
+  round by the page: an occurrence within two letter edits of one input (a substitution counts
+  as two; one edit for a needle of four letters or fewer) is masked like an echo. Forgery kind `derived_echo` covers it.
 - **Agent-made evidence proves nothing.** Code the agent runs in the page (`evaluate`,
   `add_init_script`, `set_content`, browser-use `evaluate`), responses its route handlers supply
   or rewrite, and links it follows on `data:`, `blob:`, `about:` or `file:` pages cut the
