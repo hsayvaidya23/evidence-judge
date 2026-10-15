@@ -602,7 +602,8 @@ def judge_path() -> str:
 
 def environment(spec: RerunSpec, runner: Runner, scratch: Path) -> dict[str, str]:
     """A minimal environment built from scratch: nothing the agent exported, no rc file, no
-    runner option variable reaches the run unless the spec names it."""
+    runner option variable reaches the run unless the spec names it. Python keeps its bytecode
+    under `scratch`, so no `__pycache__` file planted in the linked virtualenv is loaded."""
     home = scratch / "home"
     tmp = scratch / "tmp"
     home.mkdir(exist_ok=True)
@@ -612,6 +613,7 @@ def environment(spec: RerunSpec, runner: Runner, scratch: Path) -> dict[str, str
         "HOME": str(home),
         "LANG": "C.UTF-8",
         "TMPDIR": str(tmp),
+        "PYTHONPYCACHEPREFIX": str(scratch / "pycache"),
     }
     if sys.platform == "win32":
         env |= {k: v for k in ("SYSTEMROOT", "COMSPEC", "PATHEXT") if (v := os.environ.get(k))}
@@ -906,6 +908,44 @@ def is_runner_config(path: str) -> bool:
     return pure.parent.name == ".cargo" and pure.name in ("config", "config.toml")
 
 
+_PYTEST_ABOVE: Final = frozenset(
+    {"pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", "tox.ini", "setup.cfg",
+     "pyproject.toml", "conftest.py"}
+)  # fmt: skip
+_NODE_ABOVE: Final = frozenset({"package.json", "node_modules", ".babelrc", ".babelrc.json"})
+_ABOVE: Final[dict[Runner, Callable[[str], bool]]] = {
+    "pytest": lambda name: name in _PYTEST_ABOVE,
+    "unittest": lambda _: False,
+    "go": lambda name: name in ("go.mod", "go.work"),
+    "cargo": lambda name: name in ("Cargo.toml", ".cargo"),
+    "node": lambda name: name in _NODE_ABOVE,
+    "jest": lambda name: name in _NODE_ABOVE or name.startswith(("jest.config.", "babel.config.")),
+    "vitest": lambda name: (
+        name in _NODE_ABOVE
+        or name.startswith(("vitest.config.", "vitest.workspace.", "vite.config."))
+    ),
+}
+
+
+def configuration_above(copy: Path, runner: Runner, env: dict[str, str]) -> list[str]:
+    """Files in the directories above the copy that the runner would read as the project's
+    configuration (pytest looks upwards for an ini file and conftest.py, go for go.work, node
+    for node_modules). The copy lives in the system temporary directory, which anything running
+    as the user can write to."""
+    wanted = _ABOVE[runner]
+    cargo_home = Path(env["CARGO_HOME"]) if "CARGO_HOME" in env else None
+    found: list[str] = []
+    for parent in copy.parents:
+        try:
+            names = sorted(p.name for p in parent.iterdir())
+        except OSError:
+            continue
+        for name in names:
+            if wanted(name) and parent / name != cargo_home:
+                found.append(str(parent / name))
+    return found
+
+
 def _section(path: str, data: bytes | None) -> tuple[str, object]:
     """The part of a configuration file that configures the tests, and its label."""
     if data is None:
@@ -1063,6 +1103,7 @@ def execute(
                 notes=notes,
             )
         extra: dict[str, object] = {"config_changes": changes, "base": sha, "notes": notes}
+        found = configuration_above(copy, runner, env)
         stdout = workspace / "stdout"
         report = stdout if plan.from_stdout else plan.report
         launched = time.time()
@@ -1090,6 +1131,12 @@ def execute(
                     **extra,
                 )
             _kill_group(proc)
+        found.extend(p for p in configuration_above(copy, runner, env) if p not in found)
+        if found:
+            problems.append(
+                f"{', '.join(found[:3])} sits above the re-run's copy, where {runner} reads it as "
+                "the project's configuration"
+            )
         extra["exit_code"] = code
         return _decide(spec, runner, report, launched, code, done, extra)
 
