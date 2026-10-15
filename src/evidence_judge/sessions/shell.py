@@ -1724,13 +1724,132 @@ _FUNCTION_DEF: Final = re.compile(
 )
 
 
+_RUNNER_PACKAGES: Final = frozenset(
+    {"pytest", "jest", "vitest", "mocha", "nose2", "tox", "nox", "pytest-asyncio", "pytest-cov"}
+)
+"""Packages an honest session installs to run the tests at all; anything else it installs can
+register a test-runner plugin (a `pytest11` entry point, a jest preset)."""
+_LAUNCH_WRAPPERS: Final = frozenset(
+    {"time", "timeout", "nice", "env", "sudo", "doas", "command", "exec", "nohup", "caffeinate"}
+)
+_PACKAGE_SOURCE: Final = re.compile(
+    r"^(?:\.{1,2}(?:/|$)|/|~|file:|git\+|(?:git|hg|svn|bzr)[+:]|https?://|github:|link:|"
+    r"workspace:|portal:)|\.(?:whl|tar\.gz|tgz|zip)$|\s@\s",
+    re.IGNORECASE,
+)
+_PROJECT_ITSELF: Final = re.compile(r"^\.(?:/)?(?:\[[\w,.-]+\])?$")
+_INSTALL_VALUE_FLAGS: Final = frozenset(
+    {"-r", "--requirement", "-c", "--constraint", "-i", "--index-url", "--extra-index-url",
+     "-f", "--find-links", "--target", "-t", "--prefix", "--root", "--python", "-p",
+     "--group", "--optional", "--extra", "--tag", "--registry", "--save-prefix", "-w",
+     "--workspace", "--filter", "--dev-dep"}
+)  # fmt: skip
+
+
+def _foreign_source(value: str) -> bool:
+    """A package spec naming a path, an archive, a URL or a VCS repository, not a registry name
+    (`@scope/name` is a registry name)."""
+    return _PACKAGE_SOURCE.search(value) is not None or ("/" in value and not value.startswith("@"))
+
+
+def _package_word(value: str, why: str) -> str | None:
+    """Why installing `value` changes the test harness, or None for the project itself and a
+    test runner from the registry."""
+    if _PROJECT_ITSELF.match(value):
+        return None
+    if _foreign_source(value):
+        return f"{why} {value}, a local or VCS package that can hook into the test runner"
+    name = re.split(r"[\[<>=!~;@ ]", value, maxsplit=1)[0].casefold()
+    if name in _RUNNER_PACKAGES:
+        return None
+    return f"{why} {value}, a package the session adds, which can register a test-runner plugin"
+
+
+def _install_targets(args: list[str]) -> list[tuple[str, bool]]:
+    """The packages an install names, each with whether it is editable (`-e path`)."""
+    out: list[tuple[str, bool]] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-e", "--editable") and i + 1 < len(args):
+            out.append((args[i + 1], True))
+            i += 2
+            continue
+        if arg.startswith("--editable="):
+            out.append((arg.partition("=")[2], True))
+        elif arg in _INSTALL_VALUE_FLAGS:
+            i += 1
+        elif not arg.startswith("-"):
+            out.append((arg, False))
+        i += 1
+    return out
+
+
+def _package_change(words: list[str]) -> str | None:
+    """Why a command adds code the test runner may load: `uv run --with ./plugin`, `uvx --from
+    git+...`, or installing a package other than the project itself and a test runner."""
+    start = 0
+    while start < len(words) and (
+        program_name(words[start]) in _LAUNCH_WRAPPERS
+        or words[start].startswith("-")
+        or _ASSIGNMENT.match(words[start])
+        or words[start].replace(".", "").isdigit()
+    ):
+        start += 1
+    words = words[start:]
+    if not words:
+        return None
+    prog, args = program_name(words[0]), words[1:]
+    if _PYTHON.match(prog) and args[:2] == ["-m", "pip"]:
+        prog, args = "pip", args[2:]
+    if prog in ("uv", "uvx", "pipx"):
+        for i, arg in enumerate(args):
+            flag, eq, inline = arg.partition("=")
+            if flag not in ("--with", "--with-editable", "--with-requirements", "--from"):
+                continue
+            value = inline if eq else (args[i + 1] if i + 1 < len(args) else "")
+            if flag in ("--with-editable", "--with-requirements"):
+                return f"{prog} {flag} {value} adds packages that can hook into the test runner"
+            if _foreign_source(value):
+                return f"{prog} {flag} {value}, a local or VCS package that can hook into the test runner"
+    if prog == "uv" and args[:2] == ["pip", "install"]:
+        prog, args = "pip", args[1:]
+    adds = {
+        "pip": ("install",),
+        "pip3": ("install",),
+        "uv": ("add",),
+        "poetry": ("add",),
+        "pdm": ("add",),
+        "rye": ("add",),
+        "npm": ("install", "i", "add", "link", "ln"),
+        "pnpm": ("add", "install", "i", "link"),
+        "yarn": ("add", "link"),
+        "bun": ("add", "install", "i", "link"),
+    }.get(prog)
+    if adds is None or not args or args[0] not in adds:
+        return None
+    verb = f"{prog} {args[0]}"
+    targets = _install_targets(args[1:])
+    if prog in _PM and args[0] in ("link", "ln"):
+        return f"{verb} links {targets[0][0] if targets else 'a local package'} into node_modules"
+    for value, editable in targets:
+        if editable and not _PROJECT_ITSELF.match(value):
+            return f"{verb} -e {value}, a local package that can hook into the test runner"
+        if why := _package_word(value, f"{verb} installs"):
+            return why
+    return None
+
+
 def _harness_change(pipelines: list[_Pipeline], command: str) -> str | None:
-    """Why a command changes how later commands run (aliases, functions, PATH), or None."""
+    """Why a command changes how later commands run (aliases, functions, PATH, packages the
+    runner may load), or None."""
     if _FUNCTION_DEF.search(command):
         return "defines a shell function"
     for pipeline in pipelines:
         for simple in pipeline.commands:
             words = simple.words
+            if why := _package_change(list(words)):
+                return why
             prog = program_name(words[0]) if words else ""
             if prog in ("alias", "unalias") and words[1:]:
                 return f"{prog} {words[1].partition('=')[0]}"

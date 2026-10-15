@@ -488,6 +488,14 @@ the names exported from `evidence_judge`) is defined under
   Before, `{"disableAllHooks": true}` in `.claude/settings.local.json` silenced the recorder and
   the Stop judge and the session still passed. Forgery kinds `disable_hooks`, `rm_judge_bin`,
   `uninstall_judge` and `judge_shim` cover it.
+- **Packages the test runner may load are harness changes.** `uv run --with ./plugin`,
+  `--with-editable`, `--with-requirements`, `uvx --from` a path or VCS URL, `pip install -e
+  ./plugin`, `npm link`, and installing any package other than the project itself (`.`,
+  `.[dev]`, `-r requirements.txt`, a bare `npm install`) or a test runner (`pytest`, `jest`, ...)
+  send the session to review: the judge cannot read the project's lock file, and any added
+  package can register a `pytest11` plugin that rewrites results. Before, a local plugin loaded
+  with `uv run --with ./evjplug pytest` monkeypatched the code under test and the run passed.
+  Forgery kinds `uv_with_local_plugin` and `install_local_plugin` cover it.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

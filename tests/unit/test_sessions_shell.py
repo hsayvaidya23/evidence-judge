@@ -561,3 +561,45 @@ def test_guard_tamper(command: str, fragment: str) -> None:
 )
 def test_no_guard_tamper(command: str) -> None:
     assert analyse(command).guard_tamper is None
+
+
+@pytest.mark.parametrize(
+    ("command", "fragment"),
+    [
+        ("uv run --no-project --with pytest --with ./evjplug pytest -q", "--with ./evjplug"),
+        ("timeout 60 uv run --with=./x pytest", "--with ./x"),
+        ("uv run --with-editable ../p pytest", "--with-editable ../p"),
+        ("uv run --with-requirements req.txt pytest", "--with-requirements req.txt"),
+        ("uvx --from git+https://example.com/p pytest", "--from git+https://example.com/p"),
+        ("pip install -e ./plug", "pip install -e ./plug"),
+        ("python -m pip install pytest-randomly", "pip install installs pytest-randomly"),
+        ("uv pip install requests", "pip install installs requests"),
+        ("uv add pytest-xdist", "uv add installs pytest-xdist"),
+        ("npm i @scope/pkg", "npm i installs @scope/pkg"),
+        ("npm link ../plug", "npm link links ../plug"),
+        ("yarn add file:../x", "yarn add installs file:../x, a local or VCS package"),
+        ("pip install dist/plug-1.0-py3-none-any.whl", "a local or VCS package"),
+    ],
+)
+def test_packages_the_runner_may_load_change_the_harness(command: str, fragment: str) -> None:
+    why = analyse(command).harness_change
+    assert why is not None and fragment in why, why
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run --with pytest pytest -q",
+        "uvx --from ruff ruff check",
+        "pip install -e .",
+        "pip install .[dev]",
+        "pip install -r requirements.txt",
+        "pip install 'pytest>=8'",
+        "npm install",
+        "npm ci",
+        "npm install -D jest",
+        "uv sync",
+    ],
+)
+def test_project_and_runner_installs_keep_the_harness(command: str) -> None:
+    assert analyse(command).harness_change is None
