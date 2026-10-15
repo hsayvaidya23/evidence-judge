@@ -426,53 +426,36 @@ _FORMAT_SCRIPTS: Final = re.compile(r"^(?:format|fmt|prettier)(?::.*)?$")
 _BUILD_SCRIPTS: Final = re.compile(r"^(?:build|compile)(?::.*)?$")
 _TEST_TARGETS: Final = frozenset({"test", "tests", "check"})
 
-_PYTEST_VALUE_FLAGS: Final = frozenset(
-    {
-        "-k",
-        "-m",
-        "-p",
-        "-c",
-        "-o",
-        "-n",
-        "-W",
-        "-r",
-        "--tb",
-        "--cov",
-        "--cov-report",
-        "--cov-config",
-        "--cov-fail-under",
-        "--deselect",
-        "--ignore",
-        "--ignore-glob",
-        "--rootdir",
-        "--confcutdir",
-        "--durations",
-        "--durations-min",
-        "--maxfail",
-        "--timeout",
-        "--junitxml",
-        "--junit-xml",
-        "--basetemp",
-        "--import-mode",
-        "--log-level",
-        "--log-cli-level",
-        "--log-file",
-        "--color",
-        "--capture",
-        "--dist",
-        "--override-ini",
-        "--config-file",
-        "--randomly-seed",
-        "--reruns",
-        "--html",
-        "--benchmark-json",
-        "--count",
-        "--workers",
-        "--tests-per-worker",
-        "--log-format",
-        "--log-date-format",
-    }
-)
+_PYTEST_HARMLESS_VALUES: Final = frozenset(
+    {"-r", "-n", "--numprocesses", "--maxprocesses", "--tb", "--color", "--code-highlight",
+     "--capture", "--durations", "--durations-min", "--maxfail", "--junitxml", "--junit-xml",
+     "--junit-prefix", "--cov", "--cov-report", "--cov-config", "--cov-fail-under",
+     "--cov-context", "--dist", "--log-level", "--log-cli-level", "--log-file",
+     "--log-file-level", "--log-format", "--log-date-format", "--log-cli-format",
+     "--log-cli-date-format", "--show-capture", "--basetemp", "--randomly-seed",
+     "--random-order-seed", "--random-order-bucket", "--timeout", "--timeout-method", "--html",
+     "--benchmark-json", "--count", "--workers", "--tests-per-worker", "--verbosity", "--assert",
+     "--hypothesis-seed"}
+)  # fmt: skip
+"""pytest options taking a value that change only how a run reports, orders, spreads, times or
+measures the tests it would run anyway."""
+_PYTEST_HARMLESS_SWITCHES: Final = frozenset(
+    {"-q", "--quiet", "-v", "--verbose", "-x", "--exitfirst", "-s", "-l", "--showlocals",
+     "--no-showlocals", "--no-header", "--no-summary", "--strict-markers", "--strict-config",
+     "--strict", "--full-trace", "--disable-warnings", "--disable-pytest-warnings",
+     "--cache-clear", "--ff", "--failed-first", "--nf", "--new-first", "--setup-show",
+     "--no-cov", "--no-cov-on-fail", "--cov-branch", "--cov-append", "--instafail",
+     "--runxfail", "--doctest-modules", "--doctest-continue-on-failure",
+     "--randomly-dont-reorganize", "--random-order", "--benchmark-disable",
+     "--hypothesis-show-statistics", "--pdb", "--trace", "--force-sugar"}
+)  # fmt: skip
+"""pytest switches that change only output, order, stopping early or debugging. Any other
+option may decide what a pass means (`--record-mode=rewrite`, `--regtest-reset`, `--reruns`)."""
+_PYTEST_SHORT_VALUES: Final = frozenset("kmpcoWrn")
+_PYTEST_COLLECT: Final = frozenset(
+    {"--co", "--collect-only", "--fixtures", "--markers", "--version", "-V", "-h", "--help",
+     "--setup-plan"}
+)  # fmt: skip
 _PYTEST_FILTER_FLAGS: Final = {
     "-k": "-k",
     "-m": "-m",
@@ -486,6 +469,8 @@ _PYTEST_FILTER_FLAGS: Final = {
     "-p": "a plugin switch (-p)",
     "--rootdir": "a different root (--rootdir)",
     "--confcutdir": "--confcutdir",
+    "-W": "a warnings filter (-W)",
+    "--pythonwarnings": "a warnings filter (--pythonwarnings)",
 }
 _HARMLESS_PLUGIN_SWITCHES: Final = (
     ["no:cacheprovider"],
@@ -593,6 +578,17 @@ _JS_FILTER_SWITCHES: Final = frozenset(
         "--last-failed",
     }
 )
+_JS_HARMLESS: Final = frozenset(
+    {"--ci", "--runInBand", "-i", "--verbose", "--silent", "--coverage", "--no-coverage",
+     "--watch", "--watchAll", "--no-watch", "--no-watchAll", "--run", "--colors", "--no-colors",
+     "--color", "--no-color", "--passWithNoTests", "--detectOpenHandles", "--forceExit",
+     "--json", "--logHeapUsage", "--useStderr", "--no-cache", "--cache", "--expand",
+     "--errorOnDeprecated", "--noStackTrace", "--hideSkippedTests", "--no-file-parallelism",
+     "-w", "--maxWorkers", "--reporters", "--reporter", "--outputFile", "--coverageReporters",
+     "--coverageDirectory", "--testTimeout", "--pool", "--logLevel", "-u", "--updateSnapshot",
+     "--update"}
+)  # fmt: skip
+"""jest and vitest options that change only output, workers, caching, timeouts or coverage."""
 _JS_COLLECT: Final = frozenset({"--listTests", "--list", "--showConfig"})
 _VITEST_SUBCOMMANDS: Final = frozenset({"run", "watch", "dev"})
 _GO_VALUE_FLAGS: Final = frozenset(
@@ -622,6 +618,17 @@ _GO_VALUE_FLAGS: Final = frozenset(
         "-C",
     }
 )
+_GO_SWITCHES: Final = frozenset(
+    {"-v", "-race", "-cover", "-failfast", "-json", "-benchmem", "-trimpath", "-a", "-x", "-work",
+     "-msan", "-asan", "-fullpath"}
+)  # fmt: skip
+_GO_HARMLESS: Final = _GO_SWITCHES | frozenset(
+    {"-count", "-timeout", "-p", "-parallel", "-cpu", "-mod", "-coverprofile", "-covermode",
+     "-coverpkg", "-shuffle", "-vet", "-bench", "-benchtime", "-o", "-outputdir", "-cpuprofile",
+     "-memprofile", "-blockprofile", "-mutexprofile", "-trace"}
+)  # fmt: skip
+"""`go test` options that change only output, parallelism, timing, coverage or the order tests
+run in. Build tags, linker flags, `-exec` and `-C` can change which code and tests run."""
 _CARGO_VALUE_FLAGS: Final = frozenset(
     {
         "-p",
@@ -645,6 +652,13 @@ _CARGO_VALUE_FLAGS: Final = frozenset(
         "--message-format",
         "--config",
         "-Z",
+        "--test-threads",
+        "--failure-output",
+        "--success-output",
+        "--status-level",
+        "--final-status-level",
+        "--cargo-profile",
+        "--retries",
     }
 )
 _CARGO_FILTER_FLAGS: Final = frozenset(
@@ -654,6 +668,20 @@ _CARGO_FILTER_SWITCHES: Final = frozenset(
     {"--lib", "--bins", "--doc", "--examples", "--benches", "--tests"}
 )
 _TEST_BINARY_FILTERS: Final = frozenset({"--skip", "--exact", "--ignored"})
+_CARGO_HARMLESS: Final = frozenset(
+    {"--release", "-r", "--all", "--workspace", "--all-features", "--locked", "--frozen",
+     "--offline", "-q", "--quiet", "-v", "-vv", "--verbose", "--no-fail-fast", "--all-targets",
+     "--keep-going", "--timings", "--ignore-rust-version", "-j", "--jobs", "--target",
+     "--target-dir", "--manifest-path", "--color", "--message-format", "--profile",
+     "--cargo-profile", "--test-threads", "--no-capture", "--nocapture", "--failure-output",
+     "--success-output", "--status-level", "--final-status-level", "--hide-progress-bar"}
+)  # fmt: skip
+"""`cargo test` and `cargo nextest run` options that change only output, profile, parallelism
+or stopping early. Features can compile tests out; `--retries` can turn a failure into a pass."""
+_TEST_BINARY_HARMLESS: Final = frozenset(
+    {"--nocapture", "--show-output", "--test-threads", "-q", "--quiet", "--color", "--format",
+     "--report-time", "--include-ignored"}
+)  # fmt: skip
 _UV_VALUE_FLAGS: Final = frozenset(
     {
         "--with",
@@ -915,11 +943,28 @@ def _unwrap(words: list[str]) -> list[str]:
     return words
 
 
+def _short_cluster(arg: str) -> list[str]:
+    """`-qx` as `-q -x`, and `-qopython_functions=x` as `-q -o python_functions=x`: a letter
+    that takes a value takes the rest of the word."""
+    if arg.startswith("--") or len(arg) <= 2 or not arg.startswith("-"):
+        return [arg]
+    out: list[str] = []
+    for k, letter in enumerate(arg[1:], start=2):
+        out.append(f"-{letter}")
+        if letter in _PYTEST_SHORT_VALUES:
+            if arg[k:]:
+                out.append(arg[k:])
+            break
+    return out
+
+
 def _pytest_filters(
     args: list[str], env: dict[str, str]
 ) -> tuple[list[str], bool, list[str] | None]:
     """(filters, collect only, paths): `paths` are the files and directories the run selects
-    when its only filters are plain paths, else None."""
+    when its only filters are plain paths, else None. An option not known to be harmless counts
+    as a filter."""
+    args = [part for arg in args for part in _short_cluster(arg)]
     filters: list[str] = []
     paths: list[str] = []
     plain = True
@@ -928,16 +973,7 @@ def _pytest_filters(
     while i < len(args):
         arg = args[i]
         name, eq, _ = arg.partition("=")
-        if arg in (
-            "--co",
-            "--collect-only",
-            "--fixtures",
-            "--markers",
-            "--version",
-            "-h",
-            "--help",
-            "--setup-plan",
-        ):
+        if arg in _PYTEST_COLLECT:
             collect_only = True
         elif arg == "-p" and args[i + 1 : i + 2] in _HARMLESS_PLUGIN_SWITCHES:
             i += 1
@@ -951,14 +987,13 @@ def _pytest_filters(
         elif arg in _PYTEST_FILTER_SWITCHES:
             filters.append(_PYTEST_FILTER_SWITCHES[arg])
             plain = False
-        elif [arg[2:]] in _HARMLESS_PLUGIN_SWITCHES and arg.startswith("-p"):
+        elif name in _PYTEST_HARMLESS_VALUES:
+            i += 0 if eq else 1
+        elif arg in _PYTEST_HARMLESS_SWITCHES or _pytest_regenerates(arg):
             pass
-        elif re.fullmatch(r"-k.+|-m.+|-p.+|-c.+|-o.+", arg):
-            filters.append(_PYTEST_FILTER_FLAGS[arg[:2]])
-            plain = False
         elif arg.startswith("-"):
-            if not eq and arg in _PYTEST_VALUE_FLAGS:
-                i += 1
+            filters.append(f"{name}, an option the judge cannot tell is harmless")
+            plain = False
         else:
             paths.append(arg)
             plain = plain and "::" not in arg and not _unspelled(arg)
@@ -1007,10 +1042,16 @@ def _js_filters(runner: str, args: list[str]) -> tuple[list[str], bool]:
         elif arg.startswith("-"):
             if not eq and arg in _JS_VALUE_FLAGS:
                 i += 1
+            if runner in ("jest", "vitest") and not _js_harmless(name):
+                filters.append(f"{name}, an option the judge cannot tell is harmless")
         else:
             filters.append(f"only {arg}")
         i += 1
     return filters, collect_only
+
+
+def _js_harmless(name: str) -> bool:
+    return name in _JS_HARMLESS or name.startswith("--coverage.")
 
 
 def _go_filters(args: list[str]) -> tuple[list[str], bool]:
@@ -1032,7 +1073,14 @@ def _go_filters(args: list[str]) -> tuple[list[str], bool]:
             collect_only = True
             if not eq:
                 i += 1
+        elif flag == "-args":
+            filters.append("-args, arguments the judge cannot read passed to the test binary")
+            break
+        elif flag in _GO_HARMLESS or _GO_REGEN.fullmatch(arg):
+            if not eq and flag in _GO_VALUE_FLAGS and flag not in _GO_SWITCHES:
+                i += 1
         elif arg.startswith("-"):
+            filters.append(f"{flag}, an option the judge cannot tell is harmless")
             if not eq and flag in _GO_VALUE_FLAGS:
                 i += 1
         else:
@@ -1065,17 +1113,24 @@ def _cargo_filters(args: list[str]) -> tuple[list[str], bool]:
             filters.append(name)
         elif name in ("--no-run", "--list"):
             collect_only = True
+        elif name in _CARGO_HARMLESS:
+            if not eq and name in _CARGO_VALUE_FLAGS:
+                i += 1
         elif arg.startswith("-"):
+            filters.append(f"{name}, an option the judge cannot tell is harmless")
             if not eq and name in _CARGO_VALUE_FLAGS:
                 i += 1
         else:
             filters.append(f"only tests matching {arg}")
         i += 1
     for arg in binary:
+        name = arg.partition("=")[0]
         if arg in _TEST_BINARY_FILTERS:
             filters.append(arg)
         elif arg == "--list":
             collect_only = True
+        elif arg.startswith("-") and name not in _TEST_BINARY_HARMLESS:
+            filters.append(f"{name}, an option the judge cannot tell is harmless")
         elif not arg.startswith("-") and not arg.isdigit():
             filters.append(f"only tests matching {arg}")
     return filters, collect_only

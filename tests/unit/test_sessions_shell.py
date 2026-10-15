@@ -70,11 +70,44 @@ def test_recognises_test_runners(command: str, runner: str) -> None:
         ("make test-unit", "target test-unit"),
         ("tox -e py312", "-e"),
         ("python -m unittest tests.test_calc", "only tests.test_calc"),
+        ("pytest -q --record-mode=rewrite", "--record-mode, an option the judge cannot tell"),
+        ("pytest -q --regtest-reset", "--regtest-reset, an option the judge cannot tell"),
+        ("pytest --reruns 3", "--reruns, an option the judge cannot tell"),
+        ("pytest '-qopython_functions=test_add*'", "a config override (-o)"),
+        ("pytest -qpno:warnings", "a plugin switch (-p)"),
+        ("pytest -vk add", "-k"),
+        ("pytest -q -W ignore::DeprecationWarning", "a warnings filter (-W)"),
+        ("pytest -Werror", "a warnings filter (-W)"),
+        ("pytest --pythonwarnings=ignore", "a warnings filter (--pythonwarnings)"),
+        ("pytest -qZ", "-Z, an option the judge cannot tell"),
+        ("go test -tags integration ./...", "-tags, an option the judge cannot tell"),
+        ("go test ./... -args -v", "-args, arguments the judge cannot read"),
+        ("cargo test --features slow", "--features, an option the judge cannot tell"),
+        ("cargo nextest run --retries 3", "--retries, an option the judge cannot tell"),
+        ("cargo test -- --bogus", "--bogus, an option the judge cannot tell"),
+        ("jest --allowOnly", "--allowOnly, an option the judge cannot tell"),
+        ("vitest run --dangerouslyIgnoreUnhandledErrors", "--dangerouslyIgnoreUnhandledErrors"),
     ],
 )
 def test_filters_make_a_run_a_subset(command: str, fragment: str) -> None:
     filters = analyse(command, "/work").test_filters
     assert any(fragment in f for f in filters), filters
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pytest -q -x --tb=short -rA -vv --no-header --durations=5 --maxfail 2",
+        "pytest -n auto --dist loadscope --cov=src --cov-report term-missing --junitxml r.xml",
+        "pytest -qx -n4 -p no:cacheprovider -pno:randomly --color=yes -sl",
+        "go test -v -count=1 -race -timeout 60s -cover ./...",
+        "cargo test --release --workspace -- --nocapture --test-threads 1",
+        "npx jest --ci --runInBand --coverage --maxWorkers 2",
+        "npx vitest run --reporter=verbose --coverage.enabled",
+    ],
+)
+def test_harmless_options_keep_a_run_whole(command: str) -> None:
+    assert analyse(command).test_filters == []
 
 
 def test_cd_into_the_session_directory_is_not_a_filter() -> None:
