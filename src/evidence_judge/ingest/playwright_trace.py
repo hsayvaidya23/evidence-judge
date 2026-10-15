@@ -33,6 +33,7 @@ from evidence_judge.core.evidence import (
     PageState,
     Run,
     Screenshot,
+    is_web_page_url,
 )
 from evidence_judge.ingest._dom import FrameSnapshotStore, SnapshotDecodeError
 from evidence_judge.ingest._json import (
@@ -49,7 +50,6 @@ from evidence_judge.ingest._network import (
     body_prefix_bytes,
     check_max_body_chars,
     inline_body,
-    is_web_page_url,
     network_event,
     wall_ms,
 )
@@ -163,8 +163,8 @@ def load_playwright_trace(
     trace file must stay in place while the run is judged and reported.
 
     ``final_state`` is the last snapshot of the main page that shows a page a site served:
-    snapshots of ``about:``, ``data:``, ``blob:``, ``devtools:`` and other browser-internal URLs
-    (``NON_WEB_SCHEMES``) never count. The main page is the page (``pageId``) of the agent's last
+    only ``http`` and ``https`` snapshots count (``is_web_page_url``), never ``about:``,
+    ``data:``, ``view-source:`` or browser-internal URLs. The main page is the page (``pageId``) of the agent's last
     action that has such a snapshot, so a tab opened after that action (a popup, an ad, a page
     the agent never acted on) is ignored, and a tab the agent did act in last is followed. With
     no such action, it is the first page opened. Its screenshot is the last screencast frame of
