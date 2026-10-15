@@ -359,6 +359,12 @@ the names exported from `evidence_judge`) is defined under
   `trusted_evidence_log: true`) that the log, key and anchor were out of the agent's reach.
   Otherwise the log is `partial`, with the reason, and `--require-tamper-evidence` caps it at
   needs review. `--log-key` and `--log-anchor` override the default state-directory paths.
+- **MCP `judge_run` no longer overwrites arbitrary files.** `json_report` and `html_report`
+  replaced any file inside the allowed roots, even though the tool was annotated as
+  non-destructive. Now an existing file is replaced only when it is an earlier evidence-judge
+  report: a verdict JSON that validates, or an HTML page with the report's generator tag.
+  Replacing any other file needs `overwrite: true`, and the tool is annotated
+  `destructiveHint: true`.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

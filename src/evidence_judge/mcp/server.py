@@ -40,7 +40,7 @@ configured. Evidence and answers are redacted before judging."""
 
 _READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False)
 _JUDGE = ToolAnnotations(
-    read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False
+    read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False
 )
 
 _Trace = Annotated[str | None, Field(description="Playwright trace .zip (format v7 to v10)")]
@@ -74,7 +74,8 @@ def core_tools(server: MCPServer, config: ServerConfig) -> None:
             "spec expectation is checked against the recorded evidence. Returns the verdict "
             "(outcome pass / fail / needs_review, score, summary, tamper_detection, per-claim "
             "and per-expectation results with evidence citations). Needs at least one of "
-            "trace, har or browser_use. Optionally writes JSON / HTML reports."
+            "trace, har or browser_use. Optionally writes JSON / HTML reports: an existing file "
+            "is replaced only when it is an earlier evidence-judge report, unless overwrite=true."
         ),
         annotations=_JUDGE,
     )
@@ -135,6 +136,13 @@ def core_tools(server: MCPServer, config: ServerConfig) -> None:
             str | None,
             Field(description="Write the HTML report here (embeds screenshots unredacted)"),
         ] = None,
+        overwrite: Annotated[
+            bool,
+            Field(
+                description="Replace an existing report path even if it is not an earlier "
+                "evidence-judge report"
+            ),
+        ] = False,
     ) -> Annotated[CallToolResult, JudgeResult]:
         req = JudgeRequest(
             trace=trace,
@@ -153,6 +161,7 @@ def core_tools(server: MCPServer, config: ServerConfig) -> None:
             run_id=run_id,
             json_report=json_report,
             html_report=html_report,
+            overwrite=overwrite,
         )
 
         async def work() -> JudgeResult:
