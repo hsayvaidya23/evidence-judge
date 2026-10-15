@@ -204,15 +204,30 @@ def _citations(item: JsonObject) -> str:
     return f" [evidence: {', '.join(ids)}]" if ids else ""
 
 
-def _problems(verdict: JsonObject) -> list[str]:
-    lines: list[str] = []
+def _finding(claim: JsonObject) -> str:
+    label = "contradicted" if claim.get("status") == "contradicted" else "not shown by the evidence"
+    return f"{label}. {_clean(claim.get('reason'))}{_citations(claim)}"
+
+
+def _claim_problems(verdict: JsonObject) -> list[str]:
+    """One item per quoted sentence; the claims split from one sentence become its sub-items."""
+    by_quote: dict[str, list[JsonObject]] = {}
     for claim in _objects(verdict.get("claims")):
-        status = claim.get("status")
-        if status == "supported":
+        if claim.get("status") != "supported":
+            quote = _clean(claim.get("quote") or claim.get("claim_text"))
+            by_quote.setdefault(quote, []).append(claim)
+    items: list[str] = []
+    for quote, claims in by_quote.items():
+        if len(claims) == 1:
+            items.append(f'- "{quote}": {_finding(claims[0])}')
             continue
-        label = "contradicted" if status == "contradicted" else "not shown by the evidence"
-        quote = _clean(claim.get("quote") or claim.get("claim_text"))
-        lines.append(f'- "{quote}": {label}. {_clean(claim.get("reason"))}{_citations(claim)}')
+        subs = [f"  - {_clean(c.get('claim_text')) or 'claim'}: {_finding(c)}" for c in claims]
+        items.append("\n".join([f'- "{quote}":', *subs]))
+    return items
+
+
+def _problems(verdict: JsonObject) -> list[str]:
+    lines = _claim_problems(verdict)
     for expectation in _objects(verdict.get("expectations")):
         if expectation.get("met") is False:
             name = _clean(expectation.get("expectation_id"))

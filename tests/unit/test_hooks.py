@@ -502,3 +502,19 @@ def test_inherited_evj_settings_are_dropped_unless_allowed(
     out = _claude_stop(tmp_path, project)
     assert "decision" not in out
     assert "the judge exited 3" in str(out["systemMessage"])
+
+
+def test_feedback_groups_the_claims_of_one_sentence_under_its_quote() -> None:
+    quote = "I placed the order, #1042"
+    verdict: dict[str, object] = {
+        "summary": "s",
+        "claims": [
+            {"quote": quote, "claim_text": "order placed", "status": "contradicted", "reason": "a"},
+            {"quote": quote, "claim_text": "number 1042", "status": "no_evidence", "reason": "b"},
+            {"quote": "other", "claim_text": "x", "status": "contradicted", "reason": "c"},
+        ],
+    }
+    text = feedback("fail", verdict, "t")
+    assert text.count(quote) == 1
+    assert f'- "{quote}":\n  - order placed: contradicted. a\n  - number 1042: not shown' in text
+    assert '- "other": contradicted. c' in text
