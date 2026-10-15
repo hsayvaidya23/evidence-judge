@@ -32,7 +32,12 @@ from evidence_judge.forgery.echoes import (
     TRANSFORMED_VARIANTS,
 )
 from evidence_judge.forgery.evidence import UNANCHORED_KINDS, WRITE_ONLY_KINDS, unanchored
-from evidence_judge.forgery.hosts import MIRROR_ORIGIN, OFFSITE_VARIANTS, port_mirror_origin
+from evidence_judge.forgery.hosts import (
+    MIRROR_ORIGIN,
+    MUTATING_GET_VARIANTS,
+    OFFSITE_VARIANTS,
+    port_mirror_origin,
+)
 from evidence_judge.forgery.inputs import (
     COMPOSE_VARIANTS,
     KEYBOARD_VARIANTS,
@@ -818,11 +823,14 @@ async def test_a_get_that_acts_as_a_write_is_a_side_effect(
 ) -> None:
     base = scenarios[name]
     variants: set[str] = set()
-    for seed in range(3):
+    planted_variants: set[str] = set()
+    for seed in range(len(MUTATING_GET_VARIANTS)):
         run = _forged(base, ForgeryKind.MUTATING_GET, seed)
         [planted] = [n for n in run.network if n.id == "net#planted-get"]
         assert planted.method == "GET" and planted.is_mutation
         variants.add(planted.shown_method)
+        planted_variants.add(run.metadata["forgery"]["variant"])
         for verdict in await _verdicts(base, run, ForgeryKind.MUTATING_GET):
             assert verdict.outcome is not P, verdict.summary
-    assert variants == {"GET as DELETE", "GET as POST"}
+    assert planted_variants == set(MUTATING_GET_VARIANTS)
+    assert variants == {"GET as DELETE", "GET as POST", "GET (persisted query)"}

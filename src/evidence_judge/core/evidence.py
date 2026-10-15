@@ -23,13 +23,15 @@ _GRAPHQL_OPERATIONS: Final = frozenset({"query", "mutation", "subscription"})
 def _graphql_operations(document: str) -> list[tuple[str, str | None]]:
     """The operations a GraphQL document defines, as (kind, name), in order: every top-level
     definition that opens a selection set, read past strings, comments, variables and
-    directives. Fragments are left out; a bare `{ ... }` is an anonymous query."""
+    directives (an object literal in a variable default or a directive argument, `($a: I =
+    {id: 1})`, `@audit(meta: {by: "x"})`, opens no selection set). Fragments are left out; a
+    bare `{ ... }` is an anonymous query."""
     operations: list[tuple[str, str | None]] = []
     header: list[str] = []
     braces = parens = 0
     directive = False
     for part in _GRAPHQL_TOKEN.findall(document):
-        if part[0] in '#"':
+        if part[0] in '#"' or (parens and part in "{}"):
             continue
         if part == "{":
             if braces == 0 and parens == 0:
@@ -54,16 +56,29 @@ def _graphql_operations(document: str) -> list[tuple[str, str | None]]:
     return operations
 
 
-def _graphql_mutation(document: str, operation_name: str | None) -> bool:
-    """The operation the request runs is a mutation: the one `operationName` names, else the
-    only one; with several and none named (or a name that matches none), any mutation."""
+def _graphql_mutation(document: str, operation_names: list[str]) -> bool:
+    """The operation the request runs may be a mutation: the one `operationName` names, else
+    the only one; with several and none named (or a name that matches none), any mutation.
+    Several `operationName` values are ambiguous (servers differ on which one they read): any
+    of them naming a mutation counts."""
     operations = _graphql_operations(document)
-    named = [kind for kind, name in operations if operation_name and name == operation_name]
+    if len(set(operation_names)) > 1:
+        return any(_graphql_mutation(document, [name]) for name in operation_names)
+    wanted = operation_names[0] if operation_names else None
+    named = [kind for kind, name in operations if wanted and name == wanted]
     if named:
         return named[0] == "mutation"
     if len(operations) == 1:
         return operations[0][0] == "mutation"
     return any(kind == "mutation" for kind, _ in operations)
+
+
+def _persisted_only(params: list[tuple[str, str]]) -> bool:
+    """A GraphQL persisted query (`extensions={"persistedQuery": ...}`) sent without its
+    document: only the server knows whether the hash names a mutation."""
+    if any(key == "query" for key, _ in params):
+        return False
+    return any(key == "extensions" and "persistedQuery" in value for key, value in params)
 
 
 HarField = Literal[
@@ -252,24 +267,33 @@ class NetworkEvent(_Frozen):
     @property
     def write_method(self) -> str | None:
         """The state-changing method the request acts as, or None: its own method, one an
-        override header (`X-HTTP-Method-Override: DELETE`) or a `_method=` query names (`&` or
-        `;` separated), or POST for a GraphQL GET whose `query` runs a mutation."""
+        override header (`X-HTTP-Method-Override: DELETE`, any write method in a comma list)
+        or a `_method=` query names (`&` or `;` separated), or POST for a GraphQL GET whose
+        `query` may run a mutation or that sends only a persisted-query hash, whose operation
+        only the server knows."""
         method = self.method.upper()
         if method in MUTATION_METHODS:
             return method
         for name, value in self.request_headers.items():
-            named = value.strip().upper()
-            if name.lower() in METHOD_OVERRIDE_HEADERS and named in MUTATION_METHODS:
+            if name.lower() not in METHOD_OVERRIDE_HEADERS:
+                continue
+            listed = (part.strip().upper() for part in value.split(","))
+            if named := next((m for m in listed if m in MUTATION_METHODS), None):
                 return named
-        query = urlsplit(self.url).query.replace(";", "&")
-        params = parse_qsl(query, keep_blank_values=True)
-        operation = next((v for k, v in params if k == "operationName"), None)
+        params = self._query_params
+        operations = [v for k, v in params if k == "operationName"]
         for key, value in params:
             if key.lower() == "_method" and value.strip().upper() in MUTATION_METHODS:
                 return value.strip().upper()
-            if key == "query" and _graphql_mutation(value, operation):
+            if key == "query" and _graphql_mutation(value, operations):
                 return "POST"
+        if _persisted_only(params):
+            return "POST"
         return None
+
+    @property
+    def _query_params(self) -> list[tuple[str, str]]:
+        return parse_qsl(urlsplit(self.url).query.replace(";", "&"), keep_blank_values=True)
 
     @property
     def is_mutation(self) -> bool:
@@ -281,6 +305,8 @@ class NetworkEvent(_Frozen):
         DELETE`)."""
         method = self.method.upper()
         acts = self.write_method
+        if acts is not None and acts != method and _persisted_only(self._query_params):
+            return f"{method} (persisted query)"
         return f"{method} as {acts}" if acts is not None and acts != method else method
 
     @property

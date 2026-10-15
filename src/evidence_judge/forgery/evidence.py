@@ -116,9 +116,11 @@ a start page, prepended before) everything the run really did:
   or `display="none"` text, a second `<switch>` child or text past the canvas, a MathML
   annotation, a closed `popover`. The page is recorded as the page-text reader renders it.
 - `mutating_get`: it also sends the site a GET that acts as a write: one with an
-  `X-HTTP-Method-Override: DELETE` header, one with a `_method=DELETE` query (also after a
-  `;`), or a GraphQL mutation in the query string (alone, after a fragment, or picked by
-  `operationName`). Nothing on the page shows it.
+  `X-HTTP-Method-Override: DELETE` header (alone or in a list), one with a `_method=DELETE`
+  query (also after a `;`), a GraphQL mutation in the query string (alone, after a fragment,
+  behind an object literal in a variable default or directive argument, or picked by one of
+  one or more `operationName` values), or a persisted-query hash with no document. Nothing on
+  the page shows it.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """

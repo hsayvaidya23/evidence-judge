@@ -260,6 +260,51 @@ async def test_url_regex_still_sees_the_full_url() -> None:
         ("/graphql?query=mutation%20%40live%7Bclear%7D", {}, "POST"),
         ("/api/cart/1?x=1;_method=DELETE", {}, "DELETE"),
         ("/api/cart/delete?id=1", {}, None),
+        ("/api/cart/1", {"X-HTTP-Method-Override": "DELETE, GET"}, "DELETE"),
+        ("/api/cart/1", {"X-HTTP-Method-Override": "GET,PATCH"}, "PATCH"),
+        ("/api/cart/1", {"X-HTTP-Method-Override": "GET, HEAD"}, None),
+        (
+            "/graphql?query=mutation%20M(%24a%3A%20CartInput%20%3D%20%7Bid%3A%201%7D)%20"
+            "%7B%20clearCart(input%3A%20%24a)%20%7B%20id%20%7D%20%7D",
+            {},
+            "POST",
+        ),
+        (
+            "/graphql?query=mutation%20M%20%40audit(meta%3A%20%7Bby%3A%20%22x%22%7D)%20"
+            "%7B%20clearCart%20%7B%20id%20%7D%20%7D",
+            {},
+            "POST",
+        ),
+        (
+            "/graphql?query=mutation%20Del(%24a%3A%20I%20%3D%20%7B%7D)%20%7B%20clearCart%20"
+            "%7B%20id%20%7D%20%7D&operationName=Del",
+            {},
+            "POST",
+        ),
+        (
+            "/graphql?query=query%20Q%20%7B%20me%20%7B%20id%20%7D%20%7D%20mutation%20Del%20"
+            "%7B%20clearCart%20%7B%20id%20%7D%20%7D&operationName=Q&operationName=Del",
+            {},
+            "POST",
+        ),
+        (
+            "/graphql?query=query%20Q%20%7B%20me%20%7B%20id%20%7D%20%7D%20mutation%20Del%20"
+            "%7B%20clearCart%20%7B%20id%20%7D%20%7D&operationName=Q&operationName=Q",
+            {},
+            None,
+        ),
+        (
+            "/graphql?query=query%20Q(%24f%3A%20Filter%20%3D%20%7BinStock%3A%20true%7D)%20"
+            "%7B%20products(filter%3A%20%24f)%20%7B%20id%20%7D%20%7D",
+            {},
+            None,
+        ),
+        (
+            "/graphql?query=query%20Q%20%40cached(opts%3A%20%7Bttl%3A%2060%7D)%20"
+            "%7B%20products%20%7B%20id%20%7D%20%7D",
+            {},
+            None,
+        ),
     ],
 )
 def test_a_get_acts_as_the_write_it_names(
@@ -272,3 +317,14 @@ def test_a_get_acts_as_the_write_it_names(
         assert event.shown_method == f"GET as {acts_as}"
         assert RequestMatcher(RequestPredicate(method=acts_as)).misses(event) == []
         assert RequestMatcher(RequestPredicate(method="GET")).misses(event) == []
+
+
+def test_a_persisted_query_without_its_document_counts_as_a_possible_write() -> None:
+    extensions = (
+        "%7B%22persistedQuery%22%3A%7B%22version%22%3A1%2C%22sha256Hash%22%3A%22abc%22%7D%7D"
+    )
+    event = net(1, "GET", f"/graphql?operationName=ClearCart&extensions={extensions}")
+    assert event.is_mutation and event.write_method == "POST"
+    assert event.shown_method == "GET (persisted query)"
+    sent = net(2, "GET", f"/graphql?query=%7Bme%7Bid%7D%7D&extensions={extensions}")
+    assert not sent.is_mutation
