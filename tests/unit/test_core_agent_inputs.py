@@ -62,6 +62,21 @@ def test_pressed_text_is_input_but_key_names_and_chords_are_not() -> None:
     assert _inputs(actions=actions) == ("order a77 confirmed", "london")
 
 
+def test_typed_markup_is_also_input_as_rendered_text() -> None:
+    actions = [
+        act(1, "fill", "#bio", value="<b>Order A77</b> confirmed"),
+        act(2, "fill", "#note", value="Tom &amp; Jerry"),
+        act(3, "fill", "#plain", value="a < b > c"),
+    ]
+    assert _inputs(actions=actions) == (
+        "<b>order a77</b> confirmed",
+        "order a77 confirmed",
+        "tom &amp; jerry",
+        "tom & jerry",
+        "a < b > c",
+    )
+
+
 def test_uploaded_file_names_with_and_without_extension_are_inputs() -> None:
     actions = [
         act(1, "upload", "#a", value=r"C:\fakepath\Order A77.pdf"),

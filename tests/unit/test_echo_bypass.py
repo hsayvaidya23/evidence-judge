@@ -53,6 +53,18 @@ ECHOES = {
         act(2, "send_keys", "#q", value="Order A77 confirmed"),
         "You wrote Order A77 confirmed",
     ),
+    "typed markup rendered": (
+        act(2, "fill", "#bio", value="<b>Order A77</b> confirmed"),
+        "Bio: Order A77 confirmed",
+    ),
+    "typed block markup rendered": (
+        act(2, "fill", "#bio", value="<p>Order A77</p><p>confirmed</p>"),
+        "Bio: Order A77\nconfirmed",
+    ),
+    "typed character references decoded": (
+        act(2, "fill", "#bio", value="Order&#32;A77 confirmed"),
+        "Bio: Order A77 confirmed",
+    ),
 }
 
 GENUINE = {

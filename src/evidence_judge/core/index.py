@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import bisect
+import html
 import math
 import re
 from collections.abc import Iterable, Iterator
@@ -30,6 +31,7 @@ _KEY_NAME = re.compile(
     r"|f\d{1,2}|key[a-z]|digit\d|numpad\w+)",
     re.IGNORECASE,
 )
+_TAG = re.compile(r"</?[a-z][^<>]*>", re.IGNORECASE)
 MASK: Final = "\x00"
 """Stands in for agent input in masked evidence; it is never part of a predicate."""
 
@@ -177,17 +179,18 @@ class EvidenceIndex:
         """Normalised text the agent put into the run itself, longest first.
 
         That is the value of every typing action, each run of single-key presses on one target,
-        every press of text that is not key names (browser-use ``send_keys``),
-        the name (with and without extension) of every uploaded file, the decoded path segments and query values of every URL the agent opened, and the
-        decoded query values of every GET request (a form the agent submitted, or a navigation
-        a HAR cannot attribute). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit
-        are left out.
+        every press of text that is not key names (browser-use ``send_keys``), the name (with
+        and without extension) of every uploaded file, the decoded path segments and query
+        values of every URL the agent opened, and the decoded query values of every GET request
+        (a form the agent submitted, or a navigation a HAR cannot attribute). Each is also kept
+        as a page rendering it as HTML would show it (tags dropped, character references
+        decoded). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit are left out.
         """
         return self._agent_inputs
 
     @cached_property
     def _agent_inputs(self) -> tuple[str, ...]:
-        found = {normalize(text) for text in _raw_inputs(self.run)}
+        found = {normalize(form) for text in _raw_inputs(self.run) for form in _rendered(text)}
         kept = [t for t in found if len(t) >= MIN_PAGE_TEXT and WORD.search(t)]
         return tuple(sorted(kept, key=lambda t: (-len(t), t)))
 
@@ -247,6 +250,12 @@ def _raw_inputs(run: Run) -> Iterator[str]:
     for event in run.network:
         if event.method.upper() == "GET":
             yield from _url_inputs(event.url, with_path=False)
+
+
+def _rendered(text: str) -> tuple[str, ...]:
+    """`text`, and how a page that renders it as HTML shows it: character references decoded
+    and tags dropped (inline) or turned into a break (block)."""
+    return text, *(html.unescape(_TAG.sub(gap, text)) for gap in ("", " "))
 
 
 def _is_key_names(value: str) -> bool:
