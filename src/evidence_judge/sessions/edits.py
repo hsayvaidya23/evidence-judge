@@ -12,6 +12,7 @@ holding several tools' settings, on the sections the edit touched when the whole
 
 from __future__ import annotations
 
+import ast
 import difflib
 import posixpath
 import re
@@ -259,6 +260,134 @@ def _config_findings(
     return []
 
 
+_TEST_MODULES: Final = re.compile(
+    r"^(?:pytest|_pytest|unittest|mock|hypothesis|faker|freezegun|responses|respx|"
+    r"pytest_\w+|tests?|conftest|test_\w+|\w+_test)(?:\.|$)"
+)
+_FIXTURE_SCOPES: Final = frozenset({"session", "module", "package", "class"})
+
+
+def _imported(tree: ast.Module) -> dict[str, str]:
+    """Local names bound by the module's imports, to the module or object they name, leaving
+    out test tooling and test modules."""
+    names: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if not _TEST_MODULES.match(alias.name):
+                    names[alias.asname or alias.name.split(".")[0]] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            if _TEST_MODULES.match(node.module):
+                continue
+            for alias in node.names:
+                names[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return names
+
+
+def _root(node: ast.expr) -> str | None:
+    while isinstance(node, ast.Attribute | ast.Subscript):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _dotted(node: ast.expr) -> str:
+    try:
+        return ast.unparse(node)
+    except (ValueError, TypeError):  # pragma: no cover - unparse handles every parsed node
+        return "?"
+
+
+def _sys_modules(node: ast.expr) -> bool:
+    return isinstance(node, ast.Subscript) and _dotted(node.value) == "sys.modules"
+
+
+def _patches(body: list[ast.stmt], names: dict[str, str], monkeypatch: bool) -> list[str]:
+    """Rebindings of imported code in `body`: attribute assignments, `setattr`, writes to
+    `sys.modules`, and (inside fixtures) `monkeypatch.setattr`/`mock.patch(...).start()`."""
+    found: list[str] = []
+    for stmt in body:
+        for node in ast.walk(stmt):
+            targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+                targets = [node.target]
+            for target in targets:
+                if _sys_modules(target):
+                    found.append(f"writes {_dotted(target)}")
+                elif isinstance(target, ast.Attribute) and _root(target) in names:
+                    found.append(f"rebinds {_dotted(target)}")
+            if not isinstance(node, ast.Call):
+                continue
+            func = _dotted(node.func)
+            first = node.args[0] if node.args else None
+            if func == "setattr" and len(node.args) >= 2 and _root(node.args[0]) in names:
+                attr = node.args[1]
+                shown = attr.value if isinstance(attr, ast.Constant) else _dotted(attr)
+                found.append(f"rebinds {_dotted(node.args[0])}.{shown}")
+            elif func.endswith("sys.modules.__setitem__") or func == "sys.modules.update":
+                found.append("writes sys.modules")
+            elif monkeypatch and func.endswith(".setattr") and first is not None:
+                named = isinstance(first, ast.Constant) and isinstance(first.value, str)
+                target = _dotted(first).strip("'\"")
+                if _root(first) in names or (named and not _TEST_MODULES.match(target)):
+                    found.append(f"patches {target}")
+            elif (
+                monkeypatch
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "start"
+                and isinstance(node.func.value, ast.Call)
+                and _dotted(node.func.value.func).endswith("patch")
+            ):
+                found.append(f"starts {_dotted(node.func.value)}")
+    return found
+
+
+def _wide_fixture(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """A fixture that applies beyond one test: autouse, or scoped to a module or session."""
+    for decorator in func.decorator_list:
+        if not isinstance(decorator, ast.Call) or not _dotted(decorator.func).endswith("fixture"):
+            continue
+        for keyword in decorator.keywords:
+            value = keyword.value
+            if keyword.arg == "autouse" and isinstance(value, ast.Constant) and value.value:
+                return True
+            if (
+                keyword.arg == "scope"
+                and isinstance(value, ast.Constant)
+                and value.value in _FIXTURE_SCOPES
+            ):
+                return True
+    return False
+
+
+def rebinding_findings(source: str, name: str) -> list[str]:
+    """Ways a test module rewrites the code under test for every test: at import (an attribute
+    assignment or `setattr` on an imported module, a `sys.modules` entry) or in an autouse,
+    module- or session-scoped fixture (`monkeypatch.setattr`, `mock.patch(...).start()`)."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+    names = _imported(tree)
+    found: list[str] = []
+    top = [
+        s
+        for s in tree.body
+        if not isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    ]
+    found.extend(_patches(top, names, monkeypatch=False))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and (
+            _wide_fixture(node) or node.name.startswith(("pytest_", "setUpModule", "setup_module"))
+        ):
+            found.extend(_patches(node.body, names, monkeypatch=True))
+    return [
+        f"{what} in {name}, so every test runs against code the test module replaced"
+        for what in dict.fromkeys(found)
+    ]
+
+
 def suite_findings(
     path: str,
     change: str,
@@ -298,6 +427,18 @@ def suite_findings(
                     f"removed or changed {count} existing line{'s' if count > 1 else ''} in "
                     f"test file {name} (test data, fixtures or helpers can decide what passes)"
                 )
+    if test_file and change != "delete":
+        findings.extend(_new_rebindings(name, added, texts))
     if not test_file:
         findings.extend(_config_findings(path, change, removed, added, texts))
     return findings
+
+
+def _new_rebindings(name: str, added: list[str] | None, texts: tuple[str, str] | None) -> list[str]:
+    """Rebindings of the code under test that the edit adds to a test module."""
+    if texts is not None:
+        before = set(rebinding_findings(texts[0], name))
+        return [f for f in rebinding_findings(texts[1], name) if f not in before]
+    if added is None:
+        return []
+    return rebinding_findings("\n".join(added), name)

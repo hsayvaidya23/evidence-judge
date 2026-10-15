@@ -210,6 +210,26 @@ class SessionIndex:
                 out.append((command, f"changed how later commands run: {analysis.harness_change}"))
         return out
 
+    @property
+    def source_changed(self) -> bool:
+        """Something outside the tests and their configuration may have changed: an edit of a
+        non-test file, a command that names one or writes files it does not name, or an
+        action the log does not show."""
+
+        def outside(path: str) -> bool:
+            return not (is_test_path(path) or is_test_config(path) or is_harness_path(path))
+
+        if self.unseen_actors or any(outside(e.path) for e in self.edits):
+            return True
+        for command in self.commands:
+            analysis = command.analysis
+            if command.status is CallStatus.DENIED or analysis.mutation is None:
+                continue
+            paths = [*analysis.touched_paths, *analysis.deleted_paths]
+            if analysis.opaque_write or any(outside(p) for p in paths):
+                return True
+        return False
+
     @cached_property
     def unseen_actors(self) -> list[SessionEvent]:
         return [

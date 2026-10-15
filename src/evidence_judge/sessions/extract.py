@@ -224,6 +224,11 @@ def _sentence_claims(sentence: str) -> Iterator[tuple[ClaimKind, bool, list[Sess
             yield ClaimKind.OUTCOME, True, [TestResultPredicate()]
 
 
+def claims_fix(answer: str | None) -> bool:
+    """The answer says it fixed something ("I fixed the bug", "the issue is now fixed")."""
+    return any(_FIXED.search(sentence) for sentence in split_sentences(answer or ""))
+
+
 def _key(predicates: list[SessionPredicate]) -> str:
     return "|".join(p.model_dump_json() for p in predicates)
 

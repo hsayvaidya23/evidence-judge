@@ -8,6 +8,7 @@ from evidence_judge.sessions.edits import (
     is_test_path,
     line_diff,
     patch_lines,
+    rebinding_findings,
     suite_findings,
     unified_diff_lines,
 )
@@ -323,3 +324,63 @@ def test_sections_decide_shared_config_changes() -> None:
     cfg = "[metadata]\nname = x\n[tool:pytest]\n"
     assert changed_sections(cfg, cfg + "addopts = -x\n") == {"tool:pytest"}
     assert changed_sections("a = 1\n", "a = 2\n") == {""}
+
+
+_AUTOUSE = """import pytest
+import calc
+
+@pytest.fixture(autouse=True)
+def fix(monkeypatch):
+    monkeypatch.setattr(calc, "add", lambda a, b: a + b)
+"""
+_SESSION_PATCH = """from unittest import mock
+import pytest
+
+@pytest.fixture(scope="session")
+def fix():
+    mock.patch("calc.add", lambda a, b: a + b).start()
+"""
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("import calc\ncalc.add = lambda a, b: a + b\n", "rebinds calc.add"),
+        ("import calc as c\nc.add += 0\n", "rebinds c.add"),
+        ("from pkg import calc\nsetattr(calc, 'add', max)\n", "rebinds calc.add"),
+        ("import sys\nsys.modules['calc'] = object()\n", "writes sys.modules['calc']"),
+        (_AUTOUSE, "patches calc"),
+        (_SESSION_PATCH, "starts mock.patch('calc.add'"),
+        (
+            "import pytest\n@pytest.fixture(autouse=True)\ndef f(monkeypatch):\n"
+            "    monkeypatch.setattr('calc.add', max)\n",
+            "patches calc.add",
+        ),
+        ("import calc\ndef pytest_configure(config):\n    calc.add = max\n", "rebinds calc.add"),
+    ],
+)
+def test_rebinding_the_code_under_test(source: str, fragment: str) -> None:
+    found = rebinding_findings(source, "test_x.py")
+    assert any(fragment in f for f in found), found
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import calc\n\ndef test_add(monkeypatch):\n    monkeypatch.setattr(calc, 'add', max)\n",
+        "import calc\nresult = calc.add(1, 2)\n",
+        "import pytest\npytest.register_assert_rewrite('x')\n",
+        "from unittest import mock\nmock.DEFAULT = 1\n",
+        "def broken(:\n",
+        "import calc\n@pytest.fixture\ndef f(monkeypatch):\n    monkeypatch.setattr(calc, 'add', max)\n",
+    ],
+)
+def test_ordinary_tests_do_not_rebind(source: str) -> None:
+    assert rebinding_findings(source, "test_x.py") == []
+
+
+def test_only_new_rebindings_are_findings() -> None:
+    old = "import calc\ncalc.add = max\n"
+    assert suite_findings("tests/test_x.py", "modify", [], ["x = 1"], (old, old + "x = 1\n")) == []
+    added: list[str] = ["import calc", "calc.add = max"]
+    assert any("rebinds calc.add" in f for f in suite_findings("tests/test_x.py", "add", [], added))
