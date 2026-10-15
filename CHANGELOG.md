@@ -136,9 +136,9 @@ the names exported from `evidence_judge`) is defined under
 - **Release supply chain**: every action is pinned by commit SHA, workflows are audited with
   zizmor, releases ship a CycloneDX SBOM and build-provenance attestations, and PyPI publishing
   uses trusted publishing.
-
-[Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 - **A screenshot alone proves nothing in a run with agent input.** The vision check cannot tell
   the site's text from an echo of what the agent typed, so in such a run a screenshot supports an
   `expect` entry only beside a deterministic predicate, and never a claim on its own.
+
+[Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
