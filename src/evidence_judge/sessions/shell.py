@@ -56,9 +56,12 @@ _PYTHON: Final = re.compile(r"^(?:python|pypy)[0-9.]*$|^py$")
 _SHELLS: Final = frozenset({"sh", "bash", "zsh", "dash", "ksh", "fish"})
 SESSION_STORE: Final = re.compile(
     r"\.claude/projects|\.claude/plugins|\.codex/sessions|\.codex/archived_sessions|"
-    r"\.gemini/tmp|session-evidence|evidence-judge/evidence",
+    r"\.gemini/tmp|session-evidence|evidence-judge/evidence|\.evidence-judge(?:/|$)|"
+    r"EVJ_HOOK_LOG_DIR",
     re.IGNORECASE,
 )
+"""Where harnesses and the evidence recorder keep session records (and the project's
+`.evidence-judge/` spec): a command that writes there can rewrite the evidence."""
 _AGENT_SUMMARY_TEXT: Final = re.compile(
     r"\b\d+\s+(?:passed|passing|failed|failing|failures?|errors?)\b|"
     r"\btest result:\s*(?:ok|FAILED)|\bTests?:?\s+\d+|\bOK\s*\(\d+\s+tests?|"
@@ -1594,6 +1597,7 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
         result = _Classified(Category.READ_ONLY, "")
     else:
         result = _classify_program(words, simple.env, depth, cwd)
+    read_only = result.category is Category.READ_ONLY
     if simple.writes and result.mutation is None:
         result.mutation = f"writes {simple.writes[0]}"
         if result.category is Category.READ_ONLY:
@@ -1611,7 +1615,7 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
             result.paths = None
     named = result.touched
     if named is None:
-        mutating = result.category is Category.MUTATING
+        mutating = result.category is Category.MUTATING and not read_only
         named = [w for w in words[1:] if not w.startswith("-")] if mutating else []
     result.touched = [*named, *simple.writes]
     if result.opaque is None and result.mutation is not None:
@@ -1704,13 +1708,31 @@ def _harness_change(pipelines: list[_Pipeline], command: str) -> str | None:
     return None
 
 
-def _empty(reason: str) -> CommandAnalysis:
+def _writes_session_store(
+    pipelines: list[_Pipeline],
+    command: str,
+    touched: list[str],
+    deleted: list[str],
+    opaque: str | None,
+) -> bool:
+    """The command writes a session store: it names one as a target, or it names one at all
+    (quotes removed, so `~/.cl""aude` counts) and may write files it does not name. Reading
+    one (`cat ~/.claude/projects/x.jsonl`) does not count."""
+    if any(SESSION_STORE.search(path) for path in [*touched, *deleted]):
+        return True
+    words = [w for p in pipelines for c in p.commands for w in [*c.words, *c.writes]]
+    named = SESSION_STORE.search(command) is not None or any(SESSION_STORE.search(w) for w in words)
+    return named and opaque is not None
+
+
+def _empty(reason: str, command: str) -> CommandAnalysis:
     return CommandAnalysis(
         categories=[Category.UNKNOWN],
         mutation=f"the command could not be parsed ({reason})",
         exit_masked_by="the command could not be parsed",
         parse_error=reason,
         opaque_write=f"the command could not be parsed ({reason})",
+        session_store=SESSION_STORE.search(command) is not None,
     )
 
 
@@ -1727,11 +1749,11 @@ def _cd_step(simple: _Simple) -> str:
 
 def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     if len(command) > MAX_COMMAND_CHARS:
-        return _empty(f"longer than {MAX_COMMAND_CHARS} characters")
+        return _empty(f"longer than {MAX_COMMAND_CHARS} characters", command)
     try:
         pipelines = _parse(_strip_comments(tokenize(command)))
     except ValueError as exc:
-        return _empty(str(exc))
+        return _empty(str(exc), command)
 
     categories: list[Category] = []
     programs: list[str] = []
@@ -1749,6 +1771,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     touched: list[str] = []
     opaque: str | None = None
     lasting: str | None = None
+    nested_store = False
     cds: list[str] = []
     test_paths: list[str] | None = None
     run_cds: list[str] = []
@@ -1786,6 +1809,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 touched.extend(nested.touched_paths)
                 opaque = opaque or nested.opaque_write
                 lasting = lasting or nested.lasting_mutation
+                nested_store = nested_store or nested.session_store
                 if nested.runners:
                     run_cds = [*cds, *nested.run_cds]
                     test_paths = nested.test_paths
@@ -1881,7 +1905,8 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         test_paths=test_paths if len(runners) == 1 else None,
         cd_targets=persisting,
         mutation_after_check=mutation_after,
-        session_store=SESSION_STORE.search(command) is not None,
+        session_store=nested_store
+        or _writes_session_store(pipelines, command, touched, deleted, opaque),
         harness_change=_harness_change(pipelines, command),
     )
 

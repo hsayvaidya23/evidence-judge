@@ -368,6 +368,14 @@ the names exported from `evidence_judge`) is defined under
   overlapping or repeated paths, node ids and `-k` still cannot. `PYTHONPATH=.` (or `$PWD`) and
   `-p no:cacheprovider` no longer make a run a subset. Two test runs in one command
   (`pytest tests && cd pkg_b && pytest`) still need review, since only the last summary is read.
+- Session judge: the evidence recorder's own logs (`~/.evidence-judge/sessions`, or wherever
+  `EVJ_HOOK_LOG_DIR` points) and the project's `.evidence-judge/` spec count as session stores,
+  so rewriting them puts every result in doubt as rewriting a Claude Code or Codex transcript
+  does. The rule now applies to writes only: reading a transcript (`cat`, `jq`, `grep`) no
+  longer holds an honest session for review. A write counts when the command names a store as
+  a target, or names one anywhere (quotes removed, so `~/.cl""aude` counts, as do words inside
+  `bash -c`) and may write files it does not name. The arguments of a read-only program whose
+  output is redirected are no longer taken for write targets.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

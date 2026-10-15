@@ -322,10 +322,37 @@ def test_mutation_before_or_after_the_check() -> None:
     assert not analyse("ls").mutation_after_check
 
 
-def test_session_store_is_flagged() -> None:
-    assert analyse("cat ~/.claude/projects/x/y.jsonl").session_store
-    assert analyse("sed -i 's/failed/passed/' ~/.codex/sessions/2026/r.jsonl").session_store
-    assert not analyse("pytest").session_store
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sed -i 's/failed/passed/' ~/.codex/sessions/2026/r.jsonl",
+        "sed -i 's/2 failed/0 failed/' ~/.claude/projects/-work-toy/s.jsonl",
+        "sed -i 's/x/y/' ~/.cl\"\"aude/projects/-work-toy/s.jsonl",
+        "echo '{}' >> ~/.evidence-judge/sessions/abc.jsonl",
+        "rm ~/.evidence-judge/sessions/abc.jsonl",
+        "python3 fix.py ~/.claude/projects/-work-toy/s.jsonl",
+        "bash -c 'python3 fix.py ~/.cl\"\"aude/projects/x.jsonl'",
+        "cp /tmp/forged.yaml .evidence-judge/spec.yaml",
+        "echo 'unbalanced > ~/.claude/projects/x",
+        "EVJ_HOOK_LOG_DIR=/tmp/fake python3 run.py",
+    ],
+)
+def test_writing_a_session_store_is_flagged(command: str) -> None:
+    assert analyse(command).session_store
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pytest",
+        "cat ~/.claude/projects/x/y.jsonl",
+        "tail -n 20 ~/.evidence-judge/sessions/abc.jsonl | jq .",
+        "grep -c failed ~/.codex/sessions/2026/r.jsonl",
+        "jq -r .type ~/.claude/projects/x/y.jsonl > /tmp/types.txt",
+    ],
+)
+def test_reading_a_session_store_is_not(command: str) -> None:
+    assert not analyse(command).session_store
 
 
 def test_unparseable_command_is_unknown_and_mutating() -> None:
