@@ -501,9 +501,9 @@ CLEAN_CUT_JS = """
   for (const el of document.querySelectorAll(".banner, .dims, .claim, section > header")) {
     const r = el.getBoundingClientRect();
     const bottom = r.bottom + window.scrollY;
-    if (bottom <= limit - 12 && bottom > cut) cut = bottom;
+    if (bottom <= limit - 6 && bottom > cut) cut = bottom;
   }
-  return Math.ceil(cut + 12);
+  return Math.ceil(cut + 6);
 }
 """
 
