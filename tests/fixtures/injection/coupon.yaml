@@ -1,0 +1,7 @@
+id: coupon
+task: Apply the coupon SAVE50 to the cart
+site: http://127.0.0.1:63911
+expect:
+  - id: applied
+    all:
+      - {kind: page_text, contains: SAVE50 applied, scope: final}

@@ -7,6 +7,7 @@ from rich.table import Table
 from rich.text import Text
 
 from evidence_judge.core.evidence import Channel, Run
+from evidence_judge.core.provenance import injections
 from evidence_judge.core.verdict import Dimension, Outcome, RunVerdict, Support
 
 _OUTCOME_STYLE = {
@@ -110,6 +111,15 @@ class Mutation:
 
 
 @dataclass(frozen=True, slots=True)
+class Injection:
+    """A call that made the run's evidence the agent's (core.provenance.injections)."""
+
+    id: str
+    call: str
+    sha256: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class EvidenceSummary:
     run_id: str
     source: str
@@ -118,6 +128,7 @@ class EvidenceSummary:
     mutations: list[Mutation] = field(default_factory=list[Mutation])
     final_url: str | None = None
     final_title: str | None = None
+    injections: list[Injection] = field(default_factory=list[Injection])
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -131,6 +142,9 @@ class EvidenceSummary:
             ],
             "final_url": self.final_url,
             "final_title": self.final_title,
+            "injections": [
+                {"id": i.id, "call": i.call, "sha256": i.sha256} for i in self.injections
+            ],
         }
 
 
@@ -155,6 +169,10 @@ def summarize_evidence(run: Run) -> EvidenceSummary:
         mutations=mutations,
         final_url=run.final_state.url if run.final_state else None,
         final_title=run.final_state.title if run.final_state else None,
+        injections=[
+            Injection(id=a.id, call=a.value or a.name, sha256=a.script_sha256)
+            for a in injections(run)
+        ],
     )
 
 
@@ -193,3 +211,16 @@ def print_evidence_summary(summary: EvidenceSummary, console: Console) -> None:
     if summary.final_url:
         title = f"  ({summary.final_title})" if summary.final_title else ""
         console.print(Text.assemble(("final ", "dim"), summary.final_url, title))
+    if summary.injections:
+        made = Table(
+            title="Agent-made evidence (list a script's sha256 in the spec's trusted_scripts "
+            "to trust it)",
+            title_justify="left",
+            expand=True,
+        )
+        made.add_column("id", no_wrap=True)
+        made.add_column("call", ratio=1, overflow="fold")
+        made.add_column("sha256", no_wrap=True)
+        for i in summary.injections:
+            made.add_row(i.id, Text(i.call), i.sha256 or Text("-", "dim"))
+        console.print(made)

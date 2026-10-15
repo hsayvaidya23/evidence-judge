@@ -1,0 +1,7 @@
+id: plan
+task: Upgrade the account to the Premium plan
+site: http://127.0.0.1:63911
+expect:
+  - id: premium
+    all:
+      - {kind: page_text, contains: "Plan: Premium", scope: final}

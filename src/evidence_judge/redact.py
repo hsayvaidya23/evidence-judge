@@ -768,6 +768,7 @@ class Redactor:
                 "value": value,
                 "url": None if a.url is None else self._url(a.url, counts),
                 "error": None if a.error is None else self._text(a.error, counts),
+                "file_text": None if a.file_text is None else self._text(a.file_text, counts),
             }
         )
 
@@ -815,7 +816,7 @@ def _run_texts(run: Run) -> Iterator[str]:
     yield from (t for t in (run.task, run.agent_answer) if t)
     yield from run.agent_reasoning
     for a in run.actions:
-        yield from (t for t in (a.selector, a.value, a.url) if t)
+        yield from (t for t in (a.selector, a.value, a.url, a.file_text) if t)
     for n in run.network:
         yield n.url
         yield from (t for t in (n.request_body, n.response_body) if t)

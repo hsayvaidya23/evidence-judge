@@ -9,10 +9,14 @@ snapshot-resource and screencast blobs live in the archive under ``resources/`` 
 
 from __future__ import annotations
 
+import base64
+import binascii
 import bisect
+import codecs
 import contextlib
 import json
 import lzma
+import math
 import re
 import zipfile
 import zlib
@@ -36,7 +40,7 @@ from evidence_judge.core.evidence import (
     Screenshot,
     is_web_page_url,
 )
-from evidence_judge.core.provenance import mark_agent_page_navigations
+from evidence_judge.core.provenance import mark_agent_page_navigations, script_hash
 from evidence_judge.ingest._dom import FrameSnapshotStore, SnapshotDecodeError
 from evidence_judge.ingest._json import (
     JsonObject,
@@ -129,6 +133,149 @@ _OTHER_METHODS: Final = frozenset(
 """Trace methods recorded as user actions without a canonical name of their own."""
 
 
+_HARMLESS_METHODS: Final = frozenset(
+    {
+        "newPage",
+        "newContext",
+        "newContextForReuse",
+        "launch",
+        "launchPersistentContext",
+        "connectOverCDP",
+        "connect",
+        "close",
+        "dispose",
+        "disposeAPIResponse",
+        "bringToFront",
+        "setViewportSize",
+        "emulateMedia",
+        "pause",
+        "updateSubscription",
+        "setTestIdAttributeName",
+        "registerLocatorHandler",
+        "unregisterLocatorHandler",
+        "resolveLocatorHandlerNoReply",
+        "runBeforeUnload",
+        "requestGC",
+        "pickLocator",
+        "cancelPickLocator",
+        "highlight",
+        "hideHighlight",
+        "reload",
+        "dblclick",
+        "tap",
+        "selectText",
+        "waitForSelector",
+        "waitForTimeout",
+        "waitForElementState",
+        "waitForEventInfo",
+        "waitForLoadState",
+        "waitForURL",
+        "waitForNavigation",
+        "waitForEvent",
+        "__waitInfo__",
+        "expect",
+        "expectScreenshot",
+        "screenshot",
+        "pdf",
+        "title",
+        "content",
+        "innerText",
+        "innerHTML",
+        "textContent",
+        "getAttribute",
+        "inputValue",
+        "isChecked",
+        "isDisabled",
+        "isEditable",
+        "isEnabled",
+        "isHidden",
+        "isVisible",
+        "boundingBox",
+        "querySelector",
+        "querySelectorAll",
+        "queryCount",
+        "resolveSelector",
+        "ariaSnapshot",
+        "ariaSnapshotJSON",
+        "snapshotForAI",
+        "contentFrame",
+        "ownerFrame",
+        "frameElement",
+        "getProperty",
+        "getPropertyList",
+        "jsonValue",
+        "cookies",
+        "storageState",
+        "webStorageGetItem",
+        "webStorageItems",
+        "consoleMessages",
+        "pageErrors",
+        "clearConsoleMessages",
+        "clearPageErrors",
+        "requests",
+        "response",
+        "body",
+        "fetchResponseBody",
+        "fetchLog",
+        "rawRequestHeaders",
+        "rawResponseHeaders",
+        "httpVersion",
+        "securityDetails",
+        "serverAddr",
+        "sizes",
+        "startCSSCoverage",
+        "stopCSSCoverage",
+        "startJSCoverage",
+        "stopJSCoverage",
+        "screencastStart",
+        "screencastStop",
+        "screencastFrameAck",
+        "tracingStart",
+        "tracingStartChunk",
+        "tracingStop",
+        "tracingStopChunk",
+        "tracingGroup",
+        "tracingGroupEnd",
+        "harStart",
+        "harExport",
+        "startTracing",
+        "stopTracing",
+        "zip",
+        "tracingStarted",
+        "traceDiscarded",
+        "addStackToTracingNoReply",
+        "globToRegex",
+        "asLocatorDescription",
+        "saveAs",
+        "saveAsStream",
+        "pathAfterFinished",
+        "failure",
+        "stream",
+        "read",
+        "cancel",
+        "delete",
+        "dismiss",
+        "accept",
+        "dispatchEvent",
+    }
+)
+"""Trace methods that only open, close or arrange pages and contexts, interact the way a user
+does, wait, read, or record: what the site sends and what the page shows stay the site's. The
+known user actions (`known_action`, `_OTHER_METHODS`) are harmless too. Every other recorded
+call taints the run (INJECT): deny by default, so a method this list does not know, or one
+Playwright adds later, never passes as harmless."""
+_UNTRUSTED_CLASSES: Final = frozenset({"WebSocketRoute", "CDPSession", "BindingCall"})
+"""Classes whose every call answers the page or the browser with the agent's data."""
+_SETTLE_SCRIPT: Final = "(ms) => new Promise((f) => setTimeout(f, ms))"
+"""The script Playwright MCP evaluates to wait between actions (``Tab.waitForTimeout``); with a
+number as its argument it only waits, so it is not an injection."""
+_UPLOAD_TEXT_BYTES: Final = 64 * 1024
+"""How much of each uploaded file's content is read for its text."""
+_PRINTABLE_SHARE: Final = 0.9
+"""Share of printable characters above which decoded upload bytes count as text."""
+_BINARY_RUN = re.compile(rb"[\x20-\x7e]{8,}")
+"""A run of printable ASCII in a binary upload, the way ``strings`` finds text in one."""
+
 _INJECTED_CODE: Final[dict[str, tuple[str, str]]] = {
     "evaluateExpression": ("evaluate", "expression"),
     "evaluateExpressionHandle": ("evaluateHandle", "expression"),
@@ -148,6 +295,8 @@ _ROUTE_OVERRIDES: Final = ("url", "method", "headers", "postData")
 """``Route.continue`` parameters that rewrite the request the site gets."""
 _MOCKED_ROUTE: Final = "Route"
 """Method of the INJECT action recorded for a route call no request is marked for."""
+_INTERCEPT: Final = "setNetworkInterceptionPatterns"
+"""How ``page.route`` and ``context.route`` register the URLs their handlers see."""
 
 
 def _action_name(method: str) -> str | None:
@@ -269,6 +418,9 @@ class _RawAction:
     method: str
     params: JsonObject
     error: str | None = None
+    owner: str | None = None
+    """The class whose method it is (Frame, Page, BrowserContext, ...)."""
+    taints: bool = False
 
 
 @dataclass(slots=True)
@@ -334,6 +486,10 @@ class _TraceReader:
     form_values: int = 0
     fulfills: list[_RawRoute] = field(default_factory=list["_RawRoute"])
     continues: list[_RawRoute] = field(default_factory=list["_RawRoute"])
+    fallbacks: list[_RawRoute] = field(default_factory=list["_RawRoute"])
+    """``route.fallback`` calls with overrides: no recorded request is marked for them."""
+    intercepts: list[float] = field(default_factory=list[float])
+    """When a route handler was registered (``_INTERCEPT`` with patterns)."""
 
     def read_all(self) -> None:
         prefixes = _trace_prefixes(self.archive)
@@ -442,25 +598,43 @@ class _TraceReader:
         call_id = as_str(event.get("callId"))
         method = as_str(event.get("method"))
         start = as_float(event.get("startTime"))
-        if event.get("class") == _ROUTE_CLASS and start is not None:
-            self._on_route(method, as_object(event.get("params")), start)
-            return
-        if call_id is None or method is None or _action_name(method) is None or start is None:
-            return
+        owner = as_str(event.get("class"))
         params = as_object(event.get("params"))
-        self.actions[self._key(call_id)] = _RawAction(call_id, start, method, params)
+        if call_id is None or method is None or start is None or _is_settle(method, params):
+            return
+        if owner == _ROUTE_CLASS and self._on_route(method, params, start):
+            return
+        if method == _INTERCEPT:
+            if as_list(params.get("patterns")):
+                self.intercepts.append(start)
+            return
+        taints = owner == _ROUTE_CLASS or _taints(owner, method, params)
+        if not taints and _action_name(method) is None:
+            return
+        self.actions[self._key(call_id)] = _RawAction(
+            call_id, start, method, params, owner=owner, taints=taints
+        )
         page_id = as_str(event.get("pageId"))
         if page_id is not None:
             self.action_pages[self._key(call_id)] = page_id
 
-    def _on_route(self, method: str | None, params: JsonObject, start: float) -> None:
+    def _on_route(self, method: str, params: JsonObject, start: float) -> bool:
+        """Record a ``Route.fulfill`` or ``Route.continue``; False for any other Route call
+        (abort, redirectNavigationRequest), which is an action that taints the run."""
         if method == "fulfill":
             body = as_str(params.get("body")) or ""
             self.fulfills.append(_RawRoute(start, f"route.fulfill({body[:80]})", overrides=True))
-        elif method == "continue" and params.get("isFallback") is not True:
-            changed = [k for k in _ROUTE_OVERRIDES if params.get(k) not in (None, [], "")]
+            return True
+        if method != "continue":
+            return False
+        changed = [k for k in _ROUTE_OVERRIDES if params.get(k) not in (None, [], "")]
+        if params.get("isFallback") is not True:
             call = f"route.continue({', '.join(changed)})"
             self.continues.append(_RawRoute(start, call, overrides=bool(changed)))
+        elif changed:
+            call = f"route.fallback({', '.join(changed)})"
+            self.fallbacks.append(_RawRoute(start, call, overrides=True))
+        return True
 
     def _key(self, call_id: str) -> _CallKey:
         return (self.context_index, call_id)
@@ -568,16 +742,22 @@ class _TraceReader:
 
     def _build_actions(self, network: list[NetworkEvent]) -> list[ActionEvent]:
         """The recorded actions, plus an INJECT for every route call that answered or rewrote a
-        request when no recorded request is marked synthetic (no network file, or a format
-        without the marker), so the run still shows it was mocked."""
+        request no recorded request is marked synthetic for: a ``route.fallback`` with
+        overrides (Playwright marks none), and every overriding call when no request is marked
+        (no network file, or a format without the marker). The request it changed started
+        before the call was recorded, so the INJECT is placed when the first route handler was
+        registered, before any request it could have changed."""
         snapshot_times = [s.time for s in self.snapshots]
         out: list[ActionEvent] = []
         actions = dict(self.actions)
+        unmarked = [*self.fallbacks]
         if not any(n.synthetic for n in network):
-            for n, route in enumerate(r for r in [*self.fulfills, *self.continues] if r.overrides):
-                actions[(-1, f"route{n}")] = _RawAction(
-                    f"route{n}", route.time, _MOCKED_ROUTE, {"call": route.call}
-                )
+            unmarked += [r for r in [*self.fulfills, *self.continues] if r.overrides]
+        for n, route in enumerate(unmarked):
+            registered = min((t for t in self.intercepts if t <= route.time), default=route.time)
+            actions[(-1, f"route{n}")] = _RawAction(
+                f"route{n}", registered, _MOCKED_ROUTE, {"call": route.call}, taints=True
+            )
         ordered = sorted(actions.items(), key=lambda item: item[1].time)
         for number, (key, raw) in enumerate(ordered, 1):
             url = self.action_urls.get(key)
@@ -588,14 +768,14 @@ class _TraceReader:
                 ActionEvent(
                     id=f"act#{number}",
                     ts=self._ts(raw.time),
-                    name=INJECT
-                    if raw.method == _MOCKED_ROUTE
-                    else _action_name(raw.method) or OTHER,
+                    name=INJECT if raw.taints else _action_name(raw.method) or OTHER,
                     selector=as_str(raw.params.get("selector")),
-                    value=_action_value(raw.method, raw.params),
+                    value=_action_value(raw),
                     url=url,
                     error=raw.error,
                     call_id=raw.call_id,
+                    script_sha256=_script_sha256(raw.method, raw.params),
+                    file_text=_upload_text(raw.params) if raw.method == "setInputFiles" else None,
                 )
             )
         return out
@@ -754,7 +934,7 @@ class _TraceReader:
         if not candidates:
             return None
         for key, raw in sorted(self.actions.items(), key=lambda i: i[1].time, reverse=True):
-            if raw.method in _INJECTED_CODE:
+            if raw.taints:
                 continue
             page = self.action_pages.get(key)
             if page in candidates:
@@ -822,11 +1002,118 @@ def _trace_prefixes(archive: zipfile.ZipFile) -> list[str]:
     return [prefix for _, prefix in sorted(found)]
 
 
-def _action_value(method: str, params: JsonObject) -> str | None:
+def _taints(owner: str | None, method: str, params: JsonObject) -> bool:
+    """Whether a recorded call can change what the site sends or what the page shows or
+    stores: deny by default (see _HARMLESS_METHODS)."""
+    if method in _INJECTED_CODE or owner in _UNTRUSTED_CLASSES:
+        return True
+    if method == "dispatchEvent":
+        return _carries_value(as_object(params.get("eventInit")))
+    if method == "accept":
+        return bool(as_str(params.get("promptText")))
+    known = _action_name(method)
+    if known is not None:
+        return known == INJECT
+    return method not in _HARMLESS_METHODS
+
+
+def _carries_value(arg: JsonObject) -> bool:
+    """A serialised argument other than undefined, null or an empty object."""
+    value = as_object(arg.get("value"))
+    return value not in ({}, {"v": "undefined"}, {"v": "null"}, {"o": []}) or bool(
+        as_list(arg.get("handles"))
+    )
+
+
+def _is_settle(method: str, params: JsonObject) -> bool:
+    """``_SETTLE_SCRIPT`` evaluated with one finite number and no handles: Playwright MCP
+    waiting. Any other text, argument or call is an injection."""
+    if method != "evaluateExpression":
+        return False
+    if (as_str(params.get("expression")) or "").strip() != _SETTLE_SCRIPT:
+        return False
+    arg = as_object(params.get("arg"))
+    value = as_object(arg.get("value"))
+    number = value.get("n")
+    return (
+        set(value) == {"n"}
+        and isinstance(number, int | float)
+        and not isinstance(number, bool)
+        and math.isfinite(number)
+        and not as_list(arg.get("handles"))
+    )
+
+
+def _script_sha256(method: str, params: JsonObject) -> str | None:
+    """`script_hash` of an injected script whose code the trace holds; None for any other
+    call (an exposed binding runs the agent's own process, never vouched for)."""
+    if method not in _INJECTED_CODE or method == "exposeBinding":
+        return None
+    api, key = _INJECTED_CODE[method]
+    code = as_str(params.get(key))
+    if code is None:
+        return None
+    arg = as_object(params.get("arg")).get("value") if "arg" in params else None
+    return script_hash(api, code, arg)
+
+
+def _call_summary(params: JsonObject) -> str:
+    """A tainting call's parameters as ``name=value`` pairs, for its INJECT action's value."""
+    parts: list[str] = []
+    for name, value in params.items():
+        if name == "timeout":
+            continue
+        shown = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        parts.append(f"{name}={shown}")
+    return ", ".join(parts)
+
+
+def _upload_text(params: JsonObject) -> str | None:
+    """The text of the files a ``setInputFiles`` call sent with their content (``payloads``):
+    the first _UPLOAD_TEXT_BYTES of each, decoded; a binary file contributes its runs of
+    printable ASCII. Files sent by path or stream are not in the trace."""
+    texts: list[str] = []
+    for payload in as_list(params.get("payloads")):
+        encoded = as_str(as_object(payload).get("buffer"))
+        if not encoded:
+            continue
+        prefix = encoded[: (_UPLOAD_TEXT_BYTES // 3 + 1) * 4]
+        try:
+            data = base64.b64decode(prefix)[:_UPLOAD_TEXT_BYTES]
+        except (binascii.Error, ValueError):
+            continue
+        if text := _decoded_text(data):
+            texts.append(text)
+    return "\n".join(texts) or None
+
+
+def _decoded_text(data: bytes) -> str:
+    for bom, encoding in (
+        (codecs.BOM_UTF8, "utf-8-sig"),
+        (codecs.BOM_UTF16_LE, "utf-16"),
+        (codecs.BOM_UTF16_BE, "utf-16"),
+    ):
+        if data.startswith(bom):
+            return data.decode(encoding, errors="ignore")
+    candidates = [data.decode("utf-8", errors="ignore")]
+    if data.count(0) * 4 > len(data):
+        candidates += [data.decode(e, errors="ignore") for e in ("utf-16-le", "utf-16-be")]
+    for text in candidates:
+        printable = sum(c.isprintable() or c in "\t\n\r" for c in text)
+        if text and printable >= _PRINTABLE_SHARE * len(text):
+            return text
+    return "\n".join(run.decode("ascii") for run in _BINARY_RUN.findall(data))
+
+
+def _action_value(raw: _RawAction) -> str | None:
+    method, params = raw.method, raw.params
     if method in _INJECTED_CODE:
         api, key = _INJECTED_CODE[method]
         code = as_str(params.get(key)) or as_str(params.get("url"))
         return injected(api, code)
+    if raw.taints and method != _MOCKED_ROUTE:
+        api = f"{raw.owner}.{method}" if raw.owner else method
+        return injected(api, _call_summary(params))
     match method:
         case "Route":
             return as_str(params.get("call"))

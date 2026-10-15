@@ -111,6 +111,16 @@ class ActionEvent(_Frozen):
     url: str | None = Field(default=None, description="Page URL when the action ran")
     error: str | None = None
     call_id: str | None = None
+    script_sha256: str | None = Field(
+        default=None,
+        description="For an inject action that ran code the trace recorded in full: the hash "
+        "a task spec's trusted_scripts lists to exempt it (core.provenance.script_hash)",
+    )
+    file_text: str | None = Field(
+        default=None,
+        description="For an upload: the text of the files it sent, as far as the trace holds "
+        "it (the first 64 KB of each text file; binary files are left out)",
+    )
 
 
 class NetworkEvent(_Frozen):

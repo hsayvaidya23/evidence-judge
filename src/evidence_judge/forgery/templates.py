@@ -273,6 +273,8 @@ _DERIVED_KINDS = (
     ForgeryKind.SCRIPT_INJECTION,
     ForgeryKind.MOCKED_RESPONSE,
     ForgeryKind.DATA_URL_LINK,
+    ForgeryKind.STORAGE_TAMPERING,
+    ForgeryKind.SOCKET_OR_CDP,
 )
 for _kind in _DERIVED_KINDS:
     _STORIES[_kind] = _STORIES[ForgeryKind.PROGRESS_FABRICATION]

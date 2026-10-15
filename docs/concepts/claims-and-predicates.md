@@ -176,14 +176,40 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   (`page.evaluate`, `$eval`, `wait_for_function`, `add_init_script`, `add_script_tag`,
   `add_style_tag`, `set_content`, `expose_binding`; browser-use's `evaluate`) can write any text
   and push any URL; one whose route handler answers a request (`route.fulfill`) or rewrites it
-  (`route.continue` with a new URL, method, headers or body) makes the response, or the request
-  the site got, its own. Ingesters record the first as an `inject` action (its value is the API
-  and the code, cut to 200 characters) and mark the second `synthetic`. Everything from the first
-  of them on is set aside: page states, screenshots and requests from then on, and the page URLs
-  of later actions. A predicate that only holds on what was set aside cannot support a claim,
-  and the reason names the call (`evaluate(document.querySelector('#stock').textContent = 'In
-  stock') (act#3)`). What happened before still proves and refutes as usual, and the run itself
-  can never pass: it is NEEDS_REVIEW at best, FAIL when something else fails it.
+  (`route.continue` or `route.fallback` with a new URL, method, headers or body) makes the
+  response, or the request the site got, its own. Ingesters record the first as an `inject`
+  action (its value is the API and the code, cut to 200 characters) and mark the second
+  `synthetic`. Everything from the first of them on is set aside: page states, screenshots and
+  requests from then on, and the page URLs of later actions. A predicate that only holds on
+  what was set aside cannot support a claim, and the reason names the call
+  (`evaluate(document.querySelector('#stock').textContent = 'In stock') (act#3, sha256 …)`).
+  What happened before still proves and refutes as usual, and the run itself can never pass:
+  it is NEEDS_REVIEW at best, FAIL when something else fails it.
+- **Deny by default.** The Playwright trace ingester treats every recorded call as agent-made
+  unless it is on an allowlist of calls that only navigate, interact the way a user does
+  (click, fill, press, select, check, hover, upload, drag, mouse and keyboard), wait, read
+  (title, text, attributes, ARIA snapshots, screenshots, cookies and storage reads) or open,
+  close and arrange pages, contexts and tracing. Everything else is an `inject` action, named
+  by class and method with its parameters (`Page.webStorageSetItem(kind=local, name=coupon,
+  value=SAVE50)`): opening a CDP session (what it then sends is not recorded), mocking a
+  WebSocket (`route_web_socket`, `WebSocketRoute.send`), writing local storage or cookies
+  (`add_cookies`, `clear_cookies`, `set_storage_state`), extra HTTP headers, geolocation,
+  offline mode, permissions, the clock, `route.abort`, `request.fetch` from the test, a
+  `dispatch_event` that carries event data, a dialog accepted with prompt text, and any method
+  the allowlist does not know, including ones a later Playwright adds. A `route.fallback` with
+  overrides marks no request, so its `inject` is placed where the first route handler was
+  registered, before any request it could have rewritten.
+- **Harness scripts.** One script is exempt by itself: Playwright MCP's wait,
+  `(ms) => new Promise((f) => setTimeout(f, ms))` evaluated with a number, matched exactly
+  (only surrounding whitespace is ignored). Any other script your harness runs that does not
+  change what the page shows can be listed by hash in the spec's
+  [`trusted_scripts`](../task-specs.md#trusted_scripts-harness-scripts-you-vouch-for); an
+  `add_init_script` is never exempt unless it is listed there.
+- **Uploaded files are agent input.** The text of a file the agent uploads with its content
+  (`set_input_files` with a buffer; the first 64 KB of each file, decoded as UTF-8 or UTF-16,
+  or the runs of printable text in a binary file) counts as typed, line by line, so a page that
+  previews the file proves nothing by showing it. Files uploaded from a path are not in the
+  trace; only their names count.
 - **Links on a page the agent wrote.** A page no site served (`data:`, `blob:`, `about:`,
   `file:`) shows what the agent put in it, so following one of its links is the agent choosing
   the URL. Ingesters record such a navigation as a `goto` of the link's target (id

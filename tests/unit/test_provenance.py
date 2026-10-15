@@ -104,7 +104,8 @@ def test_tampering_names_two_calls_and_counts_the_rest() -> None:
     run = make_run(actions=[_inject(n, f"step{n}()") for n in (1, 2, 3)])
 
     assert tampering(run) == (
-        "the agent ran its own code in the page: evaluate(step1()) (act#1), evaluate(step2()) "
+        "the agent ran its own code in the page or tampered with the browser: evaluate(step1()) "
+        "(act#1), evaluate(step2()) "
         "(act#2) and 1 more; evidence from then on is not the site's"
     )
 
@@ -121,7 +122,7 @@ async def test_page_rewritten_by_evaluate_cannot_prove_and_caps_the_run() -> Non
 
     assert verdict.outcome is Outcome.NEEDS_REVIEW
     assert verdict.summary == (
-        "NEEDS_REVIEW: the agent ran its own code in the page: "
+        "NEEDS_REVIEW: the agent ran its own code in the page or tampered with the browser: "
         f"evaluate({REWRITE}) (act#3); evidence from then on is not the site's, so the run "
         "cannot pass."
     )

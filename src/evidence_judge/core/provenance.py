@@ -5,7 +5,12 @@ An agent that runs `page.evaluate("document.querySelector('#stock').textContent 
 or answers the shop's API with `route.fulfill` records a page or a response that looks like the
 site's. Ingesters record the first as an INJECT action and the second as a `synthetic` network
 event; from the first of them on (`tainted_at`), no page state, response or request is the
-site's alone, so `untampered` cuts the evidence there and `tampering` says why.
+site's alone, so `untampered` cuts the evidence there and `tampering` says why. The trace
+ingester also records as INJECT every call it does not know to be harmless (deny by default:
+storage and cookie writes, CDP sessions, WebSocket routes, ...).
+
+A script the spec's author vouched for is not the agent writing the page: `trust_scripts`
+records an INJECT whose `script_sha256` the spec's `trusted_scripts` lists as OTHER.
 
 A page the agent opened that no site served (data:, blob:, about:, javascript:, file: ...) holds
 whatever the agent wrote into it, links included, so following one of its links is the agent
@@ -15,15 +20,48 @@ target, which makes the target's URL agent input like any URL the agent typed.
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Iterable
 from typing import Final
 
-from evidence_judge.core.actions import GOTO, INJECT, canonical_action
+from evidence_judge.core.actions import GOTO, INJECT, OTHER, canonical_action
 from evidence_judge.core.evidence import ActionEvent, Run, is_web_page_url
 
 MAX_NAMED: Final = 2
 """Injected calls and synthetic requests named in `tampering`'s reason."""
 NAVIGATION_SUFFIX: Final = ".goto"
 """Suffix of the id of a GOTO that `mark_agent_page_navigations` adds after an action."""
+
+
+def script_hash(api: str, code: str, arg: object = None) -> str:
+    """The hash a task spec's `trusted_scripts` lists to exempt one injected script: SHA-256,
+    in hex, of the UTF-8 text `api`, a newline, `code`, a newline and `arg` as canonical JSON
+    (keys sorted, no spaces, non-ASCII kept). `api` is the call as the INJECT action names it
+    (evaluate, evaluateHandle, $eval, $$eval, waitForFunction, addInitScript, addScriptTag,
+    addStyleTag, setContent), `code` its code exactly as recorded and `arg` its argument in
+    Playwright's wire form as the trace records it (`{"n": 500}` for 500), None for none."""
+    canonical = json.dumps(arg, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(f"{api}\n{code}\n{canonical}".encode()).hexdigest()
+
+
+def trust_scripts(run: Run, trusted: Iterable[str]) -> Run:
+    """`run` with every INJECT action whose `script_sha256` is in `trusted` recorded as OTHER:
+    code the spec's author vouched for is not the agent writing the page. Unchanged when none
+    is."""
+    hashes = {h.lower() for h in trusted}
+    if not hashes or not any(a.script_sha256 in hashes for a in injections(run)):
+        return run
+    return run.model_copy(
+        update={
+            "actions": [
+                a.model_copy(update={"name": OTHER})
+                if a.script_sha256 in hashes and canonical_action(a.name) == INJECT
+                else a
+                for a in run.actions
+            ]
+        }
+    )
 
 
 def injections(run: Run) -> list[ActionEvent]:
@@ -42,9 +80,11 @@ def tampering(run: Run) -> str | None:
     parts: list[str] = []
     code = injections(run)
     if code:
-        named = ", ".join(f"{a.value or a.name} ({a.id})" for a in code[:MAX_NAMED])
+        named = ", ".join(_named(a) for a in code[:MAX_NAMED])
         more = f" and {len(code) - MAX_NAMED} more" if len(code) > MAX_NAMED else ""
-        parts.append(f"the agent ran its own code in the page: {named}{more}")
+        parts.append(
+            f"the agent ran its own code in the page or tampered with the browser: {named}{more}"
+        )
     mocked = [n for n in run.network if n.synthetic]
     if mocked:
         named = ", ".join(f"{n.method} {n.url} ({n.id})" for n in mocked[:MAX_NAMED])
@@ -56,6 +96,11 @@ def tampering(run: Run) -> str | None:
     if not parts:
         return None
     return "; ".join(parts) + "; evidence from then on is not the site's"
+
+
+def _named(action: ActionEvent) -> str:
+    sha = f", sha256 {action.script_sha256}" if action.script_sha256 else ""
+    return f"{action.value or action.name} ({action.id}{sha})"
 
 
 def untampered(run: Run) -> Run:

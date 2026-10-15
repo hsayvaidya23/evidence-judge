@@ -19,7 +19,11 @@ from evidence_judge.config import Settings
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Channel, Run
 from evidence_judge.core.index import EvidenceIndex
-from evidence_judge.core.provenance import mark_agent_page_navigations, tampering
+from evidence_judge.core.provenance import (
+    mark_agent_page_navigations,
+    tampering,
+    trust_scripts,
+)
 from evidence_judge.core.site import Site
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import ClaimVerdict, RunVerdict, Usage
@@ -114,6 +118,8 @@ class Judge:
             return await self._judge(run, options or JudgeOptions())
 
     async def _judge(self, run: Run, opts: JudgeOptions) -> RunVerdict:
+        if opts.spec is not None:
+            run = trust_scripts(run, opts.spec.trusted_scripts)
         run = mark_agent_page_navigations(run)
         llm = None if opts.offline or self._llm is None else _FatalErrorTrap(self._llm)
         site = str(Site.parse(opts.site, what="--site")) if opts.site else None

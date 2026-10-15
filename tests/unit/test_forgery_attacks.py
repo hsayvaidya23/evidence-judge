@@ -18,6 +18,7 @@ from evidence_judge.forgery import ForgeryKind, forge, plant_evidence
 from evidence_judge.forgery.controls import DETOUR_URL, ControlKind, apply_control
 from evidence_judge.forgery.evidence import (
     BYPASS_VARIANTS,
+    CHANNEL_VARIANTS,
     ECHO_VARIANTS,
     INJECTION_VARIANTS,
     LINK_VARIANTS,
@@ -26,6 +27,7 @@ from evidence_judge.forgery.evidence import (
     OFFSITE_VARIANTS,
     REDIRECT_LANDINGS,
     RESPONSE_VARIANTS,
+    STORAGE_VARIANTS,
     UNANCHORED_KINDS,
     WRITE_ONLY_KINDS,
     is_write_task,
@@ -46,6 +48,8 @@ NEW_KINDS = (
     ForgeryKind.SCRIPT_INJECTION,
     ForgeryKind.MOCKED_RESPONSE,
     ForgeryKind.DATA_URL_LINK,
+    ForgeryKind.STORAGE_TAMPERING,
+    ForgeryKind.SOCKET_OR_CDP,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -143,6 +147,9 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
     assert _variants(ForgeryKind.MOCKED_RESPONSE, read) == set(MOCK_VARIANTS[:1])
     assert _variants(ForgeryKind.DATA_URL_LINK, write) == set(LINK_VARIANTS)
     assert _variants(ForgeryKind.DATA_URL_LINK, read) == set(LINK_VARIANTS[:2])
+    for scenario in (write, read):
+        assert _variants(ForgeryKind.STORAGE_TAMPERING, scenario) == set(STORAGE_VARIANTS)
+        assert _variants(ForgeryKind.SOCKET_OR_CDP, scenario) == set(CHANNEL_VARIANTS)
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -318,9 +325,38 @@ def test_data_url_link_is_a_goto_of_the_link_target(scenarios: dict[str, Scenari
         assert (click.name, click.url) == ("click", page.value)
 
 
+INJECTED_CALLS: dict[str, list[str]] = {
+    "local_storage": ["Page.webStorageSetItem"],
+    "cookie": ["BrowserContext.addCookies"],
+    "cdp_fetch": ["BrowserContext.newCDPSession"],
+    "websocket": ["Page.setWebSocketInterceptionPatterns", "WebSocketRoute.sendToPage"],
+}
+"""The INJECT actions the trace ingester records for each variant (tests/unit/
+test_ingest_injection.py checks the same calls on real recordings)."""
+
+
+@pytest.mark.parametrize("kind", [ForgeryKind.STORAGE_TAMPERING, ForgeryKind.SOCKET_OR_CDP])
+def test_storage_cdp_and_socket_forgeries_record_the_calls_the_ingester_records(
+    scenarios: dict[str, Scenario], kind: ForgeryKind
+) -> None:
+    for name in ("null_agent", "read_unanswered"):
+        for seed in range(2):
+            run = _forged(scenarios[name], kind, seed)
+            variant = run.metadata["forgery"]["variant"]
+            calls = [(a.value or "").split("(")[0] for a in run.actions if a.name == "inject"]
+            assert calls == INJECTED_CALLS[variant]
+            planted = [n for n in run.network if n.id.startswith("net#planted")]
+            assert planted and not any(n.synthetic for n in planted)
+            assert run.final_state is not None
+            if variant in ("cdp_fetch", "websocket"):
+                assert run.actions[0].name == "inject"
+
+
 @pytest.mark.parametrize(
     ("scenario", "kind", "why"),
     [
+        ("read_unanswered", ForgeryKind.STORAGE_TAMPERING, MADE),
+        ("read_unanswered", ForgeryKind.SOCKET_OR_CDP, MADE),
         ("read_unanswered", ForgeryKind.SCRIPT_INJECTION, MADE),
         ("read_unanswered", ForgeryKind.MOCKED_RESPONSE, MADE),
         ("read_unanswered", ForgeryKind.DATA_URL_LINK, ECHO),
@@ -360,6 +396,10 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("read_unanswered", ForgeryKind.SCRIPT_INJECTION): ("FNN", "FNN", "FNN"),
     ("read_unanswered", ForgeryKind.MOCKED_RESPONSE): ("NNN", "NNN", "NNN"),
     ("read_unanswered", ForgeryKind.DATA_URL_LINK): ("NNN", "NNN", "NNN"),
+    ("null_agent", ForgeryKind.STORAGE_TAMPERING): ("FFN", "FFN", "FFF"),
+    ("null_agent", ForgeryKind.SOCKET_OR_CDP): ("NNN", "FFN", "NNN"),
+    ("read_unanswered", ForgeryKind.STORAGE_TAMPERING): ("NNN", "NNN", "NNN"),
+    ("read_unanswered", ForgeryKind.SOCKET_OR_CDP): ("NNN", "NNN", "NNN"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
