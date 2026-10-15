@@ -323,6 +323,18 @@ the names exported from `evidence_judge`) is defined under
     than the turn, the agent is sent back with instructions. Set `EVJ_HOOK_ON_BAD_EVIDENCE` to
     `notice` to only tell the user instead.
   - The hook still fails open, with a notice, only for its own errors and timeouts.
+- **The agent cannot weaken the spec its own answer is judged against.** The stop hook read
+  `.evidence-judge/spec.yaml` from the workspace at stop time, so an agent could edit it during
+  the turn (for example, drop a `forbid`) and pass. A new synchronous turn-start hook now saves
+  the spec when the turn starts, into the hooks' private state directory (`--state-dir`,
+  `EVJ_HOOK_STATE_DIR`, or `$CLAUDE_PLUGIN_DATA/state`), keyed by session:
+  - Claude Code and Codex: `claude-code-turn-start` / `codex-turn-start` on `UserPromptSubmit`.
+  - Gemini CLI: `gemini-turn-start` on `BeforeAgent`.
+
+  The stop hook judges with that copy. If the live spec changed, was deleted or was created
+  during the turn, the agent is sent back (`EVJ_HOOK_BLOCK_ON_SPEC_CHANGE=false` only warns).
+  `EVJ_HOOK_SPEC` may point outside the workspace. The plugin and extension manifests install
+  the turn-start hook.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

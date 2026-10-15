@@ -33,11 +33,12 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def _offline_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _offline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     for key in list(os.environ):
         if key.startswith("EVJ_HOOK_"):
             monkeypatch.delenv(key)
+    monkeypatch.setenv("EVJ_HOOK_STATE_DIR", str(tmp_path / "hook-state"))
 
 
 def _hook(command: str, stdin: str) -> dict[str, object]:

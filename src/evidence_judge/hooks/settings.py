@@ -24,6 +24,11 @@ class HookSettings(BaseSettings):
         description="When Playwright was used but its traces are missing, unreadable, from "
         "before the turn or rejected by the judge: keep the agent working, or only tell the user",
     )
+    block_on_spec_change: bool = Field(
+        default=True,
+        description="Keep the agent working when the task spec changed during the turn "
+        "(needs the turn-start hook); otherwise only tell the user",
+    )
     llm: bool = Field(
         default=False,
         description="Judge with the configured LLM (ANTHROPIC_API_KEY); offline when false",
@@ -33,7 +38,9 @@ class HookSettings(BaseSettings):
         description="Extra directories to look for traces in, relative to the project root",
     )
     spec: Path | None = Field(
-        default=None, description="Task spec to judge with, relative to the project root"
+        default=None,
+        description="Task spec to judge with, relative to the project root; an absolute path "
+        "outside the workspace keeps it out of the agent's reach",
     )
     pass_env: list[str] = Field(
         default_factory=list[str],

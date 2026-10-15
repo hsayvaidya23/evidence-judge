@@ -41,6 +41,7 @@ def _context(data: HookInput, answer_key: str, turn: Turn) -> HookContext:
         stop_hook_active=data.get("stop_hook_active") is True,
         answer=_str(data, answer_key),
         turn=turn,
+        session_id=_str(data, "session_id") or "",
     )
 
 

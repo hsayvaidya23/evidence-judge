@@ -19,6 +19,7 @@ from evidence_judge.hooks.judge import (
     trace_label,
 )
 from evidence_judge.hooks.settings import HookSettings
+from evidence_judge.hooks.state import digest, load_snapshot, read_spec
 from evidence_judge.hooks.traces import (
     TraceFile,
     fresh_traces,
@@ -56,6 +57,7 @@ class HookContext:
     stop_hook_active: bool
     answer: str | None
     turn: Turn
+    session_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,14 +162,65 @@ def _bad_evidence(
     return allow(f"the answer was not checked: {'; '.join(problems)}")
 
 
-def evaluate(context: HookContext, settings: HookSettings) -> Decision:
+def _turn_spec(
+    root: Path, settings: HookSettings, state: Path | None, session_id: str
+) -> tuple[Path | None, str | None]:
+    """The spec to judge with, and what changed about it during the turn. With a snapshot from
+    the turn-start hook, the spec as the turn started is used, whatever the agent did to it."""
+    live = find_spec(root, settings.spec)
+    snapshot = load_snapshot(state, session_id) if state is not None and session_id else None
+    if snapshot is None:
+        return live, None
+    if digest(read_spec(live)) == snapshot.sha256:
+        return snapshot.copy, None
+    before = snapshot.source or "no spec"
+    now = str(live) if live is not None else "no spec"
+    return snapshot.copy, (
+        f"the task spec changed during the turn ({before} when it started, {now} now); the "
+        "answer was judged with the spec as the turn started"
+    )
+
+
+def _with_spec_change(
+    context: HookContext, settings: HookSettings, decision: Decision, change: str | None
+) -> Decision:
+    if change is None:
+        return decision
+    if not settings.block_on_spec_change:
+        if decision.block:
+            return replace(decision, reason=f"Evidence Judge: {change}.\n\n{decision.reason}")
+        notice = NOTICE_PREFIX + change
+        return Decision(
+            notice=notice if decision.notice is None else f"{notice}\n{decision.notice}"
+        )
+    blocked = (
+        f"Evidence Judge: {change}. Restore the spec; the agent may not change the "
+        "criteria its own answer is checked against. If the user asked for this change, say so "
+        "plainly in your answer."
+    )
+    if decision.block and decision.reason:
+        return _block(context, f"{blocked}\n\n{decision.reason}")
+    rest = decision.notice or ""
+    return _block(context, f"{blocked}\n{rest}".rstrip())
+
+
+def evaluate(context: HookContext, settings: HookSettings, state: Path | None = None) -> Decision:
     """Decide whether the agent may stop. Never raises for expected failures; callers still
-    wrap it so that anything unexpected fails open."""
+    wrap it so that anything unexpected fails open. ``state`` is the hooks' private state
+    directory, where the turn-start hook saved the spec."""
     if not settings.enabled:
         return allow()
     root = _project_root(context.cwd)
     if root is None:
         return allow()
+    spec, change = _turn_spec(root, settings, state, context.session_id)
+    decision = _judge_turn(context, settings, root, spec)
+    return _with_spec_change(context, settings, decision, change)
+
+
+def _judge_turn(
+    context: HookContext, settings: HookSettings, root: Path, spec: Path | None
+) -> Decision:
     turn = context.turn
     since = (
         turn.started_at if turn.started_at is not None else time.time() - settings.max_trace_age_s
@@ -184,7 +237,7 @@ def evaluate(context: HookContext, settings: HookSettings) -> Decision:
         trace=root,
         answer=answer,
         task=turn.prompt,
-        spec=find_spec(root, settings.spec),
+        spec=spec,
         llm=settings.llm,
         timeout_s=settings.timeout_s,
         pass_env=tuple(settings.pass_env),

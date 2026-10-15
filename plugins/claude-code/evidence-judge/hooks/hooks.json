@@ -5,6 +5,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-turn-start --state-dir \"${CLAUDE_PLUGIN_DATA}/state\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-record --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
             "async": true
           }
@@ -49,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-stop --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-stop --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\" --state-dir \"${CLAUDE_PLUGIN_DATA}/state\"",
             "timeout": 90,
             "statusMessage": "Evidence Judge: checking the answer against the browser trace"
           }
@@ -61,7 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-stop --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" claude-code-stop --log-dir \"${CLAUDE_PLUGIN_DATA}/evidence\" --state-dir \"${CLAUDE_PLUGIN_DATA}/state\"",
             "timeout": 90,
             "statusMessage": "Evidence Judge: checking the answer against the browser trace"
           }

@@ -115,13 +115,19 @@ def test_plugin_hooks_use_documented_events_and_real_commands() -> None:
         assert handler["type"] == "command"
         command = str(handler["command"])
         assert command.startswith('sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" ')
-        assert '--log-dir "${CLAUDE_PLUGIN_DATA}/evidence"' in command
         adapter = _adapter(command)
         assert adapter in commands
+        if adapter != "claude-code-turn-start":
+            assert '--log-dir "${CLAUDE_PLUGIN_DATA}/evidence"' in command
         if event in ("Stop", "SubagentStop"):
             assert adapter == "claude-code-stop"
             assert "async" not in handler
             assert 60 < int(str(handler["timeout"])) <= 600
+            assert '--state-dir "${CLAUDE_PLUGIN_DATA}/state"' in command
+        elif adapter == "claude-code-turn-start":
+            assert event == "UserPromptSubmit"
+            assert "async" not in handler
+            assert '--state-dir "${CLAUDE_PLUGIN_DATA}/state"' in command
         else:
             assert adapter == "claude-code-record"
             assert handler["async"] is True
@@ -169,8 +175,12 @@ def test_gemini_extension_hooks() -> None:
         assert command.startswith('sh "${extensionPath}/hooks/run-hook.sh" ')
         adapter = _adapter(command)
         assert adapter in commands
-        expected = "gemini-after-agent" if event == "AfterAgent" else "gemini-record"
-        assert adapter == expected
+        expected = {
+            "AfterAgent": {"gemini-after-agent"},
+            "BeforeAgent": {"gemini-turn-start", "gemini-record"},
+            "AfterTool": {"gemini-record"},
+        }
+        assert adapter in expected[event]
         assert 1000 <= int(str(handler["timeout"])) <= 600_000
 
 
