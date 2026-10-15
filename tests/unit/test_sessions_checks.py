@@ -309,6 +309,35 @@ def test_an_inline_cd_back_to_the_session_directory_is_whole() -> None:
     assert "a directory only the shell knows" in _check(ALL_PASS, subshell)[1]
 
 
+def test_a_shrunken_suite_is_not_the_whole_suite() -> None:
+    run = session(
+        bash("pytest -q", RED, 1), edit("calc.py"), bash("pytest -q", ".\n1 passed in 0s")
+    )
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE
+    assert "ran 1 tests, fewer than the 3 of the earlier whole-suite run cmd#1" in reason
+    assert _check(TestResultPredicate(whole_suite=False), run)[0] is Support.SUPPORTED
+    grown = session(bash("pytest -q", RED, 1), edit("calc.py"), bash("pytest -q", "4 passed in 0s"))
+    assert _check(ALL_PASS, grown)[0] is Support.SUPPORTED
+    filtered_first = session(
+        bash("pytest -q -k add", "2 passed, 1 deselected in 0s"),
+        edit("calc.py"),
+        bash("pytest -q", "2 passed in 0s"),
+    )
+    assert _check(ALL_PASS, filtered_first)[0] is Support.SUPPORTED
+    other_runner = session(bash("make test", RED, 1), edit("calc.py"), bash("pytest", "1 passed"))
+    assert _check(ALL_PASS, other_runner)[0] is Support.SUPPORTED
+
+
+def test_a_declared_minimum_suite_size() -> None:
+    run = session(edit("calc.py"), bash("pytest -q", GREEN))
+    status, reason = _check(TestResultPredicate(min_tests=5), run)
+    assert status is Support.NO_EVIDENCE and "fewer than the 5 the suite has" in reason
+    assert _check(TestResultPredicate(min_tests=3), run)[0] is Support.SUPPORTED
+    with pytest.raises(ValidationError):
+        TestResultPredicate(min_tests=0)
+
+
 def test_setup_in_the_same_command_does_not_stale_the_run() -> None:
     run = session(edit("calc.py"), bash("uv sync && pytest", GREEN))
     assert _check(ALL_PASS, run)[0] is Support.SUPPORTED

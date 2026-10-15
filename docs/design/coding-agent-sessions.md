@@ -308,7 +308,7 @@ tests).
 
 | Kind | Fields | Supported when |
 | --- | --- | --- |
-| `test_result` | `expect` pass/fail, `whole_suite` (default true), `runner` (optional), `mentions` (optional) | the last test runs after the last workspace change show the expected result |
+| `test_result` | `expect` pass/fail, `whole_suite` (default true), `runner` (optional), `mentions` (optional), `min_tests` (optional: a whole-suite run must run at least this many tests) | the last test runs after the last workspace change show the expected result |
 | `command` | `regex` or `contains`, `ok` / `exit_code` (optional), `scope` any/last/after_last_edit | a matching command ran (with that status, in that scope) |
 | `edit` | `path` glob, `touched` true/false, `change` add/modify/delete/any | a matching edit exists (`touched`) or provably none does (`not touched`) |
 | `build` | `category` build/lint/typecheck/format, `ok` | the last command of that category after the last change exited as expected |

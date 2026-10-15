@@ -354,6 +354,11 @@ the names exported from `evidence_judge`) is defined under
   one the judge cannot resolve (`popd`, `cd -`, a variable, a failed call, `cd x || true`)
   leaves the directory unknown until an absolute `cd` back. A `cd` inside the test command
   (`run_cds`) is resolved from there, so `cd /abs/project && pytest` is the whole suite.
+- Session judge: a run proves the whole suite only if it ran at least as many tests (skipped
+  included) as the largest earlier whole-suite run of the same runner in the session. A suite
+  shrunk by a change the judge cannot see (a new ignore rule, a deleted directory, an
+  environment that skips tests) no longer passes as whole. `test_result` predicates take
+  `min_tests` for a size the spec knows.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

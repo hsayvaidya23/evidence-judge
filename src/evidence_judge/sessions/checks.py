@@ -250,8 +250,7 @@ class SessionIndex:
             here = _resolve_dir(here, target, self.run.cwd)
         return here
 
-    def outcome(self, event: CommandEvent) -> RunOutcome:
-        """`judge_test_run`, with a run outside the session directory counted as partial."""
+    def _scoped(self, event: CommandEvent) -> RunOutcome:
         judged = judge_test_run(event)
         where = self.run_dir(event)
         if where == ".":
@@ -262,6 +261,41 @@ class SessionIndex:
             event, judged.result, judged.reason, ", ".join(filter(None, [judged.partial, why]))
         )
 
+    @cached_property
+    def _largest_earlier(self) -> dict[str, tuple[int, CommandEvent]]:
+        """For each test run, the most tests an earlier whole-suite run of the same runner
+        ran, and that run."""
+        largest: dict[tuple[str, ...], tuple[int, CommandEvent]] = {}
+        out: dict[str, tuple[int, CommandEvent]] = {}
+        for event in self.test_runs(None):
+            key = tuple(sorted(set(event.analysis.runners)))
+            if key in largest:
+                out[event.id] = largest[key]
+            total = suite_size(event)
+            bigger = total is not None and (key not in largest or total > largest[key][0])
+            if bigger and total is not None and self._scoped(event).whole:
+                largest[key] = (total, event)
+        return out
+
+    def outcome(self, event: CommandEvent, minimum: int | None = None) -> RunOutcome:
+        """`judge_test_run`, with a run outside the session directory, or one that ran fewer
+        tests than an earlier whole-suite run (or than `minimum`), counted as partial."""
+        judged = self._scoped(event)
+        total = suite_size(event)
+        if not judged.whole or total is None:
+            return judged
+        earlier = self._largest_earlier.get(event.id)
+        if earlier is not None and total < earlier[0]:
+            why = (
+                f"ran {total} tests, fewer than the {earlier[0]} of the earlier whole-suite run "
+                f"{earlier[1].id}"
+            )
+        elif minimum is not None and total < minimum:
+            why = f"ran {total} tests, fewer than the {minimum} the suite has"
+        else:
+            return judged
+        return RunOutcome(event, judged.result, judged.reason, why)
+
     def test_runs(self, runner: str | None) -> list[CommandEvent]:
         runs = [
             c for c in self.commands if c.analysis.is_test and c.status is not CallStatus.DENIED
@@ -270,6 +304,14 @@ class SessionIndex:
             wanted = runner.casefold()
             runs = [c for c in runs if any(wanted in r.casefold() for r in c.analysis.runners)]
         return runs
+
+
+def suite_size(event: CommandEvent) -> int | None:
+    """How many tests the run collected and ran (skipped included, deselected not), or None."""
+    summary = event.summary
+    if summary is None or summary.no_tests:
+        return None
+    return summary.passed + summary.failed + summary.errors + summary.skipped
 
 
 def _relative_dir(path: str | None, root: str | None) -> str | None:
@@ -391,7 +433,7 @@ def check_test_result(predicate: TestResultPredicate, index: SessionIndex) -> Pr
             runs[-1],
             last_change[1],
         )
-    outcomes = [index.outcome(r) for r in fresh]
+    outcomes = [index.outcome(r, predicate.min_tests) for r in fresh]
     name = predicate.mentions
     if name:
         fails = [o for o in outcomes if o.result is Result.FAIL and _named_failure(o.event, name)]

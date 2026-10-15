@@ -75,6 +75,11 @@ class TestResultPredicate(BaseModel):
     mentions: Text | None = Field(
         default=None, description="A test the claim names; a run must mention it"
     )
+    min_tests: int | None = Field(
+        default=None,
+        ge=1,
+        description="A run proves the whole suite only if it ran at least this many tests",
+    )
 
 
 class CommandPredicate(BaseModel):
