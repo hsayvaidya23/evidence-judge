@@ -348,6 +348,19 @@ def test_inspect_table_and_json(
     assert data["final_url"] == "https://shop.test/cart"
 
 
+def test_inspect_lists_agent_made_evidence_with_script_hashes() -> None:
+    trace = Path(__file__).resolve().parent.parent / "fixtures" / "injection" / "evaluate.zip"
+    result = runner.invoke(app, ["inspect", "--trace", str(trace), "--json"])
+    assert result.exit_code == 0, result.output
+    [made] = json.loads(result.stdout)["injections"]
+    assert made["id"] == "act#3"
+    assert made["call"].startswith("evaluate(document.getElementById('stock')")
+    assert made["sha256"] == evidence_judge.ingest.load_run(trace=trace).actions[2].script_sha256
+    table = runner.invoke(app, ["inspect", "--trace", str(trace)], env={"COLUMNS": "200"})
+    assert "Agent-made evidence" in table.output
+    assert made["sha256"] in table.output
+
+
 def test_inspect_requires_evidence() -> None:
     assert runner.invoke(app, ["inspect"]).exit_code == ExitCode.USAGE
 
