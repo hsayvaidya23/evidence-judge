@@ -185,10 +185,19 @@ request nor the final page cannot support the claim either. The same baseline an
 hold for `expect` entries, whatever wrote the spec: an `expect` predicate the run met before the
 agent acted, or one that only holds where a page, URL or response echoes the agent's input (an
 agent that opens `/order/A77/confirmed` itself, searches for "Order A77 shipped", or makes a
-search API answer `{"query": "In stock"}`), leaves the entry
-unknown (`met: null`) and the run goes to review. `forbid` entries and `constraints` are not
-masked: forbidden text the agent typed or that was already shown still breaks the rule. See
+search API answer `{"query": "In stock"}`), leaves the entry unknown (`met: null`) and the run
+goes to review. `forbid` entries and `constraints` are not masked: forbidden text the agent
+typed or that was already shown still breaks the rule. See
 [evidence that proves nothing](concepts/claims-and-predicates.md#evidence-that-proves-nothing).
+
+A `url` entry is never met by a URL the agent typed itself, even one the site answered with a
+2xx and even when the entry only means "the agent visited this page": a single-page app or a
+soft-404 page answers every path with 200, so `/products/red-kettle` typed into the address bar
+loads whether or not that product exists, and a `contains` needle also matches a crafted
+`/search/products/red-kettle`. The judge cannot tell a visit entry from an outcome entry
+(`/order/A77/confirmed`), so it treats both the same. An agent that reaches the page by
+clicking a link, or that the site redirects there, meets the entry; to accept typed
+navigation, prove the visit with what the page shows (`page_text`) instead of its URL.
 
 ### `request`: a network request was observed
 
