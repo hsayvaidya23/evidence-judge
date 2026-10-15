@@ -310,7 +310,10 @@ footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
   .verdict-pill { font-size: 26px; }
   .score { width: 104px; height: 104px; }
   .score .num { font-size: 32px; }
-  .dims { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dims { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .dim { padding: 10px 10px 10px; }
+  .dim .name { font-size: 9px; letter-spacing: 0.08em; }
+  .dim .val { font-size: 18px; }
   .claim { padding: 14px 14px 12px; }
   .claim-head { flex-direction: column; gap: 8px; }
   .trace li { grid-template-columns: 52px 20px minmax(0, 1fr) auto; padding: 7px 10px 7px 6px; gap: 8px; }
