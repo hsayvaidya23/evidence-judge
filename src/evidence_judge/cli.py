@@ -4,7 +4,7 @@ import asyncio
 import json
 import zipfile
 from collections.abc import Callable
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -188,11 +188,14 @@ def _redactor(settings: Settings, *, persistent: bool = True) -> Redactor:
     return Redactor(key) if key is not None else Redactor.from_settings(settings)
 
 
-def _settings() -> Settings:
+def _settings(llm: LLMChoice | None = None) -> Settings:
     try:
-        return Settings()
+        settings = Settings()
     except ValidationError as e:
         raise CliError(f"invalid settings: {e}", ExitCode.USAGE) from e
+    if llm is None:
+        return settings
+    return settings.model_copy(update={"llm_backend": llm.value})
 
 
 def _load_spec(path: Path) -> TaskSpec:
@@ -349,6 +352,27 @@ _LangfuseTraceId = Annotated[
 ]
 
 
+class LLMChoice(StrEnum):
+    """The values of `--llm`; the same as `Settings.llm_backend`."""
+
+    ANTHROPIC = "anthropic"
+    CLAUDE_CODE = "claude-code"
+    CODEX = "codex"
+    GEMINI = "gemini"
+
+
+_Llm = Annotated[
+    LLMChoice | None,
+    typer.Option(
+        "--llm",
+        help=(
+            "LLM backend: anthropic (ANTHROPIC_API_KEY), or the claude-code, codex or gemini CLI "
+            "you are logged into. Default: EVJ_LLM_BACKEND"
+        ),
+    ),
+]
+
+
 @app.command()
 def judge(
     trace: _Trace = None,
@@ -396,6 +420,7 @@ def judge(
     offline: Annotated[
         bool, typer.Option(help="No LLM calls; heuristic claim extraction only")
     ] = False,
+    llm_backend: _Llm = None,
     no_redact: Annotated[
         bool, typer.Option("--no-redact", help="Keep secrets and PII in evidence and reports")
     ] = False,
@@ -415,7 +440,7 @@ def judge(
     err = _stderr()
     try:
         _check_exporters(otel, langfuse_trace_id)
-        settings = _settings()
+        settings = _settings(llm_backend)
         task_spec = _load_spec(spec) if spec else None
         site_name = _site(site) if site is not None else None
         claim_set = _load_claims(claims) if claims else None
@@ -538,7 +563,8 @@ def _bench_llm(settings: Settings, calls: int) -> LLMClient | None:
         raise CliError(f"could not initialise the LLM client: {e}", ExitCode.INTERNAL) from e
     if llm is None:
         raise CliError(
-            "--with-llm-baseline and --online need an LLM; set ANTHROPIC_API_KEY", ExitCode.USAGE
+            "--with-llm-baseline and --online need an LLM; set ANTHROPIC_API_KEY or pass --llm",
+            ExitCode.USAGE,
         )
     return llm
 
@@ -577,6 +603,7 @@ def bench(
             "--offline/--online", help="Evidence Judge without (default) or with LLM extraction"
         ),
     ] = True,
+    llm_backend: _Llm = None,
     no_redact: Annotated[
         bool, typer.Option("--no-redact", help="Judge unredacted evidence and agent text")
     ] = False,
@@ -596,7 +623,7 @@ def bench(
     )
 
     try:
-        settings = _settings()
+        settings = _settings(llm_backend)
         try:
             scenarios = load_scenarios(runs_dir, max_body_chars=settings.max_body_chars)
         except ValueError as e:
