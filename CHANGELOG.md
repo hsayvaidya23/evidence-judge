@@ -304,6 +304,11 @@ the names exported from `evidence_judge`) is defined under
   could change the judge's settings (or break them, which let the stop through). The judge now
   runs in a private temporary directory, and inherits only the `EVJ_*` variables listed in
   `EVJ_HOOK_PASS_ENV`.
+- **A second stop is still judged.** When the agent stopped again after a stop hook sent it
+  back (`stop_hook_active`), the hooks returned nothing, so the corrected answer was never
+  checked and the user was not told. Claude Code, Codex and Gemini CLI hooks now judge it too.
+  They never block a second time, to avoid a loop. If the answer still fails, the stop goes
+  through with a warning to the user that names what the evidence does not back up.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

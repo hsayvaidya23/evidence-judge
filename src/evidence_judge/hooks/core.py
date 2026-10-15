@@ -27,6 +27,10 @@ SPEC_FILES: Final = (
     "evidence-judge.yml",
 )
 NOTICE_PREFIX: Final = "evidence-judge hook: "
+_AGAIN: Final = (
+    "WARNING: the agent stopped again after being sent back, and its answer is still not backed "
+    "by the evidence. Do not rely on it."
+)
 _NO_TRACE: Final = (
     "Playwright was used but no trace was recorded this turn, so the answer was not checked. "
     "Start Playwright MCP with --caps=devtools and call browser_start_tracing / "
@@ -79,7 +83,7 @@ def _project_root(cwd: str) -> Path | None:
 def evaluate(context: HookContext, settings: HookSettings) -> Decision:
     """Decide whether the agent may stop. Never raises for expected failures; callers still
     wrap it so that anything unexpected fails open."""
-    if not settings.enabled or context.stop_hook_active:
+    if not settings.enabled:
         return allow()
     root = _project_root(context.cwd)
     if root is None:
@@ -122,5 +126,13 @@ def evaluate(context: HookContext, settings: HookSettings) -> Decision:
         result.outcome == "needs_review" and settings.block_on_needs_review
     )
     if blocking:
-        return Decision(block=True, reason=feedback(result.outcome, result.verdict, label))
+        return _block(context, feedback(result.outcome, result.verdict, label))
     return Decision(notice=headline(result.outcome, result.verdict, label))
+
+
+def _block(context: HookContext, reason: str) -> Decision:
+    """Keep the agent working, unless it is already continuing because of a stop hook: blocking
+    again could loop, so the stop goes through and the user is told plainly why."""
+    if not context.stop_hook_active:
+        return Decision(block=True, reason=reason)
+    return allow(f"{_AGAIN} {reason}")

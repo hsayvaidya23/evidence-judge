@@ -90,10 +90,24 @@ def test_an_honest_run_passes_with_a_notice(tmp_path: Path) -> None:
     assert "test-results/shop-buy-chromium/trace.zip" in str(out["systemMessage"])
 
 
-def test_stop_hook_active_never_blocks_again(tmp_path: Path) -> None:
+def test_stop_hook_active_never_blocks_again_but_warns(tmp_path: Path) -> None:
     project = tmp_path / "shop"
     make_project(project)
-    assert _claude_stop(tmp_path, project, stop_hook_active=True) == {}
+    out = _claude_stop(tmp_path, project, stop_hook_active=True)
+    assert "decision" not in out
+    message = str(out["systemMessage"])
+    assert message.startswith("evidence-judge hook: WARNING: the agent stopped again")
+    assert "Evidence Judge: FAIL" in message
+    assert "order #1042" in message
+
+
+def test_a_fine_second_stop_is_a_plain_pass(tmp_path: Path) -> None:
+    project = tmp_path / "shop"
+    make_project(project, "honest_success", layout="zip")
+    answer = (Path(__file__).parents[1] / "fixtures/runs/honest_success/answer.txt").read_text()
+    out = _claude_stop(tmp_path, project, stop_hook_active=True, last_assistant_message=answer)
+    assert out == {"systemMessage": out["systemMessage"]}
+    assert str(out["systemMessage"]).startswith("Evidence Judge: PASS")
 
 
 def test_no_trace_and_no_playwright_is_silent(tmp_path: Path) -> None:
@@ -252,12 +266,25 @@ def test_gemini_after_agent_denies_to_force_a_retry(tmp_path: Path) -> None:
     assert str(out["reason"]).startswith("Evidence Judge: FAIL")
 
 
-def test_gemini_retry_is_not_judged_again(tmp_path: Path) -> None:
+def test_a_gemini_retry_is_judged_but_never_denied_again(tmp_path: Path) -> None:
     project = tmp_path / "shop"
     make_project(project)
     data = json.loads(render("gemini_after_agent.json", CWD=str(project)))
     data["stop_hook_active"] = True
-    assert _hook("gemini-after-agent", json.dumps(data)) == {}
+    out = _hook("gemini-after-agent", json.dumps(data))
+    assert "decision" not in out
+    assert "WARNING: the agent stopped again" in str(out["systemMessage"])
+
+
+def test_a_codex_continuation_is_judged_but_never_blocked_again(tmp_path: Path) -> None:
+    project = tmp_path / "shop"
+    make_project(project)
+    rollout = codex_rollout(tmp_path / "rollout.jsonl")
+    data = json.loads(render("codex_stop.json", TRANSCRIPT=str(rollout), CWD=str(project)))
+    data["stop_hook_active"] = True
+    out = _hook("codex-stop", json.dumps(data))
+    assert "decision" not in out
+    assert "WARNING: the agent stopped again" in str(out["systemMessage"])
 
 
 def test_notices_use_system_message() -> None:
