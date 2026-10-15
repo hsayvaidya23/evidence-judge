@@ -74,6 +74,20 @@ the names exported from `evidence_judge`) is defined under
   schema; Claude Code's reported cost is charged to the run budget. Screenshots reach Claude Code
   and Codex; with Gemini, screenshot checks report no evidence. `EVJ_CLI_MODEL_FAST`,
   `EVJ_CLI_MODEL_STRONG` and `EVJ_CLI_TIMEOUT_S` configure them. See the LLM backends guide.
+- `evidence-judge hook`: stop hooks for coding agents (`claude-code-stop`, `codex-stop`,
+  `gemini-after-agent`). When a Playwright trace was recorded during the turn, they judge it
+  offline against the agent's final message and keep the agent working on FAIL (Claude Code and
+  Codex `decision: block`, Gemini `deny`); NEEDS_REVIEW blocks only with
+  `EVJ_HOOK_BLOCK_ON_NEEDS_REVIEW`. They respect `stop_hook_active`, time out after 60 seconds
+  and fail open with a one-line notice. Unzipped Playwright MCP traces are packed before judging.
+- Evidence recorder hooks (`claude-code-record`, `codex-record`, `gemini-record`): one redacted,
+  bounded, hash-chained JSON line per prompt, tool call and stop in a per-session log outside
+  the workspace (log format version 1), with exit codes taken only from what the hook payload
+  states.
+- A Claude Code plugin and marketplace (`/plugin marketplace add hsayvaidya23/evidence-judge`):
+  the stop and recorder hooks, the `evidence-judge mcp` server and a skill on recording traces
+  with Playwright MCP, writing a spec and reading a verdict. A Gemini CLI extension with the
+  same hooks and server, and guides for Claude Code, Codex CLI and Gemini CLI.
 
 ### Changed
 

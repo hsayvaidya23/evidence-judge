@@ -1,5 +1,5 @@
 ---
-description: Practical guides for Evidence Judge - spec recipes, CI, Docker, LLM backends, integrations, the MCP server, benchmarking and recording.
+description: Practical guides for Evidence Judge - spec recipes, CI, Docker, LLM backends, integrations, the MCP server, coding-agent hooks, benchmarking and recording.
 ---
 
 # Guides
@@ -42,6 +42,24 @@ description: Practical guides for Evidence Judge - spec recipes, CI, Docker, LLM
     ---
 
     Judge, inspect and explain runs as tools from Claude Code, Codex CLI or Gemini CLI.
+
+-   :material-robot-outline:{ .lg .middle } __[Claude Code](claude-code.md)__
+
+    ---
+
+    A plugin whose Stop hook keeps Claude working when the trace contradicts its answer.
+
+-   :material-console:{ .lg .middle } __[Codex CLI](codex.md)__
+
+    ---
+
+    A blocking Stop hook, a tool-call recorder and the MCP server for Codex.
+
+-   :material-star-four-points-outline:{ .lg .middle } __[Gemini CLI](gemini-cli.md)__
+
+    ---
+
+    An extension whose AfterAgent hook makes Gemini retry a contradicted answer.
 
 -   :material-flask-outline:{ .lg .middle } __[Benchmark your own agent](benchmark-your-agent.md)__
 

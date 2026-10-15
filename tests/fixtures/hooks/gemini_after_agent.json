@@ -1,0 +1,10 @@
+{
+  "session_id": "gemini-session-1",
+  "transcript_path": "/nonexistent/gemini/chats/session-2026-10-15T09-00-abcd1234.jsonl",
+  "cwd": "${CWD}",
+  "hook_event_name": "AfterAgent",
+  "timestamp": "2026-10-15T09:00:00.000Z",
+  "prompt": "Buy a red kettle under $30 on the test shop",
+  "prompt_response": "I placed the order, order #1042 confirmed. The Red Kettle cost $24.00.",
+  "stop_hook_active": false
+}

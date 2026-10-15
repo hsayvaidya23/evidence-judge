@@ -169,6 +169,9 @@ nav:
       - LLM backends: guides/llm-backends.md
       - Integrations: integrations.md
       - MCP server: guides/mcp.md
+      - Claude Code: guides/claude-code.md
+      - Codex CLI: guides/codex.md
+      - Gemini CLI: guides/gemini-cli.md
       - Benchmark your own agent: guides/benchmark-your-agent.md
       - Recording recipes: guides/recording-recipes.md
   - Reference:

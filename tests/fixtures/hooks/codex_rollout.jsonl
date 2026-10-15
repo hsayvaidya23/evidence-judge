@@ -1,0 +1,6 @@
+{"ordinal":0,"timestamp":"2026-01-01T09:00:00.000Z","type":"session_meta","payload":{"id":"01a13ade-0000-7000-8000-000000000001","cwd":"/work/shop","cli_version":"0.162.1"}}
+{"ordinal":1,"timestamp":"2026-01-01T09:00:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","started_at":1767258000}}
+{"ordinal":2,"timestamp":"2026-01-01T09:00:01.000Z","type":"response_item","payload":{"type":"function_call","name":"exec","namespace":null,"arguments":"{}","call_id":"c1"}}
+{"ordinal":3,"timestamp":"${PROMPT_TS}","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2","started_at":${PROMPT_EPOCH}}}
+{"ordinal":4,"timestamp":"${PROMPT_TS}","type":"response_item","payload":{"type":"function_call","name":"browser_navigate","namespace":"mcp__playwright__","arguments":"{\"url\":\"http://127.0.0.1:8000/\"}","call_id":"c2"}}
+{"ordinal":5,"timestamp":"${PROMPT_TS}","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I placed the order."}]}}

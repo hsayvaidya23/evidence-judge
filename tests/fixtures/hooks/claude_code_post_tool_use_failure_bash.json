@@ -1,0 +1,13 @@
+{
+  "session_id": "0b7e3c1a-1111-4222-8333-944455556666",
+  "transcript_path": "/nonexistent/transcript.jsonl",
+  "cwd": "/work/shop",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {"command": "npm test", "description": "Run the tests"},
+  "tool_use_id": "toolu_bash_02",
+  "error": "Exit code 1\nFAIL src/cart.test.ts\n  expected 24 to equal 30",
+  "is_interrupt": false,
+  "duration_ms": 2310
+}

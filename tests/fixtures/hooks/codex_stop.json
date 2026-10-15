@@ -1,0 +1,11 @@
+{
+  "session_id": "01a13ade-0000-7000-8000-000000000001",
+  "transcript_path": "${TRANSCRIPT}",
+  "cwd": "${CWD}",
+  "hook_event_name": "Stop",
+  "model": "gpt-5.5-codex",
+  "permission_mode": "default",
+  "turn_id": "turn-2",
+  "stop_hook_active": false,
+  "last_assistant_message": "I placed the order, order #1042 confirmed. The Red Kettle cost $24.00."
+}

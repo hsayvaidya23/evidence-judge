@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "evidence-judge-record-prompt",
+            "type": "command",
+            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-record --log-dir \"$HOME/.evidence-judge/sessions\"",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "evidence-judge-record",
+            "type": "command",
+            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-record --log-dir \"$HOME/.evidence-judge/sessions\"",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "evidence-judge-check",
+            "type": "command",
+            "command": "sh \"${extensionPath}/hooks/run-hook.sh\" gemini-after-agent --log-dir \"$HOME/.evidence-judge/sessions\"",
+            "timeout": 90000
+          }
+        ]
+      }
+    ]
+  }
+}

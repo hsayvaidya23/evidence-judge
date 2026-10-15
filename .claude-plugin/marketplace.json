@@ -1,0 +1,14 @@
+{
+  "name": "evidence-judge",
+  "owner": { "name": "Yash Vaidya", "url": "https://github.com/hsayvaidya23" },
+  "description": "Evidence Judge plugins: grade browser-agent answers against recorded evidence.",
+  "plugins": [
+    {
+      "name": "evidence-judge",
+      "source": "./plugins/claude-code/evidence-judge",
+      "description": "Stop hook, skill and MCP server that check a browser agent's answer against its Playwright trace.",
+      "category": "testing",
+      "tags": ["playwright", "browser-agents", "evals"]
+    }
+  ]
+}
