@@ -454,6 +454,67 @@ def test_a_closed_stdout_keeps_the_verdict_exit_code(read_lines: int) -> None:
     assert b"Traceback" not in err and b"BrokenPipe" not in err
 
 
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+def _closed_pipe_run(args: list[str], *, read_lines: int, merge_stderr: bool) -> tuple[int, bytes]:
+    process = subprocess.Popen(
+        [sys.executable, "-m", "evidence_judge", *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    for _ in range(read_lines):
+        process.stdout.readline()
+    process.stdout.close()
+    _, err = process.communicate(timeout=60)
+    return process.returncode, err or b""
+
+
+@pytest.mark.parametrize(
+    ("args", "code"),
+    [
+        (
+            [
+                "judge",
+                "--har",
+                str(FIXTURES / "runs" / "honest_success" / "run.har"),
+                "--spec",
+                str(FIXTURES / "runs" / "honest_success" / "spec.yaml"),
+                "--offline",
+            ],
+            ExitCode.NEEDS_REVIEW,
+        ),
+        (
+            [
+                "session",
+                "judge",
+                "--claude-code",
+                str(FIXTURES / "sessions" / "claude_code" / "honest_success.jsonl"),
+                "--offline",
+            ],
+            ExitCode.PASS,
+        ),
+    ],
+    ids=["judge", "session-judge"],
+)
+def test_a_closed_merged_stderr_keeps_the_verdict_exit_code(
+    args: list[str], code: ExitCode, tmp_path: Path
+) -> None:
+    returncode, _ = _closed_pipe_run(
+        [*args, "--out", str(tmp_path / "v.json")], read_lines=1, merge_stderr=True
+    )
+    assert returncode == code
+    assert (tmp_path / "v.json").exists()
+
+
+@pytest.mark.parametrize("args", [["version"], ["schema"], ["--help"], ["session", "--help"]])
+def test_a_closed_stdout_keeps_exit_zero(args: list[str]) -> None:
+    returncode, err = _closed_pipe_run(args, read_lines=0, merge_stderr=False)
+    assert returncode == 0
+    assert b"Traceback" not in err and b"BrokenPipe" not in err
+
+
 def test_redaction_key_is_stable_across_invocations(tmp_path: Path) -> None:
     from evidence_judge.cli import _redactor
     from evidence_judge.config import Settings

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass, field
+from typing import Any, TextIO, cast
 
 from rich.console import Console
 from rich.table import Table
@@ -34,6 +35,12 @@ def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{round(value * 100)}%"
 
 
+def _discard(stream: TextIO) -> None:
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, stream.fileno())
+    os.close(devnull)
+
+
 class StdoutConsole(Console):
     """Stops writing once stdout's reader has gone (``| head``) instead of exiting 1, so the
     command still exits with its verdict's code."""
@@ -43,9 +50,48 @@ class StdoutConsole(Console):
 
     def on_broken_pipe(self) -> None:
         self.quiet = True
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, sys.stdout.fileno())
-        os.close(devnull)
+        _discard(sys.stdout)
+
+
+class StderrConsole(Console):
+    """Stderr's counterpart of :class:`StdoutConsole`, for ``2>&1 | head``."""
+
+    def __init__(self) -> None:
+        super().__init__(stderr=True, highlight=False)
+
+    def on_broken_pipe(self) -> None:
+        self.quiet = True
+        _discard(sys.stderr)
+
+
+class _PipeSafeStream:
+    """A standard stream whose reader may go away: the first broken pipe points its descriptor
+    at /dev/null, so later writes and the flush at exit are dropped instead of failing."""
+
+    def __init__(self, stream: TextIO) -> None:
+        self._stream = stream
+
+    def write(self, text: str) -> int:
+        try:
+            return self._stream.write(text)
+        except BrokenPipeError:
+            _discard(self._stream)
+            return len(text)
+
+    def flush(self) -> None:
+        try:
+            self._stream.flush()
+        except BrokenPipeError:
+            _discard(self._stream)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+
+def guard_std_streams() -> None:
+    """Keep a closed stdout or stderr from turning the command's exit code into 1 or 120."""
+    sys.stdout = cast(TextIO, _PipeSafeStream(sys.stdout))
+    sys.stderr = cast(TextIO, _PipeSafeStream(sys.stderr))
 
 
 def print_verdict(verdict: RunVerdict, console: Console) -> None:

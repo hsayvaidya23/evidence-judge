@@ -28,7 +28,7 @@ from evidence_judge.core.verdict import (
 from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.redact import Redactor
-from evidence_judge.report.console import StdoutConsole, print_verdict
+from evidence_judge.report.console import StderrConsole, StdoutConsole, print_verdict
 from evidence_judge.report.json_report import write_json
 from evidence_judge.sessions.ingest import load_session, locate
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
@@ -135,7 +135,7 @@ _Debug = Annotated[bool, typer.Option(help="Show tracebacks for internal errors"
 
 
 def _stderr() -> Console:
-    return Console(stderr=True, highlight=False)
+    return StderrConsole()
 
 
 def _load(

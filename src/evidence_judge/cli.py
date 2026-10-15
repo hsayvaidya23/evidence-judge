@@ -33,7 +33,9 @@ from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget
 from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import (
+    StderrConsole,
     StdoutConsole,
+    guard_std_streams,
     print_evidence_summary,
     print_verdict,
     summarize_evidence,
@@ -99,7 +101,13 @@ class _Group(TyperGroup):
             raise _remap(e) from e
 
 
-app = typer.Typer(
+class _App(typer.Typer):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        guard_std_streams()
+        return super().__call__(*args, **kwargs)
+
+
+app = _App(
     cls=_Group,
     name="evidence-judge",
     help="Grade browser-agent runs and coding-agent sessions against the evidence.",
@@ -180,7 +188,7 @@ def _run_judge(
 
 
 def _stderr() -> Console:
-    return Console(stderr=True, highlight=False)
+    return StderrConsole()
 
 
 def _fail(e: CliError) -> typer.Exit:
