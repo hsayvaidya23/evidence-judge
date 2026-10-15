@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import bisect
 import html
+import json
 import math
 import re
 from collections.abc import Iterable, Iterator
 from functools import cached_property
 from pathlib import PureWindowsPath
-from typing import Final
+from typing import Final, cast
 from urllib.parse import (
     parse_qsl,
     quote,
@@ -42,11 +43,17 @@ _KEY_NAME = re.compile(
     r"|f\d{1,2}|key[a-z]|digit\d|numpad\w+)",
     re.IGNORECASE,
 )
+_DIGIT = re.compile(r"\d")
 _TAG = re.compile(r"</?[a-z][^<>]*>", re.IGNORECASE)
 _REDACTION_TOKEN = re.compile(TOKEN_RE.pattern, re.IGNORECASE)
+MIN_ECHO_WORD: Final = 6
+"""Shortest single word without a digit that the agent can echo in every predicate's evidence.
+Shorter ones ("your", "cart") are common words of honest page text; they only mask text that is
+itself a single short word."""
 MIN_ECHO_PREFIX: Final = 8
 """Shortest prefix of an agent input that counts as a cut-short echo of it. Shorter shared
 prefixes are mostly common word stems ("confirm" in "confirmation" and "confirmed")."""
+_TRUNCATION_TAIL = re.compile(r"…\[truncated[^\]]{0,60}\]\s*\Z")
 MASK: Final = "\x00"
 """Stands in for agent input in masked evidence; it is never part of a predicate."""
 
@@ -57,7 +64,7 @@ class EvidenceIndex:
     def __init__(self, run: Run) -> None:
         self.run = run
         self._normalized: dict[str, str] = {}
-        self._inputs_by_site: dict[Site | None, tuple[str, ...]] = {}
+        self._inputs_by_site: dict[tuple[Site | None, bool], tuple[str, ...]] = {}
 
     def has(self, channel: Channel) -> bool:
         return channel in self.run.captured
@@ -102,9 +109,10 @@ class EvidenceIndex:
     def baseline(self) -> EvidenceIndex:
         """The evidence as it stood before the agent acted: what every run of the task has.
 
-        The cut is the agent's first action that is not a navigation (opening the start page is
-        set-up); a run whose actions are all navigations is all baseline. Without recorded actions
-        the cut is the first mutation or the second page load (no page load: empty baseline). The
+        The cut is the agent's first action, where a first action that opens a page is set-up
+        (the start page) and every later navigation is the agent's; a run whose only action opens
+        the start page is all baseline. Without recorded actions the cut is, the same way, the
+        first mutation or the second page load (no page load: empty baseline). The
         baseline keeps the actions, requests and snapshots before the cut; its final state is the
         last snapshot before the cut, else the initial state (the run's final state when the
         whole run is baseline).
@@ -131,7 +139,10 @@ class EvidenceIndex:
 
     def _baseline_cut(self) -> float:
         if self.run.actions:
-            acted = [a.ts for a in self.run.actions if canonical_action(a.name) != GOTO]
+            first, *rest = sorted(self.run.actions, key=lambda a: a.ts)
+            acted = [a.ts for a in rest]
+            if canonical_action(first.name) != GOTO:
+                acted.append(first.ts)
             return min(acted, default=math.inf)
         loads = [n.ts for n in self.run.network if is_document_navigation(n)]
         marks = [n.ts for n in self.run.network if n.is_mutation] + loads[1:2]
@@ -220,47 +231,80 @@ class EvidenceIndex:
         kept = [(t, site) for t, site in found if len(t) >= MIN_PAGE_TEXT and WORD.search(t)]
         return tuple(sorted(kept, key=lambda i: (-len(i[0]), i[0], str(i[1] or ""))))
 
-    def _inputs_for(self, url: str | None) -> tuple[str, ...]:
-        """The inputs that can be echoed on `url`: typed ones, and URL ones from its site."""
+    def _inputs_for(self, url: str | None, *, short_words: bool) -> tuple[str, ...]:
+        """The inputs that can be echoed on `url`: typed ones, and URL ones from its site;
+        single short words (is_short_word) only with `short_words`."""
         site = Site.of_url(url)
-        cached = self._inputs_by_site.get(site)
+        cached = self._inputs_by_site.get((site, short_words))
         if cached is None:
             cached = tuple(
                 dict.fromkeys(
                     text
                     for text, origin in self._scoped_inputs
-                    if origin is None or (site is not None and origin.covers(site))
+                    if (origin is None or (site is not None and origin.covers(site)))
+                    and (short_words or not is_short_word(text))
                 )
             )
-            self._inputs_by_site[site] = cached
+            self._inputs_by_site[site, short_words] = cached
         return cached
 
     @cached_property
     def without_agent_input(self) -> EvidenceIndex:
-        """This evidence with every echo of every agent input in page text and URLs (an
-        occurrence of the input or of a prefix of at least MIN_ECHO_PREFIX characters of it)
-        replaced by MASK, so a predicate that only holds on an echo of that input fails on it.
+        """This evidence with every echo of every agent input (an occurrence of the input or of
+        a prefix of at least MIN_ECHO_PREFIX characters of it) replaced by MASK wherever the
+        site can repeat it back: page text, page and action URLs, the URL of every request that
+        is not a mutation, and every response body. A predicate that only holds on an echo of
+        that input fails on it.
 
-        Masked page text is normalised; page text and URLs without an occurrence are unchanged.
+        A mutation's URL and request body are left alone: they are what the agent submitted,
+        so a POST carrying the typed value is evidence of the submission, not an echo. Its
+        response is masked like any other: a site that answers a POST by repeating the typed
+        value proves nothing by doing so.
+
+        Inputs that are a single short word (is_short_word) are not masked here: "Your" typed
+        into a name field must not mask "Thank you for your order". Only text that is itself a
+        single short word can be produced by one; `without_short_word_input` masks them too.
+
+        Masked page text and non-JSON bodies are normalised; JSON bodies keep their structure,
+        with each echoing string (key or value) masked. Evidence without an echo is unchanged.
         """
-        if not self.agent_inputs():
+        return self._masked(short_words=False)
+
+    @cached_property
+    def without_short_word_input(self) -> EvidenceIndex:
+        """`without_agent_input` that also masks inputs that are a single short word."""
+        return self._masked(short_words=True)
+
+    def _masked(self, *, short_words: bool) -> EvidenceIndex:
+        if not any(short_words or not is_short_word(text) for text, _ in self._scoped_inputs):
             return self
         run = self.run
+
+        def inputs(url: str | None) -> tuple[str, ...]:
+            return self._inputs_for(url, short_words=short_words)
+
         return EvidenceIndex(
             run.model_copy(
                 update={
-                    "actions": [_masked_url(a, self._inputs_for(a.url)) for a in run.actions],
-                    "network": [_masked_url(n, self._inputs_for(n.url)) for n in run.network],
-                    "snapshots": [_masked_page(s, self._inputs_for(s.url)) for s in run.snapshots],
+                    "actions": [_masked_url(a, inputs(a.url)) for a in run.actions],
+                    "network": [_masked_request(n, inputs(n.url)) for n in run.network],
+                    "snapshots": [_masked_page(s, inputs(s.url)) for s in run.snapshots],
                     "initial_state": None
                     if run.initial_state is None
-                    else _masked_page(run.initial_state, self._inputs_for(run.initial_state.url)),
+                    else _masked_page(run.initial_state, inputs(run.initial_state.url)),
                     "final_state": None
                     if run.final_state is None
-                    else _masked_page(run.final_state, self._inputs_for(run.final_state.url)),
+                    else _masked_page(run.final_state, inputs(run.final_state.url)),
                 }
             )
         )
+
+
+def is_short_word(text: str) -> bool:
+    """True if `text` is a single word shorter than MIN_ECHO_WORD characters, without a digit:
+    a common word ("your", "cart", "paid") that honest page text often contains."""
+    words = WORD.findall(text)
+    return len(words) == 1 and len(words[0]) < MIN_ECHO_WORD and not _DIGIT.search(words[0])
 
 
 def _raw_inputs(run: Run) -> Iterator[tuple[str, Site | None]]:
@@ -426,6 +470,45 @@ def _masked_url[E: (ActionEvent, NetworkEvent)](event: E, inputs: tuple[str, ...
     if event.url is None:
         return event
     return event.model_copy(update={"url": _mask_url(event.url, inputs)})
+
+
+def _masked_request(event: NetworkEvent, inputs: tuple[str, ...]) -> NetworkEvent:
+    masked = event if event.is_mutation else _masked_url(event, inputs)
+    body = None if event.response_body is None else _masked_body(event.response_body, inputs)
+    if body is None:
+        return masked
+    return masked.model_copy(update={"response_body": body})
+
+
+def _masked_body(body: str, inputs: tuple[str, ...]) -> str | None:
+    """`body` with every echo masked, or None if it has none. JSON keeps its structure."""
+    try:
+        data: object = json.loads(body)
+    except (json.JSONDecodeError, RecursionError):
+        data = None
+    if isinstance(data, dict | list):
+        masked = _masked_json(cast(object, data), inputs)
+        return None if masked == data else json.dumps(masked, ensure_ascii=False)
+    tail = _TRUNCATION_TAIL.search(body)
+    cut = tail.start() if tail else len(body)
+    text = _mask(body[:cut], inputs)
+    return None if text is None else text + body[cut:]
+
+
+def _masked_json(data: object, inputs: tuple[str, ...]) -> object:
+    match data:
+        case str():
+            masked = _mask(data, inputs)
+            return data if masked is None else masked
+        case dict():
+            return {
+                _mask(key, inputs) or key: _masked_json(value, inputs)
+                for key, value in cast(dict[str, object], data).items()
+            }
+        case list():
+            return [_masked_json(v, inputs) for v in cast(list[object], data)]
+        case _:
+            return data
 
 
 def _masked_page[S: (PageSnapshot, PageState)](page: S, inputs: tuple[str, ...]) -> S:

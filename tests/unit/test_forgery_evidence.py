@@ -54,6 +54,7 @@ def test_evidence_kinds() -> None:
         ForgeryKind.PORT_MIRROR,
         ForgeryKind.REDIRECT_TO_ERROR,
         ForgeryKind.BASELINE_TAUTOLOGY,
+        ForgeryKind.RESPONSE_ECHO,
     } == EVIDENCE_KINDS
 
 

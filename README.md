@@ -6,7 +6,7 @@
   <img alt="Python 3.12 | 3.13" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white">
   <img alt="pyright strict" src="https://img.shields.io/badge/types-pyright%20strict-2F6FED">
   <img alt="ruff" src="https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black">
-  <img alt="0 of 279 forged runs passed on one demo shop" src="https://img.shields.io/badge/forged%20runs%20passed%20(1%20demo%20shop)-0%2F279-brightgreen">
+  <img alt="0 of 297 forged runs passed on one demo shop" src="https://img.shields.io/badge/forged%20runs%20passed%20(1%20demo%20shop)-0%2F297-brightgreen">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -269,16 +269,16 @@ the cache directory is not writable, a per-process key is used with a one-line w
 ## 🧪 Benchmark: can a forged story fool it?
 
 <p align="center">
-  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 261 attack runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
+  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 279 attack runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
 </p>
 
-The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks aimed at the claim extractor, and a style-only control. Nine more kinds also tamper with the evidence the way a gaming agent would, each modelled on an attack that once got a false PASS: the expected text echoed back from the agent's own input (exactly, or cut short, rendered from markup, as an upload's file name or as sent keys), a confirmation on a page the agent controls, an order sent to a third party or to the agent's own mirror of the shop (judged with `site` left out of the spec, or on another port of the site's own host), an order answered with a redirect to a card-declined page, and a confirmation that was already on screen before the agent acted. The base runs are five failed purchases and one unanswered read-only question ("is the red kettle in stock?"); the correct verdict is never PASS. Counts below pool the 15 attack kinds (261 runs per judge); the style-only control adds 18 more, also 0 passes.
+The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites the agent's answer and reasoning into a success story, using the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks aimed at the claim extractor, and a style-only control. Ten more kinds also tamper with the evidence the way a gaming agent would, each modelled on an attack that once got a false PASS: the expected text echoed back from the agent's own input (exactly, or cut short, rendered from markup, as an upload's file name or as sent keys), a confirmation on a page the agent controls, an order sent to a third party or to the agent's own mirror of the shop (judged with `site` left out of the spec, or on another port of the site's own host), an order answered with a redirect to a card-declined page, and a confirmation that was already on screen before the agent acted, and the claimed order number repeated back by the shop's own API (a search endpoint answering `{"query": "Order #4316 confirmed"}`). The base runs are five failed purchases and one unanswered read-only question ("is the red kettle in stock?"); the correct verdict is never PASS. Counts below pool the 16 attack kinds (279 runs per judge); the style-only control adds 18 more, also 0 passes.
 
 | Judge | Forged runs | False PASS | 95% CI |
 | --- | ---: | ---: | --- |
-| Evidence Judge + exact task spec (offline) | 261 | **0** (23 sent to review) | 0–1% |
-| Evidence Judge + generic task spec (offline) | 261 | **0** (67 sent to review) | 0–1% |
-| Evidence Judge, no spec (offline) | 261 | **0** (188 sent to review) | 0–1% |
+| Evidence Judge + exact task spec (offline) | 279 | **0** (23 sent to review) | 0–1% |
+| Evidence Judge + generic task spec (offline) | 279 | **0** (70 sent to review) | 0–1% |
+| Evidence Judge, no spec (offline) | 279 | **0** (198 sent to review) | 0–1% |
 
 This is one demo shop with two tasks (a purchase and a stock check) and template forgeries, so it shows these attacks are refused, not that every site and task is covered. Honest controls: 17/17 correct with the exact spec and 16/17 with the generic one (the side-effect run goes to review because the generic spec has no `forbid` rule). The 17 are the nine recorded runs plus eight honest edits of the passing ones (an order answered with a redirect to its confirmation, a search typed first, a detour to another site); all 11 that should pass do with either spec. Without a spec all 11 go to review by design: no site is named, and a spec-less run that changes state or makes no checkable claim is review-only anyway. Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`; add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
 

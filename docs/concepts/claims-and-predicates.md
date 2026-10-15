@@ -102,9 +102,12 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
 - **Already true before the agent acted.** Each request, `url` and `action` predicate (and, for
   action and outcome claims, each `page_text` and `value` predicate) is also checked against the
   run's *baseline*: the initial page, and the requests, snapshots and navigations before the
-  agent's first action that is not a navigation. A predicate the baseline meets, such as a URL
-  containing `://` or the shop's host, `GET` with `url_contains: ["//"]`, or a `goto` whose value
-  contains `http`, is met by an agent that did nothing. A `final`-scope predicate is checked
+  agent's first action. Opening the start page (a first action that navigates) is set-up; every
+  later navigation is the agent's, so a read done by typing the product page's URL can pass.
+  Without recorded actions the cut is the first mutation or the second page load. A predicate
+  the baseline meets, such as a URL containing `://` or the shop's host, `GET` with
+  `url_contains: ["//"]`, or a `goto` whose value contains `http`, is met by an agent that did
+  nothing. A `final`-scope predicate is checked
   against every page of the baseline, not only its last one, so a page the agent opened first,
   left and came back to at the end does not count. State and value claims may still cite text of
   the start page ("the kettle costs $24").
@@ -120,15 +123,32 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   the site chose that URL. URL inputs only count as echoed on pages and URLs of the site they
   came from: typing `https://en.wikipedia.org/wiki/Kettle` does not make the shop's own
   `/products/red-kettle` an echo;
-  inputs shorter than three characters or without a letter or digit are ignored. A `page_text`,
-  `url` or `value` (`page_regex`) predicate is evaluated again with every occurrence of every
-  input masked out of page text and URLs; if it no longer holds, it cannot support the claim.
-  So a needle that only partly overlaps an input ("Order #1042 confirmed" on a page that echoes
-  the typed "#1042 confirmed") is caught too. The price is that page text containing anything
-  the agent typed, even a search term the real confirmation also names ("Red Kettle" after a
-  search for "kettle"), cannot prove a claim on its own; another predicate (a mutation request,
-  text the agent did not type) has to. Values read from request bodies (`json_path`) are not
-  masked.
+  inputs shorter than three characters or without a letter or digit are ignored. Every
+  `page_text`, `url`, `request` and `value` predicate is evaluated again with every occurrence
+  of every input masked out of everything the site can repeat it in: page text, page URLs, the
+  URLs of requests that are not mutations, and every response body (JSON keeps its structure,
+  with each echoing key or string masked). If it no longer holds, it cannot support the claim.
+  So a search API answering `{"query": "In stock"}`, or a results page saying "No results for
+  99812", proves neither stock nor a tracking number, and a needle that only partly overlaps an
+  input ("Order #1042 confirmed" on a page that echoes the typed "#1042 confirmed") is caught
+  too. The price is that page text containing anything the agent typed, even a search term the
+  real confirmation also names ("Red Kettle" after a search for "kettle"), cannot prove a claim
+  on its own; another predicate (a mutation request, text the agent did not type) has to. What
+  the agent submitted is not an echo: a mutation's URL and request body are never masked, so a
+  `POST /api/orders` carrying the typed note, or a value read from it (`json_path`), still
+  proves the submission. A response that repeats the typed value back is masked like any other.
+- **Short words and cut-short echoes.** An input that is a single word shorter than six characters without a digit ("Your" typed
+  into a name field, `/cart` opened by URL) is only masked for a predicate that could be that
+  word alone: a needle that is itself one short word (`Paid`, `/cart`), a short string `value`,
+  or a regex. Typing "Your" does not mask "Thank you for your order"; typing "Paid" still
+  cannot prove `page_text: Paid`. Two limits remain. A multi-word needle that the site
+  completes around a typed short word ("Order" typed, "Order Paid" shown) is not caught. And
+  an echo cut short (a prefix of eight or more characters, for fields with a `maxlength`)
+  cannot be told apart from site text that shares a prefix with the input: a gift note "Thank
+  you for being awesome" masks "Thank you for" in the shop's "Thank you for your order", so
+  that needle sends the run to review. Echoes are matched anywhere, not only on word
+  boundaries: page text joins inline elements without a space (`for <b>Paid</b>Now` reads
+  "for PaidNow"), so a word-boundary rule would let a glued echo pass.
 - **Key outcome claims need an outcome.** A key claim of kind `outcome` can only be supported
   by a mutation request (`POST`, `PUT`, `PATCH`, `DELETE`) or by the final page: `final`-scope
   `page_text`, `url` or `screenshot`. A click on *Place order* or text seen on some earlier page

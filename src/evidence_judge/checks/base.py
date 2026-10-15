@@ -83,9 +83,13 @@ class CheckContext:
         """The same context over the evidence before the agent acted (EvidenceIndex.baseline)."""
         return dataclasses.replace(self, index=self.index.baseline, llm=None)
 
-    def without_agent_input(self) -> CheckContext:
-        """The same context over the evidence with the agent's own input masked out."""
-        return dataclasses.replace(self, index=self.index.without_agent_input, llm=None)
+    def without_agent_input(self, *, short_words: bool = False) -> CheckContext:
+        """The same context over the evidence with the agent's own input masked out; with
+        `short_words`, also inputs that are a single short word (core.index.is_short_word)."""
+        index = (
+            self.index.without_short_word_input if short_words else self.index.without_agent_input
+        )
+        return dataclasses.replace(self, index=index, llm=None)
 
 
 class PredicateChecker(Protocol):

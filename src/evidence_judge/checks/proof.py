@@ -1,9 +1,10 @@
 """Guards on evidence that proves something: a claim or an `expect` entry.
 
 A predicate that is supported on the run can still prove nothing about what the agent did: the
-run already met it before the agent acted (the baseline), or it only holds where a page or URL
-echoes the agent's own input. Claims and `expect` entries share these guards; `forbid` entries
-and constraints do not use them, since masking or a baseline could hide a real violation.
+run already met it before the agent acted (the baseline), or it only holds where a page, a URL
+or a response echoes the agent's own input. Claims and `expect` entries share these guards;
+`forbid` entries and constraints do not use them, since masking or a baseline could hide a real
+violation.
 """
 
 from __future__ import annotations
@@ -14,9 +15,11 @@ from urllib.parse import unquote_plus
 from evidence_judge.checks._common import quoted, result
 from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.registry import CheckerRegistry
+from evidence_judge.core.index import is_short_word
 from evidence_judge.core.predicates import (
     PageTextPredicate,
     Predicate,
+    RequestPredicate,
     Scope,
     UrlPredicate,
     ValuePredicate,
@@ -27,12 +30,39 @@ from evidence_judge.textnorm import normalize
 MAX_SHOWN_INPUTS: Final = 3
 
 
-def reads_page_or_url(predicate: Predicate) -> bool:
+def reads_agent_reachable_text(predicate: Predicate) -> bool:
+    """True if `predicate` reads something the site can repeat the agent's input back in: page
+    text, a URL, or a request (its URL or response); an action or a screenshot cannot."""
+    return isinstance(
+        predicate, PageTextPredicate | UrlPredicate | RequestPredicate | ValuePredicate
+    )
+
+
+def reads_short_word(predicate: Predicate) -> bool:
+    """True if a single short word the agent typed (is_short_word) could be all `predicate`
+    reads: it looks for a short word, a short string value, or matches a regex (which can
+    capture one, or match a URL path the agent typed). Such a predicate is checked with short
+    words masked too; others are not, so typing "Your" does not mask "Thank you for your order".
+    """
     match predicate:
-        case PageTextPredicate() | UrlPredicate():
-            return True
-        case ValuePredicate(page_regex=str()):
-            return True
+        case PageTextPredicate():
+            return is_short_word(predicate.contains)
+        case UrlPredicate():
+            needles = [predicate.contains, predicate.query_contains]
+            return predicate.regex is not None or any(n and is_short_word(n) for n in needles)
+        case RequestPredicate():
+            needles = [
+                *predicate.url_contains,
+                *predicate.path_contains,
+                *predicate.query_contains,
+                *predicate.response_contains,
+            ]
+            return predicate.url_regex is not None or any(is_short_word(n) for n in needles)
+        case ValuePredicate():
+            short = isinstance(predicate.value, str) and is_short_word(predicate.value)
+            return short or (
+                predicate.in_request is not None and reads_short_word(predicate.in_request)
+            )
         case _:
             return False
 
@@ -44,11 +74,12 @@ async def echoed(
     input, or None.
 
     The predicate is evaluated again with every input (EvidenceIndex.agent_inputs) masked out of
-    page text and URLs; if it no longer holds, what supported it was the agent's input.
+    everything the site can echo it in (EvidenceIndex.without_agent_input): page text, URLs and
+    response bodies. If it no longer holds, what supported it was the agent's input.
     """
-    if not reads_page_or_url(predicate):
+    if not reads_agent_reachable_text(predicate):
         return None
-    masked = ctx.without_agent_input()
+    masked = ctx.without_agent_input(short_words=reads_short_word(predicate))
     if masked.index is ctx.index:
         return None
     if (await registry.evaluate(predicate, masked)).status is Support.SUPPORTED:
@@ -57,7 +88,7 @@ async def echoed(
     shown = ", ".join(quoted(i) for i in inputs[:MAX_SHOWN_INPUTS])
     more = f" and {len(inputs) - MAX_SHOWN_INPUTS} more" if len(inputs) > MAX_SHOWN_INPUTS else ""
     return (
-        "it holds only where the page or URL echoes the agent's own input (text it typed or "
+        "it holds only where a page, URL or response echoes the agent's own input (text it typed or "
         f"put in a URL: {shown}{more}), so it proves nothing"
     )
 

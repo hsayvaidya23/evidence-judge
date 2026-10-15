@@ -7,6 +7,7 @@ import pytest
 
 from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.registry import default_registry
+from evidence_judge.config import Settings
 from evidence_judge.core.claims import Claim, ClaimKind
 from evidence_judge.core.evidence import PageState, Run
 from evidence_judge.core.index import EvidenceIndex
@@ -18,7 +19,9 @@ from evidence_judge.core.predicates import (
     Scope,
     UrlPredicate,
 )
-from evidence_judge.core.verdict import Support
+from evidence_judge.core.taskspec import TaskSpec
+from evidence_judge.core.verdict import Outcome, Support
+from evidence_judge.engine import Judge, JudgeOptions
 from tests.unit.conftest import HOST, act, ctx, final, honest_run, make_run, net, snap
 
 
@@ -128,9 +131,50 @@ async def test_text_the_agent_typed_itself_proves_nothing() -> None:
     assert "typed" in verdict.reason
 
 
-def test_baseline_index_is_cut_at_the_first_non_navigation_action() -> None:
+def test_baseline_index_is_cut_at_the_first_action_after_the_start_page() -> None:
     baseline = EvidenceIndex(honest_run()).baseline
     assert [a.name for a in baseline.run.actions] == ["goto"]
     assert [n.id for n in baseline.run.network] == ["net#1", "net#2"]
     assert baseline.final is not None
     assert baseline.final.url == f"{HOST}/"
+
+
+def _navigated_read() -> Run:
+    """An honest read: the agent opens the shop, then types the product page's URL itself."""
+    return make_run(
+        actions=[
+            act(1, "goto", url=f"{HOST}/"),
+            act(2, "goto", url=f"{HOST}/products/red-kettle"),
+        ],
+        network=[net(1, "GET", "/"), net(3, "GET", "/products/red-kettle")],
+        snapshots=[snap(1, "/", "Kettles")],
+        final_state=final("/products/red-kettle", "Red Kettle $24.00 Out of stock"),
+    ).model_copy(
+        update={
+            "task": "Is the red kettle in stock?",
+            "agent_answer": 'The red kettle is out of stock: its page says "Out of stock".',
+        }
+    )
+
+
+def test_a_later_navigation_is_the_agents_first_action() -> None:
+    baseline = EvidenceIndex(_navigated_read()).baseline
+    assert [a.id for a in baseline.run.actions] == ["act#1"]
+    assert [n.id for n in baseline.run.network] == ["net#1"]
+    assert baseline.final is not None
+    assert baseline.final.text == "Kettles"
+
+
+async def test_a_read_done_by_navigation_alone_passes() -> None:
+    spec = TaskSpec.model_validate(
+        {
+            "id": "stock",
+            "task": "Is the red kettle in stock?",
+            "site": "shop.test",
+            "expect": [{"id": "shown", "any": [{"kind": "page_text", "contains": "Out of stock"}]}],
+        }
+    )
+    judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
+    verdict = await judge.judge(_navigated_read(), JudgeOptions(offline=True, spec=spec))
+    assert verdict.outcome is Outcome.PASS, verdict.summary
+    assert [e.met for e in verdict.expectations] == [True]

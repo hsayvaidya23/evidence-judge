@@ -19,7 +19,7 @@ from evidence_judge.core.verdict import ExpectationResult, Outcome, RunVerdict
 from evidence_judge.engine import Judge, JudgeOptions
 from tests.unit.conftest import HOST, act, ctx, final, honest_run, make_run, net, shop_spec, snap
 
-ECHO = "it holds only where the page or URL echoes the agent's own input"
+ECHO = "it holds only where a page, URL or response echoes the agent's own input"
 BASELINE = "it was already true before the agent acted"
 
 
@@ -132,7 +132,41 @@ async def test_expect_url_the_agent_opened_itself_is_unknown() -> None:
 
     assert verdict.outcome is Outcome.NEEDS_REVIEW
     assert verdict.expectations[0].met is None
-    assert BASELINE in verdict.expectations[0].reason
+    assert ECHO in verdict.expectations[0].reason
+
+
+async def test_a_typed_url_the_site_served_2xx_still_cannot_prove_a_visit() -> None:
+    """An SPA answers every path with its shell, so a 200 for a typed URL proves no page exists:
+    a `url` entry stays unknown whether it reads as a visit or as an outcome."""
+    run = make_run(
+        actions=[
+            act(1, "goto", url=f"{HOST}/"),
+            act(2, "click", "#menu"),
+            act(3, "goto", url=f"{HOST}/products/red-kettle"),
+        ],
+        network=[net(1, "GET", "/"), net(4, "GET", "/products/red-kettle")],
+        snapshots=[snap(1, "/", "Kettles")],
+        final_state=final("/products/red-kettle", "Red Kettle $24.00 Out of stock"),
+    )
+    spec = TaskSpec.model_validate(
+        {
+            "id": "t",
+            "task": "Is the red kettle in stock?",
+            "site": "shop.test",
+            "expect": [
+                {
+                    "id": "visited",
+                    "any": [{"kind": "url", "contains": "/products/red-kettle", "scope": "any"}],
+                },
+                {"id": "shown", "any": [{"kind": "page_text", "contains": "Out of stock"}]},
+            ],
+        }
+    )
+    verdict = await _judge(run, spec, 'Out of stock: its page says "Out of stock".')
+
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert [e.met for e in verdict.expectations] == [None, True]
+    assert ECHO in verdict.expectations[0].reason
 
 
 def test_browser_use_agent_that_opens_the_expected_url_itself_needs_review(

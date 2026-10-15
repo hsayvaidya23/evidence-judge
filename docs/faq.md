@@ -82,7 +82,7 @@ description: Frequently asked questions about Evidence Judge - LLM judges, NEEDS
 
     It is honest about its size: seven recorded runs on one demo shop, judged against two tasks
     (a purchase and a read-only stock check), with template forgeries, so the intervals are wide
-    (0 of 261 bounds the false-PASS rate below about 1.5%, and each kind alone below about 20%).
+    (0 of 279 bounds the false-PASS rate below about 1.4%, and each kind alone below about 20%).
     Run it on your own recorded runs with
     [`evidence-judge bench`](guides/benchmark-your-agent.md). Limitations are listed on the
     [benchmark page](benchmark.md#limitations).

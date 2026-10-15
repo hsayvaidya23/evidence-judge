@@ -9,11 +9,21 @@ from __future__ import annotations
 import pytest
 
 from evidence_judge.checks.claims import judge_claim
+from evidence_judge.checks.proof import guarded
 from evidence_judge.checks.registry import default_registry
+from evidence_judge.config import Settings
 from evidence_judge.core.claims import Claim, ClaimKind
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, Run
-from evidence_judge.core.predicates import PageTextPredicate
-from evidence_judge.core.verdict import Support
+from evidence_judge.core.index import MASK, EvidenceIndex, is_short_word
+from evidence_judge.core.predicates import (
+    PageTextPredicate,
+    Predicate,
+    UrlPredicate,
+    ValuePredicate,
+)
+from evidence_judge.core.taskspec import TaskSpec
+from evidence_judge.core.verdict import Outcome, Support
+from evidence_judge.engine import Judge, JudgeOptions
 from tests.unit.conftest import HOST, act, ctx, final, make_run, net, snap
 
 CLAIM = Claim(
@@ -24,7 +34,8 @@ CLAIM = Claim(
     key=True,
     predicates=[PageTextPredicate(contains="Order A77 confirmed")],
 )
-ECHO_REASON = "it holds only where the page or URL echoes the agent's own input"
+ECHO_REASON = "it holds only where a page, URL or response echoes the agent's own input"
+JUDGE = Judge(Settings(anthropic_api_key=None, cache_dir=None))
 
 
 def _run(action: ActionEvent, final_text: str) -> Run:
@@ -135,3 +146,110 @@ async def test_url_typed_for_this_site_is_still_an_echo() -> None:
     verdict = await judge_claim(CLAIM, ctx(run), default_registry())
     assert verdict.status is Support.NO_EVIDENCE
     assert ECHO_REASON in verdict.reason
+
+
+SHORT_SPEC = TaskSpec.model_validate(
+    {
+        "id": "buy",
+        "task": "Buy a red kettle under $30",
+        "site": "shop.test",
+        "expect": [
+            {
+                "id": "order",
+                "all": [{"kind": "request", "method": "POST", "url_contains": ["/api/orders"]}],
+            },
+            {"id": "conf", "any": [{"kind": "page_text", "contains": "Thank you for your order"}]},
+        ],
+    }
+)
+
+
+async def test_a_short_word_the_agent_typed_does_not_mask_the_sites_sentence() -> None:
+    run = make_run(
+        actions=[
+            act(1, "goto", url=f"{HOST}/"),
+            act(2, "fill", "#name", value="Your"),
+            act(3, "click", "#place", url=f"{HOST}/checkout"),
+        ],
+        network=[
+            net(1, "GET", "/"),
+            net(4, "POST", "/api/orders", 201, body={"items": [{"price": 24}]}),
+            net(5, "GET", "/order/A1"),
+        ],
+        snapshots=[snap(1, "/", "Kettles Red Kettle $24.00")],
+        final_state=final("/order/A1", "Thank you for your order! Red Kettle $24.00"),
+    ).model_copy(update={"agent_answer": "I bought the Red Kettle. 'Thank you for your order'."})
+    verdict = await JUDGE.judge(run, JudgeOptions(offline=True, spec=SHORT_SPEC))
+    assert verdict.outcome is Outcome.PASS, verdict.summary
+    assert [e.met for e in verdict.expectations] == [True, True]
+
+
+def _short_echo(typed: str, text: str) -> Run:
+    return make_run(
+        actions=[act(1, "goto", url=f"{HOST}/"), act(2, "fill", "#q", value=typed)],
+        network=[net(1, "GET", "/"), net(3, "GET", "/search")],
+        snapshots=[snap(1, "/", "Welcome")],
+        final_state=final("/search", text),
+    )
+
+
+@pytest.mark.parametrize(
+    ("predicate", "typed", "text"),
+    [
+        (PageTextPredicate(contains="Paid"), "Paid", "Results for Paid"),
+        (PageTextPredicate(contains="paid!"), "Paid", "Results for PAID!"),
+        (
+            ValuePredicate(field="status", page_regex=r"for (\w+)", op="==", value="Paid"),
+            "Paid",
+            "Results for Paid",
+        ),
+    ],
+    ids=["word", "word-and-punctuation", "page-value"],
+)
+async def test_a_short_word_still_cannot_prove_itself(
+    predicate: Predicate, typed: str, text: str
+) -> None:
+    res = await guarded(predicate, ctx(_short_echo(typed, text)), default_registry(), "it")
+    assert res.status is Support.NO_EVIDENCE
+    assert ECHO_REASON in res.reason
+
+
+@pytest.mark.parametrize(
+    "predicate", [UrlPredicate(contains="/cart"), UrlPredicate(regex=r"/cart$")]
+)
+async def test_a_short_url_path_the_agent_typed_cannot_prove_itself(predicate: Predicate) -> None:
+    run = make_run(
+        actions=[act(1, "goto", url=f"{HOST}/"), act(2, "goto", url=f"{HOST}/cart")],
+        network=[net(1, "GET", "/"), net(3, "GET", "/cart")],
+        snapshots=[snap(1, "/", "Welcome")],
+        final_state=final("/cart", "Your cart is empty"),
+    )
+    claim = CLAIM.model_copy(update={"predicates": [predicate]})
+    verdict = await judge_claim(claim, ctx(run), default_registry())
+    assert verdict.status is Support.NO_EVIDENCE
+    assert ECHO_REASON in verdict.reason
+
+
+def test_short_words_are_inputs_but_only_the_short_word_mask_covers_them() -> None:
+    index = EvidenceIndex(_short_echo("Your", "Thank you for your order"))
+    assert index.agent_inputs() == ("your",)
+    assert index.without_agent_input is index
+    final_state = index.without_short_word_input.final
+    assert final_state is not None
+    assert final_state.text == f"thank you for {MASK} order"
+
+
+@pytest.mark.parametrize(
+    ("text", "short"),
+    [
+        ("your", True),
+        ("Paid!", True),
+        ("/cart", True),
+        ("kettle", False),
+        ("a77", False),
+        ("red kettle", False),
+        ("in-stock", False),
+    ],
+)
+def test_short_word_rule(text: str, short: bool) -> None:
+    assert is_short_word(text) is short
