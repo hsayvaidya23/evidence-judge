@@ -176,3 +176,13 @@ def test_ci_exercises_the_action_failure_path() -> None:
     broken = next(s for s in steps if s.get("id") == "broken")
     assert broken["continue-on-error"] is True
     assert 'test "$BROKEN_STEP" = failure' in steps[-1]["run"]
+
+
+def test_project_urls_point_at_the_docs_changelog_and_issues() -> None:
+    urls = _pyproject()["project"]["urls"]
+    config = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    mkdocs = dict(re.findall(r"^(site_url|repo_url): (\S+)$", config, re.M))
+    assert urls["Documentation"] == mkdocs["site_url"]
+    assert urls["Repository"] == mkdocs["repo_url"]
+    assert urls["Changelog"] == f"{mkdocs['repo_url']}/blob/main/CHANGELOG.md"
+    assert urls["Issues"] == f"{mkdocs['repo_url']}/issues"
