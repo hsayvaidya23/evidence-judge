@@ -127,6 +127,18 @@ that npm, yarn, pnpm, bun and go read on every run (`.npmrc` can set `node-optio
 file `GOFLAGS`)."""
 
 
+_GIT_METADATA: Final = re.compile(r"(?:^|/)\.git(?:/|$)")
+
+
+def git_metadata_reason(path: str) -> str | None:
+    """Why writing `path` inside `.git` changes the test harness, or None. Git's own commands
+    write there; a file write that does can change what git lists as the project's files
+    (`info/exclude`, `config`), which is what the judge's re-run copies."""
+    if _GIT_METADATA.search(path) is None:
+        return None
+    return f"wrote {path} inside .git, which decides what git lists as the project's files"
+
+
 def session_config_reason(path: str) -> str | None:
     """Why writing `path` changes how every later command of the session runs, or None."""
     if _SESSION_CONFIG.search(path) is None:
@@ -499,6 +511,8 @@ def suite_findings(
     unknown; `removed`/`added` are None when the source has no diff; `texts` is the whole file
     before and after the edit when the source records it."""
     name = posixpath.basename(path)
+    if why := git_metadata_reason(path):
+        return [why]
     findings: list[str] = []
     test_file = is_test_path(path)
     if is_harness_path(path):

@@ -207,12 +207,13 @@ def test_the_run_never_writes_the_working_tree(tmp_path: Path) -> None:
 
 @needs_git
 def test_untracked_files_come_along_and_ignored_ones_do_not(tmp_path: Path) -> None:
-    root = committed(toy(tmp_path))
+    project = toy(tmp_path)
+    (project / ".gitignore").write_text("scratch/\n")
+    root = committed(project)
     (root / "tests" / "test_new.py").write_text("def test_new():\n    assert False\n")
-    (root / ".gitignore").write_text("scratch/\n")
     (root / "scratch").mkdir()
     (root / "scratch" / "test_ignored.py").write_text("def test_ignored():\n    assert False\n")
-    result = execute(RerunSpec(command=[*PYTEST, "tests"]), root)
+    result = execute(RerunSpec(command=PYTEST), root)
     assert result.status is RerunStatus.FAIL
     assert result.failing == ["tests.test_new::test_new"]
 

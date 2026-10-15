@@ -593,26 +593,34 @@ def environment(spec: RerunSpec, runner: Runner, scratch: Path) -> dict[str, str
     tmp = scratch / "tmp"
     home.mkdir(exist_ok=True)
     tmp.mkdir(exist_ok=True)
-    env = {"PATH": judge_path(), "HOME": str(home), "LANG": "C.UTF-8", "TMPDIR": str(tmp)}
+    env = {
+        "PATH": judge_path(),
+        "HOME": str(home),
+        "LANG": "C.UTF-8",
+        "TMPDIR": str(tmp),
+    }
     if sys.platform == "win32":
         env |= {k: v for k in ("SYSTEMROOT", "COMSPEC", "PATHEXT") if (v := os.environ.get(k))}
     env |= _tool_dirs(spec.command, runner)
     return env | dict(spec.env)
 
 
-def _git(root: Path, *args: str, env: dict[str, str]) -> subprocess.CompletedProcess[bytes] | None:
+def _git(
+    root: Path, *args: str, env: dict[str, str], data: bytes = b""
+) -> subprocess.CompletedProcess[bytes] | None:
     git = shutil.which("git", path=env["PATH"])
     if git is None:
         return None
     try:
         return subprocess.run(  # noqa: S603 - fixed argv, no shell
-            [git, "-c", "core.fsmonitor=false", "-C", str(root), *args],
+            [git, "-c", "core.fsmonitor=false", "-c", f"core.excludesFile={os.devnull}",
+             "-C", str(root), *args],
             env=env | {"GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"},
-            stdin=subprocess.DEVNULL,
+            input=data,
             capture_output=True,
             timeout=60,
             check=False,
-        )
+        )  # fmt: skip
     except (OSError, subprocess.TimeoutExpired):
         return None
 
@@ -626,12 +634,103 @@ def head_revision(root: Path) -> str | None:
     return done.stdout.decode("ascii", "replace").strip() or None
 
 
+_PER_DIRECTORY: Final = "--exclude-per-directory=.gitignore"
+
+
+def _paths(data: bytes) -> list[str]:
+    return [p for p in data.decode("utf-8", "surrogateescape").split("\0") if p]
+
+
 def git_files(root: Path, env: dict[str, str]) -> list[str] | None:
-    """Tracked and untracked, not ignored, files under `root`, or None outside a git tree."""
-    done = _git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", env=env)
+    """Tracked files, and untracked files the tree's `.gitignore` files do not ignore, under
+    `root`; None outside a git tree. The personal exclude files (`.git/info/exclude`,
+    `core.excludesFile`) are not read: they are not part of the project, and anything running
+    as the user can write them."""
+    done = _git(root, "ls-files", "-z", "--cached", "--others", _PER_DIRECTORY, env=env)
     if done is None or done.returncode != 0:
         return None
-    return sorted({p for p in done.stdout.decode("utf-8", "surrogateescape").split("\0") if p})
+    return sorted(set(_paths(done.stdout)))
+
+
+def _work_tree_holds(root: Path, env: dict[str, str]) -> bool:
+    """The work tree git reports contains `root`; `core.worktree` can point git at another
+    directory, whose untracked files would then decide what is copied."""
+    done = _git(root, "rev-parse", "--show-toplevel", env=env)
+    if done is None or done.returncode != 0:
+        return False
+    try:
+        top = Path(done.stdout.decode("utf-8", "surrogateescape").strip()).resolve()
+    except OSError:
+        return False
+    return root.is_relative_to(top)
+
+
+@dataclass(frozen=True, slots=True)
+class Base:
+    """The revision the working tree is compared with, and the files tracked in it under the
+    project directory (relative to it)."""
+
+    sha: str
+    files: tuple[str, ...]
+
+
+def resolve_base(root: Path, revision: str, env: dict[str, str]) -> Base | None:
+    resolved = _git(root, "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}", env=env)
+    if resolved is None or resolved.returncode != 0:
+        return None
+    sha = resolved.stdout.decode().strip()
+    listing = _git(root, "ls-tree", "-r", "-z", "--name-only", sha, "--", ".", env=env)
+    if listing is None or listing.returncode != 0:
+        return None
+    return Base(sha, tuple(_paths(listing.stdout)))
+
+
+def _show(root: Path, sha: str, path: str, env: dict[str, str]) -> bytes | None:
+    shown = _git(root, "show", f"{sha}:{path}", env=env)
+    return shown.stdout if shown is not None and shown.returncode == 0 else None
+
+
+def _lines(data: bytes | None) -> set[str]:
+    if data is None:
+        return set()
+    return {line.strip() for line in data.decode("utf-8", "replace").splitlines()}
+
+
+def newly_ignored(root: Path, base: Base, env: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Untracked paths only `.gitignore` rules added since `base` ignore, which the copy takes
+    anyway; and exceptions (`!pattern`) removed since `base`, whose effect cannot be undone
+    that way."""
+    listed = _git(root, "ls-files", "-z", "--others", "--ignored", _PER_DIRECTORY, "--directory",
+                  env=env)  # fmt: skip
+    hidden: list[str] = []
+    if listed is not None and listed.returncode == 0 and listed.stdout:
+        matched = _git(root, "check-ignore", "-z", "-v", "--no-index", "--stdin", env=env,
+                       data=listed.stdout)  # fmt: skip
+        fields = _paths(matched.stdout) if matched is not None else []
+        rules: dict[str, set[str]] = {}
+        for source, _, pattern, path in zip(*[iter(fields)] * 4, strict=False):
+            if PurePosixPath(source).name != ".gitignore":
+                hidden.append(path)
+                continue
+            if source not in rules:
+                rules[source] = _lines(_show(root, base.sha, source, env))
+            if pattern.strip() not in rules[source]:
+                hidden.append(path)
+    dropped: list[str] = []
+    for path in base.files:
+        if PurePosixPath(path).name != ".gitignore":
+            continue
+        try:
+            now = _lines((root / path).read_bytes())
+        except OSError:
+            now = set[str]()
+        before = _lines(_show(root, base.sha, f"./{path}", env))
+        dropped.extend(
+            f"{path} no longer has the exception {line}"
+            for line in sorted(before - now)
+            if line.startswith("!")
+        )
+    return hidden, dropped
 
 
 class CopyError(Exception):
@@ -684,30 +783,78 @@ def _copy_tree(src: Path, dst: Path, budget: _Budget) -> None:
             _copy_one(base / name, target / name, budget)
 
 
-def copy_tree(root: Path, dest: Path, env: dict[str, str]) -> tuple[list[str], str]:
-    """Copy the working tree into `dest`; return the copied paths and how they were chosen.
-    In a git tree: every tracked file still present and every untracked file not ignored (so
-    the agent's new files come along, caches and build output do not). Elsewhere: everything
-    but VCS metadata, caches and dependency directories. Dependency directories (`.venv`,
-    `venv`, `node_modules`) are linked, not copied."""
+@dataclass(slots=True)
+class Copied:
+    """What the copy holds and how it was chosen, with what the choice needs said about it."""
+
+    paths: list[str]
+    how: str
+    notes: list[str] = field(default_factory=list[str])
+    problems: list[str] = field(default_factory=list[str])
+    config_changes: list[str] = field(default_factory=list[str])
+
+
+def _files_under(dest: Path, rel: str) -> list[str]:
+    top = dest / rel
+    if top.is_symlink() or not top.is_dir():
+        return [rel] if top.is_symlink() or top.exists() else []
+    return [p.relative_to(dest).as_posix() for p in top.rglob("*") if not p.is_dir()]
+
+
+def _skipped(rel: str) -> bool:
+    return any(part in _SKIPPED_DIRS for part in PurePosixPath(rel).parts)
+
+
+def copy_tree(
+    root: Path,
+    dest: Path,
+    env: dict[str, str],
+    base: Base | None = None,
+) -> Copied:
+    """Copy the working tree into `dest`. In a git tree: every tracked file still present and
+    every untracked file the project's `.gitignore` files do not ignore (so the agent's new
+    files come along, caches and build output do not), plus what `base` tracked and what
+    `.gitignore` rules added since `base` hide, so changing the index or the ignore rules
+    cannot keep a file out of the run. Elsewhere: everything but VCS metadata, caches and
+    dependency directories. Dependency directories (`.venv`, `venv`, `node_modules`) are linked, not copied."""
     budget = _Budget()
     listed = git_files(root, env)
-    if listed is not None:
-        how = "git ls-files (tracked and untracked, not ignored)"
-        for rel in listed:
-            src = root / rel
-            if src.is_symlink() or src.exists():
-                _copy_one(src, dest / rel, budget)
-        copied = listed
+    if listed is not None and not _work_tree_holds(root, env):
+        listed = None
+        problems = [
+            "the git configuration points the work tree away from the project, so the whole "
+            "directory was copied instead of the files git lists"
+        ]
     else:
-        how = "the whole directory (not a git tree)"
+        problems = []
+    if listed is None:
+        how = "the whole directory" + ("" if problems else " (not a git tree)")
         _copy_tree(root, dest, budget)
-        copied = [p.relative_to(dest).as_posix() for p in dest.rglob("*") if not p.is_dir()]
+        result = Copied(_files_under(dest, "."), how, problems=problems)
+    else:
+        result = Copied([], "git ls-files (tracked, and untracked not ignored by .gitignore)")
+        wanted = set(listed)
+        if base is not None:
+            wanted.update(base.files)
+            hidden, result.config_changes = newly_ignored(root, base, env)
+            hidden = [h.rstrip("/") for h in hidden if not _skipped(h.rstrip("/"))]
+            if hidden:
+                result.notes.append(
+                    f"copied {len(hidden)} path(s) that .gitignore rules added since "
+                    f"{base.sha[:12]} ignore: {', '.join(hidden[:3])}"
+                )
+            wanted.update(hidden)
+        for rel in sorted(wanted):
+            src = root / rel
+            if (src.is_symlink() or src.exists()) and not (dest / rel).exists():
+                _copy_one(src, dest / rel, budget)
+                result.paths.extend(_files_under(dest, rel))
     for name in _DEPENDENCY_DIRS:
         source = root / name
         if source.is_dir() and not (dest / name).exists() and not (dest / name).is_symlink():
             (dest / name).symlink_to(source, target_is_directory=True)
-    return copied, how
+    result.paths = sorted(set(result.paths))
+    return result
 
 
 _CONFIG_NAMES: Final = frozenset(
@@ -755,29 +902,14 @@ def _section(path: str, data: bytes | None) -> tuple[str, object]:
 
 
 def config_changes(
-    root: Path, copy: Path, copied: list[str], base: str, env: dict[str, str]
-) -> tuple[list[str], str | None]:
-    """Runner configuration that differs between the copy and the base revision, and the
-    revision compared with (None when there is none to compare with)."""
-    resolved = _git(root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", env=env)
-    if resolved is None or resolved.returncode != 0:
-        return [], None
-    sha = resolved.stdout.decode().strip()
-    listing = _git(root, "ls-tree", "-r", "--name-only", sha, "--", ".", env=env)
-    if listing is None or listing.returncode != 0:
-        return [], None
-    before = {
-        p
-        for p in listing.stdout.decode("utf-8", "surrogateescape").splitlines()
-        if is_runner_config(p)
-    }
+    root: Path, copy: Path, copied: list[str], base: Base, env: dict[str, str]
+) -> list[str]:
+    """Runner configuration that differs between the copy and the base revision."""
+    before = {p for p in base.files if is_runner_config(p)}
     now = {p for p in copied if is_runner_config(p) and (copy / p).is_file()}
     changes: list[str] = []
     for path in sorted(before | now):
-        old: bytes | None = None
-        if path in before:
-            shown = _git(root, "show", f"{sha}:./{path}", env=env)
-            old = shown.stdout if shown is not None and shown.returncode == 0 else None
+        old = _show(root, base.sha, f"./{path}", env) if path in before else None
         new = (copy / path).read_bytes() if path in now else None
         label, old_part = _section(path, old)
         new_label, new_part = _section(path, new)
@@ -789,7 +921,7 @@ def config_changes(
             changes.append(f"{path} was deleted")
         else:
             changes.append(f"{path}{label or new_label} changed")
-    return changes, sha
+    return changes
 
 
 def _kill_group(proc: subprocess.Popen[bytes]) -> None:
@@ -819,7 +951,11 @@ def _same_dir(a: str | None, b: Path) -> bool:
 
 
 def execute(
-    spec: RerunSpec, root: Path, *, base: str | None = None, session_cwd: str | None = None
+    spec: RerunSpec,
+    root: Path,
+    *,
+    base: str | None = None,
+    session_cwd: str | None = None,
 ) -> RerunResult:
     """Copy `root`, run the spec's command on the copy and read the runner's report. Runs once;
     never raises for a problem with the project, the command or the report."""
@@ -858,23 +994,28 @@ def execute(
             "(pytest, go, jest, vitest, cargo, node or unittest)",
         )
     with tempfile.TemporaryDirectory(prefix="evj-rerun-") as tmp:
-        scratch = Path(tmp)
+        scratch = Path(tmp).resolve()
         workspace = scratch / "judge"
         copy = scratch / "tree"
         workspace.mkdir()
         copy.mkdir()
         env = environment(spec, runner, scratch)
+        resolved = resolve_base(root, base or "HEAD", env)
         try:
-            copied, how = copy_tree(root, copy, env)
+            copied = copy_tree(root, copy, env, resolved)
         except (CopyError, OSError) as exc:
             return done(RerunStatus.UNKNOWN, f"the re-run could not copy the working tree: {exc}")
-        notes = [f"copied {len(copied)} files from {root} by {how}"]
-        changes, sha = config_changes(root, copy, copied, base or "HEAD", env)
-        if sha is None:
+        problems.extend(copied.problems)
+        notes = [f"copied {len(copied.paths)} files from {root} by {copied.how}", *copied.notes]
+        changes = list(copied.config_changes)
+        if resolved is None:
             notes.append(
                 f"runner configuration was not compared: {base or 'HEAD'} is not a revision of "
                 f"a git tree at {root}"
             )
+        else:
+            changes = [*config_changes(root, copy, copied.paths, resolved, env), *changes]
+        sha = resolved.sha if resolved is not None else None
         try:
             plan = _plan(spec.command, runner, workspace)
         except ReportError as exc:

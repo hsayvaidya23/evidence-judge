@@ -21,6 +21,7 @@ from typing import Final
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 from evidence_judge.sessions.edits import (
+    git_metadata_reason,
     is_config_path,
     is_harness_path,
     is_test_config,
@@ -225,7 +226,7 @@ class SessionIndex:
                 if is_test_path(path):
                     out.append((command, f"deleted or moved test file {path}"))
             for path in analysis.touched_paths:
-                if why := session_config_reason(path):
+                if why := git_metadata_reason(path) or session_config_reason(path):
                     out.append((command, why))
                 elif reader := configs.get(posixpath.basename(path)):
                     out.append(
