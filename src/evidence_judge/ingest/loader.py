@@ -7,7 +7,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Final
 
-from evidence_judge.core.evidence import Channel, NetworkEvent, Run
+from evidence_judge.core.evidence import MUTATION_METHODS, Channel, NetworkEvent, Run
 from evidence_judge.ingest._json import as_float
 from evidence_judge.ingest.browser_use import load_browser_use_history
 from evidence_judge.ingest.errors import IngestError, MismatchedEvidenceError
@@ -26,7 +26,6 @@ HAR_WINDOW_SLACK_MS: Final = 2_000
 """How far outside the trace's time window a HAR entry may start and still count as in it."""
 MAX_HAR_CLOCK_GAP_MS: Final = 10 * 60 * 1000
 """HAR-only requests starting further than this outside the trace's time window are dropped."""
-MUTATING_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 """HAR-only requests with these methods are dropped unless ``allow_mismatch``: a side effect the
 trace never saw cannot be evidence on the HAR's word alone."""
 
@@ -113,7 +112,7 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
 
     The trace did not see the unpaired HAR requests, so their new ids are listed in
     ``metadata["har_only_requests"]``. Unless ``allow_mismatch``, unpaired HAR requests that
-    mutate (``MUTATING_METHODS``) are dropped, and when both clocks are known, unpaired HAR
+    mutate (``MUTATION_METHODS``) are dropped, and when both clocks are known, unpaired HAR
     requests starting more than ``MAX_HAR_CLOCK_GAP_MS`` outside the trace's time window are
     dropped; each drop is noted in ``metadata["merge_warnings"]``.
 
@@ -157,7 +156,7 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
         ts = shifted[index]
         if allow_mismatch:
             har_only.append(h.model_copy(update={"ts": ts}))
-        elif h.method.upper() in MUTATING_METHODS:
+        elif h.method.upper() in MUTATION_METHODS:
             mutations += 1
         elif window is not None and not _near(ts, window, MAX_HAR_CLOCK_GAP_MS):
             late += 1

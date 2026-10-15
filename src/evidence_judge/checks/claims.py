@@ -18,7 +18,6 @@ evidence.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Final
 
 from evidence_judge.checks._common import (
     CONFIDENT_CONTRADICTION,
@@ -32,6 +31,7 @@ from evidence_judge.checks.base import CheckContext
 from evidence_judge.checks.proof import unproving
 from evidence_judge.checks.registry import CheckerRegistry
 from evidence_judge.core.claims import Claim, ClaimKind
+from evidence_judge.core.evidence import MUTATION_METHODS
 from evidence_judge.core.predicates import (
     PageTextPredicate,
     Predicate,
@@ -45,7 +45,6 @@ from evidence_judge.core.predicates import (
 from evidence_judge.core.verdict import ClaimVerdict, PredicateResult, Support
 
 NO_PREDICATE_REASON = "claim has no checkable predicate"
-MUTATION_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def is_decisive(results: Sequence[PredicateResult]) -> bool:

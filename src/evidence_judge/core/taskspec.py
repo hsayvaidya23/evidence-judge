@@ -26,15 +26,13 @@ Example (YAML):
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final
 from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from evidence_judge.core.evidence import MUTATION_METHODS
 from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
-
-MUTATION_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def site_host(value: str) -> str:
