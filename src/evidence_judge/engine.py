@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from evidence_judge import __version__
+from evidence_judge.checks._common import plural
 from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.dimensions import assess_dimensions
@@ -17,7 +18,7 @@ from evidence_judge.checks.outcome import decide
 from evidence_judge.checks.registry import CheckerRegistry, default_registry
 from evidence_judge.config import Settings
 from evidence_judge.core.claims import ClaimSet
-from evidence_judge.core.evidence import Channel, Run
+from evidence_judge.core.evidence import Channel, Run, har_contribution
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.provenance import (
     mark_agent_page_navigations,
@@ -94,11 +95,15 @@ _AGENT_HISTORY_SOURCE = "browser-use"
 def tamper_detection(run: Run) -> TamperDetection:
     """What `run`'s evidence source can show of the agent tampering with the page or its
     requests. Only a Playwright trace records every call the agent made through the browser
-    (`full`); browser-use history records the model's actions, not what ran beneath them
-    (`partial`); a HAR or any other source records no calls at all (`none`)."""
+    (`full`), unless a HAR merged into it added requests or fields the trace never saw: those
+    cannot prove anything (checks.proof.har_sourced), but the verdict is no longer the trace's
+    alone (`partial`). Browser-use history records the model's actions, not what ran beneath
+    them (`partial`); a HAR or any other source records no calls at all (`none`)."""
     sources = set(run.source.split("+"))
     has_calls = Channel.ACTIONS in run.captured
     if _TRACE_SOURCE in sources and has_calls:
+        if reason := _har_contribution_reason(run):
+            return TamperDetection(level=TamperLevel.PARTIAL, reason=reason)
         return TamperDetection(
             level=TamperLevel.FULL,
             reason=(
@@ -125,13 +130,33 @@ def tamper_detection(run: Run) -> TamperDetection:
     )
 
 
-def _untrusted_source(required: bool, detection: TamperDetection) -> str | None:
+def _har_contribution_reason(run: Run) -> str | None:
+    only, filled = har_contribution(run)
+    if not (only or filled):
+        return None
+    parts = [
+        *([f"{plural(only, 'request')} the trace never recorded"] if only else []),
+        *([f"fields of {plural(filled, 'request')} the trace recorded empty"] if filled else []),
+    ]
+    return (
+        f"the merged HAR added {' and '.join(parts)}; the Playwright trace records every call "
+        "the agent made, but what only the HAR holds is a file anyone can write, so it can "
+        "contradict claims and show side effects but proves nothing"
+    )
+
+
+def _untrusted_source(required: bool, detection: TamperDetection, run: Run) -> str | None:
     """Why the run cannot pass when tamper evidence is `required`, or None."""
     if not required or detection.level is TamperLevel.FULL:
         return None
+    fix = (
+        "judge the trace without the HAR"
+        if any(har_contribution(run))
+        else "record a Playwright trace from the harness"
+    )
     return (
         f"tamper evidence is required, but tamper detection is {detection.level.value}: "
-        f"{detection.reason}; record a Playwright trace from the harness"
+        f"{detection.reason}; {fix}"
     )
 
 
@@ -221,7 +246,7 @@ class Judge:
             has_spec=spec is not None,
             unanchored=_unanchored(spec, scope),
             tampered=tampering(run),
-            untrusted_source=_untrusted_source(required, detection),
+            untrusted_source=_untrusted_source(required, detection, run),
         )
         return RunVerdict(
             judge_version=__version__,

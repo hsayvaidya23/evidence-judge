@@ -7,7 +7,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Final
 
-from evidence_judge.core.evidence import MUTATION_METHODS, Channel, NetworkEvent, Run
+from evidence_judge.core.evidence import MUTATION_METHODS, Channel, HarField, NetworkEvent, Run
 from evidence_judge.ingest._json import as_float
 from evidence_judge.ingest.browser_use import load_browser_use_history
 from evidence_judge.ingest.errors import IngestError, MismatchedEvidenceError
@@ -26,8 +26,14 @@ HAR_WINDOW_SLACK_MS: Final = 2_000
 """How far outside the trace's time window a HAR entry may start and still count as in it."""
 MAX_HAR_CLOCK_GAP_MS: Final = 10 * 60 * 1000
 """HAR-only requests starting further than this outside the trace's time window are dropped."""
-"""HAR-only requests with these methods are dropped unless ``allow_mismatch``: a side effect the
-trace never saw cannot be evidence on the HAR's word alone."""
+_FILLABLE: Final[tuple[HarField, ...]] = (
+    "resource_type",
+    "request_headers",
+    "request_body",
+    "response_headers",
+    "response_body",
+    "mime_type",
+)
 
 
 def load_run(
@@ -153,10 +159,12 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
     """Merge a HAR into a trace run's network evidence without duplicating requests.
 
     Requests are paired in order by method and URL. A paired trace request keeps its own
-    timing and gains any body, status or headers only the HAR captured; unpaired HAR requests
-    are shifted onto the trace clock and added. Network ids are reassigned chronologically.
+    timing and gains any body, status or headers only the HAR captured, each named in its
+    ``har_filled``; unpaired HAR requests are shifted onto the trace clock, marked ``har_only``
+    and added. Network ids are reassigned chronologically. What only the HAR holds can
+    contradict a claim or show a side effect but never prove anything (checks.proof).
 
-    The trace did not see the unpaired HAR requests, so their new ids are listed in
+    The trace did not see the unpaired HAR requests, so their new ids are also listed in
     ``metadata["har_only_requests"]``. Unless ``allow_mismatch``, unpaired HAR requests that
     mutate (``MUTATION_METHODS``) are dropped, and when both clocks are known, unpaired HAR
     requests starting more than ``MAX_HAR_CLOCK_GAP_MS`` outside the trace's time window are
@@ -239,13 +247,13 @@ def _har_only(
             continue
         ts = shifted[index]
         if allow_mismatch:
-            har_only.append(h.model_copy(update={"ts": ts}))
+            har_only.append(h.model_copy(update={"ts": ts, "har_only": True}))
         elif h.method.upper() in MUTATION_METHODS:
             mutations += 1
         elif window is not None and not _near(ts, window, MAX_HAR_CLOCK_GAP_MS):
             late += 1
         else:
-            har_only.append(h.model_copy(update={"ts": ts}))
+            har_only.append(h.model_copy(update={"ts": ts, "har_only": True}))
     return har_only, mutations, late
 
 
@@ -351,17 +359,21 @@ def _clock_offset(trace_run: Run, har_run: Run) -> float:
 
 
 def _fill_gaps(event: NetworkEvent, har_event: NetworkEvent) -> NetworkEvent:
+    """`event` with the fields it recorded empty taken from `har_event`, each marked in
+    ``har_filled``."""
+    filled: dict[HarField, object] = {}
+    if event.status is None and har_event.status is not None:
+        filled["status"] = har_event.status
+    if event.failed and not har_event.failed:
+        filled["failed"] = False
+    for name in _FILLABLE:
+        if not getattr(event, name) and getattr(har_event, name):
+            filled[name] = getattr(har_event, name)
     return event.model_copy(
         update={
-            "status": event.status if event.status is not None else har_event.status,
-            "resource_type": event.resource_type or har_event.resource_type,
-            "request_headers": event.request_headers or har_event.request_headers,
-            "request_body": event.request_body or har_event.request_body,
-            "response_headers": event.response_headers or har_event.response_headers,
-            "response_body": event.response_body or har_event.response_body,
-            "mime_type": event.mime_type or har_event.mime_type,
-            "failed": event.failed and har_event.failed,
+            **filled,
             "synthetic": event.synthetic or har_event.synthetic,
+            "har_filled": event.har_filled | frozenset(filled),
         }
     )
 

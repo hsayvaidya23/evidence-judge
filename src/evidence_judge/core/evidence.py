@@ -2,13 +2,36 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from enum import StrEnum
-from typing import Annotated, Any, Final, Self, cast
+from typing import Annotated, Any, Final, Literal, Self, cast
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, PlainValidator
 
 MUTATION_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 """HTTP methods that change state: a request with one is a mutation."""
+
+HarField = Literal[
+    "status",
+    "resource_type",
+    "request_headers",
+    "request_body",
+    "response_headers",
+    "response_body",
+    "mime_type",
+    "failed",
+]
+"""A NetworkEvent field a HAR can fill in on a request the trace recorded with it empty."""
+
+_HAR_FIELD_DEFAULTS: Final[dict[HarField, object]] = {
+    "status": None,
+    "resource_type": None,
+    "request_headers": {},
+    "request_body": None,
+    "response_headers": {},
+    "response_body": None,
+    "mime_type": None,
+    "failed": True,
+}
 
 BlobLoader = Callable[[], bytes | None]
 """Reads one blob on demand; returns None when it can no longer be read."""
@@ -142,6 +165,28 @@ class NetworkEvent(_Frozen):
         "rewrote it (route.continue with overrides): the response, or the request the site "
         "got, is the agent's",
     )
+    har_only: bool = Field(
+        default=False,
+        description="A HAR merged into a trace recorded this request and the trace did not: "
+        "only the HAR, a file anyone can write, says it happened",
+    )
+    har_filled: frozenset[HarField] = Field(
+        default_factory=frozenset[HarField],
+        description="Fields the trace recorded empty on this request and a HAR merged into it "
+        "filled in; the trace never saw their values",
+    )
+
+    @property
+    def from_har(self) -> bool:
+        """Whether a HAR merged into a trace contributed this request or any of its fields."""
+        return self.har_only or bool(self.har_filled)
+
+    def as_traced(self) -> NetworkEvent:
+        """This request as the trace alone recorded it: the fields a HAR filled in left empty."""
+        if not self.har_filled:
+            return self
+        cleared = {f: _HAR_FIELD_DEFAULTS[f] for f in self.har_filled}
+        return self.model_copy(update={**cleared, "har_filled": frozenset[HarField]()})
 
     @property
     def is_mutation(self) -> bool:
@@ -150,6 +195,23 @@ class NetworkEvent(_Frozen):
     @property
     def ok(self) -> bool:
         return self.status is not None and 200 <= self.status < 400 and not self.failed
+
+
+def trace_witnessed(run: Run) -> Run:
+    """`run` with only what its trace recorded: requests only a merged HAR has are dropped and
+    fields a HAR filled in are left empty. `run` itself when no HAR contributed anything."""
+    if not any(n.from_har for n in run.network):
+        return run
+    network = [n.as_traced() for n in run.network if not n.har_only]
+    return run.model_copy(update={"network": network})
+
+
+def har_contribution(run: Run) -> tuple[int, int]:
+    """How many requests in `run` only a merged HAR recorded, and how many trace requests a HAR
+    filled fields in on."""
+    only = sum(1 for n in run.network if n.har_only)
+    filled = sum(1 for n in run.network if n.har_filled and not n.har_only)
+    return only, filled
 
 
 class PageSnapshot(_Frozen):

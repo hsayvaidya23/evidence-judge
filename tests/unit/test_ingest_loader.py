@@ -105,10 +105,13 @@ def test_attach_har_fills_gaps_and_adds_missing_requests(tmp_path: Path) -> None
     assert len(merged.network) == len(trace.network) + 1
     order_event = next(n for n in merged.network if n.url.endswith("/api/orders"))
     assert order_event.response_body == '{"order_id": 1001}'
+    assert order_event.har_filled == {"response_body"} and not order_event.har_only
     trace_order = next(n for n in trace.network if n.url.endswith("/api/orders"))
     assert order_event.ts == trace_order.ts
     analytics = next(n for n in merged.network if n.url.endswith("/api/analytics"))
     assert abs(analytics.ts - trace_order.ts) < 50
+    assert analytics.har_only
+    assert all(not n.from_har for n in merged.network if n not in (order_event, analytics))
     assert [n.id for n in merged.network] == [f"net#{i}" for i in range(1, len(merged.network) + 1)]
     assert [n.ts for n in merged.network] == sorted(n.ts for n in merged.network)
 
