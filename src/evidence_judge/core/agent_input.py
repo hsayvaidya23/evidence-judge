@@ -38,6 +38,8 @@ _MODIFIERS: Final = {
     "alt": "alt",
     "option": "alt",
 }
+_SHORTCUTS: Final = frozenset("acxvzy")
+"""Keys that, with Control or Meta, are editing shortcuts."""
 _TYPED_KEY = re.compile(r"key([a-z])|digit(\d)|numpad(\d)")
 _LINE_BREAK = re.compile(r"\n|(?<=[.!?])\s+")
 COPIED_WORDS: Final = 32
@@ -45,29 +47,46 @@ COPIED_WORDS: Final = 32
 
 
 def raw_inputs(run: Run) -> Iterator[tuple[str, Site | None]]:
-    served = _site_served(run)
     typing = _Typing(run)
-    last = -math.inf
-    for action in run.actions:
-        before, last = last, action.ts
-        name = canonical_action(action.name)
-        typing.act(action, name)
-        if name == UPLOAD and action.value:
-            yield from ((n, None) for n in _file_names(action.value))
-        if name == UPLOAD and action.file_text:
-            yield from ((line, None) for line in _lines(action.file_text))
-        elif (
-            name == GOTO
-            and (url := action.value or action.url)
-            and served.get(_page_key(url), math.inf) >= before
-        ):
-            yield from ((v, Site.of_url(url)) for v in _url_inputs(url, with_path=True))
+    yield from _action_inputs(run, typing)
     yield from ((text, None) for text in typing.finish())
     for event in run.network:
         if event.method.upper() == "GET":
             yield from (
                 (v, Site.of_url(event.url)) for v in _url_inputs(event.url, with_path=False)
             )
+
+
+def _action_inputs(run: Run, typing: _Typing) -> Iterator[tuple[str, Site | None]]:
+    """Uploaded file names and text, and the URL values of pages the agent opened itself, as
+    `typing` replays every action."""
+    served = _site_served(run)
+    last = -math.inf
+    for action in run.actions:
+        before, last = last, action.ts
+        name = canonical_action(action.name)
+        typing.act(action, name)
+        if name == UPLOAD:
+            yield from ((text, None) for text in _uploaded(action))
+        elif name == GOTO and (url := _agent_opened(action, served, before)):
+            yield from ((v, Site.of_url(url)) for v in _url_inputs(url, with_path=True))
+
+
+def _uploaded(action: ActionEvent) -> Iterator[str]:
+    """The uploaded files' names, and each line and sentence of the text they hold."""
+    if action.value:
+        yield from _file_names(action.value)
+    if action.file_text:
+        yield from _lines(action.file_text)
+
+
+def _agent_opened(action: ActionEvent, served: dict[str, float], before: float) -> str | None:
+    """The URL a GOTO opened, unless the browser had already loaded it, or been redirected to
+    it, before the previous action."""
+    url = action.value or action.url
+    if url and served.get(_page_key(url), math.inf) >= before:
+        return url
+    return None
 
 
 class _Field:
@@ -133,6 +152,23 @@ class _Field:
             hi = {"char": min(end, hi + 1), "word": _word_right(self.text, hi), "line": end}[unit]
         self.replace("", lo, hi)
 
+    def press(self, key: str, mods: frozenset[str]) -> None:
+        """A key that deletes or moves the cursor (Shift extends the selection); any other key
+        ends the edit."""
+        extend = "shift" in mods
+        match key:
+            case "backspace" | "delete":
+                unit = "line" if "meta" in mods else "word" if mods & {"ctrl", "alt"} else "char"
+                self.delete(backward=key == "backspace", unit=unit)
+            case "arrowleft" | "left" | "arrowright" | "right":
+                self.move(self.step(right=key.endswith("right"), mods=mods), extend=extend)
+            case "home" | "arrowup" | "up" | "pageup":
+                self.move(0, extend=extend)
+            case "end" | "arrowdown" | "down" | "pagedown":
+                self.move(len(self.text), extend=extend)
+            case _:
+                self.settle()
+
     def step(self, *, right: bool, mods: frozenset[str]) -> int:
         """Where an arrow key moves the cursor: a character, a word (Control, Alt) or to the
         end of the line (Meta)."""
@@ -173,34 +209,44 @@ class _Typing:
     def act(self, action: ActionEvent, name: str) -> None:
         value = action.value
         if name not in (PRESS, FILL) or value is None:
-            self._flush_keys()
-            self._settle()
-            if name == GOTO:
-                self._fields.clear()
-            if action.selector is not None:
-                self._focus = action.selector
+            self._leave(action, name)
             return
         target = self._focus if action.selector is None else action.selector
         self._focus = target
         field = self._fields.setdefault(target, _Field(self._out))
         if name == PRESS and len(value) == 1:
-            if self._keys and target != self._keys_target:
-                self._flush_keys()
-            self._keys_target = target
-            self._keys.append(value)
-            field.type(value)
+            self._press_character(field, target, value)
             return
         self._flush_keys()
         if name == PRESS and _is_key_names(value):
             for chord in value.split():
                 self._key(field, chord, action.ts)
             return
+        self._type(field, action, name, value)
+
+    def _type(self, field: _Field, action: ActionEvent, name: str, value: str) -> None:
         if value:
             self._out.append(value)
         if name == FILL and normalize(action.name).replace(" ", "_") in _SETS_VALUE:
             field.set(value)
         else:
             field.type(value)
+
+    def _leave(self, action: ActionEvent, name: str) -> None:
+        """An action that types nothing: the agent stops editing, and a GOTO leaves the page."""
+        self._flush_keys()
+        self._settle()
+        if name == GOTO:
+            self._fields.clear()
+        if action.selector is not None:
+            self._focus = action.selector
+
+    def _press_character(self, field: _Field, target: str | None, key: str) -> None:
+        if self._keys and target != self._keys_target:
+            self._flush_keys()
+        self._keys_target = target
+        self._keys.append(key)
+        field.type(key)
 
     def finish(self) -> list[str]:
         self._flush_keys()
@@ -222,31 +268,26 @@ class _Typing:
         if len(key) == 1 and not primary and "alt" not in mods:
             field.type(key)
             return
-        extend = "shift" in mods
+        if primary and key in _SHORTCUTS:
+            self._shortcut(field, key, ts)
+        else:
+            field.press(key, mods)
+
+    def _shortcut(self, field: _Field, key: str, ts: float) -> None:
+        """Control or Meta with A (select all), C (copy), X (cut), V (paste), Z or Y (undo, redo)."""
         match key:
-            case "a" if primary:
+            case "a":
                 field.select_all()
-            case "c" if primary:
+            case "c":
                 self._copy(field, ts)
-            case "x" if primary:
+            case "x":
                 if cut := field.selected():
                     self._clipboard = cut
                     field.type("")
-            case "v" if primary:
+            case "v":
                 self._paste(field, ts)
-            case "z" | "y" if primary:
-                field.forget()
-            case "backspace" | "delete":
-                unit = "line" if "meta" in mods else "word" if mods & {"ctrl", "alt"} else "char"
-                field.delete(backward=key == "backspace", unit=unit)
-            case "arrowleft" | "left" | "arrowright" | "right":
-                field.move(field.step(right=key.endswith("right"), mods=mods), extend=extend)
-            case "home" | "arrowup" | "up" | "pageup":
-                field.move(0, extend=extend)
-            case "end" | "arrowdown" | "down" | "pagedown":
-                field.move(len(field.text), extend=extend)
             case _:
-                field.settle()
+                field.forget()
 
     def _copy(self, field: _Field, ts: float) -> None:
         if selected := field.selected():

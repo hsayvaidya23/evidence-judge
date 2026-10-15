@@ -85,19 +85,9 @@ class _Echoes:
         }
 
     def spans(self, text: str) -> list[tuple[int, int]]:
-        spans: list[tuple[int, int]] = []
-        for value in self.whole:
-            at = text.find(value)
-            while at != -1:
-                spans.append((at, at + len(value)))
-                at = text.find(value, at + 1)
-        if len(self.heads) > self.SCAN_HEADS:
-            windows = {text[i : i + MIN_ECHO_PART] for i in range(len(text) - MIN_ECHO_PART + 1)}
-            found = [head for head in windows if head in self.heads]
-        else:
-            found = [head for head in self.heads if head in text]
+        spans = [(at, at + len(value)) for at, value in _occurrences(text, self.whole)]
         covered = -1
-        for at, head in sorted(_occurrences(text, found)):
+        for at, head in sorted(_occurrences(text, self._heads_in(text))):
             for part in self.heads[head]:
                 if at + len(part[0]) <= covered:
                     break
@@ -106,8 +96,15 @@ class _Echoes:
                     covered = max(covered, at + length)
         return spans
 
+    def _heads_in(self, text: str) -> list[str]:
+        if len(self.heads) > self.SCAN_HEADS:
+            windows = {text[i : i + MIN_ECHO_PART] for i in range(len(text) - MIN_ECHO_PART + 1)}
+            return [head for head in windows if head in self.heads]
+        return [head for head in self.heads if head in text]
+
 
 def _occurrences(text: str, heads: list[str]) -> Iterator[tuple[int, str]]:
+    """Where each of `heads` occurs in `text`, overlapping occurrences included."""
     for head in heads:
         at = text.find(head)
         while at != -1:
