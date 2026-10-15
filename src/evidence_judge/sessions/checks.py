@@ -361,6 +361,9 @@ class SessionIndex:
             taken.extend(scopes)
         if sum(total for _, _, total in chosen) != size:
             return None
+        named = [relative(path, self.run.cwd) for path in _NAMED_TEST_FILE.findall(baseline.output)]
+        if not all(any(_inside(path, scope) for scope in taken) for path in named):
+            return None
         ids = ", ".join(o.event.id for o, _, _ in reversed(chosen))
         where = ", ".join(sorted(taken))
         reason = (
@@ -377,6 +380,16 @@ class SessionIndex:
             wanted = runner.casefold()
             runs = [c for c in runs if any(wanted in r.casefold() for r in c.analysis.runners)]
         return runs
+
+
+_NAMED_TEST_FILE: Final = re.compile(r"([\w./-]+\.\w+)(?:::|:\d+:)")
+"""A test file a run's output names: in a node id (`tests/x.py::test_a`) or a traceback line
+(`tests/x.py:5: AssertionError`)."""
+
+
+def _inside(path: str, scope: str) -> bool:
+    path = posixpath.normpath(path)
+    return scope == "." or path == scope or path.startswith(scope + "/")
 
 
 def _overlapping(scopes: list[str], taken: list[str]) -> bool:

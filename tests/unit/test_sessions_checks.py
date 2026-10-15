@@ -382,6 +382,19 @@ def test_path_runs_that_may_miss_tests_do_not_cover(
     assert _check(ALL_PASS, run)[0] is Support.NO_EVIDENCE
 
 
+def test_path_runs_must_cover_the_files_the_whole_run_named() -> None:
+    named = bash(
+        "pytest -q",
+        "FF..\nFAILED tests/test_calc.py::test_add\n/work/toy/tests/test_calc.py:5: Error\n"
+        "== 1 failed, 3 passed in 0.02s ==",
+        1,
+    )
+    elsewhere = session(named, edit("calc.py"), bash("cd pkg_b && pytest -q", "4 passed"))
+    assert _check(ALL_PASS, elsewhere)[0] is Support.NO_EVIDENCE
+    covering = session(named, edit("calc.py"), bash("pytest -q tests pkg_b", "4 passed"))
+    assert _check(ALL_PASS, covering)[0] is Support.SUPPORTED
+
+
 def test_path_runs_need_an_earlier_whole_suite_run() -> None:
     run = session(edit("calc.py"), bash("pytest tests pkg_b", "4 passed"))
     assert _check(ALL_PASS, run)[0] is Support.NO_EVIDENCE

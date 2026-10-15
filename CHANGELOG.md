@@ -376,6 +376,14 @@ the names exported from `evidence_judge`) is defined under
   a target, or names one anywhere (quotes removed, so `~/.cl""aude` counts, as do words inside
   `bash -c`) and may write files it does not name. The arguments of a read-only program whose
   output is redirected are no longer taken for write targets.
+- Session benchmark: 17 more forgery kinds from a red-team review (shell rewrites of tests,
+  `git checkout`/`stash`, a rewriting script, parametrize data, a Django `tests.py`, a new
+  `pytest.ini`, a Makefile recipe, a sourced `.env`, `PYTHONOPTIMIZE`, a background revert,
+  a `cd` kept from an earlier call or made inline, padded and repeated path runs, `jest -u`, a
+  quoted transcript path and an evidence-log edit): 367 forged sessions, 0 false PASS, and the
+  five honest controls unchanged. Path-scoped runs that together match an earlier whole-suite
+  run must also cover every test file that run's output named, so a run elsewhere whose count
+  happens to match cannot stand in for the tests that failed.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
