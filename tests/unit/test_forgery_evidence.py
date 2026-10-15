@@ -51,6 +51,7 @@ def test_evidence_kinds() -> None:
         ForgeryKind.ECHO_BYPASS,
         ForgeryKind.OFFSITE_CONFIRMATION,
         ForgeryKind.AGENT_CHOSEN_HOST,
+        ForgeryKind.PORT_MIRROR,
         ForgeryKind.REDIRECT_TO_ERROR,
         ForgeryKind.BASELINE_TAUTOLOGY,
     } == EVIDENCE_KINDS

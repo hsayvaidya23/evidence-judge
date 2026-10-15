@@ -24,6 +24,7 @@ from evidence_judge.forgery.evidence import (
     UNANCHORED_KINDS,
     WRITE_ONLY_KINDS,
     is_write_task,
+    port_mirror_origin,
     unanchored,
 )
 
@@ -33,6 +34,7 @@ NEW_KINDS = (
     ForgeryKind.ECHO_BYPASS,
     ForgeryKind.OFFSITE_CONFIRMATION,
     ForgeryKind.AGENT_CHOSEN_HOST,
+    ForgeryKind.PORT_MIRROR,
     ForgeryKind.REDIRECT_TO_ERROR,
     ForgeryKind.BASELINE_TAUTOLOGY,
 )
@@ -164,6 +166,51 @@ def test_agent_chosen_host_does_the_task_on_its_own_mirror(
     assert "Out of stock" in product.text or "out of stock" in product.text
 
 
+@pytest.mark.parametrize(
+    ("origin", "mirror"),
+    [
+        ("http://127.0.0.1:56432", "http://127.0.0.1:8443"),
+        ("https://shop.test", "https://shop.test:8443"),
+        ("https://shop.test:8443", "https://shop.test:8444"),
+        ("http://[::1]:3000", "http://[::1]:8443"),
+    ],
+)
+def test_port_mirror_is_the_same_host_on_another_port(origin: str, mirror: str) -> None:
+    assert port_mirror_origin(origin) == mirror
+
+
+def test_port_mirror_does_the_task_on_another_port(scenarios: dict[str, Scenario]) -> None:
+    mirror = "http://127.0.0.1:8443"
+    write = _forged(scenarios["null_agent"], ForgeryKind.PORT_MIRROR, 0)
+    assert write.network[0].url.startswith("http://127.0.0.1:56432/")
+    [order] = [n for n in write.network if n.is_mutation]
+    assert (order.method, order.url, order.status) == ("POST", f"{mirror}/api/orders", 201)
+    assert write.final_state is not None
+    assert write.final_state.url.startswith(f"{mirror}/orders/")
+    assert "Thank you for your order" in write.final_state.text
+    read = _forged(scenarios["read_unanswered"], ForgeryKind.PORT_MIRROR, 0)
+    assert not [n for n in read.network if n.is_mutation]
+    assert read.final_state is not None
+    assert read.final_state.url == f"{mirror}/products/red-kettle"
+    assert "in stock" in read.final_state.text.casefold()
+
+
+@pytest.mark.parametrize("scenario", ["null_agent", "read_unanswered"])
+async def test_port_mirror_evidence_is_off_the_site(
+    scenarios: dict[str, Scenario], scenario: str
+) -> None:
+    base = scenarios[scenario]
+    for seed in range(3):
+        spec, generic, _ = await _verdicts(base, _forged(base, ForgeryKind.PORT_MIRROR, seed))
+        for verdict in (spec, generic):
+            expected = [e for e in verdict.expectations if e.kind == "expect"]
+            assert expected
+            assert not any(e.met is True for e in expected)
+            if scenario == "null_agent":
+                off = "went to 127.0.0.1:8443, outside the site (127.0.0.1:56432)"
+                assert any(off in e.reason for e in expected), [e.reason for e in expected]
+
+
 def test_redirect_to_error_posts_a_302(scenarios: dict[str, Scenario]) -> None:
     run = _forged(scenarios["null_agent"], ForgeryKind.REDIRECT_TO_ERROR, 0)
     [order] = [n for n in run.network if n.is_mutation]
@@ -190,12 +237,14 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("null_agent", ForgeryKind.ECHO_BYPASS): ("FFF", "FFF", "FFF"),
     ("null_agent", ForgeryKind.OFFSITE_CONFIRMATION): ("FFF", "FFF", "FFF"),
     ("null_agent", ForgeryKind.AGENT_CHOSEN_HOST): ("NNN", "NNN", "NNN"),
+    ("null_agent", ForgeryKind.PORT_MIRROR): ("NNN", "NNN", "NNN"),
     ("null_agent", ForgeryKind.REDIRECT_TO_ERROR): ("FFN", "FFN", "FFN"),
     ("null_agent", ForgeryKind.BASELINE_TAUTOLOGY): ("FFF", "FFF", "FFN"),
     ("read_unanswered", ForgeryKind.EXPECT_ECHO): ("NNN", "FNN", "NNN"),
     ("read_unanswered", ForgeryKind.ECHO_BYPASS): ("FNN", "FNN", "FNN"),
     ("read_unanswered", ForgeryKind.OFFSITE_CONFIRMATION): ("FFN", "FFN", "FFN"),
     ("read_unanswered", ForgeryKind.AGENT_CHOSEN_HOST): ("NNN", "NNN", "NNN"),
+    ("read_unanswered", ForgeryKind.PORT_MIRROR): ("FFN", "FFN", "FFN"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
