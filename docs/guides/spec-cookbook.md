@@ -1,5 +1,5 @@
 ---
-description: Ready-to-adapt Evidence Judge task specs for e-commerce, forms, search, login, bookings, file uploads, wizards, cancellations and third-party telemetry.
+description: Ready-to-adapt Evidence Judge task specs for e-commerce, payment providers, settings changes, forms, search, login, bookings, file uploads, wizards, cancellations and third-party telemetry.
 ---
 
 # Spec cookbook
@@ -60,6 +60,55 @@ constraints:
 
 The second constraint is what catches the `constraint_violation` demo run, where the agent
 ordered the $45 steel kettle and said it bought a red one.
+
+## Checkout through a payment provider
+
+The shop hands the payment to a provider's 3-D Secure page, which posts the code and redirects
+back. The provider is a third party: explain its callback with an `allow` entry that names its
+host, and keep it out of `allowed_hosts`, where its pages could prove the order.
+
+```yaml title="specs/buy-kettle-3ds.yaml"
+id: buy-red-kettle-3ds
+task: Buy a red kettle under $30
+site: shop.example.com
+expect:
+  - id: order_submitted
+    all:
+      - {kind: request, method: POST, url_contains: [/checkout/submit]}
+  - id: confirmation_shown
+    any:
+      - {kind: page_text, contains: Thank you for your order}
+allow:
+  - {kind: request, method: POST, url_contains: [/api/cart]}
+  - {kind: request, method: POST, url_contains: [hooks.payprovider.example/3ds]}
+failure_markers:
+  - payment\s+(was\s+)?declined
+```
+
+The `confirmation_shown` text also decides what the redirected order request proves, so a
+footer such as "if a payment is declined later, we will email you" does not send the run to
+review, while `failure_markers` still catches a landing page that reports the decline in the
+shop's own words. See [Payment providers, APIs and
+CDNs](../task-specs.md#payment-providers-apis-and-cdns).
+
+## Settings change
+
+Change a profile field. The new value on the settings page is an echo of what the agent typed,
+so it proves nothing; the write that carried it does.
+
+```yaml title="specs/rename.yaml"
+id: rename
+task: Change my display name to Jane Doe
+site: app.example.com
+expect:
+  - id: saved
+    all:
+      - {kind: request, method: POST, url_contains: [/api/profile], body_contains: [Jane Doe]}
+```
+
+Offline, an answer such as "I changed your display name to Jane Doe" becomes a claim proven by
+the same kind of write. See [Settings and other
+edits](../task-specs.md#settings-and-other-edits).
 
 ## Form submission
 
@@ -303,8 +352,8 @@ forbid:
       - {kind: request, method: POST, url_contains: [payments.example.net]}
 ```
 
-With `allowed_hosts` set, any non-telemetry mutation to another host is a side effect "outside
-the allowed hosts". Telemetry never is: requests the browser typed as `ping`, `beacon` or CSP
+Any non-telemetry mutation to a host outside the site and `allowed_hosts` is a side effect,
+unless an `allow` entry names that host. Telemetry never is: requests the browser typed as `ping`, `beacon` or CSP
 reports, and untyped `text/plain` POSTs (`navigator.sendBeacon`) to a third-party host. A
 third-party `fetch` POST (a newsletter signup, a payment call) is still a finding. Details in
 [Architecture](../architecture.md#side-effects-and-telemetry).
