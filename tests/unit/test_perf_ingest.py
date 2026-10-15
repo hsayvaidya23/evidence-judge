@@ -204,6 +204,7 @@ def test_large_trace_loads_within_budget(large_trace: Path) -> None:
 
 STYLED_SNAPSHOTS = 100
 STYLED_ELEMENTS = 2_000
+STYLED_BUDGET_S = 20.0
 STYLE_RULES = 10_000
 
 
