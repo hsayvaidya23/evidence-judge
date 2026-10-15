@@ -115,7 +115,8 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   nothing: typing "Order #1042 confirmed" into a search box and landing on its results page, or
   opening `/search?q=Order+%231042+confirmed` directly, shows the phrase without any order
   existing. The agent's input is every typed value (`fill`, `type`, `insert_text`), each run of
-  single-key `press` actions on one target, the path segments and query values of every URL it
+  single-key `press` actions on one target, every value a field took as the agent edited it,
+  the path segments and query values of every URL it
   opened with a `goto`, and the query values of every `GET` request (a submitted search form,
   or a navigation a HAR-only run cannot attribute), decoded and normalised like page text. A
   `goto` back to a URL the site had already loaded or redirected to before the agent's previous
@@ -123,7 +124,16 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   the site chose that URL. URL inputs only count as echoed on pages and URLs of the site they
   came from: typing `https://en.wikipedia.org/wiki/Kettle` does not make the shop's own
   `/products/red-kettle` an echo;
-  inputs shorter than three characters or without a letter or digit are ignored. Every
+  inputs shorter than three characters or without a letter or digit are ignored. Edits are
+  replayed per field, so typing "In stocX", pressing Backspace and typing "k" makes "In stock"
+  an input: Backspace and Delete (a character, a word with Control or Alt, the line with Meta),
+  arrows, Home and End (Shift selects), Control or Meta with A, X, C and V, including
+  browser-use `send_keys` sequences such as `Home Delete`; the field's value counts whenever
+  the agent stops editing it and just before an edit removes text, next to the raw typed text.
+  Copying from the page (Control+C with no selection in a field the agent typed into) makes
+  every line and sentence of the page on screen an input, since the agent could have selected
+  any of it; a paste with no copy recorded does the same for every page seen before it. Undo,
+  redo and a paste of page text start the field's replay over. Every
   `page_text`, `url`, `request` and `value` predicate is evaluated again with every occurrence
   of every input masked out of everything the site can repeat it in: page text, page URLs, the
   URLs of requests that are not mutations, and every response body (JSON keeps its structure,
@@ -137,18 +147,25 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   the agent submitted is not an echo: a mutation's URL and request body are never masked, so a
   `POST /api/orders` carrying the typed note, or a value read from it (`json_path`), still
   proves the submission. A response that repeats the typed value back is masked like any other.
-- **Short words and cut-short echoes.** An input that is a single word shorter than six characters without a digit ("Your" typed
+- **Short words and partial echoes.** An input that is a single word shorter than six characters without a digit ("Your" typed
   into a name field, `/cart` opened by URL) is only masked for a predicate that could be that
   word alone: a needle that is itself one short word (`Paid`, `/cart`), a short string `value`,
   or a regex. Typing "Your" does not mask "Thank you for your order"; typing "Paid" still
-  cannot prove `page_text: Paid`. Two limits remain. A multi-word needle that the site
-  completes around a typed short word ("Order" typed, "Order Paid" shown) is not caught. And
-  an echo cut short (a prefix of eight or more characters, for fields with a `maxlength`)
-  cannot be told apart from site text that shares a prefix with the input: a gift note "Thank
+  cannot prove `page_text: Paid`. An echo need not be the whole input: any part of eight or
+  more characters starting at one of the input's word starts counts. A part from the first word
+  may end anywhere (a `maxlength` cut it short); a later part ends at a word end of the input
+  (the site dropped words around it: "zz In stock" typed, "No variants match In stock" shown).
+  Parts never start inside a word, so typing "unconfirmed" does not mask "confirmed", and
+  "Order #A77 confirmation" does not mask "A77 confirmed". Three limits remain. A multi-word
+  needle that the site completes around a typed short word ("Order" typed, "Order Paid" shown)
+  is not caught. A part cannot be told apart from site text that shares it: a gift note "Thank
   you for being awesome" masks "Thank you for" in the shop's "Thank you for your order", so
-  that needle sends the run to review. Echoes are matched anywhere, not only on word
-  boundaries: page text joins inline elements without a space (`for <b>Paid</b>Now` reads
-  "for PaidNow"), so a word-boundary rule would let a glued echo pass.
+  that needle sends the run to review. And the replay only sees what the recording shows: a
+  field's initial value, text the agent put on the clipboard by script, a copy of fewer than
+  eight characters from inside a sentence, and an undo's restored value are not inputs. Echoes
+  are matched anywhere in the evidence, not only on its word boundaries: page text joins
+  inline elements without a space (`for <b>Paid</b>Now` reads "for PaidNow"), so a
+  word-boundary rule there would let a glued echo pass.
 - **Key outcome claims need an outcome.** A key claim of kind `outcome` can only be supported
   by a mutation request (`POST`, `PUT`, `PATCH`, `DELETE`) or by the final page: `final`-scope
   `page_text`, `url` or `screenshot`. A click on *Place order* or text seen on some earlier page

@@ -253,3 +253,115 @@ def test_short_words_are_inputs_but_only_the_short_word_mask_covers_them() -> No
 )
 def test_short_word_rule(text: str, short: bool) -> None:
     assert is_short_word(text) is short
+
+
+STOCK = {
+    "id": "stock",
+    "task": "Is the red kettle in stock?",
+    "site": "shop.test",
+    "expect": [
+        {"id": "in_stock", "all": [{"kind": "page_text", "contains": "In stock", "scope": "final"}]}
+    ],
+}
+STOCK_SPEC = TaskSpec.model_validate(STOCK)
+SEARCH_SPEC = TaskSpec.model_validate(
+    {**STOCK, "allow": [{"kind": "request", "method": "POST", "url_contains": ["/api/search"]}]}
+)
+PRODUCT_PAGES = [snap(1, "/", "Kettles Red Kettle Blue Kettle"), snap(2, "/p/red", "Out of stock")]
+FILTER_ECHO = "Red Kettle Out of stock. No variants match In stock"
+
+
+def _edited(*edits: tuple[str, str]) -> list[ActionEvent]:
+    return [act(3 + i, name, "#q", value=value) for i, (name, value) in enumerate(edits)]
+
+
+async def _judged(run: Run, spec: TaskSpec) -> Outcome:
+    run = run.model_copy(update={"agent_answer": "Yes, In stock."})
+    return (await JUDGE.judge(run, JudgeOptions(offline=True, spec=spec))).outcome
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [
+        [("fill", "In stocX"), ("press", "Backspace"), ("press", "k")],
+        [("fill", "XIn stock"), ("send_keys", "Home Delete")],
+        [("fill", "In stocX"), ("press", "Shift+ArrowLeft"), ("type", "k")],
+        [("fill", "Out of stock"), ("press", "Control+a"), ("type", "In stock")],
+    ],
+    ids=["backspace", "home-delete", "selection", "select-all"],
+)
+async def test_an_edited_filter_echoing_the_needle_goes_to_review(
+    edits: list[tuple[str, str]],
+) -> None:
+    run = make_run(
+        actions=[act(1, "goto", url=f"{HOST}/"), act(2, "click", "#red"), *_edited(*edits)],
+        network=[net(1, "GET", "/"), net(2, "GET", "/p/red")],
+        snapshots=PRODUCT_PAGES,
+        final_state=final("/p/red", FILTER_ECHO),
+    )
+    assert await _judged(run, STOCK_SPEC) is Outcome.NEEDS_REVIEW
+
+
+async def test_an_edited_search_echoed_by_an_allowed_search_api_goes_to_review() -> None:
+    edits = [("fill", "In stocX"), ("press", "Backspace"), ("press", "k"), ("press", "Enter")]
+    run = make_run(
+        actions=[act(1, "goto", url=f"{HOST}/"), act(2, "click", "#red"), *_edited(*edits)],
+        network=[
+            net(1, "GET", "/"),
+            net(2, "GET", "/p/red"),
+            net(7, "POST", "/api/search", body={"q": "In stock"}, response={"query": "In stock"}),
+        ],
+        snapshots=PRODUCT_PAGES,
+        final_state=final("/search", "Search results for In stock: no products"),
+    )
+    assert await _judged(run, SEARCH_SPEC) is Outcome.NEEDS_REVIEW
+
+
+def _pasted(copied_page: str) -> Run:
+    return make_run(
+        actions=[
+            act(1, "goto", url=f"{HOST}/"),
+            act(2, "click", "#blue"),
+            act(3, "press", "#stock", value="Control+a"),
+            act(4, "press", value="Control+c"),
+            act(5, "click", "#red-link"),
+            act(6, "click", "#filter"),
+            act(7, "press", "#filter", value="Control+v"),
+        ],
+        network=[net(1, "GET", "/"), net(2, "GET", "/p/blue"), net(5, "GET", "/p/red")],
+        snapshots=[
+            snap(1, "/", "Kettles Red Kettle Blue Kettle"),
+            snap(2, "/p/blue", copied_page),
+            snap(5, "/p/red", "Red Kettle"),
+        ],
+        final_state=final("/p/red", "Red Kettle In stock. No variants match Blue Kettle"),
+    )
+
+
+async def test_text_pasted_from_another_page_cannot_prove_the_needle() -> None:
+    assert await _judged(_pasted("Blue Kettle In stock"), STOCK_SPEC) is Outcome.NEEDS_REVIEW
+
+
+async def test_a_paste_of_text_without_the_needle_leaves_the_page_as_evidence() -> None:
+    assert await _judged(_pasted("Blue Kettle"), STOCK_SPEC) is Outcome.PASS
+
+
+async def test_a_corrected_typo_does_not_mask_a_confirmation_proven_by_other_evidence() -> None:
+    edits = [("fill", "red kettel"), ("press", "Backspace"), ("send_keys", "Backspace l e")]
+    run = make_run(
+        actions=[
+            act(1, "goto", url=f"{HOST}/"),
+            *_edited(*edits),
+            act(10, "click", "#place", url=f"{HOST}/checkout"),
+        ],
+        network=[
+            net(1, "GET", "/"),
+            net(11, "POST", "/api/orders", 201, body={"items": [{"price": 24}]}),
+            net(12, "GET", "/order/A1"),
+        ],
+        snapshots=[snap(1, "/", "Kettles Red Kettle $24.00")],
+        final_state=final("/order/A1", "Thank you for your order! Red Kettle $24.00"),
+    ).model_copy(update={"agent_answer": "I bought the Red Kettle. 'Thank you for your order'."})
+    verdict = await JUDGE.judge(run, JudgeOptions(offline=True, spec=SHORT_SPEC))
+    assert verdict.outcome is Outcome.PASS, verdict.summary
+    assert EvidenceIndex(run).agent_inputs()[:2] == ("red kettel", "red kettle")
