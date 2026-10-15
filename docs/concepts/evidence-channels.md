@@ -36,7 +36,8 @@ Only a trace and a browser-use history show whether the agent made evidence itse
 records code it ran in the page (`evaluate`, `add_init_script`, `set_content`, ...) as `inject`
 actions and marks responses its route handler supplied (`route.fulfill`) or requests it rewrote
 (`route.continue` with overrides) as `synthetic`; a browser-use history records its `evaluate`
-action. A HAR alone shows neither, so a HAR-only run cannot reveal it. See
+action, every custom tool (any action that is not one of browser-use's built-in tools) and any
+action that carries code (`code`, `script`, `js`, `javascript` or `expression`) as `inject`. A HAR alone shows neither, so a HAR-only run cannot reveal it. See
 [evidence that proves nothing](claims-and-predicates.md#evidence-that-proves-nothing).
 
 Every verdict states this as `tamper_detection`, with a `level` and a `reason`, and adds a
@@ -46,7 +47,7 @@ warning when the level is not `full`:
 | --- | --- | --- |
 | `full` | A Playwright trace (with or without a history, or a HAR that adds nothing to it) | Every call the agent made through Playwright: scripts, route handlers, storage and cookie writes, CDP sessions |
 | `partial` | A Playwright trace merged with a HAR that added requests or filled fields | As for `full`; the reason counts what the HAR added, which proves nothing |
-| `partial` | A browser-use history (without a trace) | The model's actions, including its `evaluate`; not what ran beneath them (CDP calls, request changes) |
+| `partial` | A browser-use history (without a trace) | The model's actions, including its `evaluate` and custom tools; not what ran beneath them (CDP calls, request changes) |
 | `none` | A HAR alone, or any source without a call log | Nothing: a forged HAR looks the same as a recorded one |
 
 No source shows state that existed before recording started (a persistent profile, cookies,
@@ -59,9 +60,11 @@ run can pass: a trace whose HAR added anything is `partial`, so judge it without
 
 Snapshot and final-state text is what the page itself shows. Text typed into `<input>` and
 `<textarea>` fields (and their default values) is left out, because the agent controls it: a
-search box holding "Order #1042 confirmed" is not the page confirming the order. Button labels
-and the selected `<option>` are kept. The number of values left out is in the trace's
-`metadata["form_values_excluded"]`.
+search box holding "Order #1042 confirmed" is not the page confirming the order. So is the
+text of an editable (`contenteditable`) element and the selected `<option>` of every
+`<select>`: the agent picks the option, so choosing "In stock" in a filter is not the page
+saying the product is in stock. Button labels are kept. The number of values left out is in the
+trace's `metadata["form_values_excluded"]`.
 
 `final_state` comes from the **main page**: the tab of the agent's last action (other than code it
 ran in a page), or the first tab

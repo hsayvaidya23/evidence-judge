@@ -63,6 +63,10 @@ def test_evidence_kinds() -> None:
         ForgeryKind.KEYBOARD_ECHO,
         ForgeryKind.JAVASCRIPT_URL,
         ForgeryKind.PATH_UPLOAD,
+        ForgeryKind.OPTION_SELECT,
+        ForgeryKind.DIRECTORY_UPLOAD,
+        ForgeryKind.STYLED_SCREENSHOT,
+        ForgeryKind.CUSTOM_TOOL,
     } == EVIDENCE_KINDS
 
 

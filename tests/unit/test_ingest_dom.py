@@ -56,7 +56,7 @@ def test_visible_text_and_title() -> None:
     title, text = render(PAGE)
 
     assert title == "Kettle Co."
-    assert text == "Your cart Red Kettle Blue Kettle Save Large shadow content Total: $24.00 USD"
+    assert text == "Your cart Red Kettle Blue Kettle Save shadow content Total: $24.00 USD"
 
 
 @pytest.mark.parametrize(
@@ -74,6 +74,7 @@ def test_visible_text_and_title() -> None:
         "typed note",
         "default note",
         "Small",
+        "Large",
         "console.log",
         "color: red",
     ],
@@ -110,6 +111,40 @@ def test_typed_form_values_are_not_page_text() -> None:
 
     assert page.text == "Search orders Find"
     assert page.form_values == 4
+
+
+def test_selected_option_text_is_not_page_text() -> None:
+    store = FrameSnapshotStore()
+    store.add(
+        "frame@1",
+        [
+            "HTML",
+            {},
+            [
+                "BODY",
+                {},
+                ["P", {}, "Out of stock"],
+                [
+                    "LABEL",
+                    {},
+                    "Show:",
+                    [
+                        "SELECT",
+                        {},
+                        ["OPTION", {}, "All sizes"],
+                        ["OPTION", {"__playwright_selected_": "true"}, "In stock"],
+                    ],
+                ],
+                ["SELECT", {}, ["OPTION", {}, "Newest first"]],
+                ["SELECT", {}],
+            ],
+        ],
+    )
+
+    page = store.render("frame@1", 0)
+
+    assert page.text == "Out of stock Show:"
+    assert page.form_values == 2
 
 
 def test_editable_element_text_is_not_page_text() -> None:

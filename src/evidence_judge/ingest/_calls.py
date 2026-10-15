@@ -168,6 +168,10 @@ does, wait, read, or record: what the site sends and what the page shows stay th
 known user actions (`known_action`, `_OTHER_METHODS`) are harmless too. Every other recorded
 call taints the run (INJECT): deny by default, so a method this list does not know, or one
 Playwright adds later, never passes as harmless."""
+_CAPTURES: Final = frozenset({"screenshot", "expectScreenshot"})
+_RESTYLING: Final = ("style", "mask", "maskColor")
+"""Screenshot options that change what the page shows while it is captured (a stylesheet, boxes
+over elements): the screencast and snapshots taken meanwhile record the agent's page."""
 _UNTRUSTED_CLASSES: Final = frozenset({"WebSocketRoute", "CDPSession", "BindingCall"})
 """Classes whose every call answers the page or the browser with the agent's data."""
 _SETTLE_SCRIPT: Final = "(ms) => new Promise((f) => setTimeout(f, ms))"
@@ -244,6 +248,8 @@ def taints_run(owner: str | None, method: str, params: JsonObject) -> bool:
         return _carries_value(as_object(params.get("eventInit")))
     if method == "accept":
         return bool(as_str(params.get("promptText")))
+    if method in _CAPTURES:
+        return any(params.get(key) not in (None, "", []) for key in _RESTYLING)
     known = action_name(method)
     if known is not None:
         return known == INJECT
@@ -309,10 +315,18 @@ def _call_summary(params: JsonObject) -> str:
     return ", ".join(parts)
 
 
+_UNSEEN_FILES: Final = ("localPaths", "localDirectory", "streams", "directoryStream")
+"""``setInputFiles`` parameters that send files by path, folder or stream: their content is
+not in the trace."""
+
+
 def upload_text(params: JsonObject) -> str | None:
     """The text of the files a ``setInputFiles`` call sent with their content (``payloads``):
     the first _UPLOAD_TEXT_BYTES of each, decoded; a binary file contributes its runs of
-    printable ASCII. Files sent by path or stream are not in the trace."""
+    printable ASCII. Files sent by path, folder or stream are not in the trace, so a call that
+    sends any (_UNSEEN_FILES) has no text: none of its files counts as seen."""
+    if any(params.get(key) not in (None, "", []) for key in _UNSEEN_FILES):
+        return None
     texts: list[str] = []
     for payload in as_list(params.get("payloads")):
         encoded = as_str(as_object(payload).get("buffer"))
@@ -382,9 +396,18 @@ def _recorded_value(method: str, params: JsonObject) -> str | None:
 
 
 def _uploaded_names(params: JsonObject) -> str | None:
+    """The names of the files a ``setInputFiles`` call sent: each file's name, a folder's name
+    with a trailing "/", and how many files went as streams."""
     names = [as_str(as_object(p).get("name")) for p in as_list(params.get("payloads"))]
     paths = [as_str(p) for p in as_list(params.get("localPaths"))]
-    return _joined([*names, *(PurePosixPath(p).name for p in paths if p)])
+    names += [PurePosixPath(p).name for p in paths if p]
+    if folder := as_str(params.get("localDirectory")):
+        names.append(f"{PurePosixPath(folder).name or folder}/")
+    if params.get("directoryStream") not in (None, "", []):
+        names.append("a streamed folder")
+    if streams := len(as_list(params.get("streams"))):
+        names.append(f"{streams} streamed file{'s' if streams > 1 else ''}")
+    return _joined(names)
 
 
 def _option_label(option: JsonObject) -> str | None:

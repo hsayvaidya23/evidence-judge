@@ -152,6 +152,24 @@ the names exported from `evidence_judge`) is defined under
   prove a claim, an `expect` entry or a constraint; they still contradict and still count as side
   effects. Such a run's `tamper_detection` is `partial`, so `--require-tamper-evidence` no longer
   passes a trace with a forged HAR that adds the answer.
+- **Choosing an option proves nothing.** The selected `<option>` of a `<select>` is no longer page
+  text, and the option a select action chose is agent input, so picking "In stock" in a filter
+  cannot prove the product is in stock.
+- **A folder upload cuts page evidence too.** Uploading a directory (`set_input_files` with a
+  folder, or a streamed folder or files over a remote connection) now counts as an upload whose
+  contents are not in the recording, as does any upload the recording names no file for.
+- **A restyled screenshot is tampering.** A `screenshot` or `to_have_screenshot` taken with a
+  `style`, `mask` or `mask_color` changes what the page shows while it is captured, so it now
+  counts as the agent writing the page; a plain screenshot is still harmless.
+- **browser-use custom tools are tampering.** A browser-use action that is not one of its
+  built-in tools (current or 0.x names), or that carries code, is recorded as running the
+  agent's code instead of passing as a harmless step, so a custom `set_cookie` or page-script
+  tool can no longer make a run pass.
+- The task-spec guide documents harness setup: set extra headers, locale, permissions and
+  geolocation as `browser.new_context(...)` options before tracing starts, and lists the
+  context calls that make a run the agent's own when the trace records them.
+- The benchmark forges four more ways: `option_select`, `directory_upload`, `styled_screenshot`
+  and `custom_tool`.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

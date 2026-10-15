@@ -100,7 +100,7 @@ it is not `full`:
 | --- | --- | --- | --- |
 | Playwright trace with a HAR that added requests or filled fields | `partial` | As for a trace; what only the HAR holds still contradicts claims and shows side effects | Whether what only the HAR holds happened: it never proves a claim, an `expect` entry or a constraint |
 | Playwright trace | `full` | Every call made through Playwright: injected scripts (`evaluate`, `add_init_script`, `set_content`, ...), route handlers that answer or rewrite requests, storage and cookie writes, CDP sessions (deny by default) | What a CDP session then sent; anything done outside Playwright (another process driving the browser, a proxy, OS-level input); state from before tracing started |
-| browser-use history | `partial` | The model's actions, including its `evaluate` | Scripts, CDP calls and request changes beneath those actions; network evidence unless a HAR is added |
+| browser-use history | `partial` | The model's actions, including its `evaluate`; any action that is not a built-in tool, or that carries code, counts as running the agent's code | Scripts, CDP calls and request changes beneath those actions; network evidence unless a HAR is added |
 | HAR alone | `none` | Nothing about the agent's calls | Whether the HAR was recorded at all |
 
 For gating CI on verdicts:

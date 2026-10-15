@@ -12,8 +12,8 @@ storage and cookie writes, CDP sessions, WebSocket routes, ...).
 Opening a `javascript:` or `vbscript:` URL runs its code in the page the way `evaluate` does;
 ingesters record that navigation as an INJECT (`is_script_url`).
 
-A file the agent uploads by path or stream (or a binary one) is not in the recording, and the
-page may show its contents: page text after such an upload (`unseen_uploads`) may be the
+A file the agent uploads by path, folder or stream (or a binary one), or an upload the
+recording names no file for, is not in the recording, and the page may show its contents: page text after such an upload (`unseen_uploads`) may be the
 agent's. `untampered` also drops page states, screenshots and response bodies from the first of
 them on, and `doubt` names it. Unlike an injection it does not stop the run from passing: the
 requests the browser sent and their statuses are still the site's, and a predicate that holds on
@@ -129,11 +129,9 @@ def _named(action: ActionEvent) -> str:
 
 
 def unseen_uploads(run: Run) -> list[ActionEvent]:
-    """The uploads whose files' text the recording does not hold (`file_text`): sent by path or
-    stream, or binary."""
-    return [
-        a for a in run.actions if canonical_action(a.name) == UPLOAD and a.value and not a.file_text
-    ]
+    """The uploads whose files' text the recording does not hold (`file_text`): sent by path,
+    folder or stream, binary, or not named at all. Every upload without file text counts."""
+    return [a for a in run.actions if canonical_action(a.name) == UPLOAD and not a.file_text]
 
 
 def unseen_upload(run: Run) -> str | None:
@@ -142,7 +140,7 @@ def unseen_upload(run: Run) -> str | None:
     unseen = unseen_uploads(run)
     if not unseen:
         return None
-    named = ", ".join(f"{a.value} ({a.id})" for a in unseen[:MAX_NAMED])
+    named = ", ".join(f"{a.value or 'a file'} ({a.id})" for a in unseen[:MAX_NAMED])
     more = f" and {len(unseen) - MAX_NAMED} more" if len(unseen) > MAX_NAMED else ""
     return (
         f"the agent uploaded {named}{more} whose contents are not in the recording; page text "

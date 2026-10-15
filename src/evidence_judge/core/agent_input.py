@@ -1,6 +1,6 @@
 """What the agent put into a run itself, replayed from its actions: typed text and the values
-fields took as it edited them, text it copied from pages, uploaded file names and file text, and
-the values of URLs it opened and GET requests it sent."""
+fields took as it edited them, text it copied from pages, the options it chose in drop-downs,
+uploaded file names and file text, and the values of URLs it opened and GET requests it sent."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from evidence_judge.core.actions import (
     KEY_DOWN,
     KEY_UP,
     PRESS,
+    SELECT,
     UPLOAD,
     canonical_action,
 )
@@ -66,8 +67,8 @@ def raw_inputs(run: Run) -> Iterator[tuple[str, Site | None]]:
 
 
 def _action_inputs(run: Run, typing: _Typing) -> Iterator[tuple[str, Site | None]]:
-    """Uploaded file names and text, and the URL values of pages the agent opened itself, as
-    `typing` replays every action."""
+    """Chosen options, uploaded file names and text, and the URL values of pages the agent
+    opened itself, as `typing` replays every action."""
     served = _site_served(run)
     last = -math.inf
     for action in run.actions:
@@ -76,6 +77,8 @@ def _action_inputs(run: Run, typing: _Typing) -> Iterator[tuple[str, Site | None
         typing.act(action, name)
         if name == UPLOAD:
             yield from ((text, None) for text in _uploaded(action))
+        elif name == SELECT and action.value:
+            yield from ((text, None) for text in _chosen(action.value))
         elif name == GOTO and (url := _agent_opened(action, served, before)):
             yield from ((v, Site.of_url(url)) for v in _url_inputs(url, with_path=True))
 
@@ -86,6 +89,12 @@ def _uploaded(action: ActionEvent) -> Iterator[str]:
         yield from _file_names(action.value)
     if action.file_text:
         yield from _lines(action.file_text)
+
+
+def _chosen(value: str) -> Iterator[str]:
+    """The options a select action chose (their values or labels, as recorded): the whole value
+    and each of several joined by ", "."""
+    yield from dict.fromkeys([value, *value.split(", ")])
 
 
 def _agent_opened(action: ActionEvent, served: dict[str, float], before: float) -> str | None:

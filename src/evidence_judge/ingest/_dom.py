@@ -10,8 +10,9 @@ the only way to build a cycle.
 Text typed into ``<input>`` and ``<textarea>`` controls (and their default values) is never page
 text: the agent controls it, so a search box holding "Order #1042 confirmed" must not read as the
 page confirming the order. Neither is the text of an editable element (``contenteditable``
-with any value but "false"), descendants included: the agent can type into it like a field.
-Button labels and the selected ``<option>`` text, which the page
+with any value but "false"), descendants included: the agent can type into it like a field, nor
+the selected ``<option>`` text of a ``<select>``: the agent picks it, so choosing "In stock" in a
+filter must not read as the page saying the product is in stock. Button labels, which the page
 authors, are kept.
 """
 
@@ -90,7 +91,8 @@ class RenderedPage:
     title: str | None
     text: str
     form_values: int = 0
-    """Non-empty text-field, textarea and editable-element values left out of ``text``."""
+    """Non-empty text-field, textarea, editable-element and selected-option values left out of
+    ``text``."""
 
 
 _BLOCK_END = object()
@@ -270,7 +272,7 @@ class _Renderer:
                 value = self._text_content(node, snapshot_index)
             return self._excluded_value(value)
         if tag == "SELECT":
-            return self._selected_option_text(node, snapshot_index)
+            return self._excluded_value(self._selected_option_text(node, snapshot_index))
         if _is_editable(attrs):
             return self._excluded_value(self._text_content(node, snapshot_index))
         return None

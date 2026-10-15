@@ -116,8 +116,9 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   opening `/search?q=Order+%231042+confirmed` directly, shows the phrase without any order
   existing. The agent's input is every typed value (`fill`, `type`, `insert_text`), each run of
   single-key `press` actions on one target (keys held with `keyboard.down` count as pressed;
-  their `keyboard.up` does nothing), every value a field took as the agent edited it,
-  the path segments and query values of every URL it
+  their `keyboard.up` does nothing), every value a field took as the agent edited it, every
+  option it chose (`select_option`, browser-use `select_dropdown_option`; the label or value
+  as the action recorded it, and each of several), the path segments and query values of every URL it
   opened with a `goto`, and the query values of every `GET` request (a submitted search form,
   or a navigation a HAR-only run cannot attribute), decoded and normalised like page text. A
   `goto` back to a URL the site had already loaded or redirected to before the agent's previous
@@ -185,7 +186,10 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   does not prove the order went through.
 - **Evidence the agent made in the browser.** An agent that runs its own code in the page
   (`page.evaluate`, `$eval`, `wait_for_function`, `add_init_script`, `add_script_tag`,
-  `add_style_tag`, `set_content`, `expose_binding`; browser-use's `evaluate`; a `goto` of a
+  `add_style_tag`, `set_content`, `expose_binding`; browser-use's `evaluate`, any custom tool
+  (an action that is not one of browser-use's built-in tools, current or 0.x: its code ran in
+  the agent's process with the browser at hand, so `set_cookie` or `run_page_script` is named
+  with its parameters) and any action carrying code; a `goto` of a
   `javascript:` or `vbscript:` URL, in Playwright or browser-use) can write any text
   and push any URL; one whose route handler answers a request (`route.fulfill`) or rewrites it
   (`route.continue` or `route.fallback` with a new URL, method, headers or body) makes the
@@ -212,7 +216,9 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   offline mode, permissions, the clock, a `route.abort` of anything but an image, font or media
   (blocking those to save bandwidth cannot change what a page says; blocking a document, script,
   stylesheet or API call can, and an abort no recorded request is marked for counts too),
-  `request.fetch` from the test, a
+  `request.fetch` from the test, a screenshot (`screenshot`, `to_have_screenshot`) taken with a
+  `style`, `mask` or `mask_color` (they restyle the page while it is captured, and the
+  screencast records that; a screenshot without them is harmless), a
   `dispatch_event` that carries event data, a dialog accepted with prompt text, and any method
   the allowlist does not know, including ones a later Playwright adds. A `route.fallback` with
   overrides marks no request, so its `inject` is placed where the first route handler was
@@ -226,8 +232,10 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
 - **Uploaded files are agent input.** The text of a file the agent uploads with its content
   (`set_input_files` with a buffer; the first 64 KB of each file, decoded as UTF-8 or UTF-16,
   or the runs of printable text in a binary file) counts as typed, line by line, so a page that
-  previews the file proves nothing by showing it. A file uploaded from a path or a stream (or a
-  binary file with no text) is not in the recording, and the page may show what it holds: from
+  previews the file proves nothing by showing it. A file uploaded from a path, a folder
+  (`set_input_files` with a directory, recorded as its name with a trailing `/`) or a stream,
+  a binary file with no text, and an upload the recording names no file for are not in the
+  recording, and the page may show what they hold: from
   the first such upload on, page states, screenshots, page URLs and response bodies are set
   aside like evidence the agent made, so a `page_text`, `url`, `value` or `request` predicate
   (with `response_contains`) that only holds on them cannot support a claim ("the agent
@@ -238,6 +246,12 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   but `false`), descendants included, is left out of page text like the values of `<input>`
   and `<textarea>` fields, since the agent can type into it; a site's own text in an editable
   element (a prefilled rich-text editor) cannot prove anything either.
+- **Chosen options are the agent's.** The selected `<option>` of every `<select>` is left out of
+  page text, whether or not the agent changed it, and the option a select action chose is
+  agent input, so a page that repeats it elsewhere ("Showing: In stock") proves nothing by doing
+  so. A drop-down the site set is not page evidence either; prove its state through the request
+  that loaded or submitted it. An option chosen by its `value` attribute is input as that value:
+  an echo of its label elsewhere on the page is not masked.
 - **Links on a page the agent wrote.** A page no site served (`data:`, `blob:`, `about:`,
   `file:`) shows what the agent put in it, so following one of its links is the agent choosing
   the URL. Ingesters record such a navigation as a `goto` of the link's target (id
