@@ -144,3 +144,19 @@ async def test_forbid_still_counts_an_attempt_whose_response_reports_errors() ->
     )
     assert unscoped.status is Support.SUPPORTED
     assert scoped.status is Support.NO_EVIDENCE
+
+
+@pytest.mark.parametrize(
+    ("body", "doubt"),
+    [
+        ('{"ok": false, "ok": true}', "says ok: false"),
+        ('{"ok": true, "ok": false}', "says ok: false"),
+        ('{"status": "declined", "status": "ok"}', "says status: 'declined'"),
+        ('{"errors": [], "errors": [{"message": "Payment declined"}]}', "'Payment declined'"),
+        ("ok=true&ok=false", "says ok: false"),
+    ],
+)
+def test_a_repeated_key_doubts_on_any_failing_value(body: str, doubt: str) -> None:
+    found = response_doubt(net(5, "POST", "/api/orders", 200, response=body))
+    assert found is not None
+    assert doubt in found

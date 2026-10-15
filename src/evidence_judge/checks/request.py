@@ -19,6 +19,7 @@ from evidence_judge.checks._common import (
 )
 from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.matching import (
+    body_values,
     compile_regex,
     contains,
     is_truncated,
@@ -525,24 +526,37 @@ def response_doubt(event: NetworkEvent) -> str | None:
     """
     if not event.is_mutation or event.status is None or 300 <= event.status < 400:
         return None
-    fields = _fields(parse_body(event.response_body))
+    parsed = parse_body(event.response_body)
+    fields = _fields(parsed)
     if fields is None:
         return None
     answered = f"it was answered {event.status} and its response"
+    values = _all_values(event.response_body, cast(dict[object, object], parsed))
     for key in ("errors", "error"):
-        if _reported(value := fields.get(key)):
-            nulls = _null_fields(fields.get("data"))
-            null = f", with {', '.join(map(quoted, nulls))} null" if nulls else ""
-            return f"{answered} reports an error ({quoted(_first_message(value))}){null}"
+        for value in values.get(key, []):
+            if _reported(value):
+                nulls = _null_fields(fields.get("data"))
+                null = f", with {', '.join(map(quoted, nulls))} null" if nulls else ""
+                return f"{answered} reports an error ({quoted(_first_message(value))}){null}"
     for key in _FLAG_KEYS:
-        value = fields.get(key)
-        if value is False or (isinstance(value, str) and value.strip().casefold() in _FALSE):
-            return f"{answered} says {key}: false"
+        for value in values.get(key, []):
+            if value is False or (isinstance(value, str) and value.strip().casefold() in _FALSE):
+                return f"{answered} says {key}: false"
     for key in _STATE_KEYS:
-        value = fields.get(key)
-        if isinstance(value, str) and failure_word(value):
-            return f"{answered} says {key}: {quoted(value)}"
+        for value in values.get(key, []):
+            if isinstance(value, str) and failure_word(value):
+                return f"{answered} says {key}: {quoted(value)}"
     return None
+
+
+def _all_values(body: str | None, parsed: dict[object, object]) -> dict[str, list[object]]:
+    """Every value of each top-level key, by case-folded name: a key repeated in the body
+    ('{"ok": false, "ok": true}') keeps all its values, since servers differ on which wins."""
+    out: dict[str, list[object]] = {}
+    for name in parsed:
+        values = body_values(body, str(name)) or [parsed[name]]
+        out.setdefault(str(name).casefold(), []).extend(values)
+    return out
 
 
 def failure_word(value: str) -> bool:
