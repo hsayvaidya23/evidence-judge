@@ -160,6 +160,9 @@ the names exported from `evidence_judge`) is defined under
   built-in tools (current or 0.x names), or that carries code, is recorded as running the
   agent's code instead of passing as a harmless step, so a custom `set_cookie` or page-script
   tool can no longer make a run pass.
+- The task-spec guide documents harness setup: set extra headers, locale, permissions and
+  geolocation as `browser.new_context(...)` options before tracing starts, and lists the
+  context calls that make a run the agent's own when the trace records them.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
