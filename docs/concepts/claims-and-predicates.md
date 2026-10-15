@@ -227,8 +227,10 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
 - **Uploaded files are agent input.** The text of a file the agent uploads with its content
   (`set_input_files` with a buffer; the first 64 KB of each file, decoded as UTF-8 or UTF-16,
   or the runs of printable text in a binary file) counts as typed, line by line, so a page that
-  previews the file proves nothing by showing it. A file uploaded from a path or a stream (or a
-  binary file with no text) is not in the recording, and the page may show what it holds: from
+  previews the file proves nothing by showing it. A file uploaded from a path, a folder
+  (`set_input_files` with a directory, recorded as its name with a trailing `/`) or a stream,
+  a binary file with no text, and an upload the recording names no file for are not in the
+  recording, and the page may show what they hold: from
   the first such upload on, page states, screenshots, page URLs and response bodies are set
   aside like evidence the agent made, so a `page_text`, `url`, `value` or `request` predicate
   (with `response_contains`) that only holds on them cannot support a claim ("the agent

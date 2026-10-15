@@ -150,6 +150,9 @@ the names exported from `evidence_judge`) is defined under
 - **Choosing an option proves nothing.** The selected `<option>` of a `<select>` is no longer page
   text, and the option a select action chose is agent input, so picking "In stock" in a filter
   cannot prove the product is in stock.
+- **A folder upload cuts page evidence too.** Uploading a directory (`set_input_files` with a
+  folder, or a streamed folder or files over a remote connection) now counts as an upload whose
+  contents are not in the recording, as does any upload the recording names no file for.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

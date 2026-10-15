@@ -406,6 +406,24 @@ def test_an_upload_the_recording_does_not_hold_cuts_page_text_but_not_requests()
     assert untampered(_uploaded("Invoice 12")) == _uploaded("Invoice 12")
 
 
+def test_an_upload_naming_no_file_is_unseen_too() -> None:
+    run = _uploaded()
+    nameless = run.model_copy(
+        update={
+            "actions": [
+                a.model_copy(update={"value": None}) if a.name == "upload" else a
+                for a in run.actions
+            ]
+        }
+    )
+
+    assert unseen_upload(nameless) == (
+        "the agent uploaded a file (act#2) whose contents are not in the recording; page "
+        "text and response bodies from then on may show them"
+    )
+    assert untampered(nameless).final_state is None
+
+
 async def test_after_an_unseen_upload_requests_still_prove_and_page_text_does_not() -> None:
     paid = TaskSpec.model_validate(
         {

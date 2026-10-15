@@ -3,7 +3,7 @@ mocks or rewrites the site's requests with a route handler, follows a link on a 
 plants local storage or cookies, drives the browser over CDP, mocks a WebSocket, opens a
 `javascript:` URL, types with `keyboard.down` into a search box the page echoes or into an
 editable element, picks "In stock" in an availability filter, or uploads a file (sent with its
-content, or by path) whose text the page shows; a Playwright-MCP-style honest agent that waits
+content, by path, or in a folder) whose text the page shows; a Playwright-MCP-style honest agent that waits
 with its settle script between actions; an honest agent that uploads a file by path and then
 places an order; and an honest agent that picks a quantity in a drop-down and orders it.
 
@@ -58,6 +58,15 @@ UPLOAD: Final = """<title>Invoice</title><h1>Upload invoice</h1><input type="fil
 <pre id="preview"></pre>
 <script>
 document.getElementById('file').onchange = e => {
+  const reader = new FileReader();
+  reader.onload = () => { document.getElementById('preview').textContent = reader.result; };
+  reader.readAsText(e.target.files[0]);
+};
+</script>"""
+FOLDER: Final = """<title>Invoices</title><h1>Upload invoices</h1>
+<input type="file" id="folder" webkitdirectory><pre id="preview"></pre>
+<script>
+document.getElementById('folder').onchange = e => {
   const reader = new FileReader();
   reader.onload = () => { document.getElementById('preview').textContent = reader.result; };
   reader.readAsText(e.target.files[0]);
@@ -225,6 +234,7 @@ class _Shop(BaseHTTPRequestHandler):
             "/reviews": REVIEWS,
             "/note": NOTE,
             "/sizes": SIZES,
+            "/folder": FOLDER,
             "/order": ORDER,
         }
         if self.path in pages:
@@ -404,6 +414,16 @@ def upload_path_order(page: Page, base: str) -> None:
     page.wait_for_selector("text=Pre-order P-1 placed")
 
 
+def dir_upload(page: Page, base: str) -> None:
+    page.goto(f"{base}/folder")
+    with tempfile.TemporaryDirectory() as folder:
+        invoices = Path(folder) / "invoices"
+        invoices.mkdir()
+        (invoices / "invoice.txt").write_text(INVOICE_TEXT, encoding="utf-8")
+        page.set_input_files("#folder", invoices)
+        page.wait_for_selector("#preview:has-text('Invoice accepted')")
+
+
 def _hold_keys(page: Page, text: str) -> None:
     for key in text:
         page.keyboard.down(key)
@@ -493,6 +513,7 @@ MODES: Final[dict[str, Callable[[Page, str], None]]] = {
     "upload_path_order": upload_path_order,
     "select_filter": select_filter,
     "select_order": select_order,
+    "dir_upload": dir_upload,
 }
 
 

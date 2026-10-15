@@ -24,6 +24,7 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "injection"
 MADE = "it holds only on evidence the agent made itself"
 ECHO = "echoes the agent's own input"
 UNSEEN = "uploaded invoice.txt (act#3) whose contents are not in the recording"
+FOLDER = "uploaded invoices/ (act#2) whose contents are not in the recording"
 
 
 async def _judge(
@@ -159,6 +160,7 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("kd_echo", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("kd_note", "stock", "Yes, In stock.", "fail", [False, True], "does not contain"),
         ("goto_js", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
+        ("dir_upload", "invoice", "The invoice was accepted.", "needs_review", [None], FOLDER),
         ("select_filter", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
     ],
 )
@@ -385,6 +387,37 @@ def test_upload_text_is_decoded_and_bounded(tmp_path: Path, data: bytes, text: s
     [upload] = [a for a in load_playwright_trace(trace).actions if a.name == "upload"]
 
     assert upload.file_text == text
+
+
+_TEXT = {"name": "a.txt", "buffer": base64.b64encode(b"Invoice accepted").decode()}
+
+
+@pytest.mark.parametrize(
+    ("params", "value"),
+    [
+        ({"localDirectory": "/home/me/invoices"}, "invoices/"),
+        (
+            {"directoryStream": {"guid": "d@1"}, "streams": [{"guid": "s@1"}]},
+            "a streamed folder, 1 streamed file",
+        ),
+        ({"streams": [{"guid": "s@1"}, {"guid": "s@2"}]}, "2 streamed files"),
+        ({"payloads": [_TEXT], "localPaths": ["/tmp/b.txt"]}, "a.txt, b.txt"),
+        ({}, None),
+    ],
+)
+def test_uploads_by_folder_stream_or_unknown_files_are_unseen(
+    tmp_path: Path, params: dict[str, Any], value: str | None
+) -> None:
+    def change(event: dict[str, Any]) -> None:
+        event["params"] = {"selector": "#file", **params}
+
+    trace = rewrite_trace(
+        FIXTURES / "upload.zip", tmp_path / "t.zip", _rewrite("setInputFiles", change)
+    )
+    run = load_playwright_trace(trace)
+
+    [upload] = unseen_uploads(run)
+    assert (upload.value, upload.file_text) == (value, None)
 
 
 def test_injected_scripts_carry_the_hash_that_trusts_them() -> None:
