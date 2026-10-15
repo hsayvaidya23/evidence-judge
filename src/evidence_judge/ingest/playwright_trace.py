@@ -365,23 +365,28 @@ class _TraceReader:
                 self._on_after(event)
             case "frame-snapshot":
                 self._on_frame_snapshot(as_object(event.get("snapshot")))
-            case "screencast-frame":
-                self._on_image(event, as_float(event.get("timestamp")))
-            case "screenshot":
+            case "screencast-frame" | "screenshot":
                 self._on_image(event, as_float(event.get("timestamp")))
             case "console":
                 self._on_console(event)
-            case "event" if event.get("method") == "pageError":
-                self._on_page_error(event)
-            case "event" if event.get("method") == "page":
-                page_id = as_str(as_object(event.get("params")).get("pageId"))
-                time = as_float(event.get("time"))
-                if page_id is not None and time is not None:
-                    self._page_seen(page_id, time)
+            case "event":
+                self._on_page_event(event)
             case "error":
                 self._add_console(event.get("time"), "error", as_str(event.get("message")))
             case "resource-snapshot":
                 self.resources.append(as_object(event.get("snapshot")))
+            case _:
+                pass
+
+    def _on_page_event(self, event: JsonObject) -> None:
+        match event.get("method"):
+            case "pageError":
+                self._on_page_error(event)
+            case "page":
+                page_id = as_str(as_object(event.get("params")).get("pageId"))
+                time = as_float(event.get("time"))
+                if page_id is not None and time is not None:
+                    self._page_seen(page_id, time)
             case _:
                 pass
 
@@ -393,11 +398,7 @@ class _TraceReader:
         params = as_object(event.get("params"))
         if call_id is None or method is None or start is None or is_settle(method, params):
             return
-        if owner == ROUTE_CLASS and self.routes.record(method, params, start):
-            return
-        if method == INTERCEPT:
-            if as_list(params.get("patterns")):
-                self.routes.intercepts.append(start)
+        if self._on_route_call(owner, method, params, start):
             return
         taints = owner == ROUTE_CLASS or taints_run(owner, method, params)
         if not taints and action_name(method) is None:
@@ -408,6 +409,18 @@ class _TraceReader:
         page_id = as_str(event.get("pageId"))
         if page_id is not None:
             self.action_pages[self._key(call_id)] = page_id
+
+    def _on_route_call(
+        self, owner: str | None, method: str, params: JsonObject, start: float
+    ) -> bool:
+        """Record a route handler's call or registration; False for any other call."""
+        if owner == ROUTE_CLASS and self.routes.record(method, params, start):
+            return True
+        if method == INTERCEPT:
+            if as_list(params.get("patterns")):
+                self.routes.intercepts.append(start)
+            return True
+        return False
 
     def _key(self, call_id: str) -> _CallKey:
         return (self.context_index, call_id)

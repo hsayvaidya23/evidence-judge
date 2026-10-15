@@ -349,6 +349,11 @@ def action_value(raw: RawAction) -> str | None:
     if raw.taints and method != MOCKED_ROUTE:
         api = f"{raw.owner}.{method}" if raw.owner else method
         return injected(api, _call_summary(params))
+    return _recorded_value(method, params)
+
+
+def _recorded_value(method: str, params: JsonObject) -> str | None:
+    """What a user action typed, chose, uploaded or opened; None for any other call."""
     match method:
         case "Route":
             return as_str(params.get("call"))
@@ -363,11 +368,15 @@ def action_value(raw: RawAction) -> str | None:
         case "selectOption":
             return _joined(_option_label(as_object(o)) for o in as_list(params.get("options")))
         case "setInputFiles":
-            names = [as_str(as_object(p).get("name")) for p in as_list(params.get("payloads"))]
-            paths = [as_str(p) for p in as_list(params.get("localPaths"))]
-            return _joined([*names, *(PurePosixPath(p).name for p in paths if p)])
+            return _uploaded_names(params)
         case _:
             return None
+
+
+def _uploaded_names(params: JsonObject) -> str | None:
+    names = [as_str(as_object(p).get("name")) for p in as_list(params.get("payloads"))]
+    paths = [as_str(p) for p in as_list(params.get("localPaths"))]
+    return _joined([*names, *(PurePosixPath(p).name for p in paths if p)])
 
 
 def _option_label(option: JsonObject) -> str | None:
