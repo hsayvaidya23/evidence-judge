@@ -12,12 +12,12 @@ PNG_BUDGET = 400 * 1024
 ANIMATION_BUDGET = 3 * 1024 * 1024
 
 PNGS = {
-    "report-fail-light.png": 1200,
-    "report-fail-dark.png": 1200,
-    "report-pass-light.png": 1200,
-    "report-pass-dark.png": 1200,
-    "report-mobile.png": 780,
-    "social-card.png": 1280,
+    "report-fail-light.png": (1200, 1200),
+    "report-fail-dark.png": (1200, 1200),
+    "report-pass-light.png": (1200, 1200),
+    "report-pass-dark.png": (1200, 1200),
+    "report-mobile.png": (780, 3200),
+    "social-card.png": (1280, 640),
 }
 ANIMATIONS = ("demo-agent-run.webp", "demo-verdict.webp")
 
@@ -46,13 +46,13 @@ def webp_animation(data: bytes) -> tuple[int, int, int, int]:
     return width, height, frames, total_ms
 
 
-@pytest.mark.parametrize(("name", "width"), PNGS.items())
-def test_png_within_budget(name: str, width: int) -> None:
+@pytest.mark.parametrize(("name", "box"), PNGS.items())
+def test_png_within_budget(name: str, box: tuple[int, int]) -> None:
     data = (ASSETS / name).read_bytes()
     assert len(data) < PNG_BUDGET
     w, h = png_size(data)
-    assert w == width
-    assert 300 <= h <= 3200
+    assert w == box[0]
+    assert 300 <= h <= box[1]
 
 
 def test_social_card_is_preview_sized() -> None:

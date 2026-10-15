@@ -65,15 +65,98 @@ TEMPLATES = {
   <meta charset="utf-8">
   <title>{% block title %}Kettle Co.{% endblock %}</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 0; color: #222; }
-    header { background: #b22222; color: #fff; padding: 12px 24px; display: flex; gap: 24px; }
-    header a { color: #fff; text-decoration: none; }
-    main { padding: 24px; max-width: 720px; }
-    .product { border: 1px solid #ddd; padding: 12px; margin-bottom: 12px; border-radius: 6px; }
-    .price { font-weight: bold; }
-    button { padding: 8px 16px; font-size: 15px; cursor: pointer; }
-    .notice { color: #2e7d32; }
-    .error { color: #c62828; }
+    :root {
+      --ink: #1a1714; --ink-2: #5b544c; --ink-3: #8a8178; --paper: #faf7f2; --card: #ffffff;
+      --line: #ece5db; --brand: #c2410c; --brand-ink: #fff7ed; --ok: #15803d; --bad: #be123c;
+      --shadow: 0 1px 2px rgba(26, 23, 20, 0.05), 0 18px 40px -22px rgba(26, 23, 20, 0.35);
+      --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: var(--font); margin: 0; color: var(--ink); background: var(--paper);
+      -webkit-font-smoothing: antialiased; }
+    header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 26px;
+      padding: 14px 36px; background: rgba(250, 247, 242, 0.86); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line); font-size: 14.5px; }
+    header a { color: var(--ink-2); text-decoration: none; font-weight: 550; }
+    header a:hover { color: var(--ink); }
+    header a:first-child { margin-right: auto; display: inline-flex; align-items: center; gap: 10px;
+      color: var(--ink); font-size: 17px; letter-spacing: -0.02em; }
+    header a:first-child::before { content: ""; width: 26px; height: 26px; border-radius: 9px;
+      background: radial-gradient(circle at 30% 30%, #fb923c, var(--brand) 70%);
+      box-shadow: inset 0 -3px 6px rgba(0, 0, 0, 0.18), 0 4px 10px -4px var(--brand); }
+    header a[href="/cart"] { padding: 7px 14px; border-radius: 999px; background: var(--ink);
+      color: #fff; }
+    main { padding: 34px 36px 56px; max-width: 1040px; margin: 0 auto; }
+    h1 { font-size: 34px; line-height: 1.12; letter-spacing: -0.035em; margin: 0 0 10px;
+      font-weight: 750; }
+    h2 { font-size: 19px; letter-spacing: -0.02em; margin: 16px 0 4px; }
+    h2 a { color: var(--ink); text-decoration: none; }
+    p { color: var(--ink-2); line-height: 1.55; }
+    .hero { display: grid; gap: 6px; padding: 30px 32px; margin-bottom: 26px; border-radius: 22px;
+      color: #fff7ed; background: radial-gradient(520px 260px at 88% 10%, rgba(251, 146, 60, 0.55), transparent 70%),
+        linear-gradient(120deg, #1a1714 0%, #3b1d12 100%); box-shadow: var(--shadow); }
+    .hero .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
+      color: #fdba74; }
+    .hero h1 { color: #fff; font-size: 38px; margin: 0; }
+    .hero p { color: rgba(255, 247, 237, 0.75); margin: 2px 0 0; max-width: 460px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+    .product { position: relative; padding: 14px 14px 18px; border-radius: 20px; background: var(--card);
+      border: 1px solid var(--line); box-shadow: var(--shadow); transition: transform 0.2s; }
+    .product:hover { transform: translateY(-2px); }
+    .product p { margin: 4px 0 0; font-size: 14px; }
+    .product h2 a::after { content: ""; position: absolute; inset: 0; border-radius: 20px; }
+    .price { font-weight: 750; color: var(--ink); font-size: 17px; letter-spacing: -0.01em; }
+    .product .price { margin-top: 12px; }
+    [data-product-id="red-kettle"] { --c: #e11d48; --c2: #fb7185; --bg: #fff1f2; }
+    [data-product-id="steel-kettle"] { --c: #64748b; --c2: #cbd5e1; --bg: #f1f5f9; }
+    [data-product-id="blue-kettle"] { --c: #1d4ed8; --c2: #60a5fa; --bg: #eff6ff; }
+    .art { position: relative; display: grid; place-items: center; height: 190px; border-radius: 14px;
+      background: radial-gradient(circle at 50% 115%, color-mix(in srgb, var(--c2) 45%, transparent), transparent 62%), var(--bg, #f4efe8); overflow: hidden; }
+    .art-lg { height: 360px; border-radius: 22px; }
+    .kettle { position: relative; width: 112px; height: 86px; margin-top: 26px;
+      border-radius: 48% 48% 22px 22px / 62% 62% 22px 22px;
+      background: linear-gradient(140deg, var(--c2) 0%, var(--c) 55%, color-mix(in srgb, var(--c) 70%, #000) 100%);
+      box-shadow: inset -10px -10px 22px rgba(0, 0, 0, 0.18), inset 10px 8px 16px rgba(255, 255, 255, 0.35),
+        0 22px 26px -18px rgba(0, 0, 0, 0.55); }
+    .kettle::before { content: ""; position: absolute; left: 22px; top: -38px; width: 68px; height: 54px;
+      border: 7px solid #1a1714; border-bottom: 0; border-radius: 40px 40px 0 0; }
+    .kettle::after { content: ""; position: absolute; right: -30px; top: 24px; width: 44px; height: 15px;
+      border-radius: 0 9px 9px 0; background: var(--c); transform: rotate(-32deg); transform-origin: left center; }
+    .kettle i { position: absolute; left: 46px; top: -9px; width: 20px; height: 12px; border-radius: 6px 6px 2px 2px;
+      background: #1a1714; }
+    .art-lg .kettle { transform: scale(1.7); }
+    .pdp { display: grid; grid-template-columns: 1.1fr 1fr; gap: 40px; align-items: center; }
+    .pdp .price { font-size: 26px; margin: 8px 0 18px; }
+    label { display: inline-flex; align-items: center; gap: 10px; margin-right: 12px; color: var(--ink-2);
+      font-size: 14px; font-weight: 550; }
+    input { font: inherit; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line);
+      background: #fff; color: var(--ink); width: 76px; }
+    input[type="email"] { width: 260px; }
+    button, #checkout { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 12px 22px; font: 650 15px/1 var(--font); cursor: pointer; border: 0; border-radius: 999px;
+      color: #fff; background: linear-gradient(180deg, #ea580c, var(--brand)); text-decoration: none;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 10px 22px -10px var(--brand); }
+    button:disabled { background: #d6d0c8; color: #8a8178; box-shadow: none; cursor: not-allowed; }
+    .panel { max-width: 560px; padding: 24px 26px; border-radius: 20px; background: var(--card);
+      border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .panel ul { list-style: none; margin: 0 0 6px; padding: 0; }
+    .panel li { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
+      font-weight: 600; }
+    .panel li::before { content: ""; width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+      background: radial-gradient(circle at 35% 30%, #fdba74, var(--brand) 75%); }
+    .notice { color: var(--ok); font-weight: 600; }
+    .error { color: var(--bad); font-weight: 600; }
+    .done { text-align: center; margin: 0 auto; }
+    .done::before { content: "✓"; display: grid; place-items: center; width: 56px; height: 56px;
+      margin: 0 auto 14px; border-radius: 50%; background: #dcfce7; color: var(--ok); font-size: 28px; font-weight: 800; }
+    footer { padding: 26px 36px 34px; color: var(--ink-3); font-size: 13px; border-top: 1px solid var(--line);
+      text-align: center; }
+    @media (max-width: 760px) {
+      header { padding: 12px 18px; gap: 16px; }
+      main { padding: 22px 18px 40px; }
+      .grid, .pdp { grid-template-columns: 1fr; }
+      .art-lg { height: 240px; }
+    }
   </style>
 </head>
 <body>
@@ -83,6 +166,7 @@ TEMPLATES = {
     <a href="/account">Account</a>
   </header>
   <main>{% block main %}{% endblock %}</main>
+  <footer>Small-batch kettles · free returns · carbon-neutral shipping</footer>
   <div hidden>Internal: promo code KETTLE10 is not active.</div>
   <script>
     async function postJson(url, payload) {
@@ -100,19 +184,29 @@ TEMPLATES = {
 """,
     "home.html": """{% extends "base.html" %}
 {% block main %}
-<h1>Kettles</h1>
+<section class="hero">
+  <span class="eyebrow">New season · Stovetop collection</span>
+  <h1>Kettles</h1>
+  <p>Enamel and steel, made to whistle for years. Pick a colour for slow mornings.</p>
+</section>
+<div class="grid">
 {% for p in products %}
 <div class="product" data-product-id="{{ p.id }}">
+  <div class="art" aria-hidden="true"><span class="kettle"><i></i></span></div>
   <h2><a href="/products/{{ p.id }}">{{ p.name }}</a></h2>
   <p>{{ p.blurb }}</p>
   <p class="price">${{ "%.2f"|format(p.price) }}</p>
 </div>
 {% endfor %}
+</div>
 {% endblock %}
 """,
     "product.html": """{% extends "base.html" %}
 {% block title %}{{ product.name }} | Kettle Co.{% endblock %}
 {% block main %}
+<div class="pdp" data-product-id="{{ product.id }}">
+<div class="art art-lg" aria-hidden="true"><span class="kettle"><i></i></span></div>
+<div>
 <h1>{{ product.name }}</h1>
 <p>{{ product.blurb }}</p>
 <p class="price">${{ "%.2f"|format(product.price) }}</p>
@@ -124,6 +218,8 @@ TEMPLATES = {
 <button id="add-to-cart" disabled>Add to cart</button>
 {% endif %}
 <p id="status" class="notice"></p>
+</div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -140,6 +236,7 @@ TEMPLATES = {
     "cart.html": """{% extends "base.html" %}
 {% block title %}Cart | Kettle Co.{% endblock %}
 {% block main %}
+<div class="panel">
 <h1>Your cart</h1>
 {% if lines %}
 <ul>
@@ -152,11 +249,13 @@ TEMPLATES = {
 {% else %}
 <p>Your cart is empty.</p>
 {% endif %}
+</div>
 {% endblock %}
 """,
     "checkout.html": """{% extends "base.html" %}
 {% block title %}Checkout | Kettle Co.{% endblock %}
 {% block main %}
+<div class="panel">
 <h1>Checkout</h1>
 {% if lines %}
 <ul>
@@ -171,6 +270,7 @@ TEMPLATES = {
 {% else %}
 <p>Your cart is empty.</p>
 {% endif %}
+</div>
 {% endblock %}
 {% block scripts %}
 <script id="cart-data" type="application/json">{{ lines_json|safe }}</script>
@@ -195,22 +295,26 @@ TEMPLATES = {
     "order.html": """{% extends "base.html" %}
 {% block title %}Order #{{ order_id }} | Kettle Co.{% endblock %}
 {% block main %}
+<div class="panel done">
 <h1>Thank you for your order #{{ order_id }}</h1>
 <ul>
 {% for line in lines %}
   <li>{{ line.product_id }} x {{ line.qty }} at ${{ "%.2f"|format(line.price) }}</li>
 {% endfor %}
 </ul>
+</div>
 {% endblock %}
 """,
     "account.html": """{% extends "base.html" %}
 {% block title %}Account | Kettle Co.{% endblock %}
 {% block main %}
+<div class="panel">
 <h1>Your account</h1>
 <p>Email: <span id="current-email">{{ email }}</span></p>
 <label>New email <input id="email" type="email"></label>
 <button id="save-email">Save</button>
 <p id="status" class="notice"></p>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>

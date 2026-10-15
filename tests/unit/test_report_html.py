@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from evidence_judge.core.evidence import Run, Screenshot
-from evidence_judge.core.verdict import Outcome
+from evidence_judge.core.verdict import Outcome, Support
 from evidence_judge.report.html_report import MAX_TIMELINE_ROWS, anchor_for, render_html, write_html
 from tests.unit.test_report_fixtures import EVIL, PNG_1PX, make_run, make_verdict
 
@@ -74,7 +74,10 @@ def test_claim_cards_and_citations_link_to_timeline() -> None:
     html = render_html(make_verdict(), make_run())
     assert "<blockquote>I placed the order!</blockquote>" in html
     assert "<blockquote>applied a coupon</blockquote>" in html
-    assert '<a class="cite" href="#ev-net-23-2" title="500 Internal Server Error">net#2</a>' in html
+    assert (
+        '<a class="cite t-bad" href="#ev-net-23-2" title="500 Internal Server Error">'
+        '<span class="cid">net#2</span><span class="cdesc">POST /api/orders · 500</span></a>'
+    ) in html
     assert 'id="ev-net-23-2"' in html
     assert "Contradicted" in html and "Supported" in html and "No evidence" in html
     assert ">Key<" in html
@@ -119,6 +122,30 @@ def test_empty_run_renders() -> None:
     html = render_html(verdict, Run(run_id="r", source="har"))
     assert "no checkable claims" in html
     assert "No actions or state-changing requests" in html
+
+
+def test_hero_headline_and_collapsed_reason() -> None:
+    verdict = make_verdict()
+    claims = [
+        verdict.claims[0].model_copy(update={"reason": "first check; second check; third check"}),
+        *verdict.claims[1:],
+    ]
+    html = render_html(verdict.model_copy(update={"claims": claims}), make_run())
+    assert "1 of 3 claims is contradicted by the recording" in html
+    assert '<p class="reason">first check</p>' in html
+    assert "<summary>2 more checks</summary>" in html
+    assert "<li>third check</li>" in html
+
+
+def test_supported_run_headline() -> None:
+    verdict = make_verdict(Outcome.PASS)
+    claims = [c.model_copy(update={"status": Support.SUPPORTED}) for c in verdict.claims]
+    html = render_html(verdict.model_copy(update={"claims": claims}), make_run())
+    assert "Every claim checks out, but 1 task expectation failed" in html
+    html = render_html(
+        verdict.model_copy(update={"claims": claims, "expectations": []}), make_run()
+    )
+    assert "All 3 claims backed by recorded evidence" in html
 
 
 def test_write_html(tmp_path: Path) -> None:

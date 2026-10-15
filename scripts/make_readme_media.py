@@ -1,9 +1,12 @@
 """Render the README media into docs/assets/: report screenshots, two demo animations and the
 social preview card.
 
-Reports come from the real CLI run offline on the recorded fixtures; the agent animation drives
-the demo shop through the forged_success scenario. Every frame is a Playwright screenshot with
-a fixed duration, so the output is crisp and the same on every run.
+Reports come from the real CLI run offline on the recorded fixtures. The agent animation drives
+the demo shop through the forged_success scenario with Playwright and composes the real shop
+screenshots into an "agent console" capture page; the verdict animation steps the real HTML
+report's CSS animations frame by frame. Capture pages (never the product report) load Space
+Grotesk and JetBrains Mono from Google Fonts and fall back to system fonts offline. Every frame
+is a screenshot with a fixed duration, so the output is crisp and the same on every run.
 
     uv run --with pillow python -m scripts.make_readme_media [--only reports agent verdict social]
 """
@@ -11,12 +14,12 @@ a fixed duration, so the output is crisp and the same on every run.
 from __future__ import annotations
 
 import argparse
+import base64
 import io
-import json
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,7 +28,7 @@ from typing import Any, Literal
 import httpx
 from PIL import Image  # pyright: ignore[reportMissingImports]
 from playwright.sync_api import Browser, Page, Response, ViewportSize, sync_playwright
-from scripts.record_fixtures import running_shop
+from scripts.record_fixtures import TASK, running_shop
 
 ROOT = Path(__file__).resolve().parent.parent
 RUNS = ROOT / "tests" / "fixtures" / "runs"
@@ -34,288 +37,403 @@ DEFAULT_OUT = ROOT / "docs" / "assets"
 PNG_BUDGET = 400 * 1024
 ANIMATION_BUDGET = 3 * 1024 * 1024
 REPORT_WIDTH = 1200
-REPORT_CROP = 1400
+REPORT_CROP = 1150
 MOBILE: ViewportSize = {"width": 390, "height": 844}
-MOBILE_CROP = 1500
-FRAME: ViewportSize = {"width": 960, "height": 600}
+MOBILE_CROP = 1590
+STAGE: ViewportSize = {"width": 1120, "height": 760}
+SHOP_VIEW: ViewportSize = {"width": 800, "height": 560}
+SHOP_SCALE = 0.8
 CARD: ViewportSize = {"width": 1280, "height": 640}
-SHOP_HOST = "localhost:8000"
+SHOP_HOST = "kettle.shop"
 
 Scheme = Literal["light", "dark"]
 Step = Literal["reports", "agent", "verdict", "social"]
 STEPS: tuple[Step, ...] = ("reports", "agent", "verdict", "social")
 
-OVERLAY_JS = r"""
-(() => {
-  const opts = window.__EJ_OPTS || {};
-  const css = `
-  .ej-chrome { position: fixed; inset: 0 0 auto 0; height: 44px; z-index: 2147483000;
-    display: flex; align-items: center; gap: 14px; padding: 0 16px; background: #24272e;
-    border-bottom: 1px solid #111; font: 500 14px/1 system-ui, -apple-system, sans-serif; }
-  .ej-dots { display: flex; gap: 8px; }
-  .ej-dots i { width: 12px; height: 12px; border-radius: 50%; display: block; }
-  .ej-url { flex: 1; max-width: 520px; margin: 0 auto; padding: 7px 14px; border-radius: 8px;
-    background: #353942; color: #d8dbe2; letter-spacing: 0.01em; }
-  .ej-url b { color: #fff; font-weight: 500; }
-  .ej-cap { position: fixed; left: 0; right: 0; bottom: 22px; margin: 0 auto; width: fit-content;
-    z-index: 2147483001; display: flex; align-items: center; gap: 12px; max-width: 92%;
-    padding: 12px 20px 12px 12px; border-radius: 14px; background: rgba(15, 18, 25, 0.94);
-    color: #fff; font: 600 21px/1.3 system-ui, -apple-system, sans-serif;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); letter-spacing: -0.005em; }
-  .ej-cap[hidden] { display: none; }
-  .ej-cap .ej-who { flex-shrink: 0; padding: 5px 9px; border-radius: 8px; font-size: 12px;
-    font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
-  .ej-who.agent { background: #f59e0b; color: #1a1205; }
-  .ej-who.judge { background: #6d8bff; color: #0b1230; }
-  .ej-who.task { background: #e5e7eb; color: #111827; }
-  .ej-who.bad { background: #ef4444; color: #fff; }
-  .ej-cursor { position: fixed; left: 0; top: 0; width: 26px; height: 26px; z-index: 2147483003;
-    pointer-events: none; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45)); }
-  .ej-cursor[hidden] { display: none; }
-  .ej-ring { position: fixed; width: 34px; height: 34px; margin: -17px 0 0 -17px;
-    border-radius: 50%; border: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.25);
-    z-index: 2147483002; pointer-events: none; }
-  .ej-ring[hidden] { display: none; }
-  .ej-net { position: fixed; right: 16px; top: 104px; width: 300px; z-index: 2147483002;
-    padding: 10px 12px 12px; border-radius: 12px; background: rgba(15, 18, 25, 0.92);
-    color: #cfd4dd; font: 13px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
-  .ej-net[hidden] { display: none; }
-  .ej-net h6 { margin: 0 0 6px; font: 700 11px/1 system-ui, sans-serif; letter-spacing: 0.1em;
-    text-transform: uppercase; color: #8b93a2; }
-  .ej-net div { display: flex; gap: 8px; white-space: nowrap; }
-  .ej-net .m { width: 38px; color: #8b93a2; }
-  .ej-net .p { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-  .ej-net .s { color: #5fd08e; }
-  .ej-net .post .m, .ej-net .post .p { color: #fbbf24; font-weight: 700; }
-  .ej-net .none { color: #ff8a80; font-weight: 700; }
-  .ej-hl { outline: 3px solid var(--ej-hl, #f59e0b) !important; outline-offset: 3px !important;
-    border-radius: 8px; box-shadow: 0 0 0 9px color-mix(in srgb, var(--ej-hl, #f59e0b) 22%, transparent) !important; }
-  tr.ej-hl { outline: none !important; box-shadow: none !important; }
-  tr.ej-hl td { background: color-mix(in srgb, var(--ej-hl) 16%, transparent) !important; }
-  tr.ej-hl td:first-child { box-shadow: inset 4px 0 0 var(--ej-hl) !important; }
-  .ej-tag { position: fixed; z-index: 2147483001; padding: 5px 10px; border-radius: 8px;
-    background: #ef4444; color: #fff; font: 700 14px/1.2 system-ui, sans-serif;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25); white-space: nowrap; }
-  .ej-dim { position: fixed; inset: 0; z-index: 2147483001; display: flex; align-items: center;
-    padding: 0 0 0 36px; background: rgba(8, 10, 14, 0.62); }
-  .ej-dim[hidden] { display: none; }
-  .ej-bubble { position: relative; max-width: 560px; margin: 0 0 40px; padding: 26px 32px 28px;
-    border-radius: 22px; background: #fff; color: #111827;
-    font: 15px/1.5 system-ui, -apple-system, sans-serif; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45); }
-  .ej-bubble::after { content: ""; position: absolute; left: 70px; bottom: -22px;
-    border: 12px solid transparent; border-top: 14px solid #fff; border-left: 18px solid #fff; }
-  .ej-bubble .ej-head { display: flex; align-items: center; gap: 12px; color: #6b7280;
-    font-weight: 650; font-size: 15px; letter-spacing: 0.02em; }
-  .ej-bubble .ej-av { width: 40px; height: 40px; border-radius: 50%; display: grid;
-    place-items: center; background: #fef3c7; font-size: 22px; }
-  .ej-bubble .ej-say { margin: 14px 0 0; font-size: 31px; line-height: 1.25; font-weight: 750;
-    letter-spacing: -0.02em; }
-  .ej-bubble .ej-foot { margin: 14px 0 0; color: #6b7280; font-size: 16px; }
-  `;
-  const cursorSvg = `<svg viewBox="0 0 26 26" xmlns="http://www.w3.org/2000/svg">
-    <path d="M4 2 L4 21 L9 16.5 L12.5 24 L16 22.4 L12.6 15 L19 15 Z" fill="#111" stroke="#fff"
-      stroke-width="1.6" stroke-linejoin="round"/></svg>`;
-  const els = {};
-  function mount() {
-    if (els.cap || !document.body) return;
-    const style = document.createElement("style");
-    style.textContent = css + (opts.chrome ? "body { padding-top: 44px !important; }" : "");
-    document.head.appendChild(style);
-    const add = (tag, cls, html) => {
-      const el = document.createElement(tag);
-      el.className = cls;
-      if (html) el.innerHTML = html;
-      document.body.appendChild(el);
-      return el;
-    };
-    if (opts.chrome) {
-      els.chrome = add("div", "ej-chrome",
-        '<span class="ej-dots"><i style="background:#ff5f57"></i><i style="background:#febc2e">' +
-        '</i><i style="background:#28c840"></i></span><span class="ej-url"></span>');
-    }
-    els.net = add("div", "ej-net");
-    els.cap = add("div", "ej-cap");
-    els.ring = add("div", "ej-ring");
-    els.cursor = add("div", "ej-cursor", cursorSvg);
-    els.dim = add("div", "ej-dim");
-    els.tags = [];
-  }
-  function text(el, value) { el.textContent = value; return el; }
-  function sync(state) {
-    mount();
-    if (els.chrome) {
-      const url = els.chrome.querySelector(".ej-url");
-      url.innerHTML = "";
-      url.append(text(document.createElement("b"), opts.chrome), location.pathname);
-    }
-    const cap = state.caption;
-    els.cap.hidden = !cap;
-    if (cap) {
-      els.cap.innerHTML = "";
-      els.cap.append(text(document.createElement("span"), cap.who), cap.text);
-      els.cap.firstChild.className = "ej-who " + cap.tone;
-    }
-    const cur = state.cursor;
-    els.cursor.hidden = !cur;
-    els.ring.hidden = !(cur && cur.down);
-    if (cur) {
-      els.cursor.style.transform = `translate(${cur.x - 4}px, ${cur.y - 2}px)`;
-      els.ring.style.left = cur.x + "px";
-      els.ring.style.top = cur.y + "px";
-    }
-    els.net.hidden = !state.net;
-    if (state.net) {
-      els.net.innerHTML = "";
-      els.net.append(text(document.createElement("h6"), "Recorded network"));
-      for (const row of state.net) {
-        const line = document.createElement("div");
-        if (row.method === "POST") line.className = "post";
-        if (row.none) {
-          line.append(text(document.createElement("span"), row.none));
-          line.firstChild.className = "none";
-        } else {
-          for (const [cls, value] of [["m", row.method], ["p", row.path], ["s", row.status]]) {
-            const span = text(document.createElement("span"), value);
-            span.className = cls;
-            line.append(span);
-          }
-        }
-        els.net.append(line);
-      }
-    }
-    document.querySelectorAll(".ej-hl").forEach((el) => el.classList.remove("ej-hl"));
-    for (const sel of state.highlight || []) {
-      document.querySelectorAll(sel).forEach((el) => el.classList.add("ej-hl"));
-    }
-    document.documentElement.style.setProperty("--ej-hl", state.hlColor || "#f59e0b");
-    els.tags.forEach((el) => el.remove());
-    els.tags = [];
-    for (const tag of state.tags || []) {
-      const target = document.querySelector(tag.selector);
-      if (!target) continue;
-      const box = target.getBoundingClientRect();
-      const el = text(document.createElement("div"), tag.text);
-      el.className = "ej-tag";
-      el.style.left = box.right + 18 + "px";
-      el.style.top = box.top + box.height / 2 - 14 + "px";
-      document.body.appendChild(el);
-      els.tags.push(el);
-    }
-    const bubble = state.bubble;
-    els.dim.hidden = !bubble;
-    if (bubble) {
-      els.dim.innerHTML = "";
-      const card = document.createElement("div");
-      card.className = "ej-bubble";
-      const head = document.createElement("div");
-      head.className = "ej-head";
-      const av = text(document.createElement("span"), "\u{1F916}");
-      av.className = "ej-av";
-      head.append(av, bubble.title);
-      const say = text(document.createElement("p"), bubble.text);
-      say.className = "ej-say";
-      const foot = text(document.createElement("p"), bubble.foot);
-      foot.className = "ej-foot";
-      card.append(head, say, foot);
-      els.dim.append(card);
-    }
-  }
-  window.__ej = { sync };
-})();
-"""
+FONTS = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700'
+    '&family=Space+Grotesk:wght@400;500;600;700&display=block">'
+)
 
-SOCIAL_HTML = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<style>
+BASE_CSS = """
 :root {
-  --bg: #0b0e14;
-  --ink: #f2f4f8;
-  --ink-2: #aab2c0;
-  --ink-3: #6f7889;
-  --panel: #141924;
-  --line: #262d3b;
-  --ok: #5fd08e;
-  --bad: #ff6b5e;
-  --accent: #8ea5ff;
+  --bg: #07080c; --bg-2: #0d1017; --panel: rgba(17, 20, 30, 0.82); --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.14); --text: #eef0f7; --text-2: #b4bacb; --text-3: #7d8499;
+  --violet: #8b5cf6; --violet-2: #a78bfa; --cyan: #22d3ee; --ok: #10b981; --bad: #f43f5e; --warn: #f59e0b;
+  --display: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; }
+html, body { margin: 0; overflow: hidden; }
 body {
+  color: var(--text); font-family: var(--display); -webkit-font-smoothing: antialiased;
   background:
-    radial-gradient(900px 500px at 85% 20%, rgba(142, 165, 255, 0.16), transparent 60%),
-    radial-gradient(700px 500px at 10% 110%, rgba(255, 107, 94, 0.12), transparent 60%),
-    var(--bg);
-  color: var(--ink);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  display: grid;
-  grid-template-columns: 1fr 520px;
-  gap: 48px;
-  padding: 72px 72px 64px 80px;
+    radial-gradient(900px 420px at 8% -80px, rgba(139, 92, 246, 0.20), transparent 70%),
+    radial-gradient(800px 420px at 100% 0%, rgba(34, 211, 238, 0.10), transparent 70%),
+    linear-gradient(rgba(148, 163, 255, 0.05) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(90deg, rgba(148, 163, 255, 0.05) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(180deg, var(--bg), var(--bg-2));
 }
-.brand { display: flex; align-items: center; gap: 14px; color: var(--ink-2);
-  font-weight: 650; font-size: 22px; letter-spacing: 0.01em; }
-.mark { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
-  background: linear-gradient(135deg, #6d8bff, #a78bfa); color: #0b0e14; font-weight: 800;
-  font-size: 22px; }
-h1 { margin: 44px 0 0; font-size: 82px; line-height: 0.98; letter-spacing: -0.045em;
-  font-weight: 800; }
-.tag { margin: 28px 0 0; font-size: 31px; line-height: 1.3; color: var(--ink-2);
-  letter-spacing: -0.012em; font-weight: 500; max-width: 560px; }
-.tag b { color: var(--ink); font-weight: 700; }
-.foot { margin-top: 40px; display: flex; gap: 10px; flex-wrap: wrap; }
-.pill { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
-  color: var(--ink-2); font-size: 17px; background: rgba(20, 25, 36, 0.8); }
-.card { position: relative; align-self: center; padding: 26px 26px 22px; border-radius: 22px;
-  background: var(--panel); border: 1px solid var(--line);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }
-.who { font-size: 14px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
-  color: #f59e0b; }
-.claim { margin: 10px 0 0; font-size: 27px; line-height: 1.3; font-weight: 700;
-  letter-spacing: -0.015em; }
-.ev { margin: 22px 0 0; padding: 0; list-style: none; display: grid; gap: 9px; }
-.ev li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 11px;
-  background: #0f131c; border: 1px solid var(--line);
-  font: 17px/1.2 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink-2); }
-.ev .id { color: var(--accent); min-width: 58px; }
-.ev .st { margin-left: auto; color: var(--ok); }
-.ev li.miss { border-color: rgba(255, 107, 94, 0.5); background: rgba(255, 107, 94, 0.08);
-  color: #ffd2cd; }
-.ev li.miss .id, .ev li.miss .st, .ev .st.neg { color: var(--bad); }
-.stamp { position: absolute; right: -26px; top: -34px; transform: rotate(9deg);
-  padding: 8px 22px 10px; border: 6px solid var(--bad); border-radius: 14px; color: var(--bad);
-  font-size: 58px; font-weight: 900; letter-spacing: 0.08em; background: rgba(11, 14, 20, 0.88);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
-</style>
-</head>
-<body>
+.glass {
+  position: relative; border-radius: 16px; border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 90px), var(--panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 30px 60px -30px rgba(0, 0, 0, 0.9);
+}
+.lbl { font: 600 11px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-3); }
+"""
+
+CONSOLE_HTML = (
+    """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">"""
+    + FONTS
+    + """<style>"""
+    + BASE_CSS
+    + """
+html, body { width: 1120px; height: 760px; }
+.top { position: absolute; left: 16px; right: 16px; top: 12px; height: 44px; display: flex; align-items: center;
+  gap: 14px; padding: 0 16px; border-radius: 12px; font: 500 13px/1 var(--mono); color: var(--text-2); }
+.live { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-weight: 700; letter-spacing: 0.12em; }
+.live i { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 var(--ring, 3px) rgba(244, 63, 94, 0.22), 0 0 12px var(--bad); }
+.live.done i { background: var(--ok); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.22), 0 0 12px var(--ok); }
+.sep { color: var(--text-3); }
+.top b { color: var(--text); font-weight: 600; }
+.top .model { padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.4); background: rgba(139, 92, 246, 0.12); color: var(--violet-2); }
+.top .right { margin-left: auto; display: flex; gap: 16px; align-items: center; }
+.top .clock { color: var(--cyan); }
+.browser { position: absolute; left: 16px; top: 70px; width: 658px; height: 500px; padding: 8px; overflow: hidden; }
+.chrome { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 6px 8px; }
+.dots { display: flex; gap: 7px; }
+.dots i { width: 11px; height: 11px; border-radius: 50%; display: block; background: #2a2f3c; }
+.dots i:nth-child(1) { background: #ff5f57; } .dots i:nth-child(2) { background: #febc2e; } .dots i:nth-child(3) { background: #28c840; }
+.url { flex: 1; display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 12px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); font: 12.5px/1 var(--mono); color: var(--text-2); }
+.url .lock { color: var(--ok); }
+.url b { color: var(--text); font-weight: 500; }
+.ctl { font: 600 10px/1 var(--mono); letter-spacing: 0.14em; color: var(--violet-2); padding: 5px 8px; border-radius: 6px;
+  background: rgba(139, 92, 246, 0.14); border: 1px solid rgba(139, 92, 246, 0.35); }
+#vp { position: relative; width: 640px; height: 448px; border-radius: 10px; overflow: hidden; background: #faf7f2; }
+#vp img { position: absolute; inset: 0; width: 640px; height: 448px; display: none; }
+#vp img.on { display: block; }
+.cursor { position: absolute; width: 24px; height: 24px; z-index: 5; filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.45)); }
+.ripple { position: absolute; z-index: 4; border-radius: 50%; border: 2px solid var(--violet); background: rgba(139, 92, 246, 0.18); }
+.marker { position: absolute; z-index: 3; border-radius: 999px; border: 2px dashed var(--bad); box-shadow: 0 0 0 6px rgba(244, 63, 94, 0.15), 0 0 24px rgba(244, 63, 94, 0.5); }
+.marker span { position: absolute; left: calc(100% + 14px); top: 50%; transform: translateY(-50%); white-space: nowrap;
+  padding: 6px 10px; border-radius: 8px; background: var(--bad); color: #fff; font: 700 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+  box-shadow: 0 8px 20px -6px rgba(244, 63, 94, 0.8); }
+.marker span::before { content: ""; position: absolute; left: -6px; top: 50%; margin-top: -6px; border: 6px solid transparent; border-left: 0; border-right-color: var(--bad); }
+.thoughts { position: absolute; left: 688px; top: 70px; width: 416px; height: 500px; padding: 16px 16px 14px; overflow: hidden; }
+.thoughts header, .net header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.thoughts header .lbl, .net header .lbl { color: var(--violet-2); }
+.thoughts header .lbl::before, .net header .lbl::before { content: "\\25C6  "; color: var(--cyan); }
+.tick { font: 500 11px/1 var(--mono); color: var(--text-3); }
+.thought { position: relative; margin-bottom: 10px; padding: 11px 12px 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.025); }
+.thought::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--violet); box-shadow: 0 0 10px var(--violet); }
+.thought.old { opacity: 0.6; }
+.thought.old::before { background: var(--text-3); box-shadow: none; }
+.thought .lbl { display: block; margin-bottom: 7px; font-size: 10px; }
+.thought p { margin: 0; font: 500 15.5px/1.45 var(--display); color: var(--text); letter-spacing: -0.005em; }
+#th { height: 268px; overflow: hidden; }
+.acts { position: absolute; left: 16px; right: 16px; bottom: 14px; height: 176px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.25); overflow: hidden; }
+.acts .lbl { display: block; margin-bottom: 10px; color: var(--cyan); }
+.act { display: flex; align-items: center; gap: 8px; height: 22px; font: 500 12.5px/1 var(--mono); color: var(--text-2); white-space: nowrap; }
+.act::before { content: "\\203A"; color: var(--violet-2); font-weight: 700; }
+.act b { color: var(--text); font-weight: 500; }
+.act em { margin-left: auto; font-style: normal; color: var(--ok); }
+.act.ghost, .act.ghost b, .act.ghost em { color: var(--bad); }
+.act.ghost b { text-decoration: line-through; text-decoration-color: rgba(244, 63, 94, 0.6); }
+.caret { display: inline-block; width: 8px; height: 17px; margin-left: 2px; vertical-align: -3px; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.net { position: absolute; left: 16px; right: 16px; top: 584px; height: 162px; padding: 12px 16px; overflow: hidden; }
+.net header { margin-bottom: 8px; }
+.row { display: grid; grid-template-columns: 54px 52px 230px 96px 1fr; align-items: center; gap: 10px; height: 20px; font: 500 12.5px/1 var(--mono); color: var(--text-2); }
+.row .id { color: var(--cyan); }
+.row .m { color: var(--text-3); font-weight: 700; }
+.row .s { color: var(--ok); }
+.row .lane { position: relative; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.05); }
+.row .lane i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: rgba(34, 211, 238, 0.7); }
+.row.hl { color: var(--text); }
+.row.hl .m { color: var(--warn); }
+.row.hl .lane i { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+.row.hl .p::after { content: "  state change"; color: var(--warn); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+.row.ghost { color: var(--bad); }
+.row.ghost .id, .row.ghost .m, .row.ghost .s { color: var(--bad); }
+.row.ghost .lane { background: repeating-linear-gradient(90deg, rgba(244, 63, 94, 0.5) 0 6px, transparent 6px 12px); }
+.row.ghost .p { text-decoration: line-through; text-decoration-color: rgba(244, 63, 94, 0.6); }
+.final { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(5, 6, 10, 0.72); backdrop-filter: blur(5px); }
+.say { position: relative; width: 760px; padding: 30px 36px 32px; border-radius: 24px; border: 1px solid rgba(139, 92, 246, 0.35);
+  background: linear-gradient(180deg, rgba(139, 92, 246, 0.16), rgba(139, 92, 246, 0) 70%), #11141e; box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.9), 0 0 60px -20px rgba(139, 92, 246, 0.6); }
+.say .who { display: flex; align-items: center; gap: 12px; }
+.say .av { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: linear-gradient(135deg, var(--violet), var(--cyan)); font-size: 20px; }
+.say .who .lbl { color: var(--violet-2); }
+.say q { display: block; margin: 18px 0 0; font: 700 38px/1.18 var(--display); letter-spacing: -0.03em; color: #fff; quotes: "\\201C" "\\201D"; }
+.say .meta { margin-top: 18px; display: flex; gap: 10px; flex-wrap: wrap; }
+.say .meta span { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-2); font: 500 12px/1 var(--mono); color: var(--text-2); }
+.say .meta span.ok { color: var(--ok); border-color: rgba(16, 185, 129, 0.4); }
+.ask { margin-top: 26px; text-align: center; font: 700 26px/1.2 var(--display); letter-spacing: -0.02em; color: var(--warn); }
+.ask span { display: inline-block; padding: 12px 22px; border-radius: 999px; border: 1px solid rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.1); }
+</style></head><body>
+<div class="top glass">
+  <span class="live" id="live"><i></i><span id="livetext">AGENT RUN</span></span>
+  <span class="sep">&middot;</span><span>task: <b>"""
+    + TASK
+    + """</b></span>
+  <span class="sep">&middot;</span><span>model: <span class="model">generic agent</span></span>
+  <span class="right"><span id="step">step 0/6</span><span class="clock" id="clock">00:00.0</span></span>
+</div>
+<div class="browser glass">
+  <div class="chrome"><span class="dots"><i></i><i></i><i></i></span>
+    <span class="url"><span class="lock">&#9679;</span><span id="url"></span></span><span class="ctl">AGENT CONTROL</span></div>
+  <div id="vp"></div>
+</div>
+<div class="thoughts glass"><header><span class="lbl">Agent thoughts</span><span class="tick" id="tok">streaming</span></header><div id="th"></div><div class="acts"><span class="lbl">Tool calls</span><div id="acts"></div></div></div>
+<div class="net glass"><header><span class="lbl">Network &middot; live capture</span><span class="tick" id="ncount"></span></header><div id="rows"></div></div>
+<div id="final"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const S = """
+    + str(SHOP_SCALE)
+    + """;
+const CURSOR = '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M4 2 L4 20 L8.6 15.8 L11.8 22.6 L15 21.2 L11.9 14.4 L18 14.4 Z" fill="#fff" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+window.init = async (shots) => {
+  const vp = $("#vp");
+  for (const src of shots) { const img = new Image(); img.src = src; vp.appendChild(img); }
+  await Promise.all([...vp.querySelectorAll("img")].map((i) => i.decode()));
+  await document.fonts.ready;
+};
+window.render = (st) => {
+  const imgs = document.querySelectorAll("#vp img");
+  imgs.forEach((img, i) => img.classList.toggle("on", i === st.shot));
+  $("#url").innerHTML = "";
+  $("#url").append(el("b", "", st.host), st.path);
+  $("#step").textContent = `step ${st.step}/6`;
+  $("#clock").textContent = st.clock;
+  $("#live").classList.toggle("done", st.done);
+  $("#livetext").textContent = st.done ? "RUN FINISHED" : "AGENT RUN";
+  $("#live").style.setProperty("--ring", `${3 + 3 * st.pulse}px`);
+  $("#tok").textContent = st.done ? "done" : "streaming";
+  const vp = $("#vp");
+  vp.querySelectorAll(".cursor, .ripple, .marker").forEach((e) => e.remove());
+  if (st.marker) {
+    const m = el("div", "marker");
+    const pad = 6;
+    Object.assign(m.style, { left: `${st.marker.x * S - pad}px`, top: `${st.marker.y * S - pad}px`, width: `${st.marker.w * S + 2 * pad}px`, height: `${st.marker.h * S + 2 * pad}px` });
+    m.append(el("span", "", st.marker.label));
+    vp.append(m);
+  }
+  if (st.ripple) {
+    const r = el("div", "ripple");
+    const size = 14 + 46 * st.ripple.t;
+    Object.assign(r.style, { left: `${st.ripple.x * S - size / 2}px`, top: `${st.ripple.y * S - size / 2}px`, width: `${size}px`, height: `${size}px`, opacity: `${1 - st.ripple.t * 0.8}` });
+    vp.append(r);
+  }
+  if (st.cursor) {
+    const c = el("div", "cursor");
+    c.innerHTML = CURSOR;
+    Object.assign(c.style, { left: `${st.cursor.x * S - 4}px`, top: `${st.cursor.y * S - 2}px`, transform: st.cursor.down ? "scale(0.86)" : "none" });
+    vp.append(c);
+  }
+  const th = $("#th");
+  th.innerHTML = "";
+  st.thoughts.forEach((t, i) => {
+    const box = el("div", "thought" + (i < st.thoughts.length - 1 ? " old" : ""));
+    box.append(el("span", "lbl", `step ${t.n} · reasoning`));
+    const p = el("p", "", t.text.slice(0, t.shown));
+    if (t.shown < t.text.length || (i === st.thoughts.length - 1 && !st.done && st.caret)) p.append(el("span", "caret"));
+    box.append(p);
+    th.append(box);
+  });
+  while (th.scrollHeight > th.clientHeight + 1 && th.firstChild && th.childElementCount > 1) th.firstChild.remove();
+  const acts = $("#acts");
+  acts.innerHTML = "";
+  st.actions.slice(-6).forEach((a) => {
+    const row = el("div", "act" + (a.ghost ? " ghost" : ""));
+    const call = el("span"); call.append(a.name + "(", el("b", "", a.arg), ")"); row.append(call, el("em", "", a.result));
+    acts.append(row);
+  });
+  const rows = $("#rows");
+  rows.innerHTML = "";
+  st.net.forEach((r) => {
+    const row = el("div", "row" + (r.hl ? " hl" : "") + (r.ghost ? " ghost" : ""));
+    row.append(el("span", "id", r.id), el("span", "m", r.m), el("span", "p", r.p), el("span", "s", r.s));
+    const lane = el("span", "lane");
+    if (!r.ghost) { const bar = el("i"); bar.style.left = `${((r.at - 1) / 6) * 90 + 2}%`; bar.style.width = `${Math.max(1.2, 6 * r.grow)}%`; lane.append(bar); }
+    row.append(lane);
+    rows.append(row);
+  });
+  const nreq = st.net.filter((r) => !r.ghost).length, nmut = st.net.filter((r) => r.m === "POST" && !r.ghost).length;
+  $("#ncount").textContent = `${nreq} request${nreq === 1 ? "" : "s"} · ${nmut} state change${nmut === 1 ? "" : "s"}`;
+  const fin = $("#final");
+  fin.innerHTML = "";
+  if (st.final) {
+    const wrap = el("div", "final");
+    wrap.style.opacity = st.final.fade;
+    const say = el("div", "say");
+    const who = el("div", "who");
+    who.append(el("span", "av", "\\u{1F916}"), el("span", "lbl", "Agent · final answer"));
+    const meta = el("div", "meta");
+    meta.append(el("span", "ok", "status: success"), el("span", "", "steps: 6"), el("span", "", "self-reported"));
+    say.append(who, el("q", "", st.final.text), meta);
+    const ask = el("div", "ask");
+    const a = el("span", "", "Would your LLM judge believe it?");
+    a.style.boxShadow = `0 0 ${10 + 30 * st.final.pulse}px rgba(245, 158, 11, ${0.15 + 0.4 * st.final.pulse})`;
+    a.style.transform = `scale(${1 + 0.03 * st.final.pulse})`;
+    a.style.opacity = st.final.ask;
+    ask.append(a);
+    const col = el("div");
+    col.append(say, ask);
+    wrap.append(col);
+    fin.append(wrap);
+  }
+};
+</script></body></html>"""
+)
+
+JUDGE_OVERLAY_CSS = """
+body { padding-top: 58px !important; }
+.wrap { max-width: 1100px !important; }
+.ej-bar { position: fixed; z-index: 50; left: 0; right: 0; top: 0; height: 52px; display: flex; align-items: center; gap: 14px;
+  padding: 0 22px; background: rgba(7, 8, 12, 0.88); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font: 500 13px/1 "JetBrains Mono", ui-monospace, monospace; color: #b4bacb; }
+.ej-bar .who { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; letter-spacing: 0.14em; color: #eef0f7; }
+.ej-bar .who i { width: 9px; height: 9px; border-radius: 50%; background: #22d3ee; box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.2), 0 0 12px #22d3ee; }
+.ej-bar .cmd { color: #7d8499; }
+.ej-bar .cmd b { color: #a78bfa; font-weight: 500; }
+.ej-bar .st { margin-left: auto; padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(139, 92, 246, 0.4); background: rgba(139, 92, 246, 0.12); color: #c4b5fd; }
+.ej-pending { --t: #8b5cf6 !important; }
+.ej-pending .claim-badges .badge { font-size: 0 !important; }
+.ej-pending .claim-badges .badge::after { content: "checking"; font-size: 12px; }
+.ej-pending .evidence { opacity: 0.28; }
+.ej-pending::before { opacity: 0.6; }
+.ej-flash { box-shadow: 0 0 0 2px rgba(244, 63, 94, 0.9), 0 0 50px -6px rgba(244, 63, 94, 0.75) !important; }
+.ej-flash-ok { box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.9), 0 0 50px -6px rgba(16, 185, 129, 0.7) !important; }
+.ej-lit { border-color: #22d3ee !important; box-shadow: 0 0 0 1px #22d3ee, 0 0 22px -2px rgba(34, 211, 238, 0.9) !important; }
+.ej-tag { position: fixed; z-index: 60; max-width: 360px; padding: 12px 16px 13px; border-radius: 12px; color: #fff;
+  font: 600 16px/1.3 "Space Grotesk", ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.01em;
+  background: linear-gradient(180deg, rgba(244, 63, 94, 0.95), rgba(190, 18, 60, 0.95)); box-shadow: 0 18px 40px -12px rgba(244, 63, 94, 0.8); }
+.ej-tag.cyan { background: linear-gradient(180deg, rgba(34, 211, 238, 0.95), rgba(8, 145, 178, 0.95)); color: #04121a; box-shadow: 0 18px 40px -12px rgba(34, 211, 238, 0.7); }
+.ej-tag small { display: block; margin-bottom: 5px; font: 700 10.5px/1 "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.8; }
+.ej-tag::before { content: ""; position: absolute; top: 50%; margin-top: -8px; border: 8px solid transparent; }
+.ej-tag.left::before { right: -14px; border-left: 8px solid rgba(220, 38, 78, 0.95); border-right: 0; }
+.ej-tag.cyan.left::before { border-left-color: rgba(34, 211, 238, 0.95); }
+.ej-ghost { border: 1px dashed rgba(244, 63, 94, 0.7); border-radius: 10px; margin: 6px 10px 4px; background: rgba(244, 63, 94, 0.08) !important; }
+.ej-ghost .label { color: #f43f5e !important; text-decoration: line-through; text-decoration-color: rgba(244, 63, 94, 0.6); }
+.ej-ghost .node { border-color: #f43f5e !important; border-style: dashed !important; background: transparent !important; }
+.ej-ghost .badge { --t: #f43f5e; }
+"""
+
+JUDGE_OVERLAY_JS = r"""
+(css) => {
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.appendChild(style);
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@600;700&display=block";
+  document.head.appendChild(link);
+  const bar = document.createElement("div");
+  bar.className = "ej-bar";
+  bar.innerHTML = '<span class="who"><i></i>THE JUDGE</span><span class="cmd">$ evidence-judge judge <b>--trace</b> trace.zip <b>--har</b> run.har <b>--spec</b> spec.yaml</span><span class="st" id="ej-st"></span>';
+  document.body.appendChild(bar);
+  const ghost = document.createElement("li");
+  ghost.className = "ej-ghost";
+  ghost.hidden = true;
+  ghost.innerHTML = '<span class="time">never</span><span class="node"></span><span class="what"><span class="kind">net#?</span><span class="label">POST /api/orders</span><span class="detail">no order request anywhere in the recording</span></span><span class="lane opt"></span><span class="badge">missing</span>';
+  document.querySelector(".trace ol").appendChild(ghost);
+  window.__ej = {
+    time(ms) { document.getAnimations().forEach((a) => { a.pause(); a.currentTime = ms; }); },
+    sync(st) {
+      document.getElementById("ej-st").textContent = st.status;
+      document.querySelectorAll(".claim").forEach((c, i) => {
+        c.classList.toggle("ej-pending", i >= st.revealed);
+        c.classList.toggle("ej-flash", i === st.flash && c.classList.contains("t-bad"));
+        c.classList.toggle("ej-flash-ok", i === st.flash && c.classList.contains("t-ok"));
+      });
+      document.querySelectorAll(".ej-lit").forEach((e) => e.classList.remove("ej-lit"));
+      for (const sel of st.lit) document.querySelectorAll(sel).forEach((e) => e.classList.add("ej-lit"));
+      ghost.hidden = !st.ghost;
+      document.querySelectorAll(".ej-tag").forEach((e) => e.remove());
+      for (const tag of st.tags) {
+        const target = document.querySelector(tag.sel);
+        if (!target) continue;
+        const box = target.getBoundingClientRect();
+        const t = document.createElement("div");
+        t.className = "ej-tag left " + (tag.tone || "");
+        const small = document.createElement("small");
+        small.textContent = tag.kicker;
+        t.append(small, tag.text);
+        document.body.appendChild(t);
+        const w = t.getBoundingClientRect().width, h = t.getBoundingClientRect().height;
+        if (tag.mode === "in") {
+          t.style.left = `${box.right - w - 14}px`;
+          t.style.top = `${box.bottom - h - 14}px`;
+        } else {
+          t.style.left = `${Math.max(12, box.left - w - 18 + (tag.dx || 0))}px`;
+          t.style.top = `${box.top + box.height / 2 - h / 2 + (tag.dy || 0)}px`;
+        }
+        t.style.opacity = tag.alpha ?? 1;
+      }
+    },
+  };
+}
+"""
+
+SOCIAL_HTML = (
+    """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">"""
+    + FONTS
+    + """<style>"""
+    + BASE_CSS
+    + """
+html, body { width: 1280px; height: 640px; }
+body { display: grid; grid-template-columns: 1fr 560px; gap: 40px; padding: 64px 64px 56px 72px; }
+.brand { display: flex; align-items: center; gap: 12px; font: 600 15px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-2); }
+.mark { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: linear-gradient(135deg, var(--violet), var(--cyan));
+  color: #07080c; font: 800 16px/1 var(--mono); letter-spacing: -0.02em; box-shadow: 0 0 30px -6px var(--violet); }
+h1 { margin: 44px 0 0; font: 700 84px/0.95 var(--display); letter-spacing: -0.05em; }
+h1 span { background: linear-gradient(90deg, #c4b5fd, var(--cyan)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.tag { margin: 26px 0 0; font: 500 30px/1.25 var(--display); letter-spacing: -0.02em; color: var(--text-2); max-width: 560px; }
+.tag b { color: var(--text); font-weight: 700; }
+.chips { margin-top: 38px; display: flex; flex-wrap: wrap; gap: 10px; }
+.chips span { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line-2); background: rgba(255, 255, 255, 0.03); font: 500 14px/1 var(--mono); color: var(--text-2); }
+.chips span::before { content: "\\25C6  "; color: var(--cyan); font-size: 10px; }
+.card { align-self: center; padding: 24px 24px 22px; }
+.card .lbl { display: block; margin-bottom: 10px; }
+.said { padding: 14px 16px; border-radius: 12px; border: 1px solid rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.07); }
+.said .lbl { color: var(--warn); }
+.said p { margin: 0; font: 700 25px/1.25 var(--display); letter-spacing: -0.02em; }
+.ev { margin-top: 14px; }
+.ev .lbl { color: var(--cyan); }
+.ev ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ev li { display: grid; grid-template-columns: 62px 1fr auto; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.025); font: 500 15px/1 var(--mono); color: var(--text-2); }
+.ev .id { color: var(--cyan); }
+.ev .s { color: var(--ok); }
+.ev li.miss { border: 1px dashed rgba(244, 63, 94, 0.7); background: rgba(244, 63, 94, 0.08); color: #fecdd3; }
+.ev li.miss .id, .ev li.miss .s { color: var(--bad); }
+.stamp { position: absolute; right: -22px; top: -30px; transform: rotate(8deg); padding: 8px 20px 9px; border: 4px solid var(--bad); border-radius: 14px;
+  color: var(--bad); font: 800 52px/1 var(--display); letter-spacing: 0.1em; background: rgba(7, 8, 12, 0.9); outline: 1px solid rgba(244, 63, 94, 0.45); outline-offset: 5px;
+  box-shadow: 0 0 40px -6px rgba(244, 63, 94, 0.8); text-shadow: 0 0 20px rgba(244, 63, 94, 0.6); }
+</style></head><body>
 <div>
   <div class="brand"><span class="mark">EJ</span>evidence-judge</div>
-  <h1>Evidence Judge</h1>
+  <h1>Evidence<br><span>Judge</span></h1>
   <p class="tag"><b>Don't trust what the agent says.</b> Check what it did.</p>
-  <div class="foot">
-    <span class="pill">Playwright traces</span>
-    <span class="pill">HAR</span>
-    <span class="pill">browser-use</span>
-    <span class="pill">offline &amp; deterministic</span>
-  </div>
+  <div class="chips"><span>Playwright traces</span><span>HAR</span><span>browser-use</span><span>offline</span></div>
 </div>
-<div class="card">
+<div class="card glass">
   <div class="stamp">FAIL</div>
-  <div class="who">Agent claims</div>
-  <p class="claim">“I placed the order, order #1042 confirmed.”</p>
-  <ul class="ev">
-    <li><span class="id">net#3</span>POST /api/cart<span class="st">200</span></li>
-    <li><span class="id">net#5</span>GET /checkout<span class="st">200</span></li>
-    <li class="miss"><span class="id">✗</span>POST /api/orders<span class="st">never sent</span></li>
-    <li><span class="id">final</span>/checkout<span class="st neg">no #1042</span></li>
-  </ul>
+  <div class="said"><span class="lbl">Agent said</span><p>&ldquo;I placed the order, order #1042 confirmed.&rdquo;</p></div>
+  <div class="ev"><span class="lbl">Evidence</span><ul>
+    <li><span class="id">net#3</span>POST /api/cart<span class="s">200</span></li>
+    <li><span class="id">net#5</span>GET /checkout<span class="s">200</span></li>
+    <li class="miss"><span class="id">net#?</span>POST /api/orders<span class="s">never sent</span></li>
+    <li><span class="id">final</span>/checkout<span class="s" style="color: var(--bad)">no #1042</span></li>
+  </ul></div>
 </div>
-</body>
-</html>
-"""
+</body></html>"""
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,13 +446,13 @@ class ReportShot:
     crop: int
 
 
-REPORT_SCENARIOS = ("forged_success", "honest_success", "side_effect")
+REPORT_SCENARIOS = ("forged_success", "honest_success")
 REPORT_SHOTS: tuple[ReportShot, ...] = (
-    ReportShot("forged_success", "report-fail-light.png", "light", {"width": REPORT_WIDTH, "height": 900}, 1, REPORT_CROP),
     ReportShot("forged_success", "report-fail-dark.png", "dark", {"width": REPORT_WIDTH, "height": 900}, 1, REPORT_CROP),
-    ReportShot("honest_success", "report-pass-light.png", "light", {"width": REPORT_WIDTH, "height": 900}, 1, REPORT_CROP),
+    ReportShot("forged_success", "report-fail-light.png", "light", {"width": REPORT_WIDTH, "height": 900}, 1, REPORT_CROP),
     ReportShot("honest_success", "report-pass-dark.png", "dark", {"width": REPORT_WIDTH, "height": 900}, 1, REPORT_CROP),
-    ReportShot("side_effect", "report-mobile.png", "light", MOBILE, 2, MOBILE_CROP),
+    ReportShot("honest_success", "report-pass-light.png", "light", {"width": REPORT_WIDTH, "height": 900}, 1, REPORT_CROP),
+    ReportShot("forged_success", "report-mobile.png", "dark", MOBILE, 2, MOBILE_CROP),
 )  # fmt: skip
 
 
@@ -365,13 +483,29 @@ def judge_to_html(scenario: str, out_html: Path) -> Path:
     return out_html
 
 
-def optimise_png(raw: bytes, out: Path, *, quantize: bool = True) -> None:
+def optimise_png(raw: bytes, out: Path) -> None:
     image = Image.open(io.BytesIO(raw)).convert("RGB")
-    if quantize:
-        image = image.quantize(
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    if buffer.tell() > PNG_BUDGET:
+        palette = image.quantize(
             colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE
         )
+        image = image.quantize(palette=palette, dither=Image.Dither.FLOYDSTEINBERG)
     image.save(out, format="PNG", optimize=True)
+
+
+CLEAN_CUT_JS = """
+(limit) => {
+  let cut = 0;
+  for (const el of document.querySelectorAll(".banner, .dims, .claim, section > header")) {
+    const r = el.getBoundingClientRect();
+    const bottom = r.bottom + window.scrollY;
+    if (bottom <= limit - 6 && bottom > cut) cut = bottom;
+  }
+  return Math.ceil(cut + 6);
+}
+"""
 
 
 def shoot_report(browser: Browser, html: Path, shot: ReportShot, out_dir: Path) -> Path:
@@ -382,9 +516,10 @@ def shoot_report(browser: Browser, html: Path, shot: ReportShot, out_dir: Path) 
     )
     page = context.new_page()
     page.goto(html.as_uri())
-    height = min(shot.crop, int(page.evaluate("document.documentElement.scrollHeight")))
+    height = int(page.evaluate(CLEAN_CUT_JS, shot.crop))
     raw = page.screenshot(
         full_page=True,
+        animations="disabled",
         clip={"x": 0, "y": 0, "width": shot.viewport["width"], "height": height},
     )
     context.close()
@@ -394,81 +529,23 @@ def shoot_report(browser: Browser, html: Path, shot: ReportShot, out_dir: Path) 
 
 
 @dataclass(slots=True)
-class Reel:
-    """Screenshot frames with explicit durations, plus overlay state replayed on every frame."""
+class Film:
+    """Screenshot frames with explicit durations; identical consecutive frames are merged."""
 
     page: Page
+    animations: Literal["disabled", "allow"] = "disabled"
     frames: list[tuple[bytes, int]] = field(default_factory=list[tuple[bytes, int]])
-    caption: dict[str, str] | None = None
-    cursor: dict[str, Any] | None = None
-    net: list[dict[str, str]] | None = None
-    bubble: dict[str, str] | None = None
-    highlight: list[str] = field(default_factory=list[str])
-    hl_color: str = "#f59e0b"
-    tags: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
-
-    def say(self, who: str, text: str, tone: str) -> None:
-        self.caption = {"who": who, "text": text, "tone": tone}
 
     def snap(self, ms: int) -> None:
-        state = {
-            "caption": self.caption,
-            "cursor": self.cursor,
-            "net": self.net,
-            "bubble": self.bubble,
-            "highlight": self.highlight,
-            "hlColor": self.hl_color,
-            "tags": self.tags,
-        }
-        self.page.evaluate("state => window.__ej.sync(state)", state)
-        frame = self.page.screenshot(animations="disabled", caret="hide")
+        frame = self.page.screenshot(animations=self.animations, caret="hide")
         if self.frames and self.frames[-1][0] == frame:
             self.frames[-1] = (frame, self.frames[-1][1] + ms)
         else:
             self.frames.append((frame, ms))
 
-    def glide(self, selector: str, ms: int = 700, steps: int = 10) -> tuple[float, float]:
-        box = self.page.locator(selector).first.bounding_box()
-        if box is None:
-            raise RuntimeError(f"{selector} is not visible")
-        tx, ty = box["x"] + min(box["width"] / 2, 60), box["y"] + box["height"] / 2
-        start = self.cursor or {"x": FRAME["width"] / 2, "y": FRAME["height"] - 140}
-        sx, sy = float(start["x"]), float(start["y"])
-        for i in range(1, steps + 1):
-            t = i / steps
-            e = 4 * t**3 if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2
-            x, y = sx + (tx - sx) * e, sy + (ty - sy) * e
-            self.page.mouse.move(x, y)
-            self.cursor = {"x": x, "y": y, "down": False}
-            self.snap(ms // steps)
-        return tx, ty
-
-    def click(self, selector: str, ms: int = 700) -> None:
-        tx, ty = self.glide(selector, ms)
-        self.cursor = {"x": tx, "y": ty, "down": True}
-        self.snap(220)
-        self.page.locator(selector).first.click()
-        self.page.wait_for_load_state("load")
-        self.cursor = {"x": tx, "y": ty, "down": False}
-
-    def scroll_to(self, selector: str, offset: int = 70, ms: int = 900, steps: int = 12) -> None:
-        start = float(self.page.evaluate("window.scrollY"))
-        target = float(
-            self.page.evaluate(
-                "([sel, off]) => Math.max(0, Math.min(document.querySelector(sel)"
-                ".getBoundingClientRect().top + window.scrollY - off,"
-                " document.documentElement.scrollHeight - window.innerHeight))",
-                [selector, offset],
-            )
-        )
-        for i in range(1, steps + 1):
-            t = i / steps
-            e = 1 - (1 - t) ** 3
-            self.page.evaluate("y => window.scrollTo(0, y)", round(start + (target - start) * e))
-            self.snap(ms // steps)
-
-    def save_webp(self, out: Path) -> None:
-        save_animation(self.frames, out)
+    @property
+    def elapsed(self) -> int:
+        return sum(ms for _, ms in self.frames)
 
 
 def save_animation(frames: Sequence[tuple[bytes, int]], out: Path) -> None:
@@ -482,133 +559,428 @@ def save_animation(frames: Sequence[tuple[bytes, int]], out: Path) -> None:
         duration=durations,
         loop=0,
         lossless=True,
+        quality=100,
         method=6,
         minimize_size=True,
     )
+    if out.stat().st_size > ANIMATION_BUDGET:
+        images[0].save(
+            out,
+            format="WEBP",
+            save_all=True,
+            append_images=images[1:],
+            duration=durations,
+            loop=0,
+            lossless=False,
+            quality=92,
+            method=6,
+            allow_mixed=True,
+        )
 
 
-@contextmanager
-def overlay_page(browser: Browser, chrome: str | None) -> Iterator[Page]:
-    context = browser.new_context(viewport=FRAME, device_scale_factor=1, bypass_csp=True)
-    context.add_init_script(script=f"window.__EJ_OPTS = {json.dumps({'chrome': chrome})};")
-    context.add_init_script(script=OVERLAY_JS)
-    try:
-        yield context.new_page()
-    finally:
-        context.close()
+def ease(t: float) -> float:
+    return 4 * t**3 if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2
 
 
-def record_agent_run(browser: Browser, out: Path) -> None:
-    with running_shop() as base, overlay_page(browser, SHOP_HOST) as page:
+def data_uri(png: bytes) -> str:
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+
+@dataclass(frozen=True, slots=True)
+class ShopFrame:
+    png: bytes
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class Box:
+    x: float
+    y: float
+    w: float
+    h: float
+
+    @property
+    def centre(self) -> tuple[float, float]:
+        return (self.x + min(self.w / 2, 70), self.y + self.h / 2)
+
+
+@dataclass(slots=True)
+class AgentRun:
+    """What the scripted agent did in the shop: screenshots, click targets and the network log."""
+
+    shots: list[ShopFrame] = field(default_factory=list[ShopFrame])
+    targets: dict[str, Box] = field(default_factory=dict[str, Box])
+    log: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
+
+
+def drive_shop(browser: Browser) -> AgentRun:
+    run = AgentRun()
+    with running_shop() as base:
         httpx.post(f"{base}/api/reset", json={}).raise_for_status()
-        reel = Reel(page)
-        log: list[dict[str, str]] = []
+        context = browser.new_context(viewport=SHOP_VIEW, device_scale_factor=2)
+        page = context.new_page()
 
         def on_response(response: Response) -> None:
             kind = response.request.resource_type
             path = response.url.removeprefix(base) or "/"
             if kind in ("document", "fetch") and path.startswith("/"):
-                method = response.request.method
-                log.append({"method": method, "path": path, "status": str(response.status)})
+                run.log.append({"m": response.request.method, "p": path, "s": str(response.status)})
+
+        def shoot() -> None:
+            page.wait_for_timeout(120)
+            path = page.url.removeprefix(base) or "/"
+            run.shots.append(ShopFrame(page.screenshot(animations="disabled"), path))
+
+        def target(name: str, selector: str) -> None:
+            box = page.locator(selector).first.bounding_box()
+            if box is None:
+                raise RuntimeError(f"{selector} is not visible")
+            run.targets[name] = Box(box["x"], box["y"], box["width"], box["height"])
 
         page.on("response", on_response)
         page.goto(f"{base}/")
-        reel.net = log
-        reel.say("Task", "Buy a red kettle under $30", "task")
-        reel.snap(2200)
-
-        reel.say("Agent", "Opens the Red Kettle: $24.00", "agent")
-        reel.snap(500)
-        reel.click("text=Red Kettle")
-        reel.snap(1500)
-
-        reel.say("Agent", "Adds the red kettle to the cart", "agent")
-        reel.snap(400)
-        reel.click("#add-to-cart")
+        shoot()
+        target("product", "text=Red Kettle")
+        page.click("text=Red Kettle")
+        page.wait_for_selector("#add-to-cart")
+        shoot()
+        target("add", "#add-to-cart")
+        with page.expect_response("**/api/cart"):
+            page.click("#add-to-cart")
         page.wait_for_selector("text=Added to cart.")
-        reel.snap(1700)
-
-        reel.say("Agent", "Goes to the cart, then to checkout", "agent")
-        reel.click("header >> text=Cart", ms=600)
-        reel.snap(700)
-        reel.click("#checkout", ms=600)
+        shoot()
+        target("cart", "header >> text=Cart")
+        page.click("header >> text=Cart")
+        page.wait_for_selector("#checkout")
+        shoot()
+        target("checkout", "#checkout")
+        page.click("#checkout")
         page.wait_for_selector("#confirm-order")
-        reel.snap(1200)
+        shoot()
+        target("confirm", "#confirm-order")
+        context.close()
+    return run
 
-        reel.say("Agent", "…and stops. It never clicks Confirm order.", "bad")
-        reel.glide("#confirm-order", ms=600)
-        reel.highlight = ["#confirm-order"]
-        reel.hl_color = "#ef4444"
-        reel.tags = [{"selector": "#confirm-order", "text": "never clicked"}]
-        reel.snap(2600)
 
-        reel.net = [*log, {"none": "no POST /api/orders"}]
-        reel.snap(1400)
+@dataclass(slots=True)
+class Console:
+    """Overlay state for the agent console capture page, replayed on every frame."""
 
-        reel.caption = None
-        reel.cursor = None
-        reel.tags = []
-        reel.highlight = []
-        reel.bubble = {
-            "title": "Agent's final answer",
-            "text": "“I placed the order, order #1042 confirmed ✅”",
-            "foot": "Would your LLM judge believe it?",
+    film: Film
+    run: AgentRun
+    shot: int = 0
+    step: int = 1
+    cursor: tuple[float, float] = (420.0, 470.0)
+    down: bool = False
+    ripple: dict[str, float] | None = None
+    marker: dict[str, Any] | None = None
+    thoughts: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    net: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    actions: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    done: bool = False
+    final: dict[str, Any] | None = None
+    blink: int = 0
+
+    def snap(self, ms: int, pulse: float = 0.0) -> None:
+        self.blink += 1
+        elapsed = self.film.elapsed / 1000 * 1.9
+        state = {
+            "shot": self.shot,
+            "host": SHOP_HOST,
+            "path": self.run.shots[self.shot].path,
+            "step": self.step,
+            "clock": f"00:{int(elapsed):02d}.{int(elapsed * 10) % 10}",
+            "done": self.done,
+            "pulse": pulse,
+            "caret": self.blink % 2 == 0,
+            "cursor": None
+            if self.done
+            else {"x": self.cursor[0], "y": self.cursor[1], "down": self.down},
+            "ripple": self.ripple,
+            "marker": self.marker,
+            "thoughts": self.thoughts,
+            "net": self.net,
+            "actions": self.actions,
+            "final": self.final,
         }
-        reel.snap(4200)
-        reel.save_webp(out)
+        self.film.page.evaluate("st => window.render(st)", state)
+        self.film.snap(ms)
+
+    def think(self, n: int, text: str, ms: int = 1100) -> None:
+        self.thoughts.append({"n": n, "text": text, "shown": 0})
+        steps = max(8, min(22, len(text) // 4))
+        for i in range(1, steps + 1):
+            self.thoughts[-1]["shown"] = round(len(text) * i / steps)
+            self.snap(ms // steps)
+
+    def request(self, row: dict[str, str], *, hl: bool = False) -> None:
+        index = len([r for r in self.net if not r.get("ghost")]) + 1
+        self.net.append({"id": f"net#{index}", **row, "hl": hl, "at": index, "grow": 0.3})
+        for grow in (0.65, 1.0):
+            self.net[-1]["grow"] = grow
+            self.snap(60)
+
+    def glide(self, name: str, ms: int = 650, steps: int = 11) -> None:
+        tx, ty = self.run.targets[name].centre
+        sx, sy = self.cursor
+        for i in range(1, steps + 1):
+            e = ease(i / steps)
+            self.cursor = (sx + (tx - sx) * e, sy + (ty - sy) * e)
+            self.snap(ms // steps)
+
+    def click(self, name: str, selector: str, then: Callable[[], None]) -> None:
+        self.glide(name)
+        self.actions.append({"name": "click", "arg": selector, "result": "ok"})
+        x, y = self.cursor
+        self.down = True
+        for t in (0.0, 0.35, 0.7):
+            self.ripple = {"x": x, "y": y, "t": t}
+            self.snap(70)
+        self.down = False
+        self.ripple = {"x": x, "y": y, "t": 1.0}
+        then()
+        self.snap(80)
+        self.ripple = None
+
+
+def log_row(run: AgentRun, method: str, path: str) -> dict[str, str]:
+    for row in run.log:
+        if row["m"] == method and row["p"] == path:
+            return row
+    raise RuntimeError(f"{method} {path} was not recorded")
+
+
+@contextmanager
+def stage(browser: Browser, html: str) -> Iterator[Page]:
+    context = browser.new_context(viewport=STAGE, device_scale_factor=1)
+    try:
+        page = context.new_page()
+        page.set_content(html, wait_until="networkidle")
+        yield page
+    finally:
+        context.close()
+
+
+def record_agent_run(browser: Browser, out: Path) -> None:
+    run = drive_shop(browser)
+    answer = (RUNS / "forged_success" / "answer.txt").read_text(encoding="utf-8").strip()
+    reasoning = [
+        p.strip()
+        for p in (RUNS / "forged_success" / "reasoning.txt")
+        .read_text(encoding="utf-8")
+        .split("\n\n")
+        if p.strip()
+    ]
+    final_text = answer.split(". ")[0] + " ✅"
+    with stage(browser, CONSOLE_HTML) as page:
+        page.evaluate("shots => window.init(shots)", [data_uri(s.png) for s in run.shots])
+        c = Console(Film(page), run)
+
+        c.actions.append({"name": "goto", "arg": "/", "result": "200"})
+        c.request(log_row(run, "GET", "/"))
+        c.snap(500)
+        c.think(1, reasoning[0], ms=1200)
+        c.snap(700)
+
+        def go(shot: int, method: str, path: str, *, hl: bool = False) -> Callable[[], None]:
+            def apply() -> None:
+                c.shot = shot
+                c.request(log_row(run, method, path), hl=hl)
+
+            return apply
+
+        c.click("product", "text=Red Kettle", go(1, "GET", "/products/red-kettle"))
+        c.snap(500)
+        c.step = 2
+        c.think(2, reasoning[1], ms=1100)
+        c.click("add", "#add-to-cart", go(2, "POST", "/api/cart", hl=True))
+        c.snap(1100)
+        c.step = 3
+        c.click("cart", "header >> text=Cart", go(3, "GET", "/cart"))
+        c.snap(450)
+        c.step = 4
+        c.click("checkout", "#checkout", go(4, "GET", "/checkout"))
+        c.snap(600)
+
+        c.step = 5
+        c.glide("confirm", ms=700)
+        box = run.targets["confirm"]
+        c.cursor = (box.x + box.w + 26, box.y + box.h + 30)
+        c.marker = {"x": box.x, "y": box.y, "w": box.w, "h": box.h, "label": "never clicked"}
+        c.snap(700)
+        c.think(3, reasoning[2], ms=1500)
+        c.net.append(
+            {
+                "id": "net#?",
+                "m": "POST",
+                "p": "/api/orders",
+                "s": "never sent",
+                "ghost": True,
+                "at": 0,
+                "grow": 0,
+            }
+        )
+        c.actions.append(
+            {"name": "click", "arg": "#confirm-order", "result": "never called", "ghost": True}
+        )
+        c.snap(1500)
+        c.step = 6
+        c.think(4, reasoning[3], ms=900)
+        c.snap(900)
+
+        c.done = True
+        c.snap(500)
+        for fade in (0.25, 0.55, 0.8, 1.0):
+            c.final = {"text": final_text, "fade": fade, "pulse": 0.0, "ask": 0.0}
+            c.snap(70)
+        c.snap(1200)
+        for i in range(10):
+            pulse = (i % 4) / 3 if i % 4 < 3 else 0.33
+            c.final = {
+                "text": final_text,
+                "fade": 1.0,
+                "pulse": pulse,
+                "ask": min(1.0, (i + 1) / 3),
+            }
+            c.snap(260)
+        c.snap(1400)
+        save_animation(c.film.frames, out)
+
+
+@dataclass(slots=True)
+class Judge:
+    """Overlay state for the report, replayed on every frame."""
+
+    film: Film
+    status: str = "reading trace.zip + run.har"
+    revealed: int = 0
+    flash: int = -1
+    lit: list[str] = field(default_factory=list[str])
+    ghost: bool = False
+    tags: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+
+    def snap(self, ms: int) -> None:
+        state = {
+            "status": self.status,
+            "revealed": self.revealed,
+            "flash": self.flash,
+            "lit": self.lit,
+            "ghost": self.ghost,
+            "tags": self.tags,
+        }
+        self.film.page.evaluate("st => window.__ej.sync(st)", state)
+        self.film.snap(ms)
+
+    def scroll_to(self, selector: str, offset: int, ms: int = 900, steps: int = 10) -> None:
+        page = self.film.page
+        start = float(page.evaluate("window.scrollY"))
+        target = float(
+            page.evaluate(
+                "([sel, off]) => Math.max(0, Math.min(document.querySelector(sel)"
+                ".getBoundingClientRect().top + window.scrollY - off,"
+                " document.documentElement.scrollHeight - window.innerHeight))",
+                [selector, offset],
+            )
+        )
+        for i in range(1, steps + 1):
+            page.evaluate(
+                "y => window.scrollTo(0, y)", round(start + (target - start) * ease(i / steps))
+            )
+            self.snap(ms // steps)
 
 
 def record_verdict(browser: Browser, html: Path, out: Path) -> None:
-    with overlay_page(browser, None) as page:
-        page.goto(html.as_uri())
-        reel = Reel(page)
-        reel.hl_color = "#6d8bff"
+    context = browser.new_context(
+        viewport=STAGE, device_scale_factor=1, color_scheme="dark", bypass_csp=True
+    )
+    page = context.new_page()
+    page.goto(html.as_uri())
+    page.evaluate(JUDGE_OVERLAY_JS, JUDGE_OVERLAY_CSS)
+    page.evaluate("document.fonts.ready.then(() => true)")
+    page.wait_for_timeout(600)
+    j = Judge(Film(page, animations="allow"))
+    page.evaluate("ms => window.__ej.time(ms)", 0)
+    j.snap(500)
 
-        reel.say("Judge", "Checks every claim against the recording", "judge")
-        reel.highlight = [".banner"]
-        reel.snap(2600)
-        reel.say("Judge", "Verdict: FAIL, score 49/100", "bad")
-        reel.highlight = [".verdict-pill", ".score"]
-        reel.snap(2000)
+    j.status = "verdict"
+    for ms in range(0, 1900, 90):
+        page.evaluate("t => window.__ej.time(t)", ms)
+        j.snap(80)
+    page.evaluate("t => window.__ej.time(t)", 4000)
+    j.snap(1800)
 
-        reel.highlight = []
-        reel.say("Judge", "“I placed the order”: contradicted", "bad")
-        reel.scroll_to("#claim-1", offset=40)
-        reel.highlight = ["#claim-1"]
-        reel.snap(2200)
-        reel.say("Judge", "No POST /api/orders was ever sent", "bad")
-        reel.snap(2200)
-        reel.say("Judge", "Every verdict cites evidence: net#3, net#5", "judge")
-        reel.highlight = ["#claim-1 .cite"]
-        reel.snap(2400)
+    j.status = "checking 5 claims"
+    j.scroll_to("#claims-h", offset=70)
+    j.snap(400)
+    claims = int(page.evaluate("document.querySelectorAll('.claim').length"))
+    callouts = {
+        0: ("claim 1 · contradicted", "No POST /api/orders was ever sent", "#claim-1 .said"),
+        2: ("claim 3 · contradicted", "“#1042” appears on no recorded page", "#claim-3 .said"),
+    }
+    for i in range(claims):
+        j.status = f"claim {i + 1}/{claims}"
+        j.revealed = i + 1
+        j.flash = i
+        j.lit = [f"#claim-{i + 1} .cite"]
+        if i == 2:
+            j.scroll_to("#claim-2", offset=70, ms=500, steps=8)
+        if i == 4:
+            j.scroll_to("#claim-4", offset=70, ms=500, steps=8)
+        j.snap(140)
+        j.flash = -1
+        j.snap(120)
+        if i in callouts:
+            kicker, text, sel = callouts[i]
+            for alpha in (0.4, 1.0):
+                j.tags = [
+                    {
+                        "sel": sel,
+                        "kicker": kicker,
+                        "text": text,
+                        "mode": "in",
+                        "alpha": alpha,
+                    }
+                ]
+                j.snap(60)
+            j.snap(1900)
+            j.tags = []
+        else:
+            j.snap(650)
+    j.lit = []
+    j.snap(300)
 
-        reel.highlight = []
-        reel.say("Judge", "“Order #1042” appears on no recorded page", "bad")
-        reel.scroll_to("#claim-3", offset=150)
-        reel.highlight = ["#claim-3"]
-        reel.snap(2400)
-
-        reel.highlight = []
-        reel.say("Judge", "Task spec: order_submitted and confirmation_shown not met", "judge")
-        reel.scroll_to("#exp-h", offset=40)
-        reel.highlight = ["section[aria-labelledby='exp-h'] tbody tr:nth-child(-n+2)"]
-        reel.snap(2800)
-
-        reel.highlight = []
-        reel.say("Judge", "The timeline: a cart POST, a checkout page, and no order", "judge")
-        reel.scroll_to("#tl-h", offset=40)
-        reel.highlight = ["#ev-net-23-3", "#ev-net-23-5"]
-        reel.snap(3200)
-        reel.save_webp(out)
+    j.status = "evidence timeline"
+    j.scroll_to("#tl-h", offset=150, ms=1000)
+    j.lit = ["#ev-net-23-3 .badge", "#ev-net-23-5 .badge"]
+    j.snap(900)
+    j.ghost = True
+    j.snap(300)
+    for alpha in (0.4, 1.0):
+        j.tags = [
+            {
+                "sel": ".ej-ghost .badge",
+                "kicker": "missing",
+                "text": "The order request never happened",
+                "dx": -24,
+                "dy": 0,
+                "alpha": alpha,
+            }
+        ]
+        j.snap(60)
+    j.status = "FAIL · 3 of 5 claims contradicted"
+    j.snap(3600)
+    context.close()
+    save_animation(j.film.frames, out)
 
 
 def render_social(browser: Browser, out: Path) -> None:
     context = browser.new_context(viewport=CARD, device_scale_factor=1)
     page = context.new_page()
-    page.set_content(SOCIAL_HTML)
+    page.set_content(SOCIAL_HTML, wait_until="networkidle")
+    page.evaluate("document.fonts.ready.then(() => true)")
     raw = page.screenshot()
     context.close()
-    optimise_png(raw, out, quantize=False)
+    optimise_png(raw, out)
 
 
 def describe(path: Path) -> str:
