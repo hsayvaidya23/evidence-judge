@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import bisect
+import html
 import math
 import re
 from collections.abc import Iterable, Iterator
 from functools import cached_property
+from pathlib import PureWindowsPath
 from typing import Final
 from urllib.parse import parse_qsl, quote, quote_plus, unquote, unquote_plus, urlsplit, urlunsplit
 
+from evidence_judge.core.actions import FILL, GOTO, PRESS, UPLOAD, canonical_action
 from evidence_judge.core.evidence import (
     ActionEvent,
     Channel,
@@ -17,30 +20,25 @@ from evidence_judge.core.evidence import (
     Run,
     Screenshot,
 )
-from evidence_judge.core.predicates import MIN_PAGE_TEXT
+from evidence_judge.core.predicates import MIN_PAGE_TEXT, WORD
+from evidence_judge.redact import TOKEN_RE
 from evidence_judge.textnorm import normalize
 
 FINAL_KEY = "final"
-NAVIGATIONS = frozenset({"goto", "navigate", "visit", "open", "go_to_url", "open_tab"})
-"""Action names that only open a page; the first other action starts the agent's work."""
-ACTION_ALIASES: Final = {
-    "navigate": "goto",
-    "visit": "goto",
-    "open": "goto",
-    "type": "fill",
-    "input": "fill",
-    "tap": "click",
-    "press_key": "press",
-}
-TYPING_ACTIONS: Final = frozenset({"fill", "insert_text", "input_text"})
+_KEY_NAME = re.compile(
+    r"(?:.|shift|control|ctrl|alt|option|meta|command|cmd|controlormeta|enter|return|tab|space"
+    r"|escape|esc|backspace|delete|del|insert|home|end|pageup|pagedown|capslock|numlock"
+    r"|scrolllock|pause|printscreen|contextmenu|arrow(?:up|down|left|right)|up|down|left|right"
+    r"|f\d{1,2}|key[a-z]|digit\d|numpad\w+)",
+    re.IGNORECASE,
+)
+_TAG = re.compile(r"</?[a-z][^<>]*>", re.IGNORECASE)
+_REDACTION_TOKEN = re.compile(TOKEN_RE.pattern, re.IGNORECASE)
+MIN_ECHO_PREFIX: Final = 8
+"""Shortest prefix of an agent input that counts as a cut-short echo of it. Shorter shared
+prefixes are mostly common word stems ("confirm" in "confirmation" and "confirmed")."""
 MASK: Final = "\x00"
 """Stands in for agent input in masked evidence; it is never part of a predicate."""
-_WORD = re.compile(r"[^\W_]")
-
-
-def canonical_action(name: str) -> str:
-    key = normalize(name).replace(" ", "_")
-    return ACTION_ALIASES.get(key, key)
 
 
 class EvidenceIndex:
@@ -126,7 +124,7 @@ class EvidenceIndex:
 
     def _baseline_cut(self) -> float:
         if self.run.actions:
-            acted = [a.ts for a in self.run.actions if a.name.casefold() not in NAVIGATIONS]
+            acted = [a.ts for a in self.run.actions if canonical_action(a.name) != GOTO]
             return min(acted, default=math.inf)
         loads = [n.ts for n in self.run.network if is_document_navigation(n)]
         marks = [n.ts for n in self.run.network if n.is_mutation] + loads[1:2]
@@ -186,22 +184,29 @@ class EvidenceIndex:
         """Normalised text the agent put into the run itself, longest first.
 
         That is the value of every typing action, each run of single-key presses on one target,
-        the decoded path segments and query values of every URL the agent opened, and the
-        decoded query values of every GET request (a form the agent submitted, or a navigation
-        a HAR cannot attribute). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit
-        are left out.
+        every press of text that is not key names (browser-use ``send_keys``), the name (with
+        and without extension) of every uploaded file, the decoded path segments and query
+        values of every URL the agent opened, and the decoded query values of every GET request
+        (a form the agent submitted, or a navigation a HAR cannot attribute). Each is also kept
+        as a page rendering it as HTML would show it (tags dropped, character references
+        decoded). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit are left out.
+
+        Request bodies are not inputs: whatever the agent typed into a form already comes from
+        its typing action, so a body only adds what the site put in the form (hidden fields,
+        product ids, option values), and masking that would hide the site's own text.
         """
         return self._agent_inputs
 
     @cached_property
     def _agent_inputs(self) -> tuple[str, ...]:
-        found = {normalize(text) for text in _raw_inputs(self.run)}
-        kept = [t for t in found if len(t) >= MIN_PAGE_TEXT and _WORD.search(t)]
+        found = {normalize(form) for text in _raw_inputs(self.run) for form in _rendered(text)}
+        kept = [t for t in found if len(t) >= MIN_PAGE_TEXT and WORD.search(t)]
         return tuple(sorted(kept, key=lambda t: (-len(t), t)))
 
     @cached_property
     def without_agent_input(self) -> EvidenceIndex:
-        """This evidence with every occurrence of every agent input in page text and URLs
+        """This evidence with every echo of every agent input in page text and URLs (an
+        occurrence of the input or of a prefix of at least MIN_ECHO_PREFIX characters of it)
         replaced by MASK, so a predicate that only holds on an echo of that input fails on it.
 
         Masked page text is normalised; page text and URLs without an occurrence are unchanged.
@@ -232,7 +237,7 @@ def _raw_inputs(run: Run) -> Iterator[str]:
     target: str | None = None
     for action in run.actions:
         name = canonical_action(action.name)
-        if name == "press" and action.value is not None and len(action.value) == 1:
+        if name == PRESS and action.value is not None and len(action.value) == 1:
             if keys and action.selector != target:
                 yield "".join(keys)
                 keys.clear()
@@ -242,15 +247,44 @@ def _raw_inputs(run: Run) -> Iterator[str]:
         if keys:
             yield "".join(keys)
             keys.clear()
-        if name in TYPING_ACTIONS and action.value:
+        if (name == FILL and action.value) or (
+            name == PRESS and action.value and not _is_key_names(action.value)
+        ):
             yield action.value
-        elif name == "goto" and (url := action.value or action.url):
+        elif name == UPLOAD and action.value:
+            yield from _file_names(action.value)
+        elif name == GOTO and (url := action.value or action.url):
             yield from _url_inputs(url, with_path=True)
     if keys:
         yield "".join(keys)
     for event in run.network:
         if event.method.upper() == "GET":
             yield from _url_inputs(event.url, with_path=False)
+
+
+def _rendered(text: str) -> tuple[str, ...]:
+    """`text`, and how a page that renders it as HTML shows it: character references decoded
+    and tags dropped (inline) or turned into a break (block)."""
+    return text, *(html.unescape(_TAG.sub(gap, text)) for gap in ("", " "))
+
+
+def _is_key_names(value: str) -> bool:
+    """`value` is a key or chord ("Enter", "Control+Shift+T"), or several separated by spaces."""
+    return all(
+        all(not key or _KEY_NAME.fullmatch(key) for key in chord.split("+"))
+        for chord in value.split()
+    )
+
+
+def _file_names(value: str) -> Iterator[str]:
+    """Each uploaded file's name with and without its extension; an upload's value is one
+    path or name, or several joined by ", "."""
+    for part in {value, *value.split(", ")}:
+        name = PureWindowsPath(part).name
+        yield name
+        stem, dot, _ = name.rpartition(".")
+        if dot and stem:
+            yield stem
 
 
 def _url_inputs(url: str, *, with_path: bool) -> list[str]:
@@ -262,11 +296,54 @@ def _url_inputs(url: str, *, with_path: bool) -> list[str]:
 
 
 def _mask(text: str, inputs: tuple[str, ...]) -> str | None:
-    """`text` normalised with every input replaced by MASK, or None if no input occurs in it."""
-    masked = norm = normalize(text)
-    for value in inputs:
-        masked = masked.replace(value, MASK)
-    return None if masked == norm else masked
+    """`text` normalised with every echo of an input replaced by MASK, or None if it has none.
+
+    An echo is an occurrence of the whole input or of a prefix of at least MIN_ECHO_PREFIX
+    characters (a field's maxlength, or the site, cut the input short); overlapping echoes
+    become one MASK.
+    """
+    norm = normalize(text)
+    spans = sorted(span for value in inputs for span in _echoes(norm, value))
+    if not spans:
+        return None
+    parts: list[str] = []
+    end = 0
+    for start, stop in spans:
+        if start < end:
+            end = max(end, stop)
+            continue
+        parts += [norm[end:start], MASK]
+        end = stop
+    parts.append(norm[end:])
+    return "".join(parts)
+
+
+def _echoes(text: str, value: str) -> Iterator[tuple[int, int]]:
+    """The span of every echo of `value` in `text`, each extended as far as `value` matches.
+
+    A cut-short echo never ends inside a redaction token: distinct tokens share a long prefix.
+    """
+    head = value[:MIN_ECHO_PREFIX]
+    tokens = [m.span() for m in _REDACTION_TOKEN.finditer(value)]
+    at = text.find(head)
+    while at != -1:
+        length = _match_length(text, at, value, len(head))
+        length = next((start for start, end in tokens if start < length < end), length)
+        if length == len(value) or length >= MIN_ECHO_PREFIX:
+            yield at, at + length
+        at = text.find(head, at + (length if length == len(value) else 1))
+
+
+def _match_length(text: str, at: int, value: str, known: int) -> int:
+    """How many leading characters of `value` occur at `text[at:]`; the first `known` do."""
+    low, high = known, len(value)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if text.startswith(value[known:mid], at + known):
+            low = mid
+        else:
+            high = mid - 1
+    return low
 
 
 def _mask_url(url: str, inputs: tuple[str, ...]) -> str:

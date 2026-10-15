@@ -50,6 +50,48 @@ def test_goto_paths_and_queries_and_get_queries_are_inputs() -> None:
     assert inputs == ("order a77 confirmed", "payment=success", "receipt", "orders", "a 77")
 
 
+def test_pressed_text_is_input_but_key_names_and_chords_are_not() -> None:
+    keys = ["Enter", "Control+A", "Shift+Tab", "Control+Shift+T", "ArrowDown ArrowDown Enter"]
+    actions = [
+        *[act(1 + i, "press", "#q", value=key) for i, key in enumerate(keys)],
+        act(10, "press", "#q", value="Control++"),
+        act(11, "press", "#q", value="F12"),
+        act(12, "send_keys", "#q", value="Order A77 confirmed"),
+        act(13, "press", "#q", value="London"),
+    ]
+    assert _inputs(actions=actions) == ("order a77 confirmed", "london")
+
+
+def test_typed_markup_is_also_input_as_rendered_text() -> None:
+    actions = [
+        act(1, "fill", "#bio", value="<b>Order A77</b> confirmed"),
+        act(2, "fill", "#note", value="Tom &amp; Jerry"),
+        act(3, "fill", "#plain", value="a < b > c"),
+    ]
+    assert _inputs(actions=actions) == (
+        "<b>order a77</b> confirmed",
+        "order a77 confirmed",
+        "tom &amp; jerry",
+        "tom & jerry",
+        "a < b > c",
+    )
+
+
+def test_uploaded_file_names_with_and_without_extension_are_inputs() -> None:
+    actions = [
+        act(1, "upload", "#a", value=r"C:\fakepath\Order A77.pdf"),
+        act(2, "setInputFiles", "#b", value="scan one.png, notes"),
+    ]
+    assert _inputs(actions=actions) == (
+        "scan one.png, notes",
+        "order a77.pdf",
+        "scan one.png",
+        "order a77",
+        "scan one",
+        "notes",
+    )
+
+
 def test_short_or_symbol_only_inputs_are_ignored() -> None:
     assert _inputs(actions=[act(1, "fill", value="ab"), act(2, "fill", value="--- ")]) == ()
 
@@ -68,6 +110,49 @@ def test_masking_replaces_every_occurrence_in_text_and_urls() -> None:
     assert masked.run.network[0].url == f"{HOST}/search?q=%00"
     assert masked.run.snapshots[0].text == "Welcome"
     assert masked.run.snapshots[0].url == f"{HOST}/"
+
+
+def _masked_final(typed: list[str], text: str) -> str:
+    actions = [act(1 + i, "fill", f"#f{i}", value=value) for i, value in enumerate(typed)]
+    masked = EvidenceIndex(make_run(actions=actions, final_state=final("/", text)))
+    state = masked.without_agent_input.final
+    assert state is not None
+    return state.text
+
+
+def test_masking_covers_echoes_cut_short_of_the_input() -> None:
+    text = "Hello Order A77 confirmed. Again: Order A77 c and Order A"
+    assert _masked_final(["Order A77 confirmed!!!!!!"], text) == (
+        f"hello {MASK}. again: {MASK} and order a"
+    )
+
+
+def test_masking_ignores_shared_prefixes_shorter_than_min_echo_prefix() -> None:
+    text = "Your order is confirmed"
+    assert _masked_final(["confirmation code"], text) == text
+    assert _masked_final(["confirmXYZ"], text) == text
+    assert _masked_final(["confirmeX"], text) == f"your order is {MASK}d"
+    assert _masked_final(["confirmed by phone"], text) == f"your order is {MASK}"
+
+
+def test_cut_short_echoes_never_end_inside_a_redaction_token() -> None:
+    card = "[REDACTED:card:8be88632]"
+    text = f"Card [REDACTED:card:96a7866f] for [REDACTED:email:68cc336b] Ship to {card} Main St"
+    assert _masked_final([f"{card} Main Street"], text) == (
+        f"card [redacted:card:96a7866f] for [redacted:email:68cc336b] ship to {MASK}"
+    )
+
+
+def test_masking_merges_overlapping_echoes() -> None:
+    text = "Ship to 12 Long Street London today"
+    assert _masked_final(["12 Long Street", "Long Street London"], text) == (
+        f"ship to {MASK} today"
+    )
+
+
+def test_masking_extends_each_occurrence_on_repetitive_text() -> None:
+    text = "ab" * 6 + "x " + "ab" * 3
+    assert _masked_final(["abababababab"], text) == f"{MASK}x ababab"
 
 
 def test_masking_keeps_evidence_without_agent_input() -> None:

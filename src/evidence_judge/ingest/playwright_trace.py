@@ -22,6 +22,7 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import IO, Final, cast
 
+from evidence_judge.core.actions import OTHER, known_action
 from evidence_judge.core.evidence import (
     ActionEvent,
     BlobLoader,
@@ -106,40 +107,33 @@ _ZIP_ERRORS: Final = (
 )
 """What reading a damaged, encrypted or unsupported zip entry can raise."""
 
-_ACTION_NAMES: Final[dict[str, str]] = {
-    "goto": "goto",
-    "click": "click",
-    "dblclick": "click",
-    "tap": "click",
-    "mouseClick": "click",
-    "touchscreenTap": "click",
-    "fill": "fill",
-    "press": "press",
-    "keyboardPress": "press",
-    "type": "type",
-    "keyboardType": "type",
-    "keyboardInsertText": "type",
-    "selectOption": "select",
-    "check": "check",
-    "uncheck": "uncheck",
-    "hover": "hover",
-    "setInputFiles": "upload",
-    "dragAndDrop": "other",
-    "dispatchEvent": "other",
-    "focus": "other",
-    "blur": "other",
-    "selectText": "other",
-    "scrollIntoViewIfNeeded": "other",
-    "mouseMove": "other",
-    "mouseDown": "other",
-    "mouseUp": "other",
-    "mouseWheel": "other",
-    "keyboardDown": "other",
-    "keyboardUp": "other",
-    "goBack": "other",
-    "goForward": "other",
-    "reload": "other",
-}
+_OTHER_METHODS: Final = frozenset(
+    {
+        "dragAndDrop",
+        "dispatchEvent",
+        "focus",
+        "blur",
+        "selectText",
+        "scrollIntoViewIfNeeded",
+        "mouseMove",
+        "mouseDown",
+        "mouseUp",
+        "mouseWheel",
+        "keyboardDown",
+        "keyboardUp",
+        "goBack",
+        "goForward",
+    }
+)
+"""Trace methods recorded as user actions without a canonical name of their own."""
+
+
+def _action_name(method: str) -> str | None:
+    if method in _OTHER_METHODS:
+        return OTHER
+    return known_action(method)
+
+
 _TRACE_FILE = re.compile(r"^(?:(?P<ordinal>\d+)-)?(?P<stem>[^/]*)\.trace$")
 _IMAGE_TYPES: Final[dict[str, str]] = {
     ".jpeg": "image/jpeg",
@@ -415,7 +409,7 @@ class _TraceReader:
         call_id = as_str(event.get("callId"))
         method = as_str(event.get("method"))
         start = as_float(event.get("startTime"))
-        if call_id is None or method not in _ACTION_NAMES or start is None:
+        if call_id is None or method is None or _action_name(method) is None or start is None:
             return
         params = as_object(event.get("params"))
         self.actions[self._key(call_id)] = _RawAction(call_id, start, method, params)
@@ -538,7 +532,7 @@ class _TraceReader:
                 ActionEvent(
                     id=f"act#{number}",
                     ts=self._ts(raw.time),
-                    name=_ACTION_NAMES[raw.method],
+                    name=_action_name(raw.method) or OTHER,
                     selector=as_str(raw.params.get("selector")),
                     value=_action_value(raw.method, raw.params),
                     url=url,

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from evidence_judge.core.actions import OTHER, known_action
 from evidence_judge.core.evidence import (
     ActionEvent,
     Channel,
@@ -37,20 +38,6 @@ from evidence_judge.ingest.errors import BrowserUseFormatError
 SOURCE: Final = "browser-use"
 HISTORY_FILE: Final = "history.json"
 
-_ACTION_NAMES: Final[dict[str, str]] = {
-    "navigate": "goto",
-    "go_to_url": "goto",
-    "open_tab": "goto",
-    "click": "click",
-    "click_element": "click",
-    "click_element_by_index": "click",
-    "input": "fill",
-    "input_text": "fill",
-    "send_keys": "press",
-    "select_dropdown": "select",
-    "select_dropdown_option": "select",
-    "upload_file": "upload",
-}
 _VALUE_KEYS: Final = ("url", "text", "keys", "query", "path")
 _DONE = "done"
 _REASONING_FIELDS: Final = (
@@ -185,7 +172,7 @@ class _HistoryBuilder:
             ActionEvent(
                 id=f"act#{len(self.actions) + 1}",
                 ts=ts,
-                name=_ACTION_NAMES.get(name, "other"),
+                name=known_action(name) or OTHER,
                 selector=_selector(element, params),
                 value=next((v for k in _VALUE_KEYS if (v := as_str(params.get(k)))), None),
                 url=as_str(state.get("url")),

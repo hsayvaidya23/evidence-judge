@@ -101,7 +101,7 @@ def test_form_actions_and_snapshot_decoding(tmp_path: Path) -> None:
         ("goto", None, "https://form.test/"),
         ("fill", "#name", "Sam"),
         ("press", "#name", "Enter"),
-        ("type", "#name", "!"),
+        ("fill", "#name", "!"),
         ("select", "#size", "l"),
         ("check", "#gift", None),
         ("uncheck", "#gift", None),

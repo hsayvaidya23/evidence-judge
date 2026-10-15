@@ -39,7 +39,8 @@ STATUS_NONE: Final = "none"
 """No response at all (connection error, aborted or blocked request)."""
 STATUS_ANY: Final = "any"
 """Any outcome: any status, or no response."""
-_WORD = re.compile(r"[^\W_]+")
+WORD: Final = re.compile(r"[^\W_]+")
+"""A run of letters and digits."""
 _DIGIT = re.compile(r"\d")
 _STATUS_CLASS = re.compile(r"^[1-5]xx$")
 _STATUS_EXACT = re.compile(r"^[1-5]\d\d$")
@@ -65,7 +66,7 @@ def _substring(value: str) -> str:
 
 def _page_text(value: str) -> str:
     stripped = _non_blank(value)
-    if len(stripped) < MIN_PAGE_TEXT or not _WORD.search(stripped):
+    if len(stripped) < MIN_PAGE_TEXT or not WORD.search(stripped):
         raise ValueError(
             f"page text {stripped!r} needs at least {MIN_PAGE_TEXT} characters including a "
             "letter or digit; shorter text matches almost any page"
@@ -327,7 +328,7 @@ def vacuity_reason(
                     "an action predicate needs target_contains or value_contains to prove a claim"
                 )
         case PageTextPredicate():
-            if len(_WORD.findall(predicate.contains)) < 2 and not _DIGIT.search(predicate.contains):
+            if len(WORD.findall(predicate.contains)) < 2 and not _DIGIT.search(predicate.contains):
                 return (
                     f"page text {predicate.contains!r} is a single word; it needs two words or a "
                     "number to prove a claim"
