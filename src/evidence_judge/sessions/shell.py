@@ -719,7 +719,6 @@ _UV_VALUE_FLAGS: Final = frozenset(
         "--from",
     }
 )
-_MAKE_VALUE_FLAGS: Final = frozenset({"-C", "-f", "--file", "--directory", "-j", "--jobs", "-l"})
 _TIMEOUT_VALUE_FLAGS: Final = frozenset({"-s", "--signal", "-k", "--kill-after"})
 _FIX_FLAGS: Final = frozenset(
     {
@@ -777,6 +776,12 @@ class _Classified:
     nested: CommandAnalysis | None = None
     run_env: list[str] = field(default_factory=list[str])
     """Variables set for a test run on its own command line (`CI=true pytest`)."""
+    relocations: list[str] = field(default_factory=list[str])
+    """Directories the run moves to on its own (`make -C dir`, `uv run --directory dir`)."""
+    config_files: list[str] = field(default_factory=list[str])
+    """Files the run reads as its test configuration (`make -f rules`)."""
+    writes_after: bool = False
+    """The run writes files its own check does not cover (`pytest --log-file=calc.py`)."""
 
 
 def _split_operators(token: str) -> Iterator[str]:
@@ -897,8 +902,57 @@ def _flags_then_rest(words: Sequence[str], value_flags: frozenset[str]) -> list[
     return list(words[i:])
 
 
-def _unwrap(words: list[str]) -> list[str]:
-    """Strip wrapper programs that run another command (`timeout 60 pytest`, `uv run pytest`)."""
+@dataclass(slots=True)
+class _Wrapped:
+    """What the wrappers around a command do to the run inside them."""
+
+    filters: list[str] = field(default_factory=list[str])
+    dirs: list[str] = field(default_factory=list[str])
+
+
+_UV_RUN_HARMLESS: Final = frozenset(
+    {"--no-project", "--frozen", "--locked", "--offline", "-q", "--quiet", "-v", "--verbose",
+     "--no-sync", "--isolated", "--python", "-p", "--all-extras", "--extra", "--group", "--dev",
+     "--no-dev", "--only-dev", "--no-group", "--only-group", "--all-groups", "--color",
+     "--native-tls", "--cache-dir", "--no-cache", "-n", "--refresh", "--refresh-package",
+     "--reinstall", "--reinstall-package", "--upgrade", "-U", "--upgrade-package", "--index",
+     "--default-index", "--index-url", "--extra-index-url", "--find-links", "-f", "--no-index",
+     "--exclude-newer", "--resolution", "--prerelease", "--link-mode", "--active",
+     "--managed-python", "--no-managed-python", "--no-python-downloads", "--no-env-file",
+     "--no-editable", "--compile-bytecode", "--package", "--all-packages", "--with",
+     "--with-editable", "--with-requirements", "--from", "--no-progress", "-m", "--module"}
+)  # fmt: skip
+"""`uv run` and `uvx` options that change only which interpreter, index, cache or lock state
+the environment comes from (`--with` and `--from` are judged as packages the session adds).
+`--directory` and `--project` move the run; `--env-file` sets variables; anything else may
+change what runs."""
+
+
+def _uv_run_options(args: list[str], wrapped: _Wrapped) -> None:
+    i = 0
+    while i < len(args) and args[i].startswith("-") and args[i] != "--":
+        name, eq, value = args[i].partition("=")
+        takes = not eq and name in _UV_VALUE_FLAGS
+        if takes:
+            value = args[i + 1] if i + 1 < len(args) else ""
+        if name in ("--directory", "--project"):
+            wrapped.dirs.append(_dir_word(value))
+        elif name == "--env-file":
+            wrapped.filters.append(f"variables loaded from {value} (--env-file)")
+        elif name not in _UV_RUN_HARMLESS:
+            wrapped.filters.append(f"uv run {name}, an option the judge cannot tell is harmless")
+        i += 2 if takes else 1
+
+
+def _dir_word(target: str) -> str:
+    """A directory as written, or `?` when only the shell knows it."""
+    return "?" if target in ("", "-") or target.startswith("~") or _unspelled(target) else target
+
+
+def _unwrap(words: list[str], wrapped: _Wrapped | None = None) -> list[str]:
+    """Strip wrapper programs that run another command (`timeout 60 pytest`, `uv run pytest`),
+    noting in `wrapped` what they do to the run (`uv run --directory`, `dotenv`)."""
+    wrapped = wrapped if wrapped is not None else _Wrapped()
     for _ in range(MAX_NESTING * 2):
         if not words:
             return words
@@ -909,6 +963,13 @@ def _unwrap(words: list[str]) -> list[str]:
         elif prog == "command" and rest and rest[0] not in ("-v", "-V"):
             words = _flags_then_rest(rest, frozenset())
         elif prog == "env" and rest:
+            for i, arg in enumerate(rest):
+                if arg in ("-C", "--chdir") and i + 1 < len(rest):
+                    wrapped.dirs.append(_dir_word(rest[i + 1]))
+                elif arg.startswith("--chdir="):
+                    wrapped.dirs.append(_dir_word(arg.partition("=")[2]))
+                elif not arg.startswith("-"):
+                    break
             rest = _flags_then_rest(rest, frozenset({"-u", "-C", "-S"}))
             while rest and _ASSIGNMENT.match(rest[0]):
                 rest = rest[1:]
@@ -925,8 +986,12 @@ def _unwrap(words: list[str]) -> list[str]:
         elif prog == "xvfb-run":
             words = _flags_then_rest(rest, frozenset({"-n", "-s", "-e", "-f", "-p", "-w"}))
         elif prog in ("uv", "poetry", "pipenv", "pdm", "rye", "hatch") and rest[:1] == ["run"]:
+            if prog == "uv":
+                _uv_run_options(rest[1:], wrapped)
             words = _flags_then_rest(rest[1:], _UV_VALUE_FLAGS)
         elif prog in ("uvx", "pipx") and (prog == "uvx" or rest[:1] == ["run"]):
+            if prog == "uvx":
+                _uv_run_options(rest, wrapped)
             words = _flags_then_rest(rest if prog == "uvx" else rest[1:], _UV_VALUE_FLAGS)
         elif prog in ("npx", "bunx", "pnpx"):
             words = _flags_then_rest(rest, frozenset({"-p", "--package", "-c", "--call"}))
@@ -935,6 +1000,7 @@ def _unwrap(words: list[str]) -> list[str]:
         elif prog == "bundle" and rest[:1] == ["exec"]:
             words = rest[1:]
         elif prog == "dotenv" and "--" in rest:
+            wrapped.filters.append("variables loaded by dotenv")
             words = rest[rest.index("--") + 1 :]
         elif _PYTHON.match(prog) and len(rest) >= 2 and rest[0] == "-m":
             words = [rest[1], *rest[2:]]
@@ -991,6 +1057,12 @@ def _pytest_filters(
             plain = False
         elif name in _PYTEST_HARMLESS_VALUES:
             i += 0 if eq else 1
+        elif name == "--import-mode":
+            mode = arg.partition("=")[2] if eq else (args[i + 1] if i + 1 < len(args) else "")
+            i += 0 if eq else 1
+            if mode not in ("prepend", "append", "importlib"):
+                filters.append("--import-mode, an option the judge cannot tell is harmless")
+                plain = False
         elif arg in _PYTEST_HARMLESS_SWITCHES or _pytest_regenerates(arg):
             pass
         elif arg.startswith("-"):
@@ -1008,17 +1080,132 @@ def _pytest_filters(
     return filters, collect_only, paths if plain else None
 
 
+_WRITERS: Final = {
+    "pytest": frozenset(
+        {"--log-file", "--junitxml", "--junit-xml", "--html", "--benchmark-json",
+         "--report-log", "--resultlog", "--result-log", "--json-report-file", "--debug",
+         "--cov-report", "--basetemp", "--md-report-output"}
+    ),
+    "go test": frozenset(
+        {"-coverprofile", "-cpuprofile", "-memprofile", "-blockprofile", "-mutexprofile",
+         "-trace", "-o", "-outputdir"}
+    ),
+}  # fmt: skip
+"""Options naming a file or directory a test run writes (a log, a report, a profile, the test
+binary, pytest's temporary directory, which it empties first)."""
+_WRITTEN_DIRS: Final = frozenset({"--basetemp", "-outputdir"})
+
+
+def _run_writes(
+    runner: str, args: list[str], cwd: str | None
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], bool]:
+    """(written, emptied, after): the (option, path) pairs a test run writes and empties that
+    can matter, and whether it may leave code, configuration or tests changed after its own
+    check. Paths under /tmp and outside the session directory do not matter, nor reports and
+    profiles (`report.xml`, `cover.out`, `htmlcov/`), whose text the runner writes; a path
+    among the tests, a configuration file or a runner's own file is the suite rewritten, and a
+    code file (`--log-file=calc.py`) is a change after the check."""
+    writers = _WRITERS[runner]
+    written: list[tuple[str, str]] = []
+    emptied: list[tuple[str, str]] = []
+    after = False
+    i = 0
+    while i < len(args):
+        name, eq, value = args[i].partition("=")
+        if runner == "go test" and name.startswith("--"):
+            name = name[1:]
+        if name not in writers:
+            i += 1
+            continue
+        if not eq:
+            following = args[i + 1] if i + 1 < len(args) else ""
+            optional = name == "--debug" and (not following or following.startswith("-"))
+            value = "pytestdebug.log" if optional else following
+            i += 0 if optional else 1
+        i += 1
+        directory = name in _WRITTEN_DIRS
+        if name == "--cov-report":
+            kind, colon, value = value.partition(":")
+            if not colon or not value:
+                continue
+            directory = kind in ("html", "annotate")
+        if not value or value in _SAFE_TARGETS or value.startswith(_SCRATCH):
+            continue
+        if _outside(value, cwd):
+            continue
+        weakens = (
+            edits.is_test_path(value) or edits.is_harness_path(value) or edits.is_config_path(value)
+        )
+        if name == "--basetemp":
+            emptied.append((name, value))
+        if weakens or _unspelled(value) or (not directory and edits.is_code_path(value)):
+            written.append((name, value))
+            after = after or not directory
+    return written, emptied, after
+
+
+def _outside(path: str, cwd: str | None) -> bool:
+    """An absolute path outside the session directory `cwd`."""
+    if not posixpath.isabs(path) or cwd is None or not posixpath.isabs(cwd):
+        return False
+    return posixpath.relpath(posixpath.normpath(path), posixpath.normpath(cwd)).startswith("..")
+
+
+_UNITTEST_HARMLESS: Final = frozenset(
+    {"-v", "--verbose", "-q", "--quiet", "-b", "--buffer", "-f", "--failfast", "-c", "--catch",
+     "--locals"}
+)  # fmt: skip
+"""`python -m unittest` switches that change only output, stopping early or Ctrl-C handling."""
+_UNITTEST_VALUES: Final = frozenset(
+    {"-s", "--start-directory", "-p", "--pattern", "-t", "--top-level-directory", "-k",
+     "--durations"}
+)  # fmt: skip
+_UNITTEST_DEFAULTS: Final = {
+    "-s": ".", "--start-directory": ".", "-t": ".", "--top-level-directory": ".",
+    "-p": "test*.py", "--pattern": "test*.py",
+}  # fmt: skip
+
+
 def _unittest_filters(args: list[str]) -> tuple[list[str], bool]:
-    if not args or args[0] == "discover":
-        rest = args[1:] if args else []
-        filters = [f"discover {a}" for a in rest if a in ("-p", "--pattern", "-k")]
-        return filters, False
-    if args[0] in ("-h", "--help"):
+    """Filters of a `python -m unittest` run, deny-by-default: every option but the few that
+    change only output, and every discover argument but the defaults (start `.`, pattern
+    `test*.py`), narrows or moves the run."""
+    if args[:1] in (["-h"], ["--help"]):
         return [], True
-    positional = [a for a in args if not a.startswith("-")]
-    filters = [f"only {a}" for a in positional]
-    if "-k" in args:
-        filters.append("-k")
+    discover = args[:1] == ["discover"]
+    rest = args[1:] if discover else args
+    label = "discover " if discover else ""
+    filters: list[str] = []
+    positional: list[str] = []
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        name, eq, value = arg.partition("=")
+        if not arg.startswith("--") and arg[:2] in _UNITTEST_VALUES and len(arg) > 2:
+            name, eq, value = arg[:2], "=", arg[2:]
+        if arg in _UNITTEST_HARMLESS:
+            pass
+        elif name in _UNITTEST_VALUES:
+            if not eq:
+                value = rest[i + 1] if i + 1 < len(rest) else ""
+                i += 1
+            default = _UNITTEST_DEFAULTS.get(name)
+            if name != "--durations" and not (discover and value.strip("/") == default):
+                filters.append(f"{label}{name}")
+        elif arg.startswith("-") and arg != "-":
+            filters.append(f"{label}{name}, an option the judge cannot tell is harmless")
+        else:
+            positional.append(arg)
+        i += 1
+    if discover:
+        defaults = (".", "test*.py", ".")
+        filters.extend(
+            f"discover {a}"
+            for k, a in enumerate(positional)
+            if k >= len(defaults) or a.rstrip("/") != defaults[k].rstrip("/") or a == ""
+        )
+    else:
+        filters.extend(f"only {a}" for a in positional)
     return filters, False
 
 
@@ -1050,6 +1237,107 @@ def _js_filters(runner: str, args: list[str]) -> tuple[list[str], bool]:
             filters.append(f"only {arg}")
         i += 1
     return filters, collect_only
+
+
+_NODE_TEST_HARMLESS: Final = frozenset(
+    {"--test", "--test-reporter", "--test-reporter-destination", "--test-concurrency",
+     "--test-timeout", "--experimental-test-coverage", "--test-coverage-include",
+     "--test-coverage-exclude", "--test-coverage-lines", "--test-coverage-branches",
+     "--test-coverage-functions", "--test-force-exit", "--enable-source-maps", "--no-warnings",
+     "--trace-warnings", "--trace-uncaught", "--stack-trace-limit", "--max-old-space-size"}
+)  # fmt: skip
+"""`node --test` options that change only output, coverage, workers, timeouts or warnings
+printing. Anything else (`--require`, `--import`, `--env-file`, `--conditions`, a loader) can
+change what the tests load."""
+_NODE_TEST_FILTERS: Final = frozenset(
+    {"--test-name-pattern", "--test-skip-pattern", "--test-only", "--test-shard"}
+)
+_NODE_VALUES: Final = frozenset(
+    {"--test-reporter", "--test-reporter-destination", "--test-concurrency", "--test-timeout",
+     "--test-coverage-include", "--test-coverage-exclude", "--test-coverage-lines",
+     "--test-coverage-branches", "--test-coverage-functions", "--test-name-pattern",
+     "--test-skip-pattern", "--test-shard", "--require", "-r", "--import", "--loader",
+     "--experimental-loader", "--env-file", "--conditions", "-C", "--stack-trace-limit",
+     "--max-old-space-size", "--input-type", "--eval", "-e", "--print", "-p"}
+)  # fmt: skip
+
+
+def _node_test_filters(args: list[str]) -> tuple[list[str], bool]:
+    """(filters, updates snapshots) of a `node --test` run, deny-by-default."""
+    filters: list[str] = []
+    update = False
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, _ = arg.partition("=")
+        if name == "--test-update-snapshots":
+            update = True
+        elif name in _NODE_TEST_FILTERS:
+            filters.append(name)
+        elif arg.startswith("-") and name not in _NODE_TEST_HARMLESS:
+            filters.append(f"{name}, an option the judge cannot tell is harmless")
+        elif not arg.startswith("-"):
+            filters.append(f"only {arg}")
+        if not eq and name in _NODE_VALUES:
+            i += 1
+        i += 1
+    return filters, update
+
+
+_TOX_HARMLESS: Final = frozenset(
+    {"-q", "--quiet", "-v", "--verbose", "-vv", "-r", "--recreate", "--no-recreate-pkg",
+     "-p", "--parallel", "--parallel-live", "-o", "--parallel-no-spinner", "--colored",
+     "--no-provision", "--skip-pkg-install", "--develop", "--no-color", "--forcecolor",
+     "--reuse-existing-virtualenvs", "-R", "--no-reuse-existing-virtualenvs", "--no-venv",
+     "--stop-on-first-error", "-x", "--no-error-on-missing-interpreters"}
+)  # fmt: skip
+"""tox and nox options that change only output, parallelism or how environments are reused
+(`nox -x` stops at the first failing session, which only shortens a failing run)."""
+_TOX_ENVS: Final = frozenset({"-e", "--env", "-s", "--session", "--sessions"})
+_TOX_VALUES: Final = frozenset(
+    {"-e", "--env", "-s", "--session", "--sessions", "-k", "--keywords", "-t", "--tags", "-c",
+     "--conf", "-f", "--noxfile", "--override", "-x", "--root", "--workdir", "--installpkg",
+     "--python", "-P", "--force-python", "--db"}
+)  # fmt: skip
+_PYTHON_ENV: Final = re.compile(r"(?:py|pypy)(?:\d+(?:\.\d+)?)?")
+
+
+def _tox_filters(prog: str, args: list[str]) -> list[str]:
+    """Filters of a tox or nox run, deny-by-default: environments other than a Python
+    version's (`py`, `py312`), arguments passed through, and options outside the few that
+    change only output or parallelism."""
+    if args[:1] and args[0] in ("run", "r", "run-parallel", "p"):
+        args = args[1:]
+    filters: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            if args[i + 1 :]:
+                filters.append(f"arguments passed through {prog}")
+            break
+        name, eq, value = arg.partition("=")
+        if not arg.startswith("--") and arg[:2] in _TOX_ENVS and len(arg) > 2:
+            name, eq, value = arg[:2], "=", arg[2:]
+        following = args[i + 1] if i + 1 < len(args) else ""
+        takes = name in _TOX_VALUES and not (prog == "nox" and name == "-x")
+        if name in ("-p", "--parallel", "--python") and not eq:
+            takes = prog == "nox" or following in ("auto", "all") or following.isdigit()
+        if takes and not eq:
+            value = following
+            i += 1
+        if name in _TOX_ENVS:
+            envs = [e for part in value.split(",") for e in part.split() if e]
+            if not envs or not all(_PYTHON_ENV.fullmatch(e) for e in envs):
+                filters.append(name)
+        elif name in ("-p", "--parallel", "--python"):
+            pass
+        elif arg.startswith("-") and not (name in _TOX_HARMLESS and not takes):
+            filters.append(f"{name}, an option the judge cannot tell is harmless")
+        elif not arg.startswith("-"):
+            filters.append(f"only {arg}")
+        i += 1
+    return filters
 
 
 def _js_harmless(name: str) -> bool:
@@ -1138,9 +1426,22 @@ def _cargo_filters(args: list[str]) -> tuple[list[str], bool]:
     return filters, collect_only
 
 
+_COVERAGE_FLAGS: Final = frozenset({"--coverage", "--experimental-test-coverage", "--no-coverage"})
+"""Coverage switches of jest and vitest (`--coverage`) and `node --test`
+(`--experimental-test-coverage`): passed to a test script whose runner is unknown, each only
+measures (or makes the runner reject the switch, which fails the run)."""
+
+
 def _generic_filters(label: str, args: list[str]) -> list[str]:
-    """Arguments passed to a test script whose runner is unknown narrow it, conservatively."""
-    meaningful = [a for a in args if a != "--" and a not in ("--silent", "-s", "--if-present")]
+    """Arguments passed to a test script whose runner is unknown narrow it, conservatively;
+    only coverage switches are known to change nothing."""
+    meaningful = [
+        a
+        for a in args
+        if a != "--"
+        and a not in ("--silent", "-s", "--if-present")
+        and a.partition("=")[0] not in _COVERAGE_FLAGS
+    ]
     return [f"arguments passed to {label}: {' '.join(meaningful)}"] if meaningful else []
 
 
@@ -1160,6 +1461,8 @@ def _pm_script(pm: str, words: list[str]) -> _Classified:
         sub = "test"
     elif sub in _PM_INSTALL:
         return _Classified(Category.MUTATING, pm, mutation=f"{pm} {sub} changes dependencies")
+    elif why := _tool_config_change(words):
+        return _Classified(Category.MUTATING, pm, mutation=why, touched=[])
     elif sub in _PM_READ_ONLY:
         return _Classified(Category.READ_ONLY, pm)
     elif pm == "bun" and sub == "test":
@@ -1188,10 +1491,137 @@ def _pm_script(pm: str, words: list[str]) -> _Classified:
     return _Classified(Category.UNKNOWN, pm, mutation=f"{label} runs a project script")
 
 
+_MAKE_OPTIONS: Final[dict[str, tuple[dict[str, str], frozenset[str]]]] = {
+    "make": (
+        {"-C": "dir", "--directory": "dir", "-f": "file", "--file": "file", "--makefile": "file",
+         "-I": "value", "--include-dir": "value", "-o": "value", "--old-file": "value",
+         "--assume-old": "value", "-W": "value", "--what-if": "value", "--new-file": "value",
+         "--assume-new": "value", "-j": "count", "--jobs": "count", "-l": "count",
+         "--load-average": "count", "--max-load": "count", "-O": "count",
+         "--output-sync": "count"},
+        frozenset({"-s", "--silent", "--quiet", "-k", "--keep-going", "-w", "--print-directory",
+                   "--no-print-directory", "-B", "--always-make", "-r", "--no-builtin-rules",
+                   "-R", "--no-builtin-variables", "--warn-undefined-variables", "-j", "--jobs",
+                   "-l", "-O"}),
+    ),
+    "gmake": ({}, frozenset()),
+    "just": (
+        {"-f": "file", "--justfile": "file", "-d": "dir", "--working-directory": "dir",
+         "--set": "pair", "--shell": "value", "--dotenv-filename": "value",
+         "--dotenv-path": "value", "--color": "value"},
+        frozenset({"-q", "--quiet", "-v", "--verbose", "--color"}),
+    ),
+    "task": (
+        {"-t": "file", "--taskfile": "file", "-d": "dir", "--dir": "dir", "-o": "value",
+         "--output": "value", "-c": "value", "--color": "value", "-C": "count",
+         "--concurrency": "count"},
+        frozenset({"-s", "--silent", "-v", "--verbose", "-o", "--output", "-c", "--color", "-C",
+                   "--concurrency", "-f", "--force"}),
+    ),
+    "mage": ({"-d": "dir", "-w": "dir", "-t": "value"}, frozenset({"-v", "-t"})),
+}  # fmt: skip
+"""For each make-like program, its options that take a value (what the value is) and the
+options that change only output, parallelism or rebuilding. Any other option (`make -e`,
+`make -i`, `just --dotenv-path`) may change what the recipe runs."""
+_MAKE_OPTIONS["gmake"] = _MAKE_OPTIONS["make"]
+
+
+@dataclass(slots=True)
+class _MakeArgs:
+    targets: list[str] = field(default_factory=list[str])
+    assigns: dict[str, str] = field(default_factory=dict[str, str])
+    dirs: list[str] = field(default_factory=list[str])
+    files: list[str] = field(default_factory=list[str])
+    unknown: list[str] = field(default_factory=list[str])
+    dry_run: bool = False
+
+
+def _make_args(prog: str, args: list[str]) -> _MakeArgs:
+    """Targets, `VAR=value` arguments and options of a make-like command line, options
+    anywhere (`make test -C dir`, `make -Cdir -j4 test`)."""
+    takes, harmless = _MAKE_OPTIONS[prog]
+    out = _MakeArgs()
+
+    def option(name: str, value: str | None) -> bool:
+        """Record `name`; True when it took `value`."""
+        kind = takes.get(name)
+        if name in ("-n", "--dry-run", "--just-print", "--recon", "--dry"):
+            out.dry_run = True
+        if kind == "dir":
+            out.dirs.append(_dir_word(value or ""))
+        elif kind == "file":
+            out.files.append(value or "")
+            if not value or _unspelled(value):
+                out.unknown.append(f"{name} {value or ''}".strip())
+        elif kind == "pair" and value is not None:
+            out.assigns[value] = ""
+        if kind == "count":
+            return value is not None and value.isdigit()
+        if name not in harmless and kind not in ("dir", "file") and not out.dry_run:
+            out.unknown.append(name)
+        return kind is not None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        following = args[i + 1] if i + 1 < len(args) else None
+        if arg == "--":
+            out.targets.extend(args[i + 1 :])
+            break
+        if arg.startswith("--"):
+            name, eq, value = arg.partition("=")
+            if eq:
+                option(name, value)
+            elif option(name, following):
+                i += 1
+        elif arg.startswith("-") and len(arg) > 1:
+            for k, letter in enumerate(arg[1:], start=2):
+                name, attached = f"-{letter}", arg[k:]
+                if takes.get(name) is None:
+                    option(name, None)
+                    continue
+                if attached and (takes[name] != "count" or attached.isdigit()):
+                    option(name, attached)
+                elif not attached and option(name, following):
+                    i += 1
+                break
+        elif _ASSIGNMENT.match(arg):
+            name, _, value = arg.partition("=")
+            out.assigns[name] = value
+        else:
+            out.targets.append(arg)
+        i += 1
+    return out
+
+
+_CONFIG_WRITES: Final = frozenset({"set", "delete", "rm", "unset", "edit", "fix"})
+
+
+def _tool_config_change(words: list[str]) -> str | None:
+    """Why the command changes settings a tool reads on every later run (`npm config set
+    node-options=...`, `go env -w GOFLAGS=-run=X`), or None."""
+    prog = program_name(words[0]) if words else ""
+    args = [w for w in words[1:] if not w.startswith("-")]
+    if prog in _PM:
+        verb = args[0] if args[:1] in (["set"], ["unset"]) else None
+        if args[:1] in (["config"], ["c"]) and args[1:2] and args[1] in _CONFIG_WRITES:
+            verb = args[1]
+        if verb is not None:
+            key = next((a for a in args[1:] if a not in _CONFIG_WRITES), "a setting")
+            return f"{prog} config {verb} {key} changes how every later {prog} command runs"
+    if prog == "go" and words[1:2] == ["env"]:
+        flag = next((w for w in words[2:] if w in ("-w", "-u")), None)
+        if flag is not None:
+            key = next((a for a in args[1:]), "a variable")
+            return f"go env {flag} {key} changes how every later go command runs"
+    return None
+
+
 def _make_like(prog: str, words: list[str]) -> _Classified:
-    targets = [w for w in _flags_then_rest(words[1:], _MAKE_VALUE_FLAGS) if "=" not in w]
-    if any(w in ("-n", "--dry-run", "--just-print") for w in words[1:]):
+    parsed = _make_args(prog, words[1:])
+    if parsed.dry_run:
         return _Classified(Category.READ_ONLY, prog)
+    targets = parsed.targets
     if not targets:
         return _Classified(Category.BUILD, prog, mutation=f"{prog} runs the default target")
     target = targets[0]
@@ -1199,7 +1629,22 @@ def _make_like(prog: str, words: list[str]) -> _Classified:
     if target in _TEST_TARGETS or target.startswith(("test-", "test_", "tests-")):
         filters = [] if target in _TEST_TARGETS else [f"target {target}"]
         filters.extend(f"also runs {t}" for t in targets[1:])
-        return _Classified(Category.TEST, prog, label, filters)
+        filters.extend(
+            f"{name}, an option the judge cannot tell is harmless" for name in parsed.unknown
+        )
+        return _Classified(
+            Category.TEST,
+            prog,
+            label,
+            filters,
+            relocations=parsed.dirs,
+            config_files=[f for f in parsed.files if f],
+            run_env=[
+                name
+                for name, value in parsed.assigns.items()
+                if not run_env_allowed(name) and not _harmless_env(name, value)
+            ],
+        )
     if target in ("build", "all", "compile", "dist"):
         return _Classified(Category.BUILD, prog)
     if target in ("lint", "check-lint", "ruff", "flake8"):
@@ -1377,6 +1822,11 @@ def _classify_program(
     if prog in ("pytest", "py.test"):
         filters, collect, paths = _pytest_filters(args, env)
         regen = next((a for a in args if _pytest_regenerates(a)), None)
+        written, emptied, after = _run_writes("pytest", args, cwd)
+        why = f"pytest {regen} rewrites expected outputs" if regen else None
+        if written or emptied:
+            option, path = (written or emptied)[0]
+            why = why or f"pytest {option} writes {path}"
         return _Classified(
             Category.TEST,
             prog,
@@ -1384,8 +1834,11 @@ def _classify_program(
             filters,
             collect,
             paths=paths,
-            mutation=f"pytest {regen} rewrites expected outputs" if regen else None,
+            mutation=why,
             opaque=f"pytest {regen} rewrites expected outputs" if regen else None,
+            touched=[path for _, path in written],
+            deleted=[path for _, path in emptied],
+            writes_after=after,
         )
     if prog == "unittest":
         filters, collect = _unittest_filters(args)
@@ -1437,27 +1890,36 @@ def _classify_program(
         )
         return _Classified(Category.TEST, prog, prog, filters)
     if prog in ("node", "nodejs") and "--test" in args:
-        flags = ("--test-name-pattern", "--test-skip-pattern", "--test-only", "--test-shard")
-        filters = [f"only {a}" for a in args if not a.startswith("-")]
-        filters.extend(a.partition("=")[0] for a in args if a.partition("=")[0] in flags)
-        return _Classified(Category.TEST, prog, "node --test", filters)
+        filters, update = _node_test_filters(args)
+        why = "node --test --test-update-snapshots rewrites the expected snapshots"
+        return _Classified(
+            Category.TEST,
+            prog,
+            "node --test",
+            filters,
+            mutation=why if update else None,
+            opaque=why if update else None,
+        )
     if prog in ("tox", "nox"):
-        filters = [
-            a.partition("=")[0]
-            for a in args
-            if a.partition("=")[0] in ("-e", "-s", "--session", "--sessions", "-k", "-t", "--tags")
-        ]
-        if "--" in args and args[args.index("--") + 1 :]:
-            filters.append(f"arguments passed through {prog}")
-        return _Classified(Category.TEST, prog, prog, filters)
+        return _Classified(Category.TEST, prog, prog, _tox_filters(prog, args))
     if prog == "go":
         sub = args[0] if args else ""
         if sub == "test":
             filters, collect = _go_filters(args[1:])
             regen = next((a for a in args[1:] if _GO_REGEN.fullmatch(a) and not _off(a)), None)
             why = f"go test {regen} rewrites expected outputs" if regen else None
+            written, _, after = _run_writes("go test", args[1:], cwd)
+            wrote = f"go test {written[0][0]} writes {written[0][1]}" if written else None
             return _Classified(
-                Category.TEST, prog, "go test", filters, collect, mutation=why, opaque=why
+                Category.TEST,
+                prog,
+                "go test",
+                filters,
+                collect,
+                mutation=why or wrote,
+                opaque=why,
+                touched=[path for _, path in written],
+                writes_after=after,
             )
         if sub in ("build", "install"):
             return _Classified(Category.BUILD, prog)
@@ -1465,6 +1927,8 @@ def _classify_program(
             return _Classified(Category.LINT, prog)
         if sub in ("fmt", "generate", "get") or args[:2] == ["mod", "tidy"]:
             return _Classified(Category.MUTATING, prog, mutation=f"go {sub} changes files")
+        if why := _tool_config_change(words):
+            return _Classified(Category.MUTATING, prog, mutation=why, touched=[])
         if sub in ("version", "env", "list", "doc", "help") or args[:2] == ["mod", "graph"]:
             return _Classified(Category.READ_ONLY, prog)
         return _Classified(Category.UNKNOWN, prog, mutation=f"go {sub} runs a program")
@@ -1736,11 +2200,17 @@ def _classify_program(
 
 
 def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
-    words = _unwrap(list(simple.words))
+    wrapped = _Wrapped()
+    words = _unwrap(list(simple.words), wrapped)
     if not words:
         result = _Classified(Category.READ_ONLY, "")
     else:
         result = _classify_program(words, simple.env, depth, cwd)
+    if result.runner is not None:
+        result.filters.extend(wrapped.filters)
+        result.relocations = [*wrapped.dirs, *result.relocations]
+        if wrapped.filters or result.relocations:
+            result.paths = None
     read_only = result.category is Category.READ_ONLY
     if simple.writes and result.mutation is None:
         result.mutation = f"writes {simple.writes[0]}"
@@ -1752,16 +2222,21 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
         changed = [
             name
             for name, value in simple.env.items()
-            if is_harness_env(name) and name != "PYTEST_ADDOPTS" and not _harmless_env(name, value)
+            if is_harness_env(name)
+            and name != "PYTEST_ADDOPTS"
+            and not _harmless_env(name, value, cwd)
         ]
         result.filters.extend(f"runs with {name} changed" for name in changed)
         if changed:
             result.paths = None
         run_env = _command_env(simple)
         result.run_env = [
-            name
-            for name, value in run_env.items()
-            if not run_env_allowed(name) and not _harmless_env(name, value)
+            *result.run_env,
+            *(
+                name
+                for name, value in run_env.items()
+                if not run_env_allowed(name) and not _harmless_env(name, value, cwd)
+            ),
         ]
         regen = next(
             (n for n, v in run_env.items() if regenerates_env(n) and not _off(f"={v}")), None
@@ -1816,11 +2291,13 @@ HARNESS_ENV: Final = frozenset(
      "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "VIRTUAL_ENV", "BASH_ENV",
      "ENV", "JEST_CONFIG", "VITEST_CONFIG", "PYTHONOPTIMIZE", "PYTHONWARNINGS", "PYTHONUSERBASE",
      "PYTHONNOUSERSITE", "PYTHONSAFEPATH", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS",
-     "MAVEN_OPTS", "GRADLE_OPTS", "RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "GOTOOLCHAIN"}
+     "MAVEN_OPTS", "GRADLE_OPTS", "RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "GOTOOLCHAIN",
+     "ZDOTDIR", "GOENV", "UV_ENV_FILE"}
 )  # fmt: skip
 """Variables that change which program runs, or how a test runner behaves."""
 _HARNESS_ENV_PREFIX: Final = re.compile(
-    r"^(?:PYTEST_|_PYTEST|JEST_|VITEST_|MOCHA_|NODE_TEST|CARGO_TARGET_\w+_RUNNER$|NEXTEST_)"
+    r"^(?:PYTEST_|_PYTEST|JEST_|VITEST_|MOCHA_|NODE_TEST|CARGO_TARGET_\w+_RUNNER$|NEXTEST_|"
+    r"npm_config_|NPM_CONFIG_)"
 )
 
 
@@ -1861,14 +2338,42 @@ def is_harness_env(name: str) -> bool:
     return name in HARNESS_ENV or _HARNESS_ENV_PREFIX.match(name) is not None
 
 
-_PROJECT_DIR: Final = re.compile(
-    r"^(?:\.|\./|\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`)(?::\$\{?PYTHONPATH\}?)?$"
-)
+_PROJECT_DIR: Final = re.compile(r"^(?:\.|\./|\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`)?$")
+_PROJECT_PREFIX: Final = re.compile(r"^(?:\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`)/")
+_INHERITED_PATH: Final = re.compile(r"^\$\{?PYTHONPATH\}?$")
+_SETTINGS_MODULE: Final = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
 
 
-def _harmless_env(name: str, value: str) -> bool:
-    """`PYTHONPATH=.` (or `$PWD`) adds the directory `python -m pytest` already imports from."""
-    return name == "PYTHONPATH" and _PROJECT_DIR.match(value) is not None
+def _inside_project(entry: str, cwd: str | None) -> bool:
+    """A `PYTHONPATH` entry naming the session directory or a directory inside it (`src`,
+    `$PWD/lib`, an absolute path under `cwd`)."""
+    if _PROJECT_DIR.match(entry):
+        return True
+    entry = _PROJECT_PREFIX.sub("", entry)
+    if entry.startswith("~") or _unspelled(entry):
+        return False
+    norm = posixpath.normpath(entry)
+    if posixpath.isabs(norm):
+        if cwd is None or not posixpath.isabs(cwd):
+            return False
+        norm = posixpath.relpath(norm, posixpath.normpath(cwd))
+    return norm != ".." and not norm.startswith("../")
+
+
+def _harmless_env(name: str, value: str, cwd: str | None = None) -> bool:
+    """A variable that changes no test's selection or outcome: `PYTHONPATH` naming only
+    directories inside the session directory (`.`, `src`, `$PWD/lib`, with the inherited
+    `$PYTHONPATH` after them), which `python -m pytest` and a src layout import from anyway;
+    `DJANGO_SETTINGS_MODULE` naming a module (the settings module is project code, and its
+    edits are checked like any other); and `NODE_ENV=test`, which jest sets itself."""
+    if name == "PYTHONPATH":
+        entries = value.split(":")
+        if len(entries) > 1 and _INHERITED_PATH.match(entries[-1]):
+            entries = entries[:-1]
+        return all(_inside_project(entry, cwd) for entry in entries)
+    if name == "DJANGO_SETTINGS_MODULE":
+        return _SETTINGS_MODULE.fullmatch(value) is not None
+    return name == "NODE_ENV" and value == "test"
 
 
 def _sources(simple: _Simple) -> str | None:
@@ -2011,7 +2516,7 @@ def _package_change(words: list[str]) -> str | None:
     return None
 
 
-def _exports(pipelines: list[_Pipeline]) -> list[str]:
+def _exports(pipelines: list[_Pipeline], cwd: str | None) -> list[str]:
     """Variables the command exports to later commands (`export CI=true`), beyond ones that only
     change output formatting."""
     names: list[str] = []
@@ -2028,12 +2533,12 @@ def _exports(pipelines: list[_Pipeline]) -> list[str]:
                 name, eq, value = word.partition("=")
                 if word.startswith("-") or not _ASSIGNMENT.match(f"{name}="):
                     continue
-                if not run_env_allowed(name) and not (eq and _harmless_env(name, value)):
+                if not run_env_allowed(name) and not (eq and _harmless_env(name, value, cwd)):
                     names.append(name)
     return names
 
 
-def _harness_change(pipelines: list[_Pipeline], command: str) -> str | None:
+def _harness_change(pipelines: list[_Pipeline], command: str, cwd: str | None) -> str | None:
     """Why a command changes how later commands run (aliases, functions, PATH, packages the
     runner may load), or None."""
     if _FUNCTION_DEF.search(command):
@@ -2046,18 +2551,20 @@ def _harness_change(pipelines: list[_Pipeline], command: str) -> str | None:
             prog = program_name(words[0]) if words else ""
             if prog in ("alias", "unalias") and words[1:]:
                 return f"{prog} {words[1].partition('=')[0]}"
+            if why := _tool_config_change(_unwrap(list(words))):
+                return why
             if prog == "hash" and "-p" in words:
                 return "hash -p remaps a command"
             if prog in ("export", "declare", "typeset", "readonly", "set"):
                 assignments = (w.partition("=") for w in words[1:] if "=" in w)
-                names = [n for n, _, v in assignments if not _harmless_env(n, v)]
+                names = [n for n, _, v in assignments if not _harmless_env(n, v, cwd)]
                 if changed := [n for n in names if is_harness_env(n)]:
                     return f"{prog} {changed[0]}"
             if not words and (
                 changed := [
                     n
                     for n, v in simple.env.items()
-                    if is_harness_env(n) and not _harmless_env(n, v)
+                    if is_harness_env(n) and not _harmless_env(n, v, cwd)
                 ]
             ):
                 return f"sets {changed[0]}"
@@ -2303,6 +2810,8 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     persisting: list[str] = []
     mutating_at: list[tuple[int, int]] = []
     nested_after = False
+    run_after = False
+    config_files: list[str] = []
     for p_index, pipeline in enumerate(pipelines):
         for c_index, simple in enumerate(pipeline.commands):
             classified = _classify(simple, depth, cwd)
@@ -2340,7 +2849,13 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 if nested.runners:
                     run_cds = [*cds, *nested.run_cds]
                     test_paths = nested.test_paths
-                    run_env = list(nested.run_env)
+                    outer = [
+                        name
+                        for name, value in _command_env(simple).items()
+                        if not run_env_allowed(name) and not _harmless_env(name, value, cwd)
+                    ]
+                    run_env = [*nested.run_env, *outer]
+                    config_files.extend(nested.config_files)
                 if nested.runners or (classified.category in _CHECKS and not runners):
                     nested_after = nested.mutation_after_check
                     primary = (p_index, c_index)
@@ -2352,8 +2867,10 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
             if classified.runner is not None:
                 runners.append(classified.runner)
                 filters.extend(classified.filters)
-                run_cds = list(cds)
+                run_cds = [*cds, *classified.relocations]
                 run_env = list(classified.run_env)
+                config_files.extend(classified.config_files)
+                run_after = classified.writes_after
                 test_paths = (
                     classified.paths
                     if classified.paths is not None
@@ -2375,6 +2892,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     mutation_after = primary is not None and (
         any(position > primary for position in mutating_at)
         or (nested_after and primary in mutating_at)
+        or run_after
     )
     if primary is not None and masked is None:
         p_index, c_index = primary
@@ -2432,13 +2950,14 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         lasting_mutation=lasting,
         run_cds=run_cds,
         run_env=run_env,
-        exports=_exports(pipelines),
+        exports=_exports(pipelines, cwd),
+        config_files=list(dict.fromkeys(config_files)),
         test_paths=test_paths if len(runners) == 1 else None,
         cd_targets=persisting,
         mutation_after_check=mutation_after,
         session_store=nested_store
         or _writes_session_store(pipelines, command, touched, deleted, opaque),
-        harness_change=_harness_change(pipelines, command),
+        harness_change=_harness_change(pipelines, command, cwd),
         guard_tamper=nested_guard or _guard_tamper(pipelines, command, touched, deleted, opaque),
         source_findings=list(dict.fromkeys([*written, *_written_code(pipelines, command)])),
     )

@@ -16752,7 +16752,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as DELETE /api/cart/1 → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request whose URL contai…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
       "error": null
     },
     {
@@ -16765,7 +16765,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as DELETE /api/cart/1 → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request whose URL contai…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
       "error": null
     },
     {
@@ -16778,7 +16778,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as DELETE /api/cart/1 → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request whose URL contai…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
       "error": null
     },
     {
@@ -16791,7 +16791,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request w…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?x=1;_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST reque…",
       "error": null
     },
     {
@@ -16804,7 +16804,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request w…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?x=1;_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST reque…",
       "error": null
     },
     {
@@ -16817,7 +16817,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request w…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?x=1;_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST reque…",
       "error": null
     },
     {
@@ -16830,7 +16830,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as POST /graphql?query=fragment%20F%20on%20Order%7Bid%7D%20mutation%20Place%7BplaceOrder%28item%3A%22red%20kettle%22%2…",
       "error": null
     },
     {
@@ -16843,7 +16843,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as POST /graphql?query=fragment%20F%20on%20Order%7Bid%7D%20mutation%20Place%7BplaceOrder%28item%3A%22red%20kettle%22%2…",
       "error": null
     },
     {
@@ -16856,7 +16856,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was GET as POST /graphql?query=fragment%20F%20on%20Order%7Bid%7D%20mutation%20Place%7BplaceOrder%28item%3A%22red%20kettle%22%2…",
       "error": null
     },
     {
@@ -21549,7 +21549,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1 → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request whose URL contai…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request w…",
       "error": null
     },
     {
@@ -21562,7 +21562,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1 → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request whose URL contai…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request w…",
       "error": null
     },
     {
@@ -21575,7 +21575,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1 → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request whose URL contai…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request w…",
       "error": null
     },
     {
@@ -21588,7 +21588,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request w…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
       "error": null
     },
     {
@@ -21601,7 +21601,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request w…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
       "error": null
     },
     {
@@ -21614,7 +21614,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST request w…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
       "error": null
     },
     {
@@ -21627,7 +21627,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?x=1;_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST reque…",
       "error": null
     },
     {
@@ -21640,7 +21640,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?x=1;_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST reque…",
       "error": null
     },
     {
@@ -21653,7 +21653,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as POST /graphql?query=mutation%7BplaceOrder%28item%3A%22red%20kettle%22%29%7Bid%7D%7D → 200 (URL lacks 'order'); No P…",
+      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was GET as DELETE /api/cart/1?x=1;_method=DELETE → 200 (method GET as DELETE, expected POST; URL lacks 'order'); No POST reque…",
       "error": null
     },
     {

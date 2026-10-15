@@ -71,6 +71,8 @@ class TestSummary(BaseModel):
     deselected: int = 0
     """Tests the run left out on purpose (pytest deselected, cargo filtered out)."""
     no_tests: bool = False
+    conflict: str | None = None
+    """Why the output holds summary text the runner did not print, or None."""
 
     @property
     def green(self) -> bool:
@@ -152,6 +154,11 @@ class CommandAnalysis(BaseModel):
         default_factory=list[str],
         description="Names of variables the command exports to later commands, beyond ones that "
         "only change output formatting",
+    )
+    config_files: list[str] = Field(
+        default_factory=list[str],
+        description="Files the test run reads as its configuration although no name rule "
+        "marks them (`make -f ci/rules`), as written",
     )
     test_paths: list[str] | None = Field(
         default=None,

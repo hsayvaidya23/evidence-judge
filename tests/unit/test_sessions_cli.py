@@ -40,7 +40,7 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         (["--claude-code", str(SUCCESS)], 0),
         (["--claude-code", str(FILTERED)], 2),
-        (["--codex", str(CODEX)], 0),
+        (["--codex", str(CODEX)], 2),
         (["--claude-code", str(FAILURE), "--answer", "All tests pass."], 1),
     ],
 )

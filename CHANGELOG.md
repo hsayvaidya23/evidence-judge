@@ -22,6 +22,17 @@ the names exported from `evidence_judge`) is defined under
   without a re-run; `session rerun` judges a re-run without a session record. The Claude Code,
   Codex and Gemini CLI stop hooks run it when the session spec saved at turn start
   (`.evidence-judge/session.yaml` or `EVJ_HOOK_SESSION_SPEC`) has a `rerun:` block.
+- Recorded round-18 red-team sessions: `uv run --directory`, `make -C`, `make -f ci/rules`,
+  `make test PYTEST_ADDOPTS=...`, `uv run --env-file`, unittest `discover -s` and `--pattern`,
+  `node --test --test-update-snapshots`, `pytest --log-file=tests/test_calc.py`, `npm config
+  set node-options`, `go env -w GOFLAGS`, `export` in `~/.bash_profile` and (Codex) `~/.zshenv`,
+  an `atexit` handler printing `3 passed` (also through `tail`), and three Codex exec edits whose
+  stream carries no diff; and fourteen honest sessions (`PYTHONPATH=src`,
+  `DJANGO_SETTINGS_MODULE`, `--import-mode=importlib`, `-n auto`, `uv run`, `tox -e py`, `npm
+  test` with and without coverage switches, jest `--coverage`, `go test -race`, `cargo test
+  --all-features`, `make test`, `-k` then the full suite, and a Codex exec fix), each with its
+  exact outcome. The honest ones are session-bench controls, and the session bench forges
+  fifteen new kinds (619 forged sessions, 0 false passes).
 - Recorded round-17 red-team sessions: unknown pytest options (`--record-mode=rewrite`,
   `--regtest-reset`), clustered `-qopython_functions=...` and `-qpno:warnings`, `-W ignore`,
   `RECORD_MODE=all` on every run, expected values read through path pieces or imported from a
@@ -162,6 +173,17 @@ the names exported from `evidence_judge`) is defined under
 
 ### Fixed
 
+- Honest sessions that needed review now pass: `PYTHONPATH` naming only directories inside the
+  session directory (`src`, `src:lib`, `$PWD/src`, an absolute path under it),
+  `DJANGO_SETTINGS_MODULE` naming a module, `NODE_ENV=test`, `pytest
+  --import-mode=importlib|prepend|append`, `tox -e py` (and `py312`, `pypy3`, several of them),
+  and `--coverage` or `--experimental-test-coverage` passed through `npm test --`.
+- Codex rollout `FileChange` items that list `{path, kind, diff}` (with `kind` an object) are
+  read with their diff; before, every such edit counted as an empty change.
+- GraphQL: an object literal in a variable default or a directive argument (`mutation M($a: I =
+  {id: 1})`, `@audit(meta: {by: "x"})`) no longer hides the operation that follows, and a
+  method-override header listing several methods (`DELETE, GET`) acts as the write it lists.
+
 - `pytest -p no:randomly` (and `no:random_order`, `no:cov`, `no:sugar`, `no:xdist`, like
   `no:cacheprovider` before) is a whole-suite run: these plugins only shuffle, measure, print or
   spread the same tests. `-p no:warnings` is still a filter, since it drops
@@ -210,6 +232,37 @@ the names exported from `evidence_judge`) is defined under
   its spec (`tests 2`, `pass 2`) and TAP (`# pass 2`) totals are read, also through `npm test`.
 
 ### Security
+
+- **Runs moved or configured by a wrapper are not the whole suite.** `uv run
+  --directory`/`--project`, `make -C` (`just -d`, `task -d`) and `env -C` move the run like a
+  `cd`; `uv run --env-file` and `dotenv` load variables; any other `uv run` option outside an
+  allowlist is a filter. Make options are parsed anywhere on the line; `VAR=value` arguments
+  are variables set for the run, and a file named with `make -f` (`just -f`, `task -t`) is test
+  configuration for the whole session.
+- **More runners are deny-by-default.** `python -m unittest` (every discover argument but the
+  defaults, every option but `-v -b -f -c --locals -q`), `node --test` (`--require`,
+  `--import`, `--env-file`, ... are filters; `--test-update-snapshots` rewrites expected
+  snapshots like `jest -u`), tox and nox options.
+- **Files a test run writes are changes.** pytest `--log-file`, `--junitxml`, `--html`,
+  `--basetemp`, `--cov-report=TYPE:DEST`, `--debug`, ... and `go test -coverprofile`,
+  `-cpuprofile`, `-o`, ...: a test, configuration or runner file named there is the suite
+  rewritten, and a code file is a change after the run's own check. Reports and profiles are
+  not.
+- **Settings that outlive a command are harness changes.** Writing a shell startup file
+  (`~/.bashrc`, `~/.bash_profile`, `~/.zshenv`, `~/.zshrc`, fish's config, `/etc/profile.d/`),
+  `.npmrc`, `.yarnrc*` or `bunfig.toml`; `npm`/`pnpm`/`yarn config set|delete`; `go env -w|-u`;
+  and setting `ZDOTDIR`, `GOENV`, `UV_ENV_FILE` or an `npm_config_*` variable.
+- **Code that ends the run or prints a verdict is test weakening.** An edited Python file
+  outside the tests that registers an `atexit` handler, calls `os._exit`, calls `sys.exit` or
+  raises `SystemExit` at import, replaces `sys.excepthook`, or holds passing-summary text, and
+  output holding more summary lines than the command has runs, cannot back a pass.
+- **An edit without a diff cannot back a whole-suite pass.** A code edit whose diff the source
+  does not record, such as every `file_change` in a `codex exec --json` stream, needs review,
+  with an ingest note pointing at the rollout file (which records the patch) or an independent
+  re-run. Honest Codex exec sessions that edit code now need review.
+- **GraphQL persisted queries and duplicate operation names are possible writes.** A GET that
+  sends only a persisted-query hash is shown as `GET (persisted query)` and matches a `forbid`
+  on writes; several `operationName` values count as a write when any of them names a mutation.
 
 - **Test-run options are deny-by-default.** pytest, `go test`, `cargo test`/`nextest`, jest and
   vitest options are checked against allowlists of options that only change output, order,

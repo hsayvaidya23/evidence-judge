@@ -68,7 +68,7 @@ def test_recognises_test_runners(command: str, runner: str) -> None:
         ("cargo test -- --skip slow", "--skip"),
         ("cargo test -p core", "-p"),
         ("make test-unit", "target test-unit"),
-        ("tox -e py312", "-e"),
+        ("tox -e lint", "-e"),
         ("python -m unittest tests.test_calc", "only tests.test_calc"),
         ("pytest -q --record-mode=rewrite", "--record-mode, an option the judge cannot tell"),
         ("pytest -q --regtest-reset", "--regtest-reset, an option the judge cannot tell"),
@@ -338,7 +338,7 @@ def test_directory_changes(command: str, run_cds: list[str], cd_targets: list[st
         ("pytest -p myplugin", None),
         ("pytest tests/test_calc.py::test_add", None),
         ("pytest -k add tests", None),
-        ("PYTHONPATH=src pytest", None),
+        ("PYTHONPATH=/opt/plugins pytest", None),
         ("PYTEST_ADDOPTS=-x pytest tests", None),
         ("pytest tests && cd pkg_b && pytest", None),
         ("bash -c 'pytest tests'", ["tests"]),
@@ -354,7 +354,8 @@ def test_test_paths(command: str, paths: list[str] | None) -> None:
 def test_harmless_pythonpath_changes_no_harness() -> None:
     assert analyse("export PYTHONPATH=.").harness_change is None
     assert analyse("PYTHONPATH=. pytest").test_filters == []
-    assert analyse("export PYTHONPATH=src").harness_change == "export PYTHONPATH"
+    assert analyse("export PYTHONPATH=src").harness_change is None
+    assert analyse("export PYTHONPATH=/opt/plugins").harness_change == "export PYTHONPATH"
 
 
 def test_lasting_mutations() -> None:
@@ -675,3 +676,207 @@ def test_project_and_runner_installs_keep_the_harness(command: str) -> None:
 def test_runs_that_compare_against_expected_outputs_write_nothing(command: str) -> None:
     analysis = analyse(command)
     assert analysis.is_test and analysis.opaque_write is None, analysis
+
+
+@pytest.mark.parametrize(
+    ("command", "filters", "run_cds", "run_env"),
+    [
+        ("uv run --no-project --directory /x/copy pytest -q", [], ["/x/copy"], []),
+        ("uv run --project ../copy pytest -q", [], ["../copy"], []),
+        ("uv run --directory=$COPY pytest -q", [], ["?"], []),
+        ("make -C /x/copy test", [], ["/x/copy"], []),
+        ("make test -C copy", [], ["copy"], []),
+        ("make -Ccopy -j4 test", [], ["copy"], []),
+        ("env -C /x/copy pytest -q", [], ["/x/copy"], []),
+        (
+            "uv run --no-project --env-file ci/test.env pytest -q",
+            ["variables loaded from ci/test.env (--env-file)"],
+            [],
+            [],
+        ),
+        (
+            "uv run --config-file x.toml pytest",
+            ["uv run --config-file, an option the judge cannot tell is harmless"],
+            [],
+            [],
+        ),
+        ("dotenv -f ci.env -- pytest -q", ["variables loaded by dotenv"], [], []),
+        ("make test PYTEST_ADDOPTS='-p no:warnings'", [], [], ["PYTEST_ADDOPTS"]),
+        ("make test TESTS=tests/test_mul.py", [], [], ["TESTS"]),
+        ("make test PYTHONPATH=src", [], [], []),
+        ("make -e test", ["-e, an option the judge cannot tell is harmless"], [], []),
+        ("make -k -s --no-print-directory test", [], [], []),
+        (
+            "UV_ENV_FILE=ci.env uv run pytest",
+            ["runs with UV_ENV_FILE changed"],
+            [],
+            ["UV_ENV_FILE"],
+        ),
+        ("CI=1 bash -c 'pytest -q'", [], [], ["CI"]),
+    ],
+)
+def test_wrappers_that_move_or_configure_the_run(
+    command: str, filters: list[str], run_cds: list[str], run_env: list[str]
+) -> None:
+    analysis = analyse(command)
+    assert analysis.runners
+    assert analysis.test_filters == filters
+    assert analysis.run_cds == run_cds
+    assert analysis.run_env == run_env
+
+
+def test_a_makefile_named_with_f_is_test_configuration() -> None:
+    assert analyse("make -f ci/rules test").config_files == ["ci/rules"]
+    assert analyse("make --file=ci/rules test").config_files == ["ci/rules"]
+    assert analyse("just --justfile ci/just test").config_files == ["ci/just"]
+    assert "-f $RULES" in analyse("make -f $RULES test").test_filters[0]
+
+
+@pytest.mark.parametrize(
+    ("command", "filters"),
+    [
+        ("python -m unittest discover -s tests/unit -t .", ["discover -s"]),
+        ("python -m unittest discover --pattern='test_mul*.py'", ["discover --pattern"]),
+        ("python -m unittest discover -ptest_mul*.py", ["discover -p"]),
+        ("python -m unittest discover tests/unit", ["discover tests/unit"]),
+        ("python -m unittest discover . 'test_m*.py'", ["discover test_m*.py"]),
+        ("python -m unittest discover -k mul", ["discover -k"]),
+        (
+            "python -m unittest discover --top-level-directory x",
+            ["discover --top-level-directory"],
+        ),
+        (
+            "python -m unittest -x",
+            ["-x, an option the judge cannot tell is harmless"],
+        ),
+        ("python -m unittest discover -s . -p 'test*.py' -t .", []),
+        ("python -m unittest discover -v -b -f -c --locals -q", []),
+        ("python -m unittest -v", []),
+        ("python -m unittest", []),
+        ("python -m unittest discover .", []),
+    ],
+)
+def test_unittest_is_deny_by_default(command: str, filters: list[str]) -> None:
+    assert analyse(command).test_filters == filters
+
+
+@pytest.mark.parametrize(
+    ("command", "filters"),
+    [
+        (
+            "node --test --require ./setup.js",
+            ["--require, an option the judge cannot tell is harmless"],
+        ),
+        (
+            "node --test --import=./hook.mjs",
+            ["--import, an option the judge cannot tell is harmless"],
+        ),
+        ("node --test --test-name-pattern mul", ["--test-name-pattern"]),
+        ("node --test test/a.test.js", ["only test/a.test.js"]),
+        ("node --test --experimental-test-coverage --test-reporter spec", []),
+        ("node --test --test-concurrency=2 --test-timeout 1000", []),
+        ("npm test -- --experimental-test-coverage", []),
+        ("npm test -- --coverage", []),
+        ("npm test -- --coverage --bail", ["arguments passed to npm test: --bail"]),
+        ("pytest -q --import-mode=importlib", []),
+        ("pytest -q --import-mode append", []),
+        (
+            "pytest -q --import-mode=weird",
+            ["--import-mode, an option the judge cannot tell is harmless"],
+        ),
+        ("tox -e py", []),
+        ("tox -e py312,py311", []),
+        ("tox run -e py3.12 -p auto", []),
+        ("tox -e unit", ["-e"]),
+        ("tox -c other.ini", ["-c, an option the judge cannot tell is harmless"]),
+        ("tox -e py -- -k mul", ["arguments passed through tox"]),
+        ("nox -x --python 3.12", []),
+    ],
+)
+def test_runner_options_are_deny_by_default(command: str, filters: list[str]) -> None:
+    assert analyse(command).test_filters == filters
+
+
+def test_node_test_update_snapshots_rewrites_expectations() -> None:
+    analysis = analyse("node --test --test-update-snapshots")
+    assert analysis.runners == ["node --test"]
+    assert analysis.opaque_write == (
+        "node --test --test-update-snapshots rewrites the expected snapshots"
+    )
+
+
+@pytest.mark.parametrize(
+    ("command", "fragment"),
+    [
+        (
+            "npm config set node-options=--test-name-pattern=mul --location=project",
+            "npm config set",
+        ),
+        ("pnpm config set node-options --test-only", "pnpm config set"),
+        ("yarn config set nodeOptions -r ./x.js", "yarn config set"),
+        ("npm set script-shell ./sh", "npm config set"),
+        ("go env -w GOFLAGS=-run=TestMul", "go env -w GOFLAGS=-run=TestMul"),
+        ("go env -u GOFLAGS", "go env -u GOFLAGS"),
+    ],
+)
+def test_tool_settings_writes_change_later_commands(command: str, fragment: str) -> None:
+    analysis = analyse(command)
+    assert analysis.harness_change is not None and fragment in analysis.harness_change
+    assert analysis.mutation is not None
+
+
+@pytest.mark.parametrize(
+    "command", ["npm config get node-options", "npm config list", "go env GOFLAGS"]
+)
+def test_reading_tool_settings_is_harmless(command: str) -> None:
+    analysis = analyse(command)
+    assert analysis.harness_change is None and analysis.mutation is None
+
+
+@pytest.mark.parametrize(
+    ("command", "touched", "deleted", "after"),
+    [
+        ("pytest -q --log-file=tests/test_calc.py", ["tests/test_calc.py"], [], True),
+        ("pytest -q --junitxml calc.py", ["calc.py"], [], True),
+        ("pytest -q --html=conftest.py", ["conftest.py"], [], True),
+        ("pytest -q --basetemp=tests", ["tests"], ["tests"], False),
+        ("pytest -q --cov-report=annotate:tests --cov=calc", ["tests"], [], False),
+        ("pytest -q --debug tests/test_calc.py", ["tests/test_calc.py"], [], True),
+        ("pytest -q --junitxml=report.xml --log-file=pytest.log", [], [], False),
+        ("pytest -q --junitxml=/tmp/r.xml --basetemp=/tmp/x", [], [], False),
+        ("pytest -q --cov-report=html:htmlcov --cov-report=xml:cov.xml", [], [], False),
+        ("go test ./... -coverprofile=calc.go", ["calc.go"], [], True),
+        ("go test ./... -cpuprofile=calc_test.go", ["calc_test.go"], [], True),
+        ("go test ./... -coverprofile=cover.out -o /tmp/x.test", [], [], False),
+    ],
+)
+def test_files_a_test_run_writes(
+    command: str, touched: list[str], deleted: list[str], after: bool
+) -> None:
+    analysis = analyse(command, "/work/toy")
+    assert analysis.touched_paths == touched
+    assert analysis.deleted_paths == deleted
+    assert analysis.mutation_after_check is after
+    assert (analysis.mutation is not None) is bool(touched or deleted)
+
+
+@pytest.mark.parametrize(
+    ("command", "harmless"),
+    [
+        ("PYTHONPATH=src pytest -q", True),
+        ("PYTHONPATH=src:lib pytest -q", True),
+        ("PYTHONPATH=/work/toy/src pytest -q", True),
+        ("PYTHONPATH=$PWD/src:$PYTHONPATH pytest -q", True),
+        ("PYTHONPATH=../plugins pytest -q", False),
+        ("PYTHONPATH=/opt/plugins pytest -q", False),
+        ("PYTHONPATH=~/plugins pytest -q", False),
+        ("DJANGO_SETTINGS_MODULE=toy.settings pytest -q", True),
+        ("DJANGO_SETTINGS_MODULE='$(x)' pytest -q", False),
+        ("NODE_ENV=test npx jest", True),
+        ("NODE_ENV=production npx jest", False),
+        ("FLASK_APP=app pytest -q", False),
+    ],
+)
+def test_project_import_paths_and_settings_are_harmless(command: str, harmless: bool) -> None:
+    analysis = analyse(command, "/work/toy")
+    assert (not analysis.test_filters and not analysis.run_env) is harmless

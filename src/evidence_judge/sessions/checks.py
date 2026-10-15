@@ -25,6 +25,7 @@ from evidence_judge.sessions.edits import (
     is_harness_path,
     is_test_config,
     is_test_path,
+    session_config_reason,
 )
 from evidence_judge.sessions.models import (
     CallStatus,
@@ -203,6 +204,14 @@ class SessionIndex:
         out: list[tuple[FileEditEvent | CommandEvent, str]] = []
         for edit in self.edits:
             out.extend((edit, finding) for finding in edit.test_findings)
+        configs = self._config_files
+        for edit in self.edits:
+            if (reader := configs.get(posixpath.basename(edit.path))) and not is_test_config(
+                edit.path
+            ):
+                out.append(
+                    (edit, f"changed {edit.path}, which {reader} reads as its test configuration")
+                )
         exported: list[str] = []
         for command in self.commands:
             if command.status is CallStatus.DENIED:
@@ -216,7 +225,13 @@ class SessionIndex:
                 if is_test_path(path):
                     out.append((command, f"deleted or moved test file {path}"))
             for path in analysis.touched_paths:
-                if is_harness_path(path) or is_test_config(path):
+                if why := session_config_reason(path):
+                    out.append((command, why))
+                elif reader := configs.get(posixpath.basename(path)):
+                    out.append(
+                        (command, f"changed {path}, which {reader} reads as its test configuration")
+                    )
+                elif is_harness_path(path) or is_test_config(path):
                     out.append((command, f"changed test harness file {path}"))
                 elif is_test_path(path):
                     out.append((command, f"wrote test file {path} from the shell"))
@@ -230,6 +245,17 @@ class SessionIndex:
                 out.append((command, f"changed how later commands run: {analysis.harness_change}"))
             out.extend((command, finding) for finding in analysis.source_findings)
         return out
+
+    @cached_property
+    def _config_files(self) -> dict[str, str]:
+        """Names of files a test run reads as its configuration although no name rule marks
+        them (`make -f ci/rules`), to the run that reads them."""
+        return {
+            posixpath.basename(path): command.id
+            for command in self.commands
+            if command.status is not CallStatus.DENIED
+            for path in command.analysis.config_files
+        }
 
     @property
     def source_changed(self) -> bool:
@@ -590,6 +616,12 @@ def judge_test_run(event: CommandEvent) -> RunOutcome:
             Result.UNKNOWN,
             f"{event.id}'s command line itself contains test-summary text, so its output is "
             "partly the agent's own words",
+        )
+    if summary is not None and summary.conflict:
+        return outcome(
+            Result.UNKNOWN,
+            f"{event.id} shows {summary.describe()}, but {summary.conflict}: code the run "
+            "imported can print a passing summary after the real one",
         )
     if summary is not None and summary.red:
         return outcome(Result.FAIL, f"{event.id}: {summary.describe()}")

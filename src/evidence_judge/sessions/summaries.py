@@ -316,11 +316,36 @@ def _combine(found: list[TestSummary]) -> TestSummary | None:
     )
 
 
+_ONE_SUMMARY: Final = {
+    "pytest": _PYTEST_LINE,
+    "unittest": _UNITTEST_RAN,
+    "jest": _JEST_TESTS,
+    "vitest": _VITEST_TESTS,
+}
+"""Runners that print exactly one summary line per run."""
+
+
+def _surplus(runners: list[str], lines: list[str]) -> str | None:
+    """Why the output holds more summary lines than the runs printed (code under test printing
+    `3 passed` after the real summary), or None."""
+    for runner, pattern in _ONE_SUMMARY.items():
+        runs = runners.count(runner)
+        found = sum(1 for line in lines if pattern.match(line))
+        if runs and found > runs:
+            plural = "s" if runs > 1 else ""
+            return f"its output holds {found} {runner} summary lines for {runs} run{plural}"
+    return None
+
+
 def parse_summary(runners: list[str], output: str) -> TestSummary | None:
-    """The test summary in `output` of a command that ran `runners`, or None if there is none."""
+    """The test summary in `output` of a command that ran `runners`, or None if there is none.
+    A summary from output holding more summary lines than the runs print is marked
+    `conflict`: some of it is not the runner's."""
     if not runners or not output:
         return None
     lines = _lines(output)
     known = [_BY_RUNNER[r] for r in dict.fromkeys(runners) if r in _BY_RUNNER]
     parsers = known if len(known) == len(set(runners)) else list(_ALL)
-    return _combine([s for parser in dict.fromkeys(parsers) if (s := parser(lines)) is not None])
+    summary = _combine([s for parser in dict.fromkeys(parsers) if (s := parser(lines)) is not None])
+    conflict = _surplus(runners, lines) if summary is not None else None
+    return summary.model_copy(update={"conflict": conflict}) if summary and conflict else summary

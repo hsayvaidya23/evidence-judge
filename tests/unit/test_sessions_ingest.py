@@ -837,3 +837,54 @@ def test_session_fixtures_hold_no_local_or_private_data(fixture: Path) -> None:
     assert not re.search(rf"(?<![\w/:.-]){user}(?![\w/.-])", text)
     kinds = {json.loads(line).get("type") for line in text.splitlines()}
     assert not kinds & {"attachment", "api-request", "api-request-blob", "system"}
+
+
+def test_codex_listed_changes_with_diffs(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path / "rollout.jsonl",
+        [
+            {
+                "timestamp": "2026-10-15T10:00:00Z",
+                "type": "session_meta",
+                "payload": {"id": "r-2", "cwd": CWD},
+            },
+            {
+                "timestamp": "2026-10-15T10:00:01Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "item_completed",
+                    "item": {
+                        "type": "FileChange",
+                        "status": "completed",
+                        "changes": [
+                            {
+                                "path": f"{CWD}/calc.py",
+                                "kind": {"type": "update", "move_path": None},
+                                "diff": "@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n"
+                                "+    return a + b\n",
+                            },
+                            {"path": f"{CWD}/new.py", "kind": {"type": "add"}, "diff": "X = 1\n"},
+                            {"path": f"{CWD}/old.py", "kind": "delete", "diff": "Y = 2\n"},
+                            {"path": f"{CWD}/blind.py", "kind": "update"},
+                        ],
+                    },
+                },
+            },
+        ],
+    )
+    run = load_codex(path)
+    edits = [e for e in run.events if isinstance(e, FileEditEvent)]
+    assert [(e.path, e.change, e.lines_removed, e.lines_added) for e in edits] == [
+        ("calc.py", "modify", 1, 1),
+        ("new.py", "add", 0, 1),
+        ("old.py", "delete", 1, 0),
+        ("blind.py", "modify", None, None),
+    ]
+    assert [bool(e.test_findings) for e in edits] == [False, False, False, True]
+
+
+def test_codex_exec_stream_notes_edits_without_a_diff() -> None:
+    run = load_codex(FIXTURES / "codex" / "honest_success.exec.jsonl")
+    assert any("records no diff for /work/toy/calc.py" in note for note in run.notes)
+    (edit,) = [e for e in run.events if isinstance(e, FileEditEvent)]
+    assert edit.test_findings and "with no recorded diff" in edit.test_findings[0]

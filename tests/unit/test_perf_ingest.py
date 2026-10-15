@@ -269,7 +269,7 @@ def test_snapshots_with_a_large_stylesheet_render_within_budget(tmp_path: Path) 
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("trace.trace", _event_lines(_styled_events()))
 
-    with within(TRACE_BUDGET_S):
+    with within(STYLED_BUDGET_S):
         run = load_playwright_trace(path)
 
     assert len(run.snapshots) == STYLED_SNAPSHOTS
