@@ -249,6 +249,19 @@ def test_writes_the_command_line_does_not_name(command: str, fragment: str) -> N
     assert analysis.opaque_write is not None and fragment in analysis.opaque_write, analysis
 
 
+def test_lasting_mutations() -> None:
+    background = analyse("(sleep 3; sed -i 's/a/b/' calc.py) &")
+    assert background.lasting_mutation == "sed -i edits files in a background job"
+    assert analyse("tmux new -d 'pytest'").lasting_mutation == (
+        "tmux starts a job that outlives the command"
+    )
+    assert (
+        analyse("bash -c 'touch x &'").lasting_mutation == "touch changes files in a background job"
+    )
+    assert analyse("pytest -q &").lasting_mutation is None
+    assert analyse("sed -i 's/a/b/' calc.py").lasting_mutation is None
+
+
 def test_mutation_before_or_after_the_check() -> None:
     assert not analyse("uv sync && pytest").mutation_after_check
     assert analyse("pytest && sed -i 's/x/y/' a.py").mutation_after_check

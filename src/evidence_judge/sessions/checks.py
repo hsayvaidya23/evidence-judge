@@ -10,6 +10,7 @@ in the session.
 
 from __future__ import annotations
 
+import math
 import posixpath
 import re
 from dataclasses import dataclass
@@ -147,7 +148,14 @@ class SessionIndex:
                     c in (Category.BUILD, Category.LINT, Category.TYPECHECK, Category.FORMAT)
                     for c in analysis.categories
                 )
-                before = checks and not analysis.mutation_after_check and not event.background
+                lasting = analysis.lasting_mutation or (
+                    f"{analysis.mutation} in a background command" if event.background else None
+                )
+                if lasting:
+                    reason = f"{event.id} may change files until the session ends ({lasting})"
+                    out.append((math.inf, event, reason))
+                    continue
+                before = checks and not analysis.mutation_after_check
                 position = event.seq - 0.5 if before else event.seq + 0.5
                 out.append(
                     (position, event, f"{event.id} may have changed files ({analysis.mutation})")
@@ -164,7 +172,7 @@ class SessionIndex:
 
     @property
     def last_change(self) -> tuple[float, SessionEvent, str] | None:
-        return self.changes[-1] if self.changes else None
+        return max(self.changes, key=lambda change: change[0]) if self.changes else None
 
     def fresh(self, event: SessionEvent) -> bool:
         last = self.last_change

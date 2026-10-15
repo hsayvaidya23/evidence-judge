@@ -1194,6 +1194,11 @@ _OPAQUE_WRITERS: Final = frozenset(
     {"tar", "unzip", "patch", "dd", "rsync", "wget", "split", "bunzip2", "gunzip", "7z", "unrar"}
 )
 """File-changing programs whose targets are not (all) the words on their command line."""
+_DETACHERS: Final = frozenset(
+    {"setsid", "disown", "at", "batch", "screen", "tmux", "daemonize", "start-stop-daemon",
+     "systemd-run", "launchctl", "crontab", "watchexec", "entr", "fswatch", "inotifywait"}
+)  # fmt: skip
+"""Programs that leave something running, or scheduled, after the command returns."""
 _COPIERS: Final = frozenset({"cp", "mv", "install", "ln", "scp"})
 _SCRATCH: Final = ("/tmp/", "/private/tmp/", "/var/folders/", "/dev/")  # noqa: S108
 _VERSION_FLAGS: Final = frozenset({"--version", "-V", "-VV", "--help", "-h"})
@@ -1694,6 +1699,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
 
     touched: list[str] = []
     opaque: str | None = None
+    lasting: str | None = None
     mutating_at: list[tuple[int, int]] = []
     nested_after = False
     for p_index, pipeline in enumerate(pipelines):
@@ -1701,6 +1707,8 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
             classified = _classify(simple, depth, cwd)
             touched.extend(classified.touched or [])
             opaque = opaque or classified.opaque
+            if classified.program in _DETACHERS:
+                lasting = lasting or f"{classified.program} starts a job that outlives the command"
             if classified.mutation is not None or (
                 classified.nested is not None and classified.nested.mutates
             ):
@@ -1721,6 +1729,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 mutation = mutation or nested.mutation
                 touched.extend(nested.touched_paths)
                 opaque = opaque or nested.opaque_write
+                lasting = lasting or nested.lasting_mutation
                 if nested.runners or (classified.category in _CHECKS and not runners):
                     nested_after = nested.mutation_after_check
                     primary = (p_index, c_index)
@@ -1743,6 +1752,8 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 masked = None
                 output_filter = None
 
+    if lasting is None and mutation is not None and any(p.op_after == "&" for p in pipelines):
+        lasting = f"{mutation} in a background job"
     mutation_after = primary is not None and (
         any(position > primary for position in mutating_at)
         or (nested_after and primary in mutating_at)
@@ -1800,6 +1811,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         deleted_paths=deleted,
         touched_paths=list(dict.fromkeys(touched)),
         opaque_write=opaque,
+        lasting_mutation=lasting,
         mutation_after_check=mutation_after,
         session_store=SESSION_STORE.search(command) is not None,
         harness_change=_harness_change(pipelines, command),

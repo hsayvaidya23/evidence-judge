@@ -231,6 +231,27 @@ def test_harmless_shell_steps_do_not_weaken_the_suite(step: object) -> None:
     assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
 
 
+@pytest.mark.parametrize(
+    "job",
+    [
+        bash("(sleep 3; sed -i 's/a + b/a - b/' calc.py) > /dev/null 2>&1 &"),
+        bash("nohup python3 revert.py &"),
+        bash("setsid python3 revert.py"),
+        bash("sed -i 's/+/-/' calc.py", "", None, background=True),
+    ],
+)
+def test_background_changes_last_until_the_session_ends(job: object) -> None:
+    run = session(edit("calc.py"), job, bash("pytest", GREEN), bash("ruff check ."))  # type: ignore[arg-type]
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE and "until the session ends" in reason
+    assert _check(BuildPredicate(category="lint"), run)[0] is Support.NO_EVIDENCE
+
+
+def test_a_background_test_run_changes_nothing() -> None:
+    run = session(edit("calc.py"), bash("pytest -q &", "", None), bash("pytest", GREEN))
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
 def test_setup_in_the_same_command_does_not_stale_the_run() -> None:
     run = session(edit("calc.py"), bash("uv sync && pytest", GREEN))
     assert _check(ALL_PASS, run)[0] is Support.SUPPORTED

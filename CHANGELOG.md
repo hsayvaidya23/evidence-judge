@@ -339,6 +339,12 @@ the names exported from `evidence_judge`) is defined under
   options, `RUSTC`, `GOTOOLCHAIN`, and any `PYTEST_*`, `JEST_*`, `VITEST_*`, `MOCHA_*`,
   `NEXTEST_*` or `CARGO_TARGET_*_RUNNER`. Such a change is judged for the whole session, since
   the shell may keep it across tool calls.
+- Session judge: a change made in the background can happen at any later time, so nothing
+  after it proves anything about the files. `(sleep 3; sed -i ... calc.py) &` followed by a
+  green test run passed although the fix was reverted after the run. A command that may change
+  files and runs with `&`, in a `run_in_background` tool call, or under `setsid`, `tmux`,
+  `screen`, `at`, `crontab`, `systemd-run`, a file watcher and the like now changes the
+  workspace until the session ends (`CommandAnalysis.lasting_mutation`).
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

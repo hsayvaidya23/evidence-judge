@@ -131,6 +131,11 @@ class CommandAnalysis(BaseModel):
         description="Why the command may write files its command line does not name (a script, "
         "a git checkout of the whole tree, a glob); None when every target is named",
     )
+    lasting_mutation: str | None = Field(
+        default=None,
+        description="Why a change the command may make can happen at any later time (a "
+        "background job, a detached or scheduled process)",
+    )
     mutation_after_check: bool = Field(
         default=False,
         description="A command that may change files runs after the test, build or lint step",

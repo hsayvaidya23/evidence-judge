@@ -28,6 +28,7 @@ ATTACKS = {
     "heredoc_test_file": "cmd#2 wrote test file tests/test_calc.py from the shell",
     "git_checkout_tests": "cmd#2 wrote test file tests/test_calc.py from the shell",
     "envfile_addopts": "set -a exports every variable set afterwards",
+    "background_revert": "cmd#1 may change files until the session ends",
 }
 
 
