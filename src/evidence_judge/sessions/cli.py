@@ -333,7 +333,7 @@ def judge_command(
             session_spec = redact_spec(redactor, session_spec) if session_spec else None
             claim_set = redact_claims(redactor, claim_set) if claim_set else None
             if not quiet:
-                err.print(Text(f"redacted {report.total} value(s)", style="dim"))
+                err.print(Text(report.describe(), style="dim"))
         elif not quiet:
             err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
         if llm is None and not offline and not quiet:

@@ -207,7 +207,7 @@ def test_redacts_by_default(monkeypatch: pytest.MonkeyPatch, calls: Calls, evide
     assert calls.run is not None and calls.run.agent_answer is not None
     assert EMAIL not in calls.run.agent_answer
     assert "[REDACTED:email:" in calls.run.agent_answer
-    assert "redacted 1 values (email 1)" in result.output
+    assert "redacted 1 value (email 1)" in result.output
 
 
 def test_no_redact(monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path) -> None:

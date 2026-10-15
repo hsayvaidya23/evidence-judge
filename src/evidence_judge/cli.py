@@ -269,13 +269,6 @@ def _write_output(path: Path, write: Callable[[Path], object]) -> None:
         raise CliError(f"cannot write {path}: {reason}", ExitCode.USAGE) from e
 
 
-def _describe(report: RedactionReport) -> str:
-    if not report.total:
-        return "redaction: nothing sensitive found"
-    parts = ", ".join(f"{k} {v}" for k, v in sorted(report.counts.items()))
-    return f"redacted {report.total} values ({parts})"
-
-
 def _require_evidence(trace: Path | None, har: Path | None, browser_use: Path | None) -> None:
     if not (trace or har or browser_use):
         raise InputUsageError("provide evidence with --trace, --har and/or --browser-use")
@@ -333,7 +326,7 @@ def _redact_for_judging(
     redactor = _redactor(settings, persistent=persistent)
     run, spec, claims, report = _redact_inputs(redactor, run, spec, claims)
     if err is not None:
-        err.print(Text(_describe(report), style="dim"))
+        err.print(Text(report.describe(), style="dim"))
     return run, spec, claims
 
 

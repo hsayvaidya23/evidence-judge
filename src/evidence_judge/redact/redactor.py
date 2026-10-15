@@ -93,6 +93,12 @@ class RedactionReport(BaseModel):
     def total(self) -> int:
         return sum(self.counts.values())
 
+    def describe(self) -> str:
+        if not self.total:
+            return "redaction: nothing sensitive found"
+        parts = ", ".join(f"{k} {v}" for k, v in sorted(self.counts.items()))
+        return f"redacted {self.total} value{'s' if self.total > 1 else ''} ({parts})"
+
 
 _FINGERPRINT_NORMALISERS: dict[str, Callable[[str], str]] = {
     "email": lambda v: v.strip().casefold(),

@@ -235,10 +235,7 @@ def redactor_for(settings: Settings, *, persistent: bool) -> Redactor:
 def _describe_redaction(report: RedactionReport | None) -> str:
     if report is None:
         return "redaction disabled by EVJ_REDACT=false: the verdict may contain secrets"
-    if not report.total:
-        return "nothing sensitive found"
-    parts = ", ".join(f"{k} {v}" for k, v in sorted(report.counts.items()))
-    return f"redacted {report.total} values ({parts})"
+    return report.describe()
 
 
 def _llm(config: ServerConfig, settings: Settings, offline: bool) -> LLMClient | None:
