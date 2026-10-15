@@ -512,7 +512,7 @@ async def test_a_named_test_is_read_from_the_report() -> None:
 def test_the_session_rerun_command(tmp_path: Path) -> None:
     root = toy(tmp_path, buggy=True)
     spec = tmp_path / "spec.yaml"
-    spec.write_text(f"rerun:\n  command: {json.dumps(PYTEST)}\n")
+    spec.write_text(f"task: fix add\nrerun:\n  command: {json.dumps(PYTEST)}\n")
     out = tmp_path / "verdict.json"
     runner = CliRunner()
     result = runner.invoke(
@@ -523,6 +523,12 @@ def test_the_session_rerun_command(tmp_path: Path) -> None:
     verdict = json.loads(out.read_text())
     assert verdict["outcome"] == "fail"
     assert verdict["verification"]["method"] == "rerun"
+    assert (verdict["run_id"], verdict["task"]) == ("spec", "fix add")
+    assert "wrote json" not in result.output
+    result = runner.invoke(
+        app, ["session", "rerun", "--spec", str(spec), "--project", str(root), "--out", str(out)]
+    )
+    assert "wrote json" in result.output
     (root / "calc.py").write_text("def add(a, b):\n    return a + b\n")
     result = runner.invoke(
         app, ["session", "rerun", "--spec", str(spec), "--project", str(root), "-q"]
@@ -562,4 +568,8 @@ def test_judge_rerun_needs_a_rerun_block(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 3
-    assert "rerun: block" in result.output
+    text = " ".join(result.output.split())
+    assert "the spec has no rerun: block (session rerun and session judge --rerun need one)" in text
+    result = CliRunner().invoke(app, ["session", "rerun", "--spec", str(spec)])
+    assert result.exit_code == 3
+    assert "the spec has no rerun: block" in " ".join(result.output.split())

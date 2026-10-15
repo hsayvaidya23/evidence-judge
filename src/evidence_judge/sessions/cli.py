@@ -384,8 +384,13 @@ def judge_command(
 
 
 def _rerun_spec(spec: SessionSpec | None) -> RerunSpec:
-    if spec is None or spec.rerun is None:
+    if spec is None:
         raise _Error("--rerun needs a session spec (--spec) with a rerun: block", _Exit.USAGE)
+    if spec.rerun is None:
+        raise _Error(
+            "the spec has no rerun: block (session rerun and session judge --rerun need one)",
+            _Exit.USAGE,
+        )
     return spec.rerun
 
 
@@ -405,7 +410,9 @@ def _rerun(
     return execute(spec, root, base=base or spec.base, session_cwd=session_cwd, baseline=baseline)
 
 
-def rerun_verdict(result: RerunResult, run_id: str | None = None) -> RunVerdict:
+def rerun_verdict(
+    result: RerunResult, run_id: str | None = None, task: str | None = None
+) -> RunVerdict:
     """A verdict for a re-run on its own, without a session record: the suite passes, fails,
     or cannot be decided."""
     review = [f"runner configuration changed: {c}" for c in result.config_changes]
@@ -424,7 +431,7 @@ def rerun_verdict(result: RerunResult, run_id: str | None = None) -> RunVerdict:
     return RunVerdict(
         judge_version=__version__,
         run_id=run_id or "rerun",
-        task=None,
+        task=task,
         outcome=outcome,
         score={Outcome.PASS: 1.0, Outcome.FAIL: 0.0}.get(outcome, 0.5),
         summary=summary,
@@ -460,9 +467,12 @@ def rerun_command(
 
     Needs no session record. Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
     try:
-        rerun_spec = _rerun_spec(_spec(spec))
+        session_spec = _spec(spec)
+        rerun_spec = _rerun_spec(session_spec)
         verdict = rerun_verdict(
-            _rerun(rerun_spec, project, rerun_base, None, quiet, rerun_baseline)
+            _rerun(rerun_spec, project, rerun_base, None, quiet, rerun_baseline),
+            run_id=spec.stem,
+            task=session_spec.task if session_spec else None,
         )
         if out:
             try:
@@ -477,6 +487,8 @@ def rerun_command(
         raise _internal(e) from None
     if not quiet:
         print_verdict(verdict, StdoutConsole(), claims=False)
+        if out:
+            _stderr().print(Text.assemble(("wrote json ", "dim"), str(out)))
     raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
 
 
