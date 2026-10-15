@@ -12,9 +12,11 @@ from evidence_judge.core.agent_input import raw_inputs, rendered
 from evidence_judge.core.echo import (
     covered_page,
     covered_request,
+    masked_derived,
     masked_page,
     masked_request,
     masked_url,
+    query_derived,
 )
 from evidence_judge.core.evidence import (
     ActionEvent,
@@ -318,21 +320,32 @@ class EvidenceIndex:
         def inputs(url: str | None) -> tuple[str, ...]:
             return self._inputs_for(url, short_words=short_words)
 
+        derived, final = self._query_derived
+
+        def page[S: (PageSnapshot, PageState)](state: S, phrases: tuple[str, ...]) -> S:
+            return masked_page(masked_derived(state, phrases), inputs(state.url))
+
         return EvidenceIndex(
             run.model_copy(
                 update={
                     "actions": [masked_url(a, inputs(a.url)) for a in run.actions],
                     "network": [masked_request(n, inputs(n.url)) for n in run.network],
-                    "snapshots": [masked_page(s, inputs(s.url)) for s in run.snapshots],
+                    "snapshots": [page(s, derived.get(s.id, ())) for s in run.snapshots],
                     "initial_state": None
                     if run.initial_state is None
                     else masked_page(run.initial_state, inputs(run.initial_state.url)),
                     "final_state": None
                     if run.final_state is None
-                    else masked_page(run.final_state, inputs(run.final_state.url)),
+                    else page(run.final_state, final),
                 }
             )
         )
+
+    @cached_property
+    def _query_derived(self) -> tuple[dict[str, tuple[str, ...]], tuple[str, ...]]:
+        """The text of each page state the site may have made from what the agent searched for
+        (core.echo.query_derived): masked with the echoes, so it proves nothing."""
+        return query_derived(self.run)
 
 
 def is_short_word(text: str) -> bool:

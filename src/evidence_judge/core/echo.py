@@ -4,14 +4,23 @@ the evidence with every echo masked."""
 from __future__ import annotations
 
 import bisect
+import difflib
 import functools
 import json
 import re
+import unicodedata
 from collections.abc import Callable, Iterator
 from typing import Final, cast
 from urllib.parse import quote, quote_plus, unquote, unquote_plus, urlsplit, urlunsplit
 
-from evidence_judge.core.evidence import ActionEvent, NetworkEvent, PageSnapshot, PageState
+from evidence_judge.core.actions import FILL, PRESS, canonical_action
+from evidence_judge.core.evidence import (
+    ActionEvent,
+    NetworkEvent,
+    PageSnapshot,
+    PageState,
+    Run,
+)
 from evidence_judge.core.predicates import MIN_PAGE_TEXT, WORD
 from evidence_judge.redact import TOKEN_RE
 from evidence_judge.textnorm import normalize
@@ -227,29 +236,72 @@ class _Echoes:
         return [head for head in self.heads if head in text]
 
 
+_LOOKALIKES: Final = str.maketrans("013457@$l" + chr(0x131), "oieastasii")
+"""Characters a site or an agent writes for a letter ("1n 5t0ck", "$ale", a Turkish dotless
+i), and the letter each folds to: "l" and "1" both fold to "i", as the dotless i does."""
+
+
+@functools.cache
+def _fold_char(char: str) -> str | None:
+    """The folded form of `char`: its letters and digits without accents, case or look-alikes;
+    "" for a combining mark (it continues a word), None for a character that ends one."""
+    if unicodedata.combining(char):
+        return ""
+    plain = "".join(
+        c for c in unicodedata.normalize("NFKD", char.casefold()) if not unicodedata.combining(c)
+    )
+    return "".join(c for c in plain.translate(_LOOKALIKES) if c.isalnum()) or None
+
+
 class _Folded:
-    """Text with only its letters and digits kept (`text`), and where its words start and end
-    in it; `original` maps a span of it back to the text it came from."""
+    """Text with only its letters and digits kept, without accents, case or look-alikes
+    (`_fold_char`: "İñ ştöçk" and "1n 5t0ck" fold as "In stock" does), and where its words
+    start and end in it; `original` maps a span of it back to the text it came from."""
 
     def __init__(self, text: str) -> None:
-        self._runs = [m.span() for m in WORD.finditer(text)]
-        self.text = "".join(text[s:e] for s, e in self._runs)
         self.starts: list[int] = []
         self.ends: set[int] = set()
-        at = 0
-        for s, e in self._runs:
-            self.starts.append(at)
-            at += e - s
-            self.ends.add(at)
+        self._from: list[int] = []
+        self._to: list[int] = []
+        if text.isascii():
+            mapped = text.lower().translate(_LOOKALIKES)
+            runs = [m.span() for m in WORD.finditer(mapped)]
+            self.text = "".join(mapped[s:e] for s, e in runs)
+            for s, e in runs:
+                self.starts.append(len(self._from))
+                self._from += range(s, e)
+                self._to += range(s + 1, e + 1)
+                self.ends.add(len(self._from))
+        else:
+            self.text = self._fold(text)
         self.start_set = frozenset(self.starts)
 
+    def _fold(self, text: str) -> str:
+        chars: list[str] = []
+        inside = False
+        for at, char in enumerate(text):
+            folded = _fold_char(char)
+            if folded is None:
+                if inside:
+                    self.ends.add(len(chars))
+                inside = False
+            elif not folded:
+                if inside:
+                    self._to[-1] = at + 1
+            else:
+                if not inside:
+                    self.starts.append(len(chars))
+                    inside = True
+                for c in folded:
+                    chars.append(c)
+                    self._from.append(at)
+                    self._to.append(at + 1)
+        if inside:
+            self.ends.add(len(chars))
+        return "".join(chars)
+
     def original(self, lo: int, hi: int) -> tuple[int, int]:
-        first = bisect.bisect_right(self.starts, lo) - 1
-        last = bisect.bisect_right(self.starts, hi - 1) - 1
-        return (
-            self._runs[first][0] + lo - self.starts[first],
-            self._runs[last][0] + hi - self.starts[last],
-        )
+        return self._from[lo], self._to[hi - 1]
 
 
 type _FoldedPart = tuple[str, bool, frozenset[int]]
@@ -488,3 +540,97 @@ def covered_page[S: (PageSnapshot, PageState)](
     word (`mask_covered`) masked."""
     text = mask_covered(page.text, needles, inputs)
     return page if text is None else page.model_copy(update={"text": text})
+
+
+def query_derived(run: Run) -> tuple[dict[str, tuple[str, ...]], tuple[str, ...]]:
+    """The phrases of each page state's text the site may have made from what the agent
+    searched for, by snapshot id, and those of the final state.
+
+    A page can translate, correct or look up what the agent typed ("disponible" typed,
+    "Results for: In stock" shown), so no edit distance ties its text to the input. Text is
+    query-derived when it first shows on a page right after the agent typed into it (a live
+    search: every phrase the state before it on the same page, same URL path, did not show), or
+    on a page a form the agent typed into sent it to, whose URL query carries what it typed (a
+    submitted search: all of it). It stays query-derived on later states of that page. Text
+    that appears after a click, or on a page the agent opened from the results, is the site's
+    own: an honest search proves the product's stock on the product page, not on the results.
+    """
+    typed = {
+        folded
+        for a in run.actions
+        if canonical_action(a.name) == FILL
+        and a.value
+        and len(folded := _Folded(normalize(a.value)).text) >= MIN_PAGE_TEXT
+    }
+    if not typed:
+        return {}, ()
+    by_call = {a.call_id: a for a in run.actions if a.call_id}
+    starts = [a.ts for a in run.actions]
+    fills = [a for a in run.actions if canonical_action(a.name) == FILL]
+    found: dict[str, tuple[str, ...]] = {}
+    page: str | None = None
+    before: list[str] | None = None
+    phrases: list[str] = []
+    for snapshot in run.snapshots:
+        key = _page_key(snapshot.url)
+        words = normalize(snapshot.text).split()
+        left = page
+        if key != page:
+            page, before, phrases = key, None, []
+        cause = by_call.get(snapshot.call_id or "")
+        if cause is None and (at := bisect.bisect_right(starts, snapshot.ts)) > 0:
+            cause = run.actions[at - 1]
+        name = "" if cause is None else canonical_action(cause.name)
+        if before is not None:
+            live = name in (FILL, PRESS)
+        else:
+            live = _submitted(fills, snapshot.ts, left) and _carries(snapshot.url, typed)
+        if live:
+            phrases += _added(before or [], words)
+        if phrases:
+            found[snapshot.id] = tuple(dict.fromkeys(phrases))
+        before = words
+    final = run.final_state
+    if final is None:
+        return found, ()
+    if final.snapshot_id is not None or _page_key(final.url) != page:
+        return found, found.get(final.snapshot_id or "", ())
+    return found, tuple(dict.fromkeys(phrases))
+
+
+def masked_derived[S: (PageSnapshot, PageState)](page: S, phrases: tuple[str, ...]) -> S:
+    """`page` with every occurrence of each of `phrases` in its text replaced by MASK."""
+    if not phrases:
+        return page
+    norm = normalize(page.text)
+    text = _replaced(norm, [(at, at + len(p)) for at, p in _occurrences(norm, list(phrases))])
+    return page if text is None else page.model_copy(update={"text": text})
+
+
+def _page_key(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}{parts.path}"
+
+
+def _submitted(fills: list[ActionEvent], ts: float, left: str | None) -> bool:
+    """The agent's last typing before `ts` was on the page it left (`left`): the page loaded
+    is what a form it typed into sent it to, not a link it followed from a results page."""
+    last = next((a for a in reversed(fills) if a.ts <= ts), None)
+    return last is not None and last.url is not None and _page_key(last.url) == left
+
+
+def _carries(url: str, typed: set[str]) -> bool:
+    """`url`'s query or fragment holds something the agent typed."""
+    parts = urlsplit(url)
+    folded = _Folded(unquote_plus(f"{parts.query} {parts.fragment}")).text
+    return any(value in folded for value in typed)
+
+
+def _added(before: list[str], after: list[str]) -> list[str]:
+    """The runs of words of `after` that `before` does not have where `after` has them."""
+    matcher = difflib.SequenceMatcher(None, before, after, autojunk=False)
+    return [
+        " ".join(after[j1:j2])
+        for op, _, _, j1, j2 in matcher.get_opcodes()
+        if op in ("insert", "replace")
+    ]
