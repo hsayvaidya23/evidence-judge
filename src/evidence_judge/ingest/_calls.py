@@ -17,7 +17,7 @@ from typing import Final
 
 from evidence_judge.core.actions import INJECT, OTHER, injected, known_action
 from evidence_judge.core.evidence import NetworkEvent
-from evidence_judge.core.provenance import script_hash
+from evidence_judge.core.provenance import is_script_url, script_hash
 from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, as_str
 
 _OTHER_METHODS: Final = frozenset(
@@ -238,7 +238,7 @@ def action_name(method: str) -> str | None:
 def taints_run(owner: str | None, method: str, params: JsonObject) -> bool:
     """Whether a recorded call can change what the site sends or what the page shows or
     stores: deny by default (see _HARMLESS_METHODS)."""
-    if method in _INJECTED_CODE or owner in _UNTRUSTED_CLASSES:
+    if method in _INJECTED_CODE or owner in _UNTRUSTED_CLASSES or _opens_script(method, params):
         return True
     if method == "dispatchEvent":
         return _carries_value(as_object(params.get("eventInit")))
@@ -248,6 +248,11 @@ def taints_run(owner: str | None, method: str, params: JsonObject) -> bool:
     if known is not None:
         return known == INJECT
     return method not in _HARMLESS_METHODS
+
+
+def _opens_script(method: str, params: JsonObject) -> bool:
+    """A ``goto`` of a URL that runs its code in the page (`is_script_url`)."""
+    return method == "goto" and is_script_url(as_str(params.get("url")))
 
 
 def _carries_value(arg: JsonObject) -> bool:
@@ -279,7 +284,10 @@ def is_settle(method: str, params: JsonObject) -> bool:
 
 def script_sha256(method: str, params: JsonObject) -> str | None:
     """`script_hash` of an injected script whose code the trace holds; None for any other
-    call (an exposed binding runs the agent's own process, never vouched for)."""
+    call (an exposed binding runs the agent's own process, never vouched for). A ``goto`` of a
+    script URL hashes as api "goto" with the URL as its code."""
+    if _opens_script(method, params):
+        return script_hash("goto", as_str(params.get("url")) or "")
     if method not in _INJECTED_CODE or method == "exposeBinding":
         return None
     api, key = _INJECTED_CODE[method]
@@ -344,6 +352,8 @@ def action_value(raw: RawAction) -> str | None:
         api, key = _INJECTED_CODE[method]
         code = as_str(params.get(key)) or as_str(params.get("url"))
         return injected(api, code)
+    if _opens_script(method, params):
+        return injected("goto", as_str(params.get("url")))
     if raw.taints and method != MOCKED_ROUTE:
         api = f"{raw.owner}.{method}" if raw.owner else method
         return injected(api, _call_summary(params))

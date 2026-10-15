@@ -9,6 +9,9 @@ site's alone, so `untampered` cuts the evidence there and `tampering` says why. 
 ingester also records as INJECT every call it does not know to be harmless (deny by default:
 storage and cookie writes, CDP sessions, WebSocket routes, ...).
 
+Opening a `javascript:` or `vbscript:` URL runs its code in the page the way `evaluate` does;
+ingesters record that navigation as an INJECT (`is_script_url`).
+
 A script the spec's author vouched for is not the agent writing the page: `trust_scripts`
 records an INJECT whose `script_sha256` the spec's `trusted_scripts` lists as OTHER.
 
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable
 from typing import Final
 
@@ -32,6 +36,19 @@ MAX_NAMED: Final = 2
 """Injected calls and synthetic requests named in `tampering`'s reason."""
 NAVIGATION_SUFFIX: Final = ".goto"
 """Suffix of the id of a GOTO that `mark_agent_page_navigations` adds after an action."""
+SCRIPT_SCHEMES: Final = ("javascript:", "vbscript:")
+"""URL schemes whose navigation runs the URL's code in the current page."""
+_URL_SPACE = re.compile(r"[\t\n\r]")
+_URL_LEADING = "".join(chr(c) for c in range(0x21))
+
+
+def is_script_url(url: str | None) -> bool:
+    """`url` runs code in the page when opened (SCRIPT_SCHEMES) instead of loading a page. Its
+    scheme is read the way a browser reads it: leading spaces and control characters dropped,
+    tabs and newlines anywhere ignored, in any case (`" Java\tScript:alert(1)"`)."""
+    if not url:
+        return False
+    return _URL_SPACE.sub("", url).lstrip(_URL_LEADING).lower().startswith(SCRIPT_SCHEMES)
 
 
 def script_hash(api: str, code: str, arg: object = None) -> str:
@@ -39,7 +56,8 @@ def script_hash(api: str, code: str, arg: object = None) -> str:
     in hex, of the UTF-8 text `api`, a newline, `code`, a newline and `arg` as canonical JSON
     (keys sorted, no spaces, non-ASCII kept). `api` is the call as the INJECT action names it
     (evaluate, evaluateHandle, $eval, $$eval, waitForFunction, addInitScript, addScriptTag,
-    addStyleTag, setContent), `code` its code exactly as recorded and `arg` its argument in
+    addStyleTag, setContent, and goto for a `javascript:` URL), `code` its code (the whole URL
+    for goto) exactly as recorded and `arg` its argument in
     Playwright's wire form as the trace records it (`{"n": 500}` for 500), None for none."""
     canonical = json.dumps(arg, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(f"{api}\n{code}\n{canonical}".encode()).hexdigest()

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from evidence_judge.checks.outcome import decide
 from evidence_judge.config import Settings
 from evidence_judge.core.actions import MAX_INJECTED_CHARS, injected
@@ -10,7 +12,9 @@ from evidence_judge.core.claims import Claim, ClaimKind, ClaimSet
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, PageState, Run
 from evidence_judge.core.predicates import PageTextPredicate, RequestPredicate, Scope
 from evidence_judge.core.provenance import (
+    is_script_url,
     mark_agent_page_navigations,
+    script_hash,
     tainted_at,
     tampering,
     untampered,
@@ -309,3 +313,43 @@ def test_browser_use_evaluate_is_an_inject_action(tmp_path: Path) -> None:
 
     assert [(a.name, a.value) for a in run.actions] == [("inject", f"evaluate({REWRITE})")]
     assert tampering(run) is not None
+
+
+@pytest.mark.parametrize(
+    ("url", "runs"),
+    [
+        ("javascript:void(0)", True),
+        (" \x01JavaScript:alert(1)", True),
+        ("java\tscr\nipt:alert(1)", True),
+        ("VBScript:msgbox(1)", True),
+        ("data:text/html,<p>In stock</p>", False),
+        ("blob:https://shop.test/1", False),
+        ("about:blank", False),
+        ("https://shop.test/javascript:x", False),
+        (None, False),
+    ],
+)
+def test_script_urls_are_read_the_way_a_browser_reads_their_scheme(
+    url: str | None, runs: bool
+) -> None:
+    assert is_script_url(url) is runs
+
+
+def test_browser_use_goto_of_a_javascript_url_is_an_inject_action(tmp_path: Path) -> None:
+    history = tmp_path / "history.json"
+    code = f"javascript:void({REWRITE})"
+    step = {
+        "model_output": {"action": [{"go_to_url": {"url": code}}, {"go_to_url": {"url": HOST}}]},
+        "result": [{}, {}],
+        "state": {"url": f"{HOST}/p/red-kettle", "title": "Red Kettle"},
+    }
+    history.write_text(json.dumps({"history": [step]}))
+
+    run = load_browser_use_history(history)
+
+    assert [(a.name, a.value) for a in run.actions] == [
+        ("inject", f"goto({code})"),
+        ("goto", HOST),
+    ]
+    assert run.actions[0].script_sha256 == script_hash("goto", code)
+    assert run.actions[1].script_sha256 is None
