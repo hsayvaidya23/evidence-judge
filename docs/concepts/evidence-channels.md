@@ -37,6 +37,21 @@ actions and marks responses its route handler supplied (`route.fulfill`) or requ
 action. A HAR alone shows neither, so a HAR-only run cannot reveal it. See
 [evidence that proves nothing](claims-and-predicates.md#evidence-that-proves-nothing).
 
+Every verdict states this as `tamper_detection`, with a `level` and a `reason`, and adds a
+warning when the level is not `full`:
+
+| Level | Source | What it can show |
+| --- | --- | --- |
+| `full` | A Playwright trace (with or without a HAR or history) | Every call the agent made through Playwright: scripts, route handlers, storage and cookie writes, CDP sessions |
+| `partial` | A browser-use history (without a trace) | The model's actions, including its `evaluate`; not what ran beneath them (CDP calls, request changes) |
+| `none` | A HAR alone, or any source without a call log | Nothing: a forged HAR looks the same as a recorded one |
+
+No source shows state that existed before recording started (a persistent profile, cookies,
+storage, service workers), and each is only as honest as whatever produced it. For CI gating,
+record a Playwright trace from the harness, not the agent, and pass
+`--require-tamper-evidence` (or set `require_tamper_evidence` in the spec) so only a `full`
+run can pass. See [trust assumptions](../../SECURITY.md#trust-assumptions).
+
 ### Page text and the final page
 
 Snapshot and final-state text is what the page itself shows. Text typed into `<input>` and

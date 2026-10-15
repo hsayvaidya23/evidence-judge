@@ -77,6 +77,42 @@ by guessing.
   phone numbers outside phone-named fields pass through. Review reports before sharing them.
 - `--no-redact` (or `EVJ_REDACT=false`) disables all of the above. Use it only on synthetic data.
 
+## Trust assumptions
+
+Evidence Judge checks an agent's claims against a recording. It cannot check the recording
+itself, so a verdict is only as trustworthy as whatever made the evidence:
+
+- **The recorder is trusted.** The harness that starts the browser and records the run is
+  assumed honest. An agent that can write or edit its own recording can make it say anything.
+- **A HAR file or a browser-use history is only as honest as its producer.** A HAR is a JSON
+  file of requests and responses; a hand-written one that shows `POST /api/orders` answered
+  `201` is indistinguishable from a recorded one and can score `PASS`. A browser-use history is
+  written by the agent framework itself.
+- **State from before recording started is invisible.** A persistent browser profile, cookies,
+  local storage, IndexedDB, service workers, extensions or a proxy set up before tracing began
+  can change what the site shows or what requests do, and no source records it.
+
+What each source can and cannot reveal about the agent tampering with the page or its requests
+is reported in every verdict as `tamper_detection` (`level` and `reason`), with a warning when
+it is not `full`:
+
+| Source | `tamper_detection` | Can reveal | Cannot reveal |
+| --- | --- | --- | --- |
+| Playwright trace | `full` | Every call made through Playwright: injected scripts (`evaluate`, `add_init_script`, `set_content`, ...), route handlers that answer or rewrite requests, storage and cookie writes, CDP sessions (deny by default) | What a CDP session then sent; anything done outside Playwright (another process driving the browser, a proxy, OS-level input); state from before tracing started |
+| browser-use history | `partial` | The model's actions, including its `evaluate` | Scripts, CDP calls and request changes beneath those actions; network evidence unless a HAR is added |
+| HAR alone | `none` | Nothing about the agent's calls | Whether the HAR was recorded at all |
+
+For gating CI on verdicts:
+
+- Record a **Playwright trace from the harness**, not from inside the agent, and keep the agent
+  from writing the trace file.
+- Pass **`--require-tamper-evidence`** (or set `require_tamper_evidence: true` in the task
+  spec): a run whose `tamper_detection` is not `full` is then `NEEDS_REVIEW` at best.
+- Start each run from a fresh browser context, without a persistent profile; pass any login
+  state with `storage_state=` when the context is created.
+- Treat a `PASS` on a HAR-only or browser-use run as "the recording is consistent with the
+  claim", not as proof that the run happened.
+
 ## Untrusted recordings
 
 Recordings are treated as untrusted input, since they may come from a third party or a
