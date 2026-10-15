@@ -14,9 +14,57 @@ METHOD_OVERRIDE_HEADERS: Final = frozenset(
     {"x-http-method-override", "x-http-method", "x-method-override"}
 )
 """Headers a server may read as the request's real method (a GET that acts as a DELETE)."""
-_GRAPHQL_MUTATION: Final = re.compile(r"^(?:[\s,\ufeff]|#[^\n]*)*mutation\b[^{}]*\{")
-"""A GraphQL document that is a mutation: `mutation`, after whitespace, commas or comments,
-then an optional name, variables and directives, then its selection set."""
+_GRAPHQL_TOKEN: Final = re.compile(
+    r'"""(?:\\"""|[^"]|"(?!""))*(?:"""|$)|"(?:\\.|[^"\\\n])*"?|#[^\n]*|[_A-Za-z][_0-9A-Za-z]*|\S'
+)
+_GRAPHQL_OPERATIONS: Final = frozenset({"query", "mutation", "subscription"})
+
+
+def _graphql_operations(document: str) -> list[tuple[str, str | None]]:
+    """The operations a GraphQL document defines, as (kind, name), in order: every top-level
+    definition that opens a selection set, read past strings, comments, variables and
+    directives. Fragments are left out; a bare `{ ... }` is an anonymous query."""
+    operations: list[tuple[str, str | None]] = []
+    header: list[str] = []
+    braces = parens = 0
+    directive = False
+    for part in _GRAPHQL_TOKEN.findall(document):
+        if part[0] in '#"':
+            continue
+        if part == "{":
+            if braces == 0 and parens == 0:
+                if not header:
+                    operations.append(("query", None))
+                elif header[0] in _GRAPHQL_OPERATIONS:
+                    operations.append((header[0], header[1] if len(header) > 1 else None))
+            braces += 1
+        elif part == "}":
+            braces = max(braces - 1, 0)
+            if braces == 0:
+                header = []
+        elif part in "()" and braces == 0:
+            parens = parens + 1 if part == "(" else max(parens - 1, 0)
+        elif braces == 0 and parens == 0:
+            if part == "@":
+                directive = True
+            elif part[0].isalpha() or part[0] == "_":
+                if not directive:
+                    header.append(part)
+                directive = False
+    return operations
+
+
+def _graphql_mutation(document: str, operation_name: str | None) -> bool:
+    """The operation the request runs is a mutation: the one `operationName` names, else the
+    only one; with several and none named (or a name that matches none), any mutation."""
+    operations = _graphql_operations(document)
+    named = [kind for kind, name in operations if operation_name and name == operation_name]
+    if named:
+        return named[0] == "mutation"
+    if len(operations) == 1:
+        return operations[0][0] == "mutation"
+    return any(kind == "mutation" for kind, _ in operations)
+
 
 HarField = Literal[
     "status",
@@ -204,8 +252,8 @@ class NetworkEvent(_Frozen):
     @property
     def write_method(self) -> str | None:
         """The state-changing method the request acts as, or None: its own method, one an
-        override header (`X-HTTP-Method-Override: DELETE`) or a `_method=` query names, or POST
-        for a GraphQL GET whose `query` is a mutation."""
+        override header (`X-HTTP-Method-Override: DELETE`) or a `_method=` query names (`&` or
+        `;` separated), or POST for a GraphQL GET whose `query` runs a mutation."""
         method = self.method.upper()
         if method in MUTATION_METHODS:
             return method
@@ -213,10 +261,13 @@ class NetworkEvent(_Frozen):
             named = value.strip().upper()
             if name.lower() in METHOD_OVERRIDE_HEADERS and named in MUTATION_METHODS:
                 return named
-        for key, value in parse_qsl(urlsplit(self.url).query, keep_blank_values=True):
+        query = urlsplit(self.url).query.replace(";", "&")
+        params = parse_qsl(query, keep_blank_values=True)
+        operation = next((v for k, v in params if k == "operationName"), None)
+        for key, value in params:
             if key.lower() == "_method" and value.strip().upper() in MUTATION_METHODS:
                 return value.strip().upper()
-            if key == "query" and _GRAPHQL_MUTATION.match(value):
+            if key == "query" and _graphql_mutation(value, operation):
                 return "POST"
         return None
 

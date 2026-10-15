@@ -236,6 +236,29 @@ async def test_url_regex_still_sees_the_full_url() -> None:
         ("/graphql?query=%7Bproduct(id%3A1)%7Bname%7D%7D", {}, None),
         ("/graphql?query=query%20Q%7Bmutation%7D", {}, None),
         ("/search?query=mutation+testing", {}, None),
+        (
+            "/graphql?query=fragment%20F%20on%20C%7Bid%7D%20mutation%7Bclear%7B...F%7D%7D",
+            {},
+            "POST",
+        ),
+        (
+            "/graphql?query=query%20Q%7Bme%7Bid%7D%7D%20mutation%20Del%7Bclear%7Bid%7D%7D"
+            "&operationName=Del",
+            {},
+            "POST",
+        ),
+        ("/graphql?query=query%20Q%7Bme%7D%20mutation%20Del%7Bclear%7D", {}, "POST"),
+        ("/graphql?query=query%20Q%7Bme%7D%20mutation%20Del%7Bclear%7D&operationName=Q", {}, None),
+        (
+            "/graphql?query=query%20Q%7Bme%7D%20mutation%20Del%7Bclear%7D&operationName=X",
+            {},
+            "POST",
+        ),
+        ("/graphql?query=query%7Bs(q%3A%22mutation%20%7B%20x%20%7D%22)%7Bid%7D%7D", {}, None),
+        ("/graphql?query=%23%20mutation%20%7Bx%7D%0Aquery%7Bme%7D", {}, None),
+        ("/graphql?query=query%20Q(%24f%3AIn%3D%7Ba%3A1%7D)%7Bme%7D", {}, None),
+        ("/graphql?query=mutation%20%40live%7Bclear%7D", {}, "POST"),
+        ("/api/cart/1?x=1;_method=DELETE", {}, "DELETE"),
         ("/api/cart/delete?id=1", {}, None),
     ],
 )
