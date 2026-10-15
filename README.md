@@ -122,8 +122,8 @@ Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (o
 ## 🚀 Quick start
 
 **Try it first on the recorded runs in this repository**: offline, no API key. Both runs are
-the same task on the demo shop, and each `spec.yaml` names its `site` (`127.0.0.1`), which any
-`PASS` needs.
+the same task on the demo shop, and each `spec.yaml` names its `site` (`127.0.0.1:56432`),
+which any `PASS` needs.
 
 ```bash
 git clone https://github.com/hsayvaidya23/evidence-judge && cd evidence-judge
