@@ -114,12 +114,13 @@ def test_form_actions_and_snapshot_decoding(tmp_path: Path) -> None:
     final = run.final_state
     assert final is not None
     assert final.title == "Form lab"
-    assert "Delivery Name Size Large Gift wrap" in final.text
+    assert "Delivery Name Size Gift wrap" in final.text
     assert "Sam" not in final.text
     assert run.metadata["form_values_excluded"] > 0
     assert "Hovered" in final.text
     assert "shadow text" in final.text
     assert "Small" not in final.text
+    assert "Large" not in final.text
     assert "Do not show" not in final.text
     assert "inside the frame" not in final.text
 

@@ -147,6 +147,9 @@ the names exported from `evidence_judge`) is defined under
   uploaded from disk or a stream, page text, screenshots, URLs and response bodies cannot prove
   anything (the page may be showing the file); requests and their statuses still can.
 - Committed trace fixtures no longer carry the recording machine's paths.
+- **Choosing an option proves nothing.** The selected `<option>` of a `<select>` is no longer page
+  text, and the option a select action chose is agent input, so picking "In stock" in a filter
+  cannot prove the product is in stock.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

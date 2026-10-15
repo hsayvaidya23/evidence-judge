@@ -159,6 +159,7 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("kd_echo", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("kd_note", "stock", "Yes, In stock.", "fail", [False, True], "does not contain"),
         ("goto_js", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
+        ("select_filter", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
     ],
 )
 async def test_agent_made_evidence_never_passes(
@@ -465,3 +466,21 @@ async def test_an_order_placed_after_an_upload_by_path_still_passes() -> None:
 
     assert got is Outcome.PASS, text
     assert results == [("ordered", True)]
+
+
+def test_a_chosen_option_is_input_and_not_page_text() -> None:
+    run = load_playwright_trace(FIXTURES / "select_filter.zip")
+
+    assert [(a.name, a.selector, a.value) for a in run.actions][-1:] == [
+        ("select", "#avail", "In stock")
+    ]
+    assert run.final_state is not None
+    assert run.final_state.text == "Red Kettle sizes Out of stock Show:"
+    assert "in stock" in EvidenceIndex(run).agent_inputs()
+
+
+async def test_an_order_of_the_quantity_chosen_in_a_drop_down_passes() -> None:
+    got, text, results = await _judge("select_order", "two_ordered", "Done, I pre-ordered two.")
+
+    assert got is Outcome.PASS, text
+    assert results == [("two_ordered", True)]

@@ -126,6 +126,31 @@ def test_uploaded_file_names_with_and_without_extension_are_inputs() -> None:
     )
 
 
+def test_chosen_options_are_inputs_under_any_alias() -> None:
+    actions = [
+        act(1, "selectOption", "#avail", value="In stock"),
+        act(2, "select_dropdown_option", value="Express shipping"),
+        act(3, "select", "#sizes", value="Large tray, Small tray"),
+    ]
+    assert _inputs(actions=actions) == (
+        "large tray, small tray",
+        "express shipping",
+        "large tray",
+        "small tray",
+        "in stock",
+    )
+
+
+def test_a_page_repeating_the_chosen_option_is_masked() -> None:
+    run = make_run(
+        actions=[act(1, "selectOption", "#avail", value="In stock")],
+        final_state=final("/sizes", "Out of stock Showing: In stock"),
+    )
+    masked = EvidenceIndex(run).without_agent_input.final
+    assert masked is not None
+    assert masked.text == f"out of stock showing: {MASK}"
+
+
 def test_short_or_symbol_only_inputs_are_ignored() -> None:
     assert _inputs(actions=[act(1, "fill", value="ab"), act(2, "fill", value="--- ")]) == ()
 

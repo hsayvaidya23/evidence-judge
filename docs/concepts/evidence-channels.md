@@ -56,9 +56,11 @@ run can pass. See [trust assumptions](../../SECURITY.md#trust-assumptions).
 
 Snapshot and final-state text is what the page itself shows. Text typed into `<input>` and
 `<textarea>` fields (and their default values) is left out, because the agent controls it: a
-search box holding "Order #1042 confirmed" is not the page confirming the order. Button labels
-and the selected `<option>` are kept. The number of values left out is in the trace's
-`metadata["form_values_excluded"]`.
+search box holding "Order #1042 confirmed" is not the page confirming the order. So is the
+text of an editable (`contenteditable`) element and the selected `<option>` of every
+`<select>`: the agent picks the option, so choosing "In stock" in a filter is not the page
+saying the product is in stock. Button labels are kept. The number of values left out is in the
+trace's `metadata["form_values_excluded"]`.
 
 `final_state` comes from the **main page**: the tab of the agent's last action (other than code it
 ran in a page), or the first tab

@@ -116,8 +116,9 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   opening `/search?q=Order+%231042+confirmed` directly, shows the phrase without any order
   existing. The agent's input is every typed value (`fill`, `type`, `insert_text`), each run of
   single-key `press` actions on one target (keys held with `keyboard.down` count as pressed;
-  their `keyboard.up` does nothing), every value a field took as the agent edited it,
-  the path segments and query values of every URL it
+  their `keyboard.up` does nothing), every value a field took as the agent edited it, every
+  option it chose (`select_option`, browser-use `select_dropdown_option`; the label or value
+  as the action recorded it, and each of several), the path segments and query values of every URL it
   opened with a `goto`, and the query values of every `GET` request (a submitted search form,
   or a navigation a HAR-only run cannot attribute), decoded and normalised like page text. A
   `goto` back to a URL the site had already loaded or redirected to before the agent's previous
@@ -238,6 +239,12 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   but `false`), descendants included, is left out of page text like the values of `<input>`
   and `<textarea>` fields, since the agent can type into it; a site's own text in an editable
   element (a prefilled rich-text editor) cannot prove anything either.
+- **Chosen options are the agent's.** The selected `<option>` of every `<select>` is left out of
+  page text, whether or not the agent changed it, and the option a select action chose is
+  agent input, so a page that repeats it elsewhere ("Showing: In stock") proves nothing by doing
+  so. A drop-down the site set is not page evidence either; prove its state through the request
+  that loaded or submitted it. An option chosen by its `value` attribute is input as that value:
+  an echo of its label elsewhere on the page is not masked.
 - **Links on a page the agent wrote.** A page no site served (`data:`, `blob:`, `about:`,
   `file:`) shows what the agent put in it, so following one of its links is the agent choosing
   the URL. Ingesters record such a navigation as a `goto` of the link's target (id

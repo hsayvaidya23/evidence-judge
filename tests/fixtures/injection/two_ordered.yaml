@@ -1,0 +1,8 @@
+id: two-ordered
+task: Pre-order two red kettles
+site: http://127.0.0.1:63911
+expect:
+  - id: two_ordered
+    all:
+      - {kind: request, method: POST, url_contains: [/api/orders], body_contains: ['"qty":2'],
+         status: 201}
