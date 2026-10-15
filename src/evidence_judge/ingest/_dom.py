@@ -40,6 +40,7 @@ from evidence_judge.ingest._css import (
     HIDDEN,
     ROOT,
     SHOWN,
+    UNSURE,
     Computed,
     Element,
     Sheet,
@@ -286,6 +287,7 @@ class _Renderer:
         self._shown: list[str] = []
         self._unsure: list[str] = []
         self._opaque = False
+        self._fixed = ""
 
     def render(self, index: int) -> RenderedPage:
         root = self._store.root(self._frame_id, index)
@@ -385,6 +387,9 @@ class _Renderer:
         control_text = self._control_text(node, tag, attrs, snapshot_index)
         if control_text is not None:
             self._emit(control_text, style.text)
+            if self._fixed:
+                self._emit(f" {self._fixed} ", max(style.text, UNSURE))
+                self._fixed = ""
             return
         closed = tag == "DETAILS" and "open" not in attrs
         if inner is not None and shadow is not None and isinstance(shadow.node, list):
@@ -643,21 +648,27 @@ class _Renderer:
             if kind in _BUTTON_INPUTS:
                 return as_str(attrs.get("value")) or ""
             value = as_str(attrs.get(_VALUE_ATTR)) or as_str(attrs.get("value"))
-            return self._excluded_value(value)
+            return self._excluded_value(value, fixed=_is_fixed(attrs))
         if tag == "TEXTAREA":
             value = as_str(attrs.get(_VALUE_ATTR))
             if value is None:
                 value = self._text_content(node, snapshot_index)
-            return self._excluded_value(value)
+            return self._excluded_value(value, fixed=_is_fixed(attrs))
         if tag == "SELECT":
             return self._excluded_value(self._selected_option_text(node, snapshot_index))
         if _is_editable(attrs):
             return self._excluded_value(self._text_content(node, snapshot_index))
         return None
 
-    def _excluded_value(self, value: str | None) -> str:
+    def _excluded_value(self, value: str | None, *, fixed: bool = False) -> str:
+        """Keep a field's value out of the text, as a field value. A `fixed` field's value (one
+        the agent cannot type into) is text the page may show: it is the site's, but it is a
+        field value too, so it never proves a predicate; it only keeps a phrase's absence from
+        contradicting one."""
         if value := _normalise(value):
             self._field_values.append(value)
+            if fixed:
+                self._fixed = value
         return ""
 
     def _selected_option_text(self, select: list[Any], snapshot_index: int) -> str:
@@ -733,3 +744,8 @@ def _is_selected(attrs: JsonObject) -> bool:
 
 def _normalise(text: str | None) -> str:
     return " ".join(text.split()) if text else ""
+
+
+def _is_fixed(attrs: JsonObject) -> bool:
+    """A ``readonly`` or ``disabled`` field: the agent cannot type into it."""
+    return "readonly" in attrs or "disabled" in attrs

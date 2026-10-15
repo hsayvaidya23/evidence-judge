@@ -78,7 +78,9 @@ Text typed into `<input>` and
 search box holding "Order #1042 confirmed" is not the page confirming the order. So is the
 text of an editable (`contenteditable`) element and the selected `<option>` of every
 `<select>`: the agent picks the option, so choosing "In stock" in a filter is not the page
-saying the product is in stock. Button labels are kept. The number of values left out is in the
+saying the product is in stock. Button labels are kept. The value of a `readonly` or `disabled`
+field, which the agent cannot type into, goes to `unsure_text` as well: a site that shows a
+status in one is not contradicted, but the value never proves anything. The number of values left out is in the
 trace's `metadata["form_values_excluded"]`.
 
 `final_state` comes from the **main page**: the tab of the agent's last action (other than code it

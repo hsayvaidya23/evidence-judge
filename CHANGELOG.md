@@ -133,6 +133,8 @@ the names exported from `evidence_judge`) is defined under
 
 ### Fixed
 
+- The value of a shown `readonly` or `disabled` field is text the page may show: a status a
+  site puts in one sends the run to review instead of failing it, and still proves nothing.
 - A page whose `::before` or `::after` rule gives a shown element text (`content` with a letter
   or digit, `attr()` or a counter) is opaque: a phrase missing from its snapshot sends the run to
   review instead of failing it.

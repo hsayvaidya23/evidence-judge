@@ -508,6 +508,18 @@ def test_slotted_and_part_rules_make_what_they_reach_unsure() -> None:
     assert (page.text, page.unsure_text) == ("Plain", "Slotted Part")
 
 
+def test_a_value_the_agent_cannot_type_into_is_text_the_page_may_show() -> None:
+    page = _rendered(
+        ["LABEL", {}, "Availability ", ["INPUT", {"readonly": "", "value": "Out of stock"}]],
+        ["TEXTAREA", {"disabled": ""}, "Ships in 3 days"],
+        ["INPUT", {"value": "typed"}],
+        ["INPUT", {"readonly": "", "value": "secret", "style": "display:none"}],
+    )
+    assert page.text == "Availability"
+    assert page.unsure_text == "Out of stock Ships in 3 days"
+    assert page.field_values == ("Out of stock", "Ships in 3 days", "typed")
+
+
 def test_an_empty_custom_element_may_hold_a_closed_shadow_root() -> None:
     assert _rendered(["X-B", {}], ["P", {}, "Kettle"]).opaque
     assert not _rendered(["X-B", {}, "text"], ["DIV", {}]).opaque
