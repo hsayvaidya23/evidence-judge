@@ -8,12 +8,16 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | --- | --- |
 | `judge` | Judge one agent run |
 | `inspect` | Summarise the evidence in a trace, HAR or browser-use run without judging it |
+| `bench` | Benchmark judges on forged runs: false-PASS rates and accuracy on honest controls |
 | `mcp` | Run an MCP server so coding agents can judge, inspect and explain runs as tools |
+| `hook` | Entry points coding agents run as hooks: stop checks, evidence recorders, guards |
 | `session judge` | Judge a coding-agent session (Claude Code, Codex) against its tool-call log |
 | `session inspect` | Summarise a coding-agent session without judging it |
 | `session rerun` | Re-run a spec's test command on a copy of the project and judge the runner's own report |
 | `schema` | Print the JSON Schema of the verdict format |
-| `version` | Print the evidence-judge version |
+| `version` | Print the evidence-judge version (also `evidence-judge --version`) |
+
+Until v0.1.0 is on PyPI, install from GitHub: `uv tool install "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install "evidence-judge[...]"` forms below work once the release is on PyPI.
 
 Settings (models, budget, redaction, cache) come from environment variables or a `.env` file;
 see the configuration table in the [README](../README.md#configuration).
@@ -252,6 +256,9 @@ always exits 0.
 | `claude-code-turn-start` | Claude Code `UserPromptSubmit` (synchronous) | nothing; saves the turn's task spec to the state directory |
 | `codex-turn-start` | Codex `UserPromptSubmit` (synchronous) | nothing; as above |
 | `gemini-turn-start` | Gemini CLI `BeforeAgent` | `{}`; as above |
+| `claude-code-guard` | Claude Code `PreToolUse` | `{"hookSpecificOutput": {"permissionDecision": "deny", ...}}` for a write that would switch off the hooks or the judge (agent settings, hook files, the evidence-judge install, evidence logs); else nothing |
+| `codex-guard` | Codex `PreToolUse` | as `claude-code-guard` |
+| `gemini-guard` | Gemini CLI `BeforeTool` | `{"decision": "deny", "reason": ...}` for such a write; else `{}` |
 
 | Option | Description |
 | --- | --- |

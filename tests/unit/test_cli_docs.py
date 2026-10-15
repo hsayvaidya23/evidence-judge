@@ -60,6 +60,24 @@ def _options(command: str) -> list[str]:
     return sorted({opt for p in params for opt in p.opts if opt.startswith("--")})
 
 
+def test_every_command_is_in_the_docs_cli_table() -> None:
+    group = typer.main.get_command(app)
+    assert isinstance(group, TyperGroup)
+    table = CLI_DOC.split("## ", 1)[0]
+    missing = [name for name in group.commands if f"| `{name}" not in table]
+    assert missing == [], f"docs/cli.md command table is missing {missing}"
+
+
+def test_every_hook_is_in_the_docs_cli_hook_table() -> None:
+    group = typer.main.get_command(app)
+    assert isinstance(group, TyperGroup)
+    hooks = group.commands["hook"]
+    assert isinstance(hooks, TyperGroup)
+    section = _section(CLI_DOC, "`evidence-judge hook`")
+    missing = [name for name in hooks.commands if f"| `{name}` |" not in section]
+    assert missing == [], f"docs/cli.md hook table is missing {missing}"
+
+
 @pytest.mark.parametrize("command", DOCUMENTED_COMMANDS)
 def test_every_cli_option_is_in_docs_cli(command: str) -> None:
     section = _section(CLI_DOC, f"`evidence-judge {command}`")

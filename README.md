@@ -112,11 +112,12 @@ See [docs/architecture.md](docs/architecture.md).
 ## 📦 Install
 
 ```bash
-uv tool install "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"
-# PyPI release coming soon: then simply `uv tool install "evidence-judge[anthropic]"`
+uv tool install "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
 ```
 
-Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically.
+v0.1.0 is not on PyPI yet, so this installs from GitHub; once it is, `uv tool install "evidence-judge[anthropic,mcp]"` does the same.
+
+Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically. The `mcp` extra adds the MCP server (`evidence-judge mcp`), which the Claude Code plugin starts.
 
 ## 🚀 Quick start
 
@@ -297,7 +298,7 @@ MCP server: `evidence-judge mcp` (extra `evidence-judge[mcp]`) serves `judge_run
 
 Coding agents: check the agent's answer against its own browser trace before it is allowed to stop.
 
-- **Claude Code**: `/plugin marketplace add hsayvaidya23/evidence-judge`, then `/plugin install evidence-judge@evidence-judge` (or `/plugin install evidence-judge --marketplace hsayvaidya23/evidence-judge`). A Stop hook blocks on FAIL, recorder hooks keep a hash-chained evidence log, and the plugin adds the MCP server and a skill. See [docs/guides/claude-code.md](docs/guides/claude-code.md).
+- **Claude Code**: `/plugin marketplace add hsayvaidya23/evidence-judge`, then `/plugin install evidence-judge@evidence-judge` (or `/plugin install evidence-judge --marketplace hsayvaidya23/evidence-judge`). A Stop hook blocks on FAIL, recorder hooks keep a hash-chained evidence log, and the plugin adds the MCP server and a skill. The plugin runs `evidence-judge` from your `PATH`, so install the CLI with the `mcp` extra first (as in [Install](#-install)). See [docs/guides/claude-code.md](docs/guides/claude-code.md).
 - **Codex CLI**: `evidence-judge hook codex-stop` as a blocking `Stop` hook, `codex-record` as a `PostToolUse` recorder, and `codex mcp add evidence-judge -- evidence-judge mcp`. See [docs/guides/codex.md](docs/guides/codex.md).
 - **Gemini CLI**: an extension whose `AfterAgent` hook makes Gemini retry a contradicted answer, plus an `AfterTool` recorder and the MCP server. See [docs/guides/gemini-cli.md](docs/guides/gemini-cli.md).
 
