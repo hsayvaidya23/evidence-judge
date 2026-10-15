@@ -170,7 +170,7 @@ the final answer when the log lacks them.
 | `--codex FILE` | Codex `exec --json` output saved by the harness, or a rollout file from `~/.codex/sessions` |
 | `--evidence-log FILE` | Evidence-recorder log (format version 1), written by a harness hook after every tool call; the only transcript-independent source. Its `tamper_detection` is `full` only when its HMAC chain and head anchor verify **and** `--trusted-log` is given; otherwise `partial`, with the reason |
 | `--log-key FILE` | The evidence-log key (default: `log-key` in the hooks' state directory, `EVJ_HOOK_STATE_DIR` or `~/.evidence-judge/state`) |
-| `--log-anchor FILE` | The evidence log's head anchor (default: `<state>/<session>/log-head.json`) |
+| `--log-anchor FILE` | The evidence log's head anchor (default: `<session>/log-head.json` in the `--log-key` directory, else `<state>/<session>/log-head.json`) |
 | `--trusted-log` | Assert that the log, its key and anchor were out of the agent's reach (a sandbox that denies the state directory, a container, another OS user). Without it, an agent running as your user could have read the key and signed a forged log, so a verified log is still `partial`. The spec's `trusted_evidence_log: true` does the same |
 | `--answer TEXT` / `--answer-file FILE` | Judge this final answer instead of the recorded one |
 | `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block |

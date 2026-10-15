@@ -204,9 +204,10 @@ def _call(record: JsonObject, agent: str) -> ToolCall:
 def load_evidence_log(
     path: Path, *, key_file: Path | None = None, anchor_file: Path | None = None
 ) -> SessionRun:
-    """Load an evidence log. The key and head anchor default to the hooks' state directory
-    (``EVJ_HOOK_STATE_DIR``, else ``~/.evidence-judge/state``) and the log's session."""
-    state = resolve_state_dir(None)
+    """Load an evidence log. The key defaults to the hooks' state directory
+    (``EVJ_HOOK_STATE_DIR``, else ``~/.evidence-judge/state``); the head anchor to the log's
+    session in the key's directory."""
+    state = resolve_state_dir(None) if key_file is None else key_file.parent
     key = read_log_key(key_file if key_file is not None else state / LOG_KEY_FILE)
     stats = LineStats()
     chain = _Chain(key)

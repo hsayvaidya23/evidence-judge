@@ -126,7 +126,8 @@ _LogAnchor = Annotated[
     Path | None,
     typer.Option(
         "--log-anchor",
-        help="Evidence-log head anchor (default: the hooks' state dir, by session)",
+        help="Evidence-log head anchor (default: by session, in --log-key's directory, else "
+        "the hooks' state dir)",
         **_IN_FILE,
     ),
 ]
