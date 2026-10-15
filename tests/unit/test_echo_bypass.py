@@ -24,7 +24,7 @@ CLAIM = Claim(
     key=True,
     predicates=[PageTextPredicate(contains="Order A77 confirmed")],
 )
-ECHO_REASON = "it holds only where the page or URL echoes the agent's own input"
+ECHO_REASON = "it holds only where a page, URL or response echoes the agent's own input"
 
 
 def _run(action: ActionEvent, final_text: str) -> Run:

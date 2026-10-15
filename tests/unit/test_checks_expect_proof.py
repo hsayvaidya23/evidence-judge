@@ -19,7 +19,7 @@ from evidence_judge.core.verdict import ExpectationResult, Outcome, RunVerdict
 from evidence_judge.engine import Judge, JudgeOptions
 from tests.unit.conftest import HOST, act, ctx, final, honest_run, make_run, net, shop_spec, snap
 
-ECHO = "it holds only where the page or URL echoes the agent's own input"
+ECHO = "it holds only where a page, URL or response echoes the agent's own input"
 BASELINE = "it was already true before the agent acted"
 
 

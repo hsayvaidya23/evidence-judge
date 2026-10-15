@@ -120,15 +120,20 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   the site chose that URL. URL inputs only count as echoed on pages and URLs of the site they
   came from: typing `https://en.wikipedia.org/wiki/Kettle` does not make the shop's own
   `/products/red-kettle` an echo;
-  inputs shorter than three characters or without a letter or digit are ignored. A `page_text`,
-  `url` or `value` (`page_regex`) predicate is evaluated again with every occurrence of every
-  input masked out of page text and URLs; if it no longer holds, it cannot support the claim.
-  So a needle that only partly overlaps an input ("Order #1042 confirmed" on a page that echoes
-  the typed "#1042 confirmed") is caught too. The price is that page text containing anything
-  the agent typed, even a search term the real confirmation also names ("Red Kettle" after a
-  search for "kettle"), cannot prove a claim on its own; another predicate (a mutation request,
-  text the agent did not type) has to. Values read from request bodies (`json_path`) are not
-  masked.
+  inputs shorter than three characters or without a letter or digit are ignored. Every
+  `page_text`, `url`, `request` and `value` predicate is evaluated again with every occurrence
+  of every input masked out of everything the site can repeat it in: page text, page URLs, the
+  URLs of requests that are not mutations, and every response body (JSON keeps its structure,
+  with each echoing key or string masked). If it no longer holds, it cannot support the claim.
+  So a search API answering `{"query": "In stock"}`, or a results page saying "No results for
+  99812", proves neither stock nor a tracking number, and a needle that only partly overlaps an
+  input ("Order #1042 confirmed" on a page that echoes the typed "#1042 confirmed") is caught
+  too. The price is that page text containing anything the agent typed, even a search term the
+  real confirmation also names ("Red Kettle" after a search for "kettle"), cannot prove a claim
+  on its own; another predicate (a mutation request, text the agent did not type) has to. What
+  the agent submitted is not an echo: a mutation's URL and request body are never masked, so a
+  `POST /api/orders` carrying the typed note, or a value read from it (`json_path`), still
+  proves the submission. A response that repeats the typed value back is masked like any other.
 - **Key outcome claims need an outcome.** A key claim of kind `outcome` can only be supported
   by a mutation request (`POST`, `PUT`, `PATCH`, `DELETE`) or by the final page: `final`-scope
   `page_text`, `url` or `screenshot`. A click on *Place order* or text seen on some earlier page

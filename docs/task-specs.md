@@ -183,8 +183,9 @@ run already met before the agent acted, that only holds on an echo of the agent'
 (text it typed or put in a URL), or (for a key outcome claim) that is neither a mutation
 request nor the final page cannot support the claim either. The same baseline and echo rules
 hold for `expect` entries, whatever wrote the spec: an `expect` predicate the run met before the
-agent acted, or one that only holds where a page or URL echoes the agent's input (an agent that
-opens `/order/A77/confirmed` itself, or searches for "Order A77 shipped"), leaves the entry
+agent acted, or one that only holds where a page, URL or response echoes the agent's input (an
+agent that opens `/order/A77/confirmed` itself, searches for "Order A77 shipped", or makes a
+search API answer `{"query": "In stock"}`), leaves the entry
 unknown (`met: null`) and the run goes to review. `forbid` entries and `constraints` are not
 masked: forbidden text the agent typed or that was already shown still breaks the rule. See
 [evidence that proves nothing](concepts/claims-and-predicates.md#evidence-that-proves-nothing).

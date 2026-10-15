@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import bisect
 import html
+import json
 import math
 import re
 from collections.abc import Iterable, Iterator
 from functools import cached_property
 from pathlib import PureWindowsPath
-from typing import Final
+from typing import Final, cast
 from urllib.parse import (
     parse_qsl,
     quote,
@@ -46,6 +47,7 @@ _REDACTION_TOKEN = re.compile(TOKEN_RE.pattern, re.IGNORECASE)
 MIN_ECHO_PREFIX: Final = 8
 """Shortest prefix of an agent input that counts as a cut-short echo of it. Shorter shared
 prefixes are mostly common word stems ("confirm" in "confirmation" and "confirmed")."""
+_TRUNCATION_TAIL = re.compile(r"…\[truncated[^\]]{0,60}\]\s*\Z")
 MASK: Final = "\x00"
 """Stands in for agent input in masked evidence; it is never part of a predicate."""
 
@@ -240,11 +242,19 @@ class EvidenceIndex:
 
     @cached_property
     def without_agent_input(self) -> EvidenceIndex:
-        """This evidence with every echo of every agent input in page text and URLs (an
-        occurrence of the input or of a prefix of at least MIN_ECHO_PREFIX characters of it)
-        replaced by MASK, so a predicate that only holds on an echo of that input fails on it.
+        """This evidence with every echo of every agent input (an occurrence of the input or of
+        a prefix of at least MIN_ECHO_PREFIX characters of it) replaced by MASK wherever the
+        site can repeat it back: page text, page and action URLs, the URL of every request that
+        is not a mutation, and every response body. A predicate that only holds on an echo of
+        that input fails on it.
 
-        Masked page text is normalised; page text and URLs without an occurrence are unchanged.
+        A mutation's URL and request body are left alone: they are what the agent submitted,
+        so a POST carrying the typed value is evidence of the submission, not an echo. Its
+        response is masked like any other: a site that answers a POST by repeating the typed
+        value proves nothing by doing so.
+
+        Masked page text and non-JSON bodies are normalised; JSON bodies keep their structure,
+        with each echoing string (key or value) masked. Evidence without an echo is unchanged.
         """
         if not self.agent_inputs():
             return self
@@ -253,7 +263,7 @@ class EvidenceIndex:
             run.model_copy(
                 update={
                     "actions": [_masked_url(a, self._inputs_for(a.url)) for a in run.actions],
-                    "network": [_masked_url(n, self._inputs_for(n.url)) for n in run.network],
+                    "network": [_masked_request(n, self._inputs_for(n.url)) for n in run.network],
                     "snapshots": [_masked_page(s, self._inputs_for(s.url)) for s in run.snapshots],
                     "initial_state": None
                     if run.initial_state is None
@@ -436,6 +446,45 @@ def _masked_url[E: (ActionEvent, NetworkEvent)](event: E, inputs: tuple[str, ...
     if event.url is None:
         return event
     return event.model_copy(update={"url": _mask_url(event.url, inputs)})
+
+
+def _masked_request(event: NetworkEvent, inputs: tuple[str, ...]) -> NetworkEvent:
+    masked = event if event.is_mutation else _masked_url(event, inputs)
+    body = None if event.response_body is None else _masked_body(event.response_body, inputs)
+    if body is None:
+        return masked
+    return masked.model_copy(update={"response_body": body})
+
+
+def _masked_body(body: str, inputs: tuple[str, ...]) -> str | None:
+    """`body` with every echo masked, or None if it has none. JSON keeps its structure."""
+    try:
+        data: object = json.loads(body)
+    except (json.JSONDecodeError, RecursionError):
+        data = None
+    if isinstance(data, dict | list):
+        masked = _masked_json(cast(object, data), inputs)
+        return None if masked == data else json.dumps(masked, ensure_ascii=False)
+    tail = _TRUNCATION_TAIL.search(body)
+    cut = tail.start() if tail else len(body)
+    text = _mask(body[:cut], inputs)
+    return None if text is None else text + body[cut:]
+
+
+def _masked_json(data: object, inputs: tuple[str, ...]) -> object:
+    match data:
+        case str():
+            masked = _mask(data, inputs)
+            return data if masked is None else masked
+        case dict():
+            return {
+                _mask(key, inputs) or key: _masked_json(value, inputs)
+                for key, value in cast(dict[str, object], data).items()
+            }
+        case list():
+            return [_masked_json(v, inputs) for v in cast(list[object], data)]
+        case _:
+            return data
 
 
 def _masked_page[S: (PageSnapshot, PageState)](page: S, inputs: tuple[str, ...]) -> S:
