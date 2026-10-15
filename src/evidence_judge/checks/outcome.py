@@ -13,9 +13,11 @@ Rules, first match wins:
    add a spec); if a key claim has NO_EVIDENCE; if any spec result is unknown (including a failed
    attempt at a forbidden action); if LLM claim extraction failed and heuristics were used; if
    claim coverage is below the review threshold; if nothing (no decided key claim, no
-   expectation) establishes success; or if nothing names the site (no `site`, no
+   expectation) establishes success; if nothing names the site (no `site`, no
    `allowed_hosts`, no --site), so the run's own first page decided which host counts, with a
-   spec or without one (`unanchored`).
+   spec or without one (`unanchored`); or if tamper evidence is required (--require-tamper-evidence
+   or the spec's `require_tamper_evidence`) and the source cannot fully show tampering
+   (`untrusted_source`).
 4. PASS otherwise.
 
 The score is a weighted mean of the assessable dimension scores plus the claim-support share,
@@ -164,6 +166,7 @@ def _review(
     has_spec: bool,
     unanchored: str | None,
     tampered: str | None,
+    untrusted_source: str | None = None,
 ) -> str | None:
     if tampered is not None:
         return f"NEEDS_REVIEW: {_clause(tampered)}, so the run cannot pass."
@@ -201,6 +204,8 @@ def _review(
         )
     if unanchored is not None:
         return f"NEEDS_REVIEW: {unanchored}."
+    if untrusted_source is not None:
+        return f"NEEDS_REVIEW: {untrusted_source}."
     return None
 
 
@@ -229,6 +234,7 @@ def decide(
     has_spec: bool = True,
     unanchored: str | None = None,
     tampered: str | None = None,
+    untrusted_source: str | None = None,
 ) -> tuple[Outcome, float, str]:
     key_claims = [v for v in claim_verdicts if v.key]
     value = score(claim_verdicts, dimensions)
@@ -245,6 +251,7 @@ def decide(
             has_spec,
             unanchored,
             tampered,
+            untrusted_source,
         )
     ) is not None:
         return Outcome.NEEDS_REVIEW, min(value, REVIEW_SCORE_CAP), summary

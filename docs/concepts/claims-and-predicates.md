@@ -168,6 +168,15 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   are matched anywhere in the evidence, not only on its word boundaries: page text joins
   inline elements without a space (`for <b>Paid</b>Now` reads "for PaidNow"), so a
   word-boundary rule there would let a glued echo pass.
+- **Screenshots cannot be masked.** A screenshot shows the field the agent typed into and any
+  page that repeats its input back, and masking only works on text. So in a run with any agent
+  input (anything typed, pressed, pasted, uploaded or put in a URL) or any injected code, a
+  `screenshot` predicate alone supports neither a claim nor an `expect` entry, whatever the
+  vision model answers; the reason names the inputs. In an `expect` entry it counts when a
+  deterministic predicate of the same entry (`page_text`, `url`, `request`, `value`, `action`)
+  is supported too. A claim never has such a co-witness: its screenshot predicates are only
+  consulted when no deterministic predicate supported it. A screenshot that contradicts still
+  refutes.
 - **Key outcome claims need an outcome.** A key claim of kind `outcome` can only be supported
   by a mutation request (`POST`, `PUT`, `PATCH`, `DELETE`) or by the final page: `final`-scope
   `page_text`, `url` or `screenshot`. A click on *Place order* or text seen on some earlier page

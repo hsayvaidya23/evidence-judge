@@ -133,8 +133,15 @@ def _run_judge(
     spec: TaskSpec | None,
     claims: ClaimSet | None,
     site: str | None = None,
+    require_tamper_evidence: bool = False,
 ) -> RunVerdict:
-    options = engine.JudgeOptions(offline=offline, spec=spec, claims=claims, site=site)
+    options = engine.JudgeOptions(
+        offline=offline,
+        spec=spec,
+        claims=claims,
+        site=site,
+        require_tamper_evidence=require_tamper_evidence,
+    )
     try:
         return asyncio.run(engine.Judge(settings, llm).judge(run, options))
     except LLMConfigError as e:
@@ -367,6 +374,16 @@ def judge(
             )
         ),
     ] = None,
+    require_tamper_evidence: Annotated[
+        bool,
+        typer.Option(
+            "--require-tamper-evidence",
+            help=(
+                "Cap the run at needs review unless its evidence can fully show tampering (a "
+                "Playwright trace); HAR-only and browser-use runs cannot pass"
+            ),
+        ),
+    ] = False,
     claims: Annotated[
         Path | None, typer.Option(help="Pre-extracted ClaimSet JSON", **_IN_FILE)
     ] = None,
@@ -436,6 +453,7 @@ def judge(
             spec=task_spec,
             claims=claim_set,
             site=site_name,
+            require_tamper_evidence=require_tamper_evidence,
         )
 
         _write_reports(verdict, run, out=out, html=html)

@@ -11,7 +11,9 @@ result unknown, so the run goes to review instead of passing as if nothing was t
 forbidden request answered 2xx or 3xx happened (a POST answered 303 took effect).
 
 An `expect` entry is proven like a claim (`checks.proof`): a predicate the run met before the
-agent acted, or one that only holds on an echo of the agent's own input, leaves it unknown.
+agent acted, or one that only holds on an echo of the agent's own input, leaves it unknown, and
+so does a screenshot in a run with agent input unless a deterministic predicate of the same
+entry is supported too.
 `forbid` entries and constraints read the evidence as recorded.
 
 An `expect` entry with an explicit `max_count` is broken when more mutations that took effect
@@ -100,16 +102,30 @@ def _explaining(
 async def _evaluate(
     predicates: Sequence[Predicate], ctx: CheckContext, registry: CheckerRegistry, proving: bool
 ) -> list[PredicateResult]:
-    if proving:
-        return [await guarded(p, ctx, registry, "an expectation") for p in predicates]
-    return [await registry.evaluate(p, ctx) for p in predicates]
+    """Each predicate's result. When `proving`, deterministic predicates are evaluated first: a
+    supported one is the co-witness a screenshot needs (checks.proof.unwitnessed_screenshot)."""
+    if not proving:
+        return [await registry.evaluate(p, ctx) for p in predicates]
+    what = "an expectation"
+    decided = {
+        i: await guarded(p, ctx, registry, what)
+        for i, p in enumerate(predicates)
+        if registry.is_deterministic(p)
+    }
+    witnessed = any(r.status is Support.SUPPORTED for r in decided.values())
+    return [
+        decided[i]
+        if i in decided
+        else await guarded(p, ctx, registry, what, co_witnessed=witnessed)
+        for i, p in enumerate(predicates)
+    ]
 
 
 async def _happened(
     expectation: Expectation, ctx: CheckContext, registry: CheckerRegistry, *, proving: bool
 ) -> tuple[bool | None, list[PredicateResult]]:
-    all_results = await _evaluate(expectation.all, ctx, registry, proving)
-    any_results = await _evaluate(expectation.any, ctx, registry, proving)
+    results = await _evaluate([*expectation.all, *expectation.any], ctx, registry, proving)
+    all_results, any_results = results[: len(expectation.all)], results[len(expectation.all) :]
     happened = holds(all_results, any_results)
     return happened, _explaining(happened, all_results, any_results)
 

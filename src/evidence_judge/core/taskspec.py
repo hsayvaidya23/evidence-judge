@@ -139,6 +139,14 @@ class TaskSpec(BaseModel):
         ),
     )
 
+    require_tamper_evidence: bool = Field(
+        default=False,
+        description=(
+            "Cap the run at NEEDS_REVIEW unless its evidence can fully show tampering: a "
+            "Playwright trace with its call log. HAR-only and browser-use runs cannot pass"
+        ),
+    )
+
     @field_validator("trusted_scripts")
     @classmethod
     def _trusted_scripts(cls, value: list[str]) -> list[str]:

@@ -56,7 +56,10 @@ that would prove it. Then code takes over:
 A `screenshot` predicate asks a vision model a yes/no question about the nearest screenshot. It
 runs only for claims the deterministic checks could not decide, only when
 `EVJ_SCREENSHOTS_TO_LLM=true`, and a "no" is a weak contradiction (0.6) that can only send a run
-to review. Screenshots are never redacted, which is why this is opt-in; see
+to review. A "yes" proves nothing alone in a run where the agent typed, pasted, uploaded,
+put text in a URL or injected code: an image shows the agent's own text and the site's echo of
+it, and pixels cannot be masked (see [Claims & predicates](claims-and-predicates.md)).
+Screenshots are never redacted, which is why this is opt-in; see
 [Redaction & privacy](redaction.md).
 
 ## How much did the model decide?

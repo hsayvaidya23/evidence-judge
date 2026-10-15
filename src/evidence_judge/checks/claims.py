@@ -88,8 +88,10 @@ async def judge_claim(claim: Claim, ctx: CheckContext, registry: CheckerRegistry
     """Judge `claim`. Besides vacuous predicates, a predicate cannot *support* it when the run met
     it before the agent's first action (the baseline), when it only holds on an echo of the
     agent's own input (text it typed, pasted or put in a URL), or, for a key outcome claim, when it is
-    neither a mutation request nor the final page. Such a predicate still refutes the claim when
-    it is contradicted."""
+    neither a mutation request nor the final page. A screenshot is only consulted when no
+    deterministic predicate is supported, so it never has a co-witness: in a run with agent
+    input it cannot support the claim (checks.proof.unwitnessed_screenshot). Such a predicate
+    still refutes the claim when it is contradicted."""
     if not claim.predicates:
         return _verdict(claim, Support.NO_EVIDENCE, NO_PREDICATE_REASON, [], 0.0)
     weak = [(p, r) for p in claim.predicates if (r := vacuity_reason(p)) is not None]
