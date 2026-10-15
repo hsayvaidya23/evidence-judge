@@ -1384,7 +1384,11 @@ def render_benchmark(data: dict[str, Any]) -> str:
     seeds = int(data["seeds"])
     forged_scenarios = sum(1 for s in data["scenarios"] if s["forged"])
     for p in pooled:
-        require(p.n == forged_scenarios * len(manip) * seeds, "pooled n no longer adds up")
+        cases = [
+            c for c in data["cases"] if c["judge"] == p.judge and c["forged"] and c["kind"] in manip
+        ]
+        require(p.n == len(cases), "pooled n no longer adds up")
+        require(p.n <= forged_scenarios * len(manip) * seeds, "more forged runs than kinds allow")
         require(sum(by_key[(p.judge, k)].n for k in manip) == p.n, "per-kind n mismatch")
     worst = max(pooled, key=lambda r: r.false_pass)
     ci_high = max(
@@ -1409,9 +1413,9 @@ def render_benchmark(data: dict[str, Any]) -> str:
         '<text x="32" y="78" class="b" style="font-size:25px;letter-spacing:-.01em">'
         "Can a forged success story fool the judge?</text>"
         '<text x="32" y="103" class="i2" style="font-size:14px">Failed runs rewritten to claim '
-        "success, evidence untouched. Any PASS is a miss.</text>"
+        "success, some with planted evidence. Any PASS is a miss.</text>"
         f'<text class="m mu" x="32" y="126" style="font-size:11px">{forged_scenarios} failed runs '
-        f"{TIMES} {len(manip)} forgery kinds {TIMES} {seeds} seeds = {worst.n} per judge · "
+        f"{TIMES} up to {len(manip)} attack kinds {TIMES} {seeds} seeds = {worst.n} per judge · "
         "offline · bench/results/offline-fixtures.json</text>"
     )
 
