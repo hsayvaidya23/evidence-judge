@@ -53,6 +53,8 @@ from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, 
 
 DEFAULT_MAX_VISITS = 1_000_000
 
+_FRAMES = frozenset({"IFRAME", "FRAME"})
+"""Elements that show another document, which the snapshot of this one does not hold."""
 _SKIPPED_TAGS = frozenset(
     {
         "SCRIPT",
@@ -141,7 +143,7 @@ class RenderedPage:
     """The text whose visibility the reader is unsure of, in document order."""
     opaque: bool = False
     """The page may show text the snapshot does not hold (a closed shadow root, text a
-    ``::before`` or ``::after`` rule gives a shown element)."""
+    ``::before`` or ``::after`` rule gives a shown element, a shown frame's document)."""
 
 
 _BLOCK_END = object()
@@ -349,6 +351,9 @@ class _Renderer:
         stack: list[_Item],
     ) -> None:
         if tag in _SKIPPED_TAGS or (tag == "TEMPLATE" and _SHADOW_ROOT_ATTR not in attrs):
+            if tag in _FRAMES and _loads_content(attrs):
+                style = scope.sheets.style(element, inherited, ua_hide=_ua_hide(tag, attrs))
+                self._opaque = self._opaque or (not style.removed and style.text != HIDDEN)
             return
         children = self._resolved(node, snapshot_index, parent=element)
         shadow = next(
@@ -749,3 +754,11 @@ def _normalise(text: str | None) -> str:
 def _is_fixed(attrs: JsonObject) -> bool:
     """A ``readonly`` or ``disabled`` field: the agent cannot type into it."""
     return "readonly" in attrs or "disabled" in attrs
+
+
+def _loads_content(attrs: JsonObject) -> bool:
+    """A frame with a ``srcdoc`` or a ``src`` other than ``about:blank`` shows a document."""
+    if as_str(attrs.get("srcdoc")):
+        return True
+    src = (as_str(attrs.get("src")) or "").strip().lower()
+    return bool(src) and src != "about:blank"

@@ -236,7 +236,8 @@ class PageSnapshot(_Frozen):
         default=False,
         description="The page may show text the snapshot does not hold (an empty custom "
         "element may render a closed shadow root, a ::before or ::after rule may give a shown "
-        "element text), so text missing from it is not proven absent",
+        "element text, a shown frame holds a document of its own), so text missing from it is "
+        "not proven absent",
     )
     html: str | None = None
     call_id: str | None = None

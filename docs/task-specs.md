@@ -567,7 +567,8 @@ page may hide"), so the run goes to review instead of passing or failing. The sa
 page has an empty custom element (`<x-badge></x-badge>`): it may render a closed shadow root,
 whose text no snapshot holds, so a phrase missing from that page is not proven missing; and
 when a `::before` or `::after` rule gives a shown element text (`content: attr(data-status)`),
-which no snapshot holds either. The
+which no snapshot holds either; and when a shown `<iframe>` loads a document, whose text the
+judge does not read. The
 judge still cannot see text a script hides or that another element covers. Prefer phrases the
 page shows only in the state you expect, and pair a read with a `url` or `request` predicate
 when a page carries the phrase hidden.

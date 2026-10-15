@@ -133,6 +133,9 @@ the names exported from `evidence_judge`) is defined under
 
 ### Fixed
 
+- A page with a shown `<iframe>` or `<frame>` that loads a document is opaque: a status the
+  site shows inside a frame sends the run to review instead of failing it. Frame text is still
+  never read, so it proves nothing; a hidden frame changes nothing.
 - A linked stylesheet whose request the trace records as failed without a response (a refused
   connection, an unsafe port) counts as an empty sheet, like one with an error status, instead
   of leaving the whole page's text unsure. One the agent's route handler aborted does not.

@@ -25,7 +25,8 @@ MAY_HIDE: Final = "text the page may hide"
 """What text of unsure visibility is called in reasons (PageSnapshot.unsure_text)."""
 OPAQUE: Final = (
     "the page may show text its snapshot does not hold (an empty custom element may render a "
-    "closed shadow root, a ::before or ::after rule may add text)"
+    "closed shadow root, a ::before or ::after rule may add text, a shown frame holds a page of "
+    "its own)"
 )
 SNAPSHOT_ABSENCE_CONFIDENCE: Final = WEAK_CONTRADICTION_CONFIDENCE
 """Snapshots are point-in-time: text shown between them is never recorded, so absence across

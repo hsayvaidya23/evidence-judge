@@ -520,6 +520,26 @@ def test_a_value_the_agent_cannot_type_into_is_text_the_page_may_show() -> None:
     assert page.field_values == ("Out of stock", "Ships in 3 days", "typed")
 
 
+@pytest.mark.parametrize(
+    ("frame", "opaque"),
+    [
+        (["IFRAME", {"srcdoc": "<p>Out of stock</p>"}], True),
+        (["IFRAME", {"src": "/frag"}], True),
+        (["FRAME", {"src": "https://other.example/"}], True),
+        (["IFRAME", {"src": "/frag", "style": "opacity:0"}], True),
+        (["IFRAME", {"src": "/frag", "style": "display:none"}], False),
+        (["IFRAME", {"src": "/frag", "hidden": ""}], False),
+        (["IFRAME", {"src": "about:blank"}], False),
+        (["IFRAME", {}], False),
+    ],
+)
+def test_a_shown_frame_holds_a_document_the_snapshot_does_not(
+    frame: list[object], opaque: bool
+) -> None:
+    page = _rendered(frame, ["P", {}, "Kettle"])
+    assert (page.text, page.opaque) == ("Kettle", opaque)
+
+
 def test_an_empty_custom_element_may_hold_a_closed_shadow_root() -> None:
     assert _rendered(["X-B", {}], ["P", {}, "Kettle"]).opaque
     assert not _rendered(["X-B", {}, "text"], ["DIV", {}]).opaque

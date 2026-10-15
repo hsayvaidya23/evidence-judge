@@ -72,7 +72,8 @@ without a response, applied nothing and counts as empty) goes to `unsure_text` i
 predicate and keeps its absence from contradicting one. `opaque` marks a page with an empty
 custom element, which may render a closed shadow root no snapshot holds, or with a shown element
 a `::before` or `::after` rule gives text (`content` with a letter or digit, `attr()` or a
-counter). See
+counter), or with a shown `<iframe>` or `<frame>` that loads a document (`src` or `srcdoc`):
+the reader does not read frames, so their text never proves anything either way. See
 [`page_text`](../task-specs.md#page_text-the-pages-text-contains-a-phrase).
 Text typed into `<input>` and
 `<textarea>` fields (and their default values) is left out, because the agent controls it: a
