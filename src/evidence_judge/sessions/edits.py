@@ -19,10 +19,10 @@ from typing import Final
 from evidence_judge.ingest._json import as_list, as_object
 
 _TEST_PATH: Final = re.compile(
-    r"(?:^|/)(?:tests?|__tests__|specs?|testing|e2e|integration_tests)/|"
-    r"(?:^|/)test_[^/]+\.py$|_tests?\.py$|(?:^|/)conftest\.py$|_test\.go$|"
-    r"\.(?:test|spec)\.[cm]?[jt]sx?$|_spec\.rb$|Tests?\.(?:java|kt|cs|swift|php)$|"
-    r"(?:^|/)tests?\.rs$",
+    r"(?:^|/)(?:tests?|__tests__|specs?|testing|e2e|integration_tests|testdata|fixtures)/|"
+    r"(?:^|/)test[^/]*\.py$|_tests?\.[^/.]+$|(?:^|/)conftest\.py$|_spec\.[^/.]+$|"
+    r"\.(?:test|spec)\.[^/]+$|Tests?\.(?:java|kt|cs|swift|php|scala|groovy)$|"
+    r"(?:^|/)tests?\.[^/.]+$|(?:^|/)test_[^/]+$",
     re.IGNORECASE,
 )
 _TEST_CONFIG: Final = re.compile(
@@ -86,7 +86,9 @@ def is_harness_path(path: str) -> bool:
 
 
 def is_test_path(path: str) -> bool:
-    return _TEST_PATH.search(path) is not None
+    """A test file or test directory (`tests.py`, `test_x.py`, `x_test.go`, `x.spec.ts`,
+    `tests/`, `__tests__/`, ...), named with or without a trailing slash."""
+    return _TEST_PATH.search(path) is not None or _TEST_PATH.search(path + "/") is not None
 
 
 def is_test_config(path: str) -> bool:

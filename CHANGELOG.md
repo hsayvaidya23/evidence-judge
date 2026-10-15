@@ -299,6 +299,11 @@ the names exported from `evidence_judge`) is defined under
   trailing slash): `contains: /p/red-kettle` is a substring and is also met by
   `/p/red-kettle-lid`. The task-spec guide steers exact pages to `path` or an anchored `regex`.
   Like `regex`, a `path` the agent typed into the address bar cannot prove itself, however short.
+- Session judge: more files count as tests, so editing their assertions weakens the suite.
+  Django's `tests.py`, `test*.py`, `*_test.*`, `*_spec.*`, `*.test.*` and `*.spec.*` in any
+  language, and the `tests/`, `spec/`, `__tests__/`, `testdata/` and `fixtures/` directories
+  (named with or without a trailing slash) were partly missed: rewriting an assertion in a
+  Django `tests.py` then running the suite passed.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

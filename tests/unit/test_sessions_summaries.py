@@ -181,6 +181,17 @@ def test_summary_properties() -> None:
         "spec/calc_spec.rb",
         "__tests__/calc.js",
         "src/test/java/CalcTest.java",
+        "tests.py",
+        "polls/tests.py",
+        "test.py",
+        "testcalc.py",
+        "calc_test.rb",
+        "calc_spec.ts",
+        "src/calc.test.mjs",
+        "tests",
+        "pkg/tests/",
+        "spec",
+        "__tests__",
     ],
 )
 def test_test_paths(path: str) -> None:
