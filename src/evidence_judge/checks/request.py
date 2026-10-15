@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
+from typing import Final, cast
 from urllib.parse import parse_qsl, unquote_plus, urljoin, urlsplit
 
 from evidence_judge.checks._common import (
@@ -19,6 +20,7 @@ from evidence_judge.checks.matching import (
     compile_regex,
     contains,
     is_truncated,
+    parse_body,
     regex_search,
     status_matches,
     url_host,
@@ -187,12 +189,13 @@ def check_request(
 def _hit_result(
     matcher: RequestMatcher, scored: Scored, index: EvidenceIndex
 ) -> PredicateResult | None:
-    """SUPPORTED by the matching requests, NO_EVIDENCE if every one was a redirect that cannot be
-    shown to have worked, or None if no request matched."""
+    """SUPPORTED by the matching requests, NO_EVIDENCE if every one is in doubt (a redirect that
+    cannot be shown to have worked, a mutation whose response reports a failure), or None if no
+    request matched."""
     hits = [event for event, misses in scored if not misses]
     if not hits:
         return None
-    doubts = _redirect_doubts(hits, index) if matcher.scope is not None else {}
+    doubts = _doubts(hits, index) if matcher.scope is not None else {}
     proven = [e for e in hits if e.id not in doubts]
     if not proven:
         event = hits[-1]
@@ -207,8 +210,8 @@ def _hit_result(
     )
 
 
-def _redirect_doubts(hits: list[NetworkEvent], index: EvidenceIndex) -> dict[str, str]:
-    return {e.id: d for e in hits if (d := redirect_doubt(e, index))}
+def _doubts(hits: list[NetworkEvent], index: EvidenceIndex) -> dict[str, str]:
+    return {e.id: d for e in hits if (d := redirect_doubt(e, index) or response_doubt(e))}
 
 
 def _no_evidence(matcher: RequestMatcher, event: NetworkEvent, but: str) -> PredicateResult:
@@ -416,6 +419,81 @@ def redirect_doubt(event: NetworkEvent, index: EvidenceIndex) -> str | None:
     if _text_before(origin, event, index) in texts:
         return f"{back}, which showed the same as before"
     return None
+
+
+_FLAG_KEYS: Final = ("ok", "success", "succeeded")
+_STATE_KEYS: Final = ("status", "state", "result", "outcome")
+_FALSE: Final = frozenset({"false", "0", "no"})
+
+
+def _reported(value: object) -> bool:
+    """Whether an `errors` or `error` field holds something: not null, empty or unset."""
+    if isinstance(value, str):
+        return value.strip().casefold() not in _UNSET
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, list | dict):
+        return bool(cast(list[object] | dict[object, object], value))
+    return value is not None
+
+
+def _fields(value: object) -> dict[str, object] | None:
+    """A JSON object's fields by case-folded name, or None for anything else."""
+    if not isinstance(value, dict):
+        return None
+    return {str(k).casefold(): v for k, v in cast(dict[object, object], value).items()}
+
+
+def _first_message(value: object) -> str:
+    first: object = value
+    if isinstance(value, list) and value:
+        first = cast(list[object], value)[0]
+    if (fields := _fields(first)) is not None:
+        first = fields.get("message", fields.get("code", first))
+    return str(first)[:80]
+
+
+def _null_fields(data: object) -> list[str]:
+    fields = _fields(data)
+    return [k for k, v in fields.items() if v is None] if fields is not None else []
+
+
+def response_doubt(event: NetworkEvent) -> str | None:
+    """Why a mutation answered without a redirect cannot be shown to have succeeded, or None.
+
+    An API reports a failed write in the body of a 200 as often as with an error status: a
+    GraphQL `{"data": {"placeOrder": null}, "errors": [...]}`, a REST `{"ok": false}`. A JSON
+    (or form-encoded) response object whose top-level `errors` or `error` holds something,
+    whose `ok`, `success` or `succeeded` is false, or whose `status`, `state`, `result` or
+    `outcome` is a failure word ('failed', 'declined', 'error', ...) does not prove the
+    mutation took effect. Requests that are not mutations, redirects and unrecorded or
+    unparseable bodies return None.
+    """
+    if not event.is_mutation or event.status is None or 300 <= event.status < 400:
+        return None
+    fields = _fields(parse_body(event.response_body))
+    if fields is None:
+        return None
+    answered = f"it was answered {event.status} and its response"
+    for key in ("errors", "error"):
+        if _reported(value := fields.get(key)):
+            nulls = _null_fields(fields.get("data"))
+            null = f", with {', '.join(map(quoted, nulls))} null" if nulls else ""
+            return f"{answered} reports an error ({quoted(_first_message(value))}){null}"
+    for key in _FLAG_KEYS:
+        value = fields.get(key)
+        if value is False or (isinstance(value, str) and value.strip().casefold() in _FALSE):
+            return f"{answered} says {key}: false"
+    for key in _STATE_KEYS:
+        value = fields.get(key)
+        if isinstance(value, str) and failure_word(value):
+            return f"{answered} says {key}: {quoted(value)}"
+    return None
+
+
+def failure_word(value: str) -> bool:
+    """Whether a status-like value ('failed', 'DECLINED', 'payment_refused') names a failure."""
+    return _URL_FAILURE.search(_CAMEL.sub(" ", value)) is not None
 
 
 def _only_off_site(misses: list[Miss]) -> bool:
