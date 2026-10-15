@@ -61,6 +61,33 @@ def load_run(
     if answer is not None and answer_file is not None:
         raise IngestError("pass either answer or answer_file, not both")
 
+    trace_run, har_run, agent_run = _load_sources(
+        trace, har, browser_use, max_body_chars=max_body_chars, screenshot_root=screenshot_root
+    )
+    loaded = [r for r in (trace_run, har_run, agent_run) if r is not None]
+    merged, merge_metadata = _merge_sources(
+        trace_run, har_run, agent_run, allow_mismatch=allow_mismatch
+    )
+    return _with_overrides(
+        merged,
+        loaded,
+        merge_metadata,
+        answer=answer,
+        answer_file=answer_file,
+        reasoning_file=reasoning_file,
+        task=task,
+        run_id=run_id,
+    )
+
+
+def _load_sources(
+    trace: str | Path | None,
+    har: str | Path | None,
+    browser_use: str | Path | None,
+    *,
+    max_body_chars: int,
+    screenshot_root: str | Path | None,
+) -> tuple[Run | None, Run | None, Run | None]:
     trace_run = load_playwright_trace(trace, max_body_chars=max_body_chars) if trace else None
     har_run = load_har(har, max_body_chars=max_body_chars) if har else None
     agent_run = (
@@ -68,8 +95,13 @@ def load_run(
         if browser_use
         else None
     )
-    loaded = [r for r in (trace_run, har_run, agent_run) if r is not None]
+    return trace_run, har_run, agent_run
 
+
+def _merge_sources(
+    trace_run: Run | None, har_run: Run | None, agent_run: Run | None, *, allow_mismatch: bool
+) -> tuple[Run, dict[str, object]]:
+    """The sources merged into one run, and the HAR merge's metadata to keep."""
     sources: list[Run] = []
     merge_metadata: dict[str, object] = {}
     if trace_run is not None and har_run is not None:
@@ -88,7 +120,21 @@ def load_run(
     merged = sources[0]
     for other in sources[1:]:
         merged = merged.merge(other)
+    return merged, merge_metadata
 
+
+def _with_overrides(
+    merged: Run,
+    loaded: list[Run],
+    merge_metadata: dict[str, object],
+    *,
+    answer: str | None,
+    answer_file: str | Path | None,
+    reasoning_file: str | Path | None,
+    task: str | None,
+    run_id: str | None,
+) -> Run:
+    """`merged` with the explicit answer, reasoning, task and run id, and per-source metadata."""
     explicit_answer = answer if answer is not None else _read_text(answer_file)
     reasoning = _read_paragraphs(reasoning_file) if reasoning_file else merged.agent_reasoning
     return merged.model_copy(
@@ -124,7 +170,41 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
             start within ``HAR_WINDOW_SLACK_MS`` of the trace's time window; or none of its
             entries do. ``allow_mismatch=True`` merges anyway.
     """
+    network, paired = _pair(trace_run, har_run)
+    timed = _clocks_known(trace_run, har_run)
+    window = _trace_window(trace_run) if timed else None
     offset = _clock_offset(trace_run, har_run)
+    shifted = [round(h.ts + offset, 3) for h in har_run.network]
+    if not allow_mismatch:
+        _check_mismatch(trace_run, har_run, paired, shifted, window)
+    har_only, mutations, late = _har_only(
+        har_run, paired, shifted, window, allow_mismatch=allow_mismatch
+    )
+    marker = {id(h) for h in har_only}
+    network.extend(har_only)
+    network.sort(key=lambda n: n.ts)
+    renumbered = [n.model_copy(update={"id": f"net#{i}"}) for i, n in enumerate(network, 1)]
+    metadata = {
+        **trace_run.metadata,
+        "har_only_requests": [
+            r.id for r, n in zip(renumbered, network, strict=True) if id(n) in marker
+        ],
+    }
+    warnings = _merge_warnings(mutations, late)
+    if warnings:
+        metadata["merge_warnings"] = warnings
+    return trace_run.model_copy(
+        update={
+            "network": renumbered,
+            "captured": trace_run.captured | {Channel.NETWORK},
+            "metadata": metadata,
+        }
+    )
+
+
+def _pair(trace_run: Run, har_run: Run) -> tuple[list[NetworkEvent], set[int]]:
+    """The trace's requests, each filled in from the HAR entry it pairs with in order by method
+    and URL, and the indexes of the paired HAR entries."""
     pending: defaultdict[tuple[str, str], deque[int]] = defaultdict(deque)
     for index, har_event in enumerate(har_run.network):
         pending[(har_event.method, har_event.url)].append(index)
@@ -138,15 +218,19 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
         index = queue.popleft()
         paired.add(index)
         network.append(_fill_gaps(event, har_run.network[index]))
-    timed = _clocks_known(trace_run, har_run)
-    window = _trace_window(trace_run) if timed else None
-    shifted = [round(h.ts + offset, 3) for h in har_run.network]
-    if not allow_mismatch:
-        _check_same_run(len(trace_run.network), len(har_run.network), len(paired))
-        if window is not None:
-            _check_time_window(shifted, paired, window)
-        elif trace_run.network:
-            _check_har_share(len(har_run.network), len(paired), len(paired), timed=False)
+    return network, paired
+
+
+def _har_only(
+    har_run: Run,
+    paired: set[int],
+    shifted: list[float],
+    window: tuple[float, float] | None,
+    *,
+    allow_mismatch: bool,
+) -> tuple[list[NetworkEvent], int, int]:
+    """The unpaired HAR requests to keep, on the trace clock, and how many mutations and how many
+    requests outside the trace's time window were dropped."""
     har_only: list[NetworkEvent] = []
     late = 0
     mutations = 0
@@ -162,16 +246,10 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
             late += 1
         else:
             har_only.append(h.model_copy(update={"ts": ts}))
-    marker = {id(h) for h in har_only}
-    network.extend(har_only)
-    network.sort(key=lambda n: n.ts)
-    renumbered = [n.model_copy(update={"id": f"net#{i}"}) for i, n in enumerate(network, 1)]
-    metadata = {
-        **trace_run.metadata,
-        "har_only_requests": [
-            r.id for r, n in zip(renumbered, network, strict=True) if id(n) in marker
-        ],
-    }
+    return har_only, mutations, late
+
+
+def _merge_warnings(mutations: int, late: int) -> list[str]:
     warnings: list[str] = []
     if mutations:
         warnings.append(
@@ -183,15 +261,21 @@ def attach_har(trace_run: Run, har_run: Run, *, allow_mismatch: bool = False) ->
             f"dropped {late} HAR requests that started more than "
             f"{MAX_HAR_CLOCK_GAP_MS // 60_000} minutes outside the trace"
         )
-    if warnings:
-        metadata["merge_warnings"] = warnings
-    return trace_run.model_copy(
-        update={
-            "network": renumbered,
-            "captured": trace_run.captured | {Channel.NETWORK},
-            "metadata": metadata,
-        }
-    )
+    return warnings
+
+
+def _check_mismatch(
+    trace_run: Run,
+    har_run: Run,
+    paired: set[int],
+    shifted: list[float],
+    window: tuple[float, float] | None,
+) -> None:
+    _check_same_run(len(trace_run.network), len(har_run.network), len(paired))
+    if window is not None:
+        _check_time_window(shifted, paired, window)
+    elif trace_run.network:
+        _check_har_share(len(har_run.network), len(paired), len(paired), timed=False)
 
 
 def _check_same_run(trace_requests: int, har_requests: int, paired: int) -> None:
