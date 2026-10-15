@@ -94,8 +94,9 @@ def guard_std_streams() -> None:
     sys.stderr = cast(TextIO, _PipeSafeStream(sys.stderr))
 
 
-def print_verdict(verdict: RunVerdict, console: Console) -> None:
-    """Human-readable verdict. Agent-controlled strings are rendered as plain text, never markup."""
+def print_verdict(verdict: RunVerdict, console: Console, *, claims: bool = True) -> None:
+    """Human-readable verdict. Agent-controlled strings are rendered as plain text, never markup.
+    ``claims=False`` leaves out the claims section, for a verdict that never had a transcript."""
     label, style = _OUTCOME_STYLE[verdict.outcome]
     head = Text.assemble(
         (f" {label} ", style),
@@ -108,7 +109,7 @@ def print_verdict(verdict: RunVerdict, console: Console) -> None:
     if verdict.task:
         console.print(Text.assemble(("task ", "dim"), verdict.task))
     console.print(Text(verdict.summary))
-    if verdict.verification is not None:
+    if verdict.verification is not None and verdict.verification.reason not in verdict.summary:
         rerun = verdict.verification.method is VerificationMethod.RERUN
         label = "tests verified by re-run" if rerun else "tests from the transcript"
         console.print(
@@ -135,7 +136,7 @@ def print_verdict(verdict: RunVerdict, console: Console) -> None:
                 Text(", ".join(c.evidence_id for c in cv.citations) or "-", style="cyan"),
             )
         console.print(table)
-    else:
+    elif claims:
         console.print(Text("No checkable claims were found.", style="dim"))
 
     failed = [e for e in verdict.expectations if e.met is not True]

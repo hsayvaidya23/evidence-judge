@@ -438,7 +438,7 @@ def rerun_verdict(result: RerunResult, run_id: str | None = None) -> RunVerdict:
             )
         ],
         verification=Verification(
-            method=VerificationMethod.RERUN, reason=result.verification_reason
+            method=VerificationMethod.RERUN, reason=result.copied or result.reason
         ),
         warnings=[*review, *(f"re-run: {n}" for n in result.notes)],
     )
@@ -476,7 +476,7 @@ def rerun_command(
             raise
         raise _internal(e) from None
     if not quiet:
-        print_verdict(verdict, StdoutConsole())
+        print_verdict(verdict, StdoutConsole(), claims=False)
     raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
 
 

@@ -530,6 +530,19 @@ def test_the_session_rerun_command(tmp_path: Path) -> None:
     assert result.exit_code == 0
 
 
+def test_the_session_rerun_console_does_not_repeat_itself(tmp_path: Path) -> None:
+    root = toy(tmp_path, buggy=False)
+    spec = tmp_path / "spec.yaml"
+    spec.write_text(f"rerun:\n  command: {json.dumps(PYTEST)}\n")
+    result = CliRunner().invoke(
+        app, ["session", "rerun", "--spec", str(spec), "--project", str(root)]
+    )
+    assert result.exit_code == 0, result.output
+    text = " ".join(result.output.split())
+    assert "tests verified by re-run: copied" in text
+    assert "No checkable claims" not in text
+
+
 def test_judge_rerun_needs_a_rerun_block(tmp_path: Path) -> None:
     spec = tmp_path / "spec.yaml"
     spec.write_text("task: x\n")
