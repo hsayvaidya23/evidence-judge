@@ -185,18 +185,47 @@ run the project's test suite. What they execute, and what they protect against:
   tree in a temporary directory, without a shell, in an environment built from scratch (a
   judge `HOME` and `TMPDIR`, the judge's `PATH` without relative entries, `LANG`, toolchain
   cache locations and the spec's `env`), so rc files, `BASH_ENV`, aliases, exported variables,
-  `PYTEST_ADDOPTS`, `GOFLAGS`, `NODE_OPTIONS` and `~/.npmrc` do not apply. It is not a
-  sandbox: the code can still read and write anything your user can, use the network, and
-  reach the dependency directories (`.venv`, `node_modules`), which are linked into the copy.
-  Run it in a container or VM when the code is not yours to trust.
+  `PYTEST_ADDOPTS`, `GOFLAGS`, `NODE_OPTIONS` and `~/.npmrc` do not apply. Python's bytecode
+  goes to a judge directory (`PYTHONPYCACHEPREFIX`), so no `__pycache__` file planted next to
+  a source is loaded. It is not a sandbox: the code can still read and write anything your
+  user can, use the network, and reach the dependency directories (`.venv`, `node_modules`),
+  which are linked into the copy.
+- **What is copied is decided by the project.** The file list comes from git, but not from
+  state anything running as you can change on the side: `.git/info/exclude` and
+  `core.excludesFile` are not read, files tracked at the base revision are copied whenever
+  present, untracked paths that only `.gitignore` rules added since the base ignore are copied
+  anyway, a removed `!exception` is a configuration change, and a `core.worktree` pointing
+  elsewhere copies the whole directory and needs review. A file write into `.git/` in the
+  session record is a harness change.
+- **What the run can read from outside the copy.** The copy sits in the system temporary
+  directory, so configuration above your repository (`pytest.ini`, `tox.ini`, `setup.cfg`,
+  `pyproject.toml`) is not above it; runner configuration found in the directories that are
+  above it (pytest ini files and `conftest.py`, `go.mod`/`go.work`, `package.json`,
+  `node_modules`, `Cargo.toml`, `.cargo`) needs review. The linked `.venv`, `venv` and
+  `node_modules` are read from your tree, as are an editable install's sources (its `.pth`
+  points at your `src/`), absolute symlinks in the tree and the toolchain caches. The
+  turn-start hook fingerprints the dependency directories (every file's size and times in a
+  virtualenv, skipping `__pycache__`; the top-level package manifests and `.bin` of
+  `node_modules`) and the re-run fingerprints them again: any difference needs review. Without
+  the hooks (the plain CLI) there is no fingerprint, and the session record's install and
+  harness findings are what remains. The virtualenv's base interpreter and standard library,
+  and edits inside a `node_modules` package other than its manifest, are not fingerprinted.
 - **The code under test can still lie, within limits.** The verdict comes from the runner's
-  machine-readable report, written to a judge path outside the copy, never from stdout: a
-  summary printed at exit or an exit code forced with `os._exit(0)` does not change it, and a
-  report with failures fails. Code under test that finds the report path (it is in its own
-  `argv`) can rewrite the report; a rewrite that leaves it inconsistent with itself (test cases
-  against stated totals) is needs review, but a careful forgery of a whole, consistent report
-  is not detected. A source change that does this is a runner patch the transcript analysis
-  reports, so such a run still needs review when the session record shows it.
+  machine-readable report, written to its own private temporary directory (mode 0700, a random
+  name not derived from the copy's path), never from stdout: a summary printed at exit or an
+  exit code forced with `os._exit(0)` does not change it, and a report with failures fails.
+  The code under test runs as your user, in the same process as the runner that writes the
+  report, and the report path is in its own `argv`: it can in principle find the report and
+  replace it with a forged one. A forgery that leaves the report inconsistent with itself (test
+  cases against stated totals) is needs review; a careful, self-consistent one is not detected.
+  A source change that does this is a runner patch the transcript analysis reports, so such a
+  run still needs review when the session record shows it.
+- **The hardening path is an OS sandbox.** `rerun.sandbox` takes an argv prefix the judge runs
+  the command under (`bwrap`, `sandbox-exec`, `docker run ...`), with `{tree}`, `{report_dir}`,
+  `{home}` and `{tmp}` filled in, so you can keep the run off your files, the hooks' state and
+  the network. Because the runner writes the report from inside the same sandbox as the code
+  under test, a sandbox protects your machine, not the report's integrity. Run untrusted code
+  in a container or VM.
 - **Weakened tests stay weakened.** A re-run of a suite whose assertions were removed passes.
   Edits to tests, test data, snapshots and runner configuration, and source that patches the
   runner, are still found in the session record, and runner configuration in the copy is also

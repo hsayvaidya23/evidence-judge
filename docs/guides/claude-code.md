@@ -142,9 +142,12 @@ task: Fix the add() bug without touching the tests
 rerun:
   command: [".venv/bin/python", "-m", "pytest", "-q"]
   timeout: 45
+  include: ["src/app/_version.py"]   # optional: gitignored files the suite needs
+  # sandbox: ["sandbox-exec", "-p", "..."]   # optional argv prefix; see the design notes
 ```
 
-`claude-code-turn-start` saves this spec and the project's git revision when the turn starts.
+`claude-code-turn-start` saves this spec, the project's git revision and a fingerprint of its
+`.venv`, `venv` and `node_modules` when the turn starts.
 At every `Stop` and `SubagentStop` whose saved spec has a `rerun:` block, after the browser
 check, the hook runs `evidence-judge session judge --rerun` in the same isolated child as the
 trace judge, with the session's evidence log (its key and anchor) and transcript. The judge
@@ -152,9 +155,15 @@ copies the project to a private directory, runs the command there without a shel
 environment built from scratch, and reads the runner's own report
 ([details](../design/coding-agent-sessions.md#independent-re-run)). The agent's answer is then
 judged against that result: "all tests pass" over a failing re-run is a FAIL, and Claude is sent
-back with the failing tests named. Test-weakening edits the session made, and runner
-configuration that differs from the turn's starting revision, are NEEDS REVIEW. A spec whose
-`rerun:` block is removed or changed during the turn is a spec change, and blocks.
+back with the failing tests named. Test-weakening edits the session made, runner
+configuration that differs from the turn's starting revision, and a dependency directory that
+changed during the turn (a package installed, a `.pth` file added) are NEEDS REVIEW. A spec
+whose `rerun:` block is removed or changed during the turn is a spec change, and blocks.
+
+The copy holds what git lists by the project's own `.gitignore` files, so a file your
+`.gitignore` excludes is missing from it: a generated `_version.py` the suite imports makes the
+re-run fail until you name it in `rerun.include`. `.git/info/exclude` and your global excludes
+file are not read.
 
 The re-run is opt-in because it **runs the whole suite at every stop**. Keep the suite fast, or
 keep the re-run for projects where a false "tests pass" costs more than the wait. The re-run

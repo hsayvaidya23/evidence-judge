@@ -137,7 +137,9 @@ runner's own report contradicts. Gemini has no transcript the judge reads, so th
 from the evidence log when `gemini-after-agent` has `--log-dir`; without one the hook judges the
 re-run on its own (`evidence-judge session rerun`): a failing suite is denied whatever the
 answer says. The `AfterAgent` hook's `timeout` (milliseconds) and `EVJ_HOOK_TIMEOUT_S` must
-cover the suite.
+cover the suite. `gemini-turn-start` fingerprints `.venv`, `venv` and `node_modules` when the
+turn starts; a change to them by the end of the turn is NEEDS REVIEW. Gitignored files the
+suite needs (a generated `_version.py`) go in `rerun.include`.
 
 Hooks run with a sanitized environment plus `GEMINI_PROJECT_DIR`. If you set
 `security.environmentVariableRedaction`, allow the `EVJ_HOOK_*` variables you use (and `HOME`,

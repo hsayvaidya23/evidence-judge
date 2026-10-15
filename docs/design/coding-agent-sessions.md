@@ -655,15 +655,33 @@ rerun:
   timeout: 300          # seconds (default 600)
   min_tests: 40         # optional
   env: {DJANGO_SETTINGS_MODULE: app.settings.test}
+  include: ["src/app/_version.py"]   # optional: ignored files the suite needs
+  sandbox: ["bwrap", "--ro-bind", "/", "/", "--bind", "{tree}", "{tree}",
+            "--bind", "{report_dir}", "{report_dir}", "--bind", "{tmp}", "{tmp}",
+            "--dev", "/dev", "--proc", "/proc", "--unshare-net"]   # optional
 ```
 
 `evidence-judge session judge --spec spec.yaml --rerun` (and the stop hooks, when the snapshot
 of the session spec has a `rerun:` block) then:
 
 1. **Copies the working tree** into a directory the judge owns. In a git tree it copies what
-   `git ls-files --cached --others --exclude-standard` lists: every tracked file still present
-   and every untracked file that is not ignored, so files the agent created come along and
-   caches, build output and `.git` do not. Outside git it copies the whole directory except VCS
+   `git ls-files --cached --others --exclude-per-directory=.gitignore` lists: every tracked
+   file still present and every untracked file the project's `.gitignore` files do not ignore,
+   so files the agent created come along and caches, build output and `.git` do not. What
+   decides the list is the project, not state the agent can change on the side:
+   - the personal exclude files, `.git/info/exclude` and `core.excludesFile` (from
+     `.git/config` or the global configuration), are not read;
+   - files tracked at the base revision are copied whenever they are present, even after
+     `git rm --cached`;
+   - untracked paths that only `.gitignore` rules added since the base revision ignore are
+     copied anyway (each `check-ignore -v` match is compared with the rule lines the same
+     `.gitignore` had at the base), so a rule the agent adds cannot hide its new test file, and
+     an exception (`!pattern`) removed since the base is reported as a configuration change;
+   - when `core.worktree` points git at a directory that does not contain the project, the
+     whole directory is copied and the run needs review.
+
+   Paths matching the spec's `include` patterns are copied even when ignored, for a generated
+   file the suite imports (`_version.py`). Outside git it copies the whole directory except VCS
    metadata, caches (`__pycache__`, `.pytest_cache`, `.tox`, ...) and dependency directories.
    `.venv`, `venv` and `node_modules` are linked into the copy, not copied: the suite needs
    them, and copying them would cost more than the run. A tree over 200,000 files or 2 GiB is
@@ -674,10 +692,13 @@ of the session spec has a `rerun:` block) then:
    built from scratch: `PATH` from the judge's own environment with relative entries dropped,
    `HOME` and `TMPDIR` in a judge temporary directory, `LANG=C.UTF-8`, the directories the
    toolchain keeps its downloads in (`GOPATH`, `GOMODCACHE`, `GOCACHE`, `CARGO_HOME`,
-   `RUSTUP_HOME`, `UV_CACHE_DIR`; locations, not options), and the spec's `env`. No rc file,
-   `BASH_ENV`, alias, function, exported variable, `~/.npmrc` or `~/.config/pip` reaches the
-   run. The spec's `env` can set `HOME` back when a suite needs it.
-3. **Reads the runner's own report**, written to a judge path outside the copy, never stdout:
+   `RUSTUP_HOME`, `UV_CACHE_DIR`; locations, not options), `PYTHONPYCACHEPREFIX` in the judge
+   directory (so no bytecode file next to a source, in the copy or in the linked virtualenv,
+   is loaded) and the spec's `env`. No rc file, `BASH_ENV`, alias, function, exported variable,
+   `~/.npmrc` or `~/.config/pip` reaches the run. The spec's `env` can set `HOME` back when a
+   suite needs it. With `sandbox`, the command runs under that argv prefix (see below).
+3. **Reads the runner's own report**, written to its own private temporary directory (mode
+   0700, a random name that cannot be derived from the copy's path), never stdout:
 
     | Runner | How the judge gets the report |
     | --- | --- |
@@ -709,6 +730,17 @@ of the session spec has a `rerun:` block) then:
    `HEAD`. A file added, deleted or changed since is a reason to review, since configuration is
    part of the copy and the re-run obeys it. Outside git there is nothing to compare with, and
    the verdict says so.
+6. **Checks what the run reads from outside the copy.** The copy lives in the system
+   temporary directory, so the project's own ancestors (a `pytest.ini`, `tox.ini`,
+   `setup.cfg` or `pyproject.toml` above the repository) are not above it. The directories
+   that *are* above it are checked before and after the run for files the runner would take
+   as the project's configuration: an ini file or `conftest.py` for pytest, `go.mod` or
+   `go.work` for go, `package.json` or `node_modules` for node, jest and vitest, `Cargo.toml`
+   or `.cargo` (other than `CARGO_HOME`) for cargo. One found is a reason to review. And
+   when the turn-start hook saved a fingerprint of `.venv`, `venv` and `node_modules`, they
+   are fingerprinted again before and after the run; any difference (a package installed or
+   removed, a `.pth` or `sitecustomize.py` changed, a file edited in place) needs review:
+   "the environment changed during the session".
 
 With a re-run, every `test_result` predicate is decided by it: a failing re-run contradicts
 "all tests pass", a passing one supports it, and a named test (`mentions`) is looked up in the
@@ -728,12 +760,67 @@ What the re-run neutralises and what still rests on the transcript:
 | A summary the code under test prints at exit, an exit code it forces (`os._exit(0)`) | Neutralised: the report decides, and a report with failures fails |
 | Edited, deleted or skipped tests; rewritten snapshots or golden files; changed test data; a `conftest.py` or test module that patches the code under test; source that patches the runner; an always-equal `__eq__` | Still decided by the transcript: a re-run of weakened tests passes too, so these findings keep the run at needs review |
 | A changed `pytest.ini`, `pyproject.toml [tool.pytest]`, `package.json` script, `conftest.py` | Caught twice: by the transcript and by the configuration diff |
-| Packages installed into `.venv` or `node_modules`, a poisoned module cache | Not neutralised: dependency directories are used in place; the transcript's package findings still apply |
-| Code under test that rewrites the report itself (it can find the path in its own `argv`) | Partly: a rewrite that leaves the report inconsistent needs review; a careful forgery of a whole, consistent report is not caught. The transcript still shows the source change that does it |
+| Packages installed into `.venv` or `node_modules`, a `.pth` or `sitecustomize.py` added, an installed file edited | With the hooks: caught by the environment fingerprint taken when the turn started. Without one (plain CLI): the transcript's package and harness findings still apply. A poisoned module cache outside the project is not caught |
+| A file hidden from the copy with `.git/info/exclude`, `core.excludesFile`, a new `.gitignore` rule, `git rm --cached` or `core.worktree` | Neutralised: personal excludes are not read, base-tracked files and paths only new rules hide are copied, a moved work tree copies everything and needs review; a file write into `.git/` is also a harness change in the transcript |
+| A `pytest.ini`, `conftest.py`, `go.work` or `node_modules` planted in the temporary directory above the copy | Caught: needs review |
+| A `__pycache__` bytecode file planted next to a source | Neutralised: `PYTHONPYCACHEPREFIX` keeps bytecode in the judge directory |
+| Code under test that rewrites the report itself (it can find the path in its own `argv`, and runs as your user) | Partly: a rewrite that leaves the report inconsistent needs review; a careful forgery of a whole, consistent report is not caught. The report directory is private and not next to the copy, which stops guessing, not a process that reads its own `argv`. The transcript still shows the source change that does it; a `sandbox` keeps the run away from your files but cannot protect a report the runner writes from inside the same process |
+
+What the run still reads from your real tree, outside the copy:
+
+- **The linked dependency directories.** `.venv`, `venv` and `node_modules` are symlinks to
+  the originals, so the interpreter, the runner, its plugins and every installed package come
+  from there; node resolves the symlink, so packages are loaded from (and resolve their own
+  dependencies in) the real `node_modules`, including workspace packages linked into it. An
+  editable install (`pip install -e .`) puts a `.pth` file in the virtualenv that adds your
+  real `src/` to `sys.path`: the suite imports the package from your tree, not the copy (the
+  copy's files are identical when the run starts). The virtualenv's interpreter itself
+  (`.venv/bin/python` links to a uv or system Python) and its standard library are outside
+  every fingerprint.
+- **Symlinks in the tree** are copied as symlinks; an absolute one still points into your
+  files.
+- **Toolchain caches** named by location (`GOMODCACHE`, `GOCACHE`, `CARGO_HOME`,
+  `UV_CACHE_DIR`).
+
+Everything here runs as your user, and so does the code under test: it can read and write
+anything you can, including the report it is judged by. The way to take that away is an OS
+sandbox or container around the run, and `rerun.sandbox` is where it goes: an argv prefix the
+judge puts in front of the command, with `{tree}` (the copy, also the working directory),
+`{report_dir}` (where the report and the unittest helper live), `{home}` and `{tmp}` (the
+run's `HOME` and `TMPDIR`) filled in. The judge resolves the prefix's program on its `PATH`
+and leaves the command itself to the sandbox. Examples: `bwrap` with a read-only root and
+`{tree}`, `{report_dir}` and `{tmp}` bound writable; `sandbox-exec -p '(version 1)(allow
+default)(deny file-write* (subpath "/Users/me"))'` on macOS; `docker run --rm -v
+{tree}:{tree} -v {report_dir}:{report_dir} -w {tree} image` (the image needs the toolchain at
+the same paths, and the spec's `env` must be passed with `-e`). A sandbox keeps the run away
+from your files, the hooks' state and the network; the report is still written by the runner
+inside it.
 
 The re-run executes the project's own test code: the same trust as running the suite yourself,
 on a copy, with your environment left out. It costs one full test run per judgement (per stop,
 in the hooks), so it is opt-in.
+
+Honest cost, measured on twelve genuine sessions over toy projects (pytest with conftest
+fixtures, a `src/` layout installed with `pip install -e .` before the session, a gitignored
+generated `_version.py`, parametrized tests, a go module, `node --test`, a Django-style
+settings module, a uv-managed `.venv` run as `.venv/bin/python -m pytest` and as `uv run
+pytest`, a session that adds a `.gitignore` rule, a `.git/info/exclude` holding scratch notes,
+and one that installs a dependency mid-session), judged from the transcript, with `--rerun`
+and through the hooks:
+
+| Session | Transcript | `--rerun` | Hooks |
+| --- | --- | --- | --- |
+| Ten of the twelve | pass | pass | pass |
+| Gitignored generated `_version.py` | pass | fail (the copy lacks it) | fail |
+| ... with `rerun.include: [src/vpkg/_version.py]` | pass | pass | pass |
+| `uv pip install pyyaml` during the session | needs review | needs review | needs review |
+
+The table is the same with and without the copy, environment and report hardening above; it
+only adds the `include` row. The installed dependency needs review in every mode already (the transcript reports the
+install as a harness change) and the fingerprint names it too (`.venv: added
+pyyaml-6.0.3.dist-info`); when the install is legitimate, say so and review. Not reading
+`.git/info/exclude` costs nothing in verdicts: the agent's own runs do not honour git's ignore
+files either, so the copy only gets closer to what the session ran.
 
 ## Fixtures
 

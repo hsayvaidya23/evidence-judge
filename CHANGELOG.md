@@ -10,6 +10,13 @@ the names exported from `evidence_judge`) is defined under
 
 ### Added
 
+- `rerun.include` copies gitignored paths the suite needs (a generated `_version.py`) into the
+  re-run's copy, and `rerun.sandbox` runs the command under an argv prefix (`bwrap`,
+  `sandbox-exec`, `docker run ...`) with `{tree}`, `{report_dir}`, `{home}` and `{tmp}` filled
+  in. The turn-start hooks fingerprint `.venv`, `venv` and `node_modules` when the session spec
+  has a `rerun:` block, and the re-run (`--rerun-baseline`) needs review when they changed
+  during the turn ("the environment changed during the session").
+
 - Independent re-run for coding-agent sessions. A session spec's `rerun:` block (an argv
   `command`, `runner`, `timeout`, `env`, `min_tests`, `base`) lets `session judge --rerun` copy
   the working tree to a judge-owned directory, run the suite there without a shell in an
@@ -232,6 +239,22 @@ the names exported from `evidence_judge`) is defined under
   its spec (`tests 2`, `pass 2`) and TAP (`# pass 2`) totals are read, also through `npm test`.
 
 ### Security
+
+- The re-run's file list no longer depends on state anything running as the user can change:
+  `.git/info/exclude` and `core.excludesFile` are not read, files tracked at the base revision
+  are copied after `git rm --cached`, untracked paths that only `.gitignore` rules added since
+  the base hide are copied anyway, a removed `!exception` is a configuration change, and a
+  `core.worktree` pointing away from the project copies the whole directory and needs review.
+  A session's file write into `.git/` is a harness change.
+- The re-run checks the directories above its copy (the system temporary directory, which the
+  agent can write) for runner configuration (a pytest ini file or `conftest.py`, `go.work`,
+  `node_modules`, ...) before and after the run, and needs review when it finds any.
+- The re-run sets `PYTHONPYCACHEPREFIX` to a judge directory, so a bytecode file planted in a
+  `__pycache__` (or a stale one copied from an unignored `__pycache__`) is never loaded.
+- The re-run's report is written to its own private temporary directory with a random name,
+  apart from the copy. SECURITY.md now states that code under test, running as the user in the
+  runner's process, can in principle forge a self-consistent report, and that an OS sandbox
+  (`rerun.sandbox`) or container is the hardening path.
 
 - **Runs moved or configured by a wrapper are not the whole suite.** `uv run
   --directory`/`--project`, `make -C` (`just -d`, `task -d`) and `env -C` move the run like a

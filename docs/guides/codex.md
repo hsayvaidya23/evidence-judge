@@ -154,6 +154,9 @@ suite itself, on a copy of the project in a clean environment, and judges the an
 the runner's own report, reading the session from the evidence log and the rollout at
 `transcript_path` ([Re-running the tests](claude-code.md#re-running-the-tests)). It runs at
 every stop, so the `Stop` hook's `timeout` above and `EVJ_HOOK_TIMEOUT_S` must cover the suite.
+`codex-turn-start` fingerprints `.venv`, `venv` and `node_modules` when the turn starts; a
+change to them by the stop is NEEDS REVIEW. Gitignored files the suite needs (a generated
+`_version.py`) go in `rerun.include`.
 
 If `evidence-judge` is not on `PATH`, the hook command fails to start. Codex treats any exit
 code other than 0 and 2 as a failed hook and carries on, so a missing CLI never blocks Codex.
