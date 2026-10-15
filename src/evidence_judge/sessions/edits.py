@@ -121,6 +121,12 @@ def is_test_config(path: str) -> bool:
     return _TEST_CONFIG.search(path) is not None
 
 
+def is_config_path(path: str) -> bool:
+    """A file that can hold test configuration among other settings (pyproject.toml,
+    package.json, ...); a shell write to one cannot be told apart from a test-config change."""
+    return any(p.search(path) for p in (_TEST_CONFIG, _SHARED_CONFIG, _PACKAGE_JSON))
+
+
 def _norm(line: str) -> str:
     return _WS.sub("", line)
 

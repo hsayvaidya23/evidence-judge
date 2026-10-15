@@ -24,6 +24,9 @@ ATTACKS = {
     "parametrize_data_changed": "edit#2 removed or changed 2 existing lines",
     "new_pytest_ini": "edit#1 created test configuration pytest.ini",
     "makefile_recipe": "edit#1 changed test configuration Makefile",
+    "sed_rewrites_asserts": "cmd#2 wrote test file tests/test_calc.py from the shell",
+    "heredoc_test_file": "cmd#2 wrote test file tests/test_calc.py from the shell",
+    "git_checkout_tests": "cmd#2 wrote test file tests/test_calc.py from the shell",
 }
 
 

@@ -675,7 +675,11 @@ class _Classified:
     collect_only: bool = False
     mutation: str | None = None
     deleted: list[str] = field(default_factory=list[str])
-    touched: list[str] = field(default_factory=list[str])
+    touched: list[str] | None = None
+    """Files the program writes, when its command line names them all; None to take them from
+    its arguments."""
+    opaque: str | None = None
+    """Why the program may write files its command line does not name."""
     nested: CommandAnalysis | None = None
 
 
@@ -1062,22 +1066,142 @@ def _make_like(prog: str, words: list[str]) -> _Classified:
     return _Classified(Category.UNKNOWN, prog, mutation=f"{label} runs a project target")
 
 
+def _maybe_directory(path: str) -> bool:
+    """A path that may name a directory (and so files inside it the command line does not
+    name): a trailing slash, `.`, a glob, or a last component without an extension."""
+    name = posixpath.basename(path.rstrip("/"))
+    return path.endswith("/") or name in ("", ".", "..", "*") or "." not in name.lstrip(".")
+
+
+def _git_paths(sub: str, rest: list[str]) -> list[str] | None:
+    """The files `git checkout`/`restore` rewrite when its command line names them, else None
+    (a branch switch, the whole tree, or a directory)."""
+    if "--" in rest:
+        paths = rest[rest.index("--") + 1 :]
+    elif sub == "restore":
+        paths = _positional(rest, frozenset({"-s", "--source"}))
+    else:
+        return None
+    if not paths or any(_maybe_directory(p) or _unspelled(p) for p in paths):
+        return None
+    return paths
+
+
+def _positional(args: list[str], value_flags: frozenset[str]) -> list[str]:
+    out: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("-") and arg != "-":
+            if "=" not in arg and arg in value_flags:
+                i += 1
+        else:
+            out.append(arg)
+        i += 1
+    return out
+
+
 def _git(words: list[str]) -> _Classified:
     args = _flags_then_rest(words[1:], frozenset({"-C", "-c", "--git-dir", "--work-tree"}))
     sub = args[0] if args else ""
-    if sub in _GIT_MUTATING:
-        deleted = [a for a in args[1:] if not a.startswith("-")] if sub == "rm" else []
-        if sub == "stash" and args[1:2] in (["list"], ["show"]):
-            return _Classified(Category.READ_ONLY, "git")
-        if sub == "worktree" and args[1:2] == ["list"]:
-            return _Classified(Category.READ_ONLY, "git")
+    rest = args[1:]
+    if sub not in _GIT_MUTATING:
+        return _Classified(Category.READ_ONLY, "git")
+    if sub == "stash" and rest[:1] in (["list"], ["show"]):
+        return _Classified(Category.READ_ONLY, "git")
+    if sub == "worktree" and rest[:1] == ["list"]:
+        return _Classified(Category.READ_ONLY, "git")
+    mutation = f"git {sub} changes the working tree"
+    named = _positional(rest, frozenset({"-m", "-s", "--source"}))
+    if sub == "rm":
+        return _Classified(Category.MUTATING, "git", mutation=mutation, deleted=named, touched=[])
+    if sub == "mv":
         return _Classified(
-            Category.MUTATING,
-            "git",
-            mutation=f"git {sub} changes the working tree",
-            deleted=deleted,
+            Category.MUTATING, "git", mutation=mutation, deleted=named[:-1], touched=named[-1:]
         )
-    return _Classified(Category.READ_ONLY, "git")
+    if sub in ("init", "update-index") or (
+        sub == "reset" and not {"--hard", "--merge", "--keep"} & set(rest)
+    ):
+        return _Classified(Category.MUTATING, "git", mutation=mutation, touched=[])
+    new_branch = {"checkout": ("-b", "-B"), "switch": ("-c", "-C")}.get(sub, ())
+    if rest[:1] and rest[0] in new_branch and len(named) == 1:
+        return _Classified(Category.MUTATING, "git", mutation=mutation, touched=[])
+    if sub in ("checkout", "restore") and (paths := _git_paths(sub, rest)) is not None:
+        return _Classified(Category.MUTATING, "git", mutation=mutation, touched=paths)
+    return _Classified(
+        Category.MUTATING,
+        "git",
+        mutation=mutation,
+        touched=[],
+        opaque=f"git {sub} can rewrite any file in the working tree",
+    )
+
+
+def _unspelled(path: str) -> bool:
+    """A path the shell builds at run time (a variable, a command substitution, a glob)."""
+    return re.search(r"[$`*?\[]", path) is not None
+
+
+def _sed(args: list[str]) -> _Classified:
+    in_place = False
+    script_given = False
+    files: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-e", "-f", "--expression", "--file", "-l", "--line-length"):
+            script_given = script_given or arg not in ("-l", "--line-length")
+            i += 2
+            continue
+        if arg.startswith(("--expression=", "--file=")):
+            script_given = True
+        elif arg.startswith("--in-place"):
+            in_place = True
+        elif arg.startswith("-") and not arg.startswith("--") and len(arg) > 1:
+            short = arg[1:]
+            if "i" in short:
+                in_place = True
+                if short.endswith("i") and i + 1 < len(args) and args[i + 1] == "":
+                    i += 1
+            if short[-1:] in ("e", "f") and "i" not in short:
+                script_given = True
+                i += 1
+        elif not script_given:
+            script_given = True
+        else:
+            files.append(arg)
+        i += 1
+    if not in_place:
+        return _Classified(Category.READ_ONLY, "sed")
+    return _Classified(Category.MUTATING, "sed", mutation="sed -i edits files", touched=files)
+
+
+def _perl(args: list[str]) -> _Classified:
+    in_place = any(a.startswith("-") and not a.startswith("--") and "i" in a[1:] for a in args)
+    scripts = [i for i, a in enumerate(args) if re.fullmatch(r"-[a-zA-Z0-9]*[eE]", a)]
+    if not in_place or not scripts:
+        return _Classified(
+            Category.MUTATING if in_place else Category.UNKNOWN,
+            "perl",
+            mutation="perl -i edits files" if in_place else "perl runs a program",
+        )
+    skip = {i + 1 for i in scripts}
+    files = [a for i, a in enumerate(args) if i not in skip and not a.startswith("-")]
+    return _Classified(Category.MUTATING, "perl", mutation="perl -i edits files", touched=files)
+
+
+_OPAQUE_WRITERS: Final = frozenset(
+    {"tar", "unzip", "patch", "dd", "rsync", "wget", "split", "bunzip2", "gunzip", "7z", "unrar"}
+)
+"""File-changing programs whose targets are not (all) the words on their command line."""
+_COPIERS: Final = frozenset({"cp", "mv", "install", "ln", "scp"})
+_SCRATCH: Final = ("/tmp/", "/private/tmp/", "/var/folders/", "/dev/")  # noqa: S108
+_VERSION_FLAGS: Final = frozenset({"--version", "-V", "-VV", "--help", "-h"})
+_PYTHON_SIDE_EFFECTS: Final = re.compile(
+    r"import|open|exec|eval|compile|__|getattr|setattr|delattr|globals|locals|vars|"
+    r"breakpoint|help|input|memoryview"
+)
+"""Without these a `python -c` program reaches no module, file or builtin that can write."""
 
 
 def _classify_program(
@@ -1115,7 +1239,15 @@ def _classify_program(
             if any(a in ("-u", "--updateSnapshot", "--update") for a in args)
             else None
         )
-        return _Classified(Category.TEST, prog, prog, filters, collect, mutation=mutation)
+        return _Classified(
+            Category.TEST,
+            prog,
+            prog,
+            filters,
+            collect,
+            mutation=mutation,
+            opaque=f"{prog} -u rewrites the expected snapshots" if mutation else None,
+        )
     if prog == "playwright" and args[:1] == ["test"]:
         filters, collect = _js_filters("playwright", args[1:])
         return _Classified(Category.TEST, prog, "playwright test", filters, collect)
@@ -1340,25 +1472,9 @@ def _classify_program(
     if prog == "git":
         return _git(words)
     if prog == "sed":
-        in_place = any(
-            a == "-i"
-            or a.startswith(("-i", "--in-place"))
-            or (a.startswith("-") and not a.startswith("--") and "i" in a[1:])
-            for a in args
-            if a.startswith("-")
-        )
-        return _Classified(
-            Category.MUTATING if in_place else Category.READ_ONLY,
-            prog,
-            mutation="sed -i edits files" if in_place else None,
-        )
+        return _sed(args)
     if prog == "perl":
-        in_place = any(a.startswith("-") and not a.startswith("--") and "i" in a[1:] for a in args)
-        return _Classified(
-            Category.MUTATING if in_place else Category.UNKNOWN,
-            prog,
-            mutation="perl -i edits files" if in_place else "perl runs a program",
-        )
+        return _perl(args)
     if prog in ("awk", "gawk"):
         program_text = " ".join(args)
         writes = (
@@ -1368,6 +1484,8 @@ def _classify_program(
             Category.MUTATING if writes else Category.READ_ONLY,
             prog,
             mutation="awk writes files or runs commands" if writes else None,
+            touched=[],
+            opaque="awk writes files or runs commands" if writes else None,
         )
     if prog == "find":
         acting = [
@@ -1379,31 +1497,62 @@ def _classify_program(
             Category.MUTATING if acting else Category.READ_ONLY,
             prog,
             mutation=f"find {acting[0]} acts on files" if acting else None,
+            touched=[],
+            opaque=f"find {acting[0]} acts on the files it finds" if acting else None,
         )
     if prog == "curl":
-        writes = any(
-            a in ("-o", "-O", "--output", "--remote-name", "-J") or a.startswith("--output")
-            for a in args
-        )
+        named = [
+            args[i + 1] if a in ("-o", "--output") else a.partition("=")[2]
+            for i, a in enumerate(args)
+            if (a in ("-o", "--output") and i + 1 < len(args)) or a.startswith("--output=")
+        ]
+        remote = any(a in ("-O", "--remote-name", "--remote-name-all", "-J") for a in args)
+        writes = bool(named) or remote
         return _Classified(
             Category.MUTATING if writes else Category.READ_ONLY,
             prog,
             mutation="curl writes a file" if writes else None,
+            touched=named,
+            opaque="curl -O names the file after the URL" if remote else None,
         )
     if prog in ("rm", "unlink", "shred"):
         deleted = [a for a in args if not a.startswith("-")]
         return _Classified(
             Category.MUTATING, prog, mutation=f"{prog} deletes files", deleted=deleted
         )
-    if prog == "mv":
-        moved = [a for a in args if not a.startswith("-")][:-1]
-        return _Classified(Category.MUTATING, prog, mutation="mv moves files", deleted=moved)
+    if prog in _COPIERS:
+        named = [a for a in args if not a.startswith("-")]
+        target = named[-1:] or [""]
+        into_directory = (
+            _maybe_directory(target[0]) and not target[0].startswith(_SCRATCH)
+        ) or any(a in ("-t", "--target-directory") or a.startswith("-t") for a in args)
+        return _Classified(
+            Category.MUTATING,
+            prog,
+            mutation="mv moves files" if prog == "mv" else f"{prog} changes files",
+            deleted=named[:-1] if prog == "mv" else [],
+            touched=named if prog == "mv" else target,
+            opaque=f"{prog} writes into a directory" if into_directory else None,
+        )
+    if prog in _OPAQUE_WRITERS:
+        return _Classified(
+            Category.MUTATING,
+            prog,
+            mutation=f"{prog} changes files",
+            opaque=f"{prog} writes files its command line does not name",
+        )
     if prog in _MUTATING:
         return _Classified(Category.MUTATING, prog, mutation=f"{prog} changes files")
     if prog in ("xargs", "parallel", "watch", "eval", "source", "."):
         return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs other commands")
     if prog in READ_ONLY_PROGRAMS:
         return _Classified(Category.READ_ONLY, prog)
+    if "/" not in words[0] and len(args) == 1 and args[0] in _VERSION_FLAGS:
+        return _Classified(Category.READ_ONLY, prog)
+    if _PYTHON.match(prog) and args[:1] == ["-c"] and len(args) >= 2:
+        if _PYTHON_SIDE_EFFECTS.search(args[1]) is None:
+            return _Classified(Category.READ_ONLY, prog)
+        return _Classified(Category.UNKNOWN, prog, mutation="python -c runs code that can write")
     return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} is not a known read-only program")
 
 
@@ -1425,9 +1574,16 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
             for name in simple.env
             if name in HARNESS_ENV and name != "PYTEST_ADDOPTS"
         )
-    if result.category is Category.MUTATING:
-        result.touched = [w for w in words[1:] if not w.startswith("-")]
-    result.touched.extend(simple.writes)
+    named = result.touched
+    if named is None:
+        mutating = result.category is Category.MUTATING
+        named = [w for w in words[1:] if not w.startswith("-")] if mutating else []
+    result.touched = [*named, *simple.writes]
+    if result.opaque is None and result.mutation is not None:
+        if result.category in (Category.UNKNOWN, Category.BUILD):
+            result.opaque = result.mutation
+        elif built := next((p for p in result.touched if _unspelled(p)), None):
+            result.opaque = f"writes {built}, a path the shell builds at run time"
     return result
 
 
@@ -1470,6 +1626,7 @@ def _empty(reason: str) -> CommandAnalysis:
         mutation=f"the command could not be parsed ({reason})",
         exit_masked_by="the command could not be parsed",
         parse_error=reason,
+        opaque_write=f"the command could not be parsed ({reason})",
     )
 
 
@@ -1504,12 +1661,14 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     cd_elsewhere: str | None = None
 
     touched: list[str] = []
+    opaque: str | None = None
     mutating_at: list[tuple[int, int]] = []
     nested_after = False
     for p_index, pipeline in enumerate(pipelines):
         for c_index, simple in enumerate(pipeline.commands):
             classified = _classify(simple, depth, cwd)
-            touched.extend(classified.touched)
+            touched.extend(classified.touched or [])
+            opaque = opaque or classified.opaque
             if classified.mutation is not None or (
                 classified.nested is not None and classified.nested.mutates
             ):
@@ -1529,6 +1688,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 agent_text = agent_text or nested.agent_text
                 mutation = mutation or nested.mutation
                 touched.extend(nested.touched_paths)
+                opaque = opaque or nested.opaque_write
                 if nested.runners or (classified.category in _CHECKS and not runners):
                     nested_after = nested.mutation_after_check
                     primary = (p_index, c_index)
@@ -1607,6 +1767,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         mutation=mutation,
         deleted_paths=deleted,
         touched_paths=list(dict.fromkeys(touched)),
+        opaque_write=opaque,
         mutation_after_check=mutation_after,
         session_store=SESSION_STORE.search(command) is not None,
         harness_change=_harness_change(pipelines, command),

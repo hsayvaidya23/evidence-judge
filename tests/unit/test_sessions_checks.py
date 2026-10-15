@@ -158,6 +158,13 @@ def test_failure_after_a_pass_contradicts() -> None:
         edit("pyproject.toml", "", 'addopts = "-k not add"'),
         write("tests/test_calc.py", "def test_nothing(): pass", kind="update"),
         edit("src/calc.test.ts", "it('adds', () => {", "it.skip('adds', () => {"),
+        bash("sed -i 's/== 5/== -1/' tests/test_calc.py"),
+        bash("cat > tests/test_calc.py <<'EOF'\ndef test_ok():\n    pass\nEOF"),
+        bash("git checkout HEAD -- tests/test_calc.py"),
+        bash("git stash"),
+        bash("python3 scripts/rewrite_tests.py"),
+        bash("echo 'addopts = \"-k mul\"' >> pyproject.toml"),
+        bash("jest -u", "Tests: 3 passed, 3 total"),
     ],
 )
 def test_test_tampering_blocks_a_pass(tamper: object) -> None:
@@ -206,6 +213,21 @@ def test_possible_changes_after_the_tests_make_them_stale(later: object) -> None
 )
 def test_read_only_steps_after_the_tests_are_fine(later: object) -> None:
     run = session(edit("calc.py"), bash("pytest", GREEN), later)  # type: ignore[arg-type]
+    assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        bash("python3 -c 'print(1 + 2)'"),
+        bash("ruff format tests/"),
+        bash("git checkout -b fix-calc"),
+        bash("cp calc.py /tmp/calc.py.orig"),
+        bash("cat tests/test_calc.py"),
+    ],
+)
+def test_harmless_shell_steps_do_not_weaken_the_suite(step: object) -> None:
+    run = session(step, edit("calc.py"), bash("pytest", GREEN))  # type: ignore[arg-type]
     assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
 
 

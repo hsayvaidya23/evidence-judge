@@ -126,6 +126,11 @@ class CommandAnalysis(BaseModel):
     touched_paths: list[str] = Field(
         default_factory=list[str], description="Paths a known file-changing program names"
     )
+    opaque_write: str | None = Field(
+        default=None,
+        description="Why the command may write files its command line does not name (a script, "
+        "a git checkout of the whole tree, a glob); None when every target is named",
+    )
     mutation_after_check: bool = Field(
         default=False,
         description="A command that may change files runs after the test, build or lint step",

@@ -19,7 +19,12 @@ from typing import Final
 
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
-from evidence_judge.sessions.edits import is_harness_path, is_test_config, is_test_path
+from evidence_judge.sessions.edits import (
+    is_config_path,
+    is_harness_path,
+    is_test_config,
+    is_test_path,
+)
 from evidence_judge.sessions.models import (
     CallStatus,
     Category,
@@ -181,6 +186,12 @@ class SessionIndex:
             for path in analysis.touched_paths:
                 if is_harness_path(path) or is_test_config(path):
                     out.append((command, f"changed test harness file {path}"))
+                elif is_test_path(path):
+                    out.append((command, f"wrote test file {path} from the shell"))
+                elif is_config_path(path):
+                    out.append((command, f"changed {path}, which can configure the tests"))
+            if analysis.opaque_write:
+                out.append((command, f"may have changed test files: {analysis.opaque_write}"))
             if analysis.harness_change:
                 out.append((command, f"changed how later commands run: {analysis.harness_change}"))
         return out
