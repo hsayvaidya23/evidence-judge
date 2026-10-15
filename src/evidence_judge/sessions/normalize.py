@@ -156,12 +156,12 @@ class EventBuilder:
     def __init__(self, cwd: str | None) -> None:
         self.cwd = cwd
         self.events: list[SessionEvent] = []
-        self._counters: dict[str, int] = {}
+        self.counters: dict[str, int] = {}
         self.dropped = 0
 
     def _id(self, prefix: str) -> str:
-        self._counters[prefix] = self._counters.get(prefix, 0) + 1
-        return f"{prefix}#{self._counters[prefix]}"
+        self.counters[prefix] = self.counters.get(prefix, 0) + 1
+        return f"{prefix}#{self.counters[prefix]}"
 
     def _append(self, event: SessionEvent) -> None:
         if len(self.events) >= MAX_EVENTS:
@@ -285,3 +285,18 @@ def build_events(calls: Iterable[ToolCall], cwd: str | None) -> tuple[list[Sessi
     for call in calls:
         builder.add(call)
     return builder.events, builder.dropped
+
+
+def extend_events(
+    events: list[SessionEvent], calls: Iterable[ToolCall], cwd: str | None
+) -> list[SessionEvent]:
+    """`events` followed by `calls`, numbered on from the existing ids."""
+    builder = EventBuilder(cwd)
+    builder.events = list(events)
+    for event in events:
+        prefix, _, number = event.id.partition("#")
+        if number.isdigit():
+            builder.counters[prefix] = max(builder.counters.get(prefix, 0), int(number))
+    for call in calls:
+        builder.add(call)
+    return builder.events

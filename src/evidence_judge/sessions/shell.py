@@ -1419,10 +1419,49 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
             result.category = Category.MUTATING
     if simple.heredoc and result.category is Category.UNKNOWN:
         result.mutation = result.mutation or "feeds a heredoc to a program"
+    if result.runner is not None:
+        result.filters.extend(
+            f"runs with {name} changed"
+            for name in simple.env
+            if name in HARNESS_ENV and name != "PYTEST_ADDOPTS"
+        )
     if result.category is Category.MUTATING:
         result.touched = [w for w in words[1:] if not w.startswith("-")]
     result.touched.extend(simple.writes)
     return result
+
+
+HARNESS_ENV: Final = frozenset(
+    {"PATH", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTEST_ADDOPTS", "PYTEST_PLUGINS",
+     "NODE_OPTIONS", "NODE_PATH", "GOFLAGS", "RUSTFLAGS", "RUSTC_WRAPPER", "LD_PRELOAD",
+     "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "VIRTUAL_ENV", "BASH_ENV",
+     "ENV", "JEST_CONFIG", "VITEST_CONFIG"}
+)  # fmt: skip
+"""Variables that change which program runs, or how a test runner behaves."""
+_FUNCTION_DEF: Final = re.compile(
+    r"(?:^|[;&|\n(]\s*)(?:function\s+[\w.:-]+|[\w.:-]+\s*\(\s*\))\s*\{"
+)
+
+
+def _harness_change(pipelines: list[_Pipeline], command: str) -> str | None:
+    """Why a command changes how later commands run (aliases, functions, PATH), or None."""
+    if _FUNCTION_DEF.search(command):
+        return "defines a shell function"
+    for pipeline in pipelines:
+        for simple in pipeline.commands:
+            words = simple.words
+            prog = program_name(words[0]) if words else ""
+            if prog in ("alias", "unalias") and words[1:]:
+                return f"{prog} {words[1].partition('=')[0]}"
+            if prog == "hash" and "-p" in words:
+                return "hash -p remaps a command"
+            if prog in ("export", "declare", "typeset", "readonly", "set"):
+                names = [w.partition("=")[0] for w in words[1:] if "=" in w]
+                if changed := [n for n in names if n in HARNESS_ENV]:
+                    return f"{prog} {changed[0]}"
+            if not words and (changed := [n for n in simple.env if n in HARNESS_ENV]):
+                return f"sets {changed[0]}"
+    return None
 
 
 def _empty(reason: str) -> CommandAnalysis:
@@ -1570,6 +1609,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         touched_paths=list(dict.fromkeys(touched)),
         mutation_after_check=mutation_after,
         session_store=SESSION_STORE.search(command) is not None,
+        harness_change=_harness_change(pipelines, command),
     )
 
 

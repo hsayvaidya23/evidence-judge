@@ -19,7 +19,7 @@ from typing import Final
 
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
-from evidence_judge.sessions.edits import is_test_path
+from evidence_judge.sessions.edits import is_harness_path, is_test_config, is_test_path
 from evidence_judge.sessions.models import (
     CallStatus,
     Category,
@@ -174,9 +174,15 @@ class SessionIndex:
         for command in self.commands:
             if command.status is CallStatus.DENIED:
                 continue
-            for path in command.analysis.deleted_paths:
+            analysis = command.analysis
+            for path in analysis.deleted_paths:
                 if is_test_path(path):
-                    out.append((command, f"{command.id} deleted or moved test file {path}"))
+                    out.append((command, f"deleted or moved test file {path}"))
+            for path in analysis.touched_paths:
+                if is_harness_path(path) or is_test_config(path):
+                    out.append((command, f"changed test harness file {path}"))
+            if analysis.harness_change:
+                out.append((command, f"changed how later commands run: {analysis.harness_change}"))
         return out
 
     @cached_property

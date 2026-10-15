@@ -60,6 +60,31 @@ _TEST_LINE: Final = re.compile(
 _WS: Final = re.compile(r"\s+")
 
 
+_RUNNER_NAMES: Final = frozenset(
+    {"pytest", "py.test", "jest", "vitest", "mocha", "ava", "tap", "go", "cargo", "npm", "npx",
+     "pnpm", "yarn", "bun", "make", "tox", "nox", "rspec", "phpunit", "dotnet", "mvn", "gradle",
+     "python", "python3", "node", "deno", "unittest", "nose2"}
+)  # fmt: skip
+_HARNESS_NAMES: Final = frozenset({"conftest.py", "sitecustomize.py", "usercustomize.py"})
+_HARNESS_DIRS: Final = re.compile(
+    r"(?:^|/)(?:site-packages|dist-packages|node_modules|\.venv/bin|venv/bin|\.tox|\.nox)/"
+)
+
+
+def is_harness_path(path: str) -> bool:
+    """A file the test runner itself loads or is: conftest and site hooks, `.pth` files, a file
+    named like a runner (`./pytest`, `pytest.py`), installed packages and virtualenv scripts.
+    Changing one can make any suite report a pass."""
+    name = posixpath.basename(path.rstrip("/"))
+    stem = name.removesuffix(".py").removesuffix(".js").removesuffix(".sh")
+    return (
+        name in _HARNESS_NAMES
+        or name.endswith(".pth")
+        or stem in _RUNNER_NAMES
+        or _HARNESS_DIRS.search(path) is not None
+    )
+
+
 def is_test_path(path: str) -> bool:
     return _TEST_PATH.search(path) is not None
 
@@ -128,8 +153,10 @@ def suite_findings(
     name = posixpath.basename(path)
     findings: list[str] = []
     test_file = is_test_path(path)
+    if is_harness_path(path):
+        findings.append(f"changed test harness file {name}")
     if change == "delete" and (test_file or is_test_config(path)):
-        return [f"deleted test file {name}"]
+        return [*findings, f"deleted test file {name}"]
     if added is not None and (test_file or is_test_config(path)):
         skips = [line.strip() for line in added if _SKIP_MARKERS.search(line)]
         if skips:

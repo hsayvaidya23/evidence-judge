@@ -133,6 +133,10 @@ class CommandAnalysis(BaseModel):
     session_store: bool = Field(
         default=False, description="The command touches a harness session store"
     )
+    harness_change: str | None = Field(
+        default=None,
+        description="How the command changes what later commands run (an alias, a function, PATH)",
+    )
     parse_error: str | None = None
 
     @property
