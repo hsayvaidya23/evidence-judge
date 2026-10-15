@@ -107,6 +107,12 @@ def _check_any(
             f"Page snapshots were not captured, so no page can be shown to contain {phrase}",
             KIND,
         )
+    if not states and scope is not None:
+        return result(
+            Support.NO_EVIDENCE,
+            f"No recorded page state is on {scope.describe()}, so none can show {phrase}",
+            KIND,
+        )
     where = f"; final URL is {url_path(index.final.url)}" if index.final else ""
     return result(
         Support.CONTRADICTED,

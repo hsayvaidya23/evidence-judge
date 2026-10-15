@@ -15,6 +15,7 @@ If `--task` is not given, the spec's `task` is used as the task text.
 ```yaml
 id: buy-kettle                      # required, unique
 task: Buy a red kettle under $30    # required, the instruction given to the agent
+site: https://shop.example.com      # the site the task is on (URL or host name)
 expect: [...]                       # expectations that must be met
 forbid: [...]                       # expectations that must NOT be met
 constraints: [...]                  # value predicates that must hold
@@ -40,13 +41,29 @@ meets it proves nothing (see below).
 ### Which hosts can prove something
 
 Evidence that *proves* something (an agent's claim or an `expect` entry) must come from the
-site the run was about:
+site the run was about. Name it with `site` (a URL or host name, checked when the spec loads;
+`--site` on the command line overrides it). The site's hosts are `site` and the
+`allowed_hosts`, each with its subdomains and a leading `www.` ignored. With neither, the site is
+inferred from the run's first page: the initial page state, else the first page the agent
+opened. The agent chooses that page, so an agent that opens `https://evil.test/` first and
+posts its "order" to `https://evil.test/api/orders` would prove its own task. A spec whose
+`expect` entries need a state-changing request (`POST`, `PUT`, `PATCH`, `DELETE`) therefore
+never passes on an inferred site: a run that would pass gets
+
+```
+NEEDS_REVIEW: the site host (shop.example.com) was inferred from the run's first page, which the
+agent may have chosen; set `site` in the task spec (or pass --site) so evidence from another
+host cannot prove the task.
+```
+
+Read-only specs and runs judged without a spec are not downgraded; set `site` for them too when
+the agent picks its own start page.
 
 - With `allowed_hosts` set, request, page text, URL and value predicates only match requests
-  and page states on those hosts or their subdomains.
+  and page states on the site's hosts (`site` and `allowed_hosts`) or their subdomains.
 - Without it, a mutation (POST, PUT, PATCH, DELETE) and every page state (page text, URLs,
-  values read with `page_regex`) must be on the run's primary host (the host of the first page
-  the run was on) or a subdomain of it, a leading `www.` ignored. A POST to a third party
+  values read with `page_regex`) must be on a site host (`site`, else the inferred host) or a
+  subdomain of it. A POST to a third party
   (`https://httpbin.org/anything/order`) cannot prove "order placed", and it is reported as a
   side effect; a confirmation shown on another host (a gist or paste page the agent opened)
   cannot prove it either: a `final`-scope predicate on such a final page is `no_evidence`, and

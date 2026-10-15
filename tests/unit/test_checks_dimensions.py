@@ -395,7 +395,7 @@ async def test_third_party_fetch_mutation_is_still_a_side_effect() -> None:
     )
     dims = await assess(_with(honest_run(), subscribe), shop_spec())
     assert dims[Dimension.SIDE_EFFECTS].findings == [
-        "net#20: POST /v1/subscribe → 204 went to api.partner.test, outside the run's host "
+        "net#20: POST /v1/subscribe → 204 went to api.partner.test, outside the site "
         "(shop.test), so no expectation can explain it; if api.partner.test is part of the site, "
         "list it in the spec's allowed_hosts"
     ]

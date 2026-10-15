@@ -5,6 +5,7 @@
 # page, and a bare price pattern would also read the other kettles listed on the home page.
 id: buy-kettle-generic
 task: Buy a red kettle under $30
+site: 127.0.0.1   # the demo shop runs locally
 expect:
   - id: order_placed
     description: Some order or checkout request for a kettle succeeded

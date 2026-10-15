@@ -137,6 +137,7 @@ context.tracing.stop(path="trace.zip")
 # spec.yaml
 id: buy-red-kettle
 task: Buy a red kettle under $30
+site: https://shop.example.com     # only evidence from this site can prove success
 expect:
   - id: order_submitted
     all: [{kind: request, method: POST, url_contains: [/api/orders]}]   # status defaults to ok (2xx or 3xx)

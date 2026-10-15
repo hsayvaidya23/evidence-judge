@@ -224,9 +224,7 @@ def _telemetry_leak(event: NetworkEvent, allowed: list[str]) -> str | None:
 
 
 def _first_party(index: EvidenceIndex, spec: TaskSpec | None) -> list[str]:
-    if spec and spec.allowed_hosts:
-        return list(spec.allowed_hosts)
-    return [index.primary_host] if index.primary_host else []
+    return spec_scope(spec, index).site_hosts
 
 
 def _unexplained(

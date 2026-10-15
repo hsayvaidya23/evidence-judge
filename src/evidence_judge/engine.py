@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from evidence_judge import __version__
-from evidence_judge.checks.base import CheckContext
+from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.claims import judge_claim
 from evidence_judge.checks.dimensions import assess_dimensions
 from evidence_judge.checks.expectations import evaluate_spec, spec_scope
@@ -19,7 +19,7 @@ from evidence_judge.config import Settings
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Channel, Run
 from evidence_judge.core.index import EvidenceIndex
-from evidence_judge.core.taskspec import TaskSpec
+from evidence_judge.core.taskspec import TaskSpec, site_host
 from evidence_judge.core.verdict import ClaimVerdict, RunVerdict, Usage
 from evidence_judge.extract import ClaimExtractor, HeuristicExtractor, LLMClaimExtractor, coverage
 from evidence_judge.llm.base import (
@@ -43,6 +43,8 @@ class JudgeOptions:
     offline: bool = False
     spec: TaskSpec | None = None
     claims: ClaimSet | None = None
+    site: str | None = None
+    """The site the task is on (URL or host); overrides the spec's `site`."""
 
 
 @dataclass(slots=True)
@@ -68,6 +70,19 @@ class _FatalErrorTrap:
             if self.error is None:
                 self.error = exc
             raise
+
+
+def _unanchored(spec: TaskSpec | None, scope: EvidenceScope) -> str | None:
+    """Why a write task cannot pass on this run alone: nothing but the agent's own navigation
+    says which site it was on, so a run on the agent's choice of host would prove itself."""
+    if spec is None or not scope.inferred or not spec.changes_state():
+        return None
+    host = scope.primary_host or "unknown"
+    return (
+        f"the site host ({host}) was inferred from the run's first page, which the agent may "
+        "have chosen; set `site` in the task spec (or pass --site) so evidence from another "
+        "host cannot prove the task"
+    )
 
 
 class Judge:
@@ -96,22 +111,27 @@ class Judge:
 
     async def _judge(self, run: Run, opts: JudgeOptions) -> RunVerdict:
         llm = None if opts.offline or self._llm is None else _FatalErrorTrap(self._llm)
-        task = run.task or (opts.spec.task if opts.spec else None)
+        site = site_host(opts.site) if opts.site else None
+        spec = opts.spec
+        if spec is not None and site is not None:
+            spec = spec.model_copy(update={"site": site})
+        task = run.task or (spec.task if spec else None)
 
         extraction = await self._extract(run, task, llm, opts)
         ctx = CheckContext(index=EvidenceIndex(run), llm=llm)
         ctx.usage.add(extraction.usage)
 
-        proving = ctx.scoped(spec_scope(opts.spec, ctx.index))
+        scope = spec_scope(spec, ctx.index, site)
+        proving = ctx.scoped(scope)
         claim_verdicts = list(
             await asyncio.gather(
                 *(judge_claim(c, proving, self._registry) for c in extraction.claims.claims)
             )
         )
-        expectations = await evaluate_spec(opts.spec, ctx, self._registry) if opts.spec else []
+        expectations = await evaluate_spec(spec, ctx, self._registry) if spec else []
         if llm is not None and llm.error is not None:
             raise llm.error
-        dimensions = assess_dimensions(run, ctx.index, claim_verdicts, expectations, opts.spec)
+        dimensions = assess_dimensions(run, ctx.index, claim_verdicts, expectations, spec)
         claim_coverage = coverage(extraction.claims.claims, run.agent_answer, [])
         outcome, score, summary = decide(
             claim_verdicts,
@@ -120,7 +140,8 @@ class Judge:
             coverage=claim_coverage,
             review_threshold=self._settings.review_coverage_threshold,
             extraction_fallback=extraction.fallback,
-            has_spec=opts.spec is not None,
+            has_spec=spec is not None,
+            unanchored=_unanchored(spec, scope),
         )
         return RunVerdict(
             judge_version=__version__,

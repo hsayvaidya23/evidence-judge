@@ -31,6 +31,7 @@ class JudgeOptions:
     offline: bool = False
     spec: TaskSpec | None = None
     claims: ClaimSet | None = None
+    site: str | None = None
 
 
 @dataclass

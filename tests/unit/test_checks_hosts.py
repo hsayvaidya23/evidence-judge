@@ -287,19 +287,20 @@ def _sibling_api_run() -> Run:
 @pytest.mark.parametrize("with_spec", [False, True])
 async def test_order_on_a_sibling_api_host_needs_review_not_fail(with_spec: bool) -> None:
     judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
-    spec = shop_spec() if with_spec else None
+    spec = shop_spec(site="https://shop.example.com/") if with_spec else None
     verdict = await judge.judge(_sibling_api_run(), JudgeOptions(offline=True, spec=spec))
 
     assert verdict.outcome is Outcome.NEEDS_REVIEW, verdict.summary
     assert "No POST request" not in verdict.summary
     [order] = [c for c in verdict.claims if c.claim_text == "The agent placed an order"]
     assert order.status is Support.NO_EVIDENCE
-    assert "went to api.example.com, outside the run's host (shop.example.com)" in order.reason
+    where = "the site" if with_spec else "the run's host"
+    assert f"went to api.example.com, outside {where} (shop.example.com)" in order.reason
     assert "allowed_hosts" in order.reason
     if with_spec:
         assert verdict.summary == (
             "NEEDS_REVIEW: side effect: net#6: POST /api/orders → 201 went to api.example.com, "
-            "outside the run's host (shop.example.com), so no expectation can explain it; if "
+            "outside the site (shop.example.com), so no expectation can explain it; if "
             "api.example.com is part of the site, list it in the spec's allowed_hosts."
         )
 

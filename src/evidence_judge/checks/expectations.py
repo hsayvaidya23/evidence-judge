@@ -200,9 +200,14 @@ async def evaluate_expectation(
     )
 
 
-def spec_scope(spec: TaskSpec | None, index: EvidenceIndex) -> EvidenceScope:
-    """The hosts that may prove claims and `expect` entries for a run graded with `spec`."""
-    return EvidenceScope.of(index, spec.allowed_hosts if spec else [])
+def spec_scope(
+    spec: TaskSpec | None, index: EvidenceIndex, site: str | None = None
+) -> EvidenceScope:
+    """The hosts that may prove claims and `expect` entries for a run graded with `spec`;
+    `site` stands in for the spec's own `site` (a --site given without a spec)."""
+    return EvidenceScope.of(
+        index, spec.allowed_hosts if spec else [], site or (spec.site if spec else None)
+    )
 
 
 def constraint_id(constraint: ValuePredicate) -> str:

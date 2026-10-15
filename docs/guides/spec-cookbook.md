@@ -68,6 +68,7 @@ Send a contact form with specific content, and nothing else.
 ```yaml title="specs/contact-support.yaml"
 id: contact-support
 task: Ask support to reset the 2FA device for order 88123, using jane@example.com
+site: https://support.example.com
 expect:
   - id: ticket_created
     all:
@@ -149,6 +150,7 @@ Book a room on a given date and time, for a bounded number of nights.
 ```yaml title="specs/book-hotel.yaml"
 id: book-hotel-berlin
 task: Book a double room in Berlin for 2 nights from 2026-11-03, under EUR 400 total
+site: https://hotels.example.com
 expect:
   - id: booking_created
     all:
@@ -195,6 +197,7 @@ Upload a document and check the server accepted it.
 ```yaml title="specs/upload-receipt.yaml"
 id: upload-expense-receipt
 task: Upload receipt.pdf to the March expense report
+site: https://expenses.example.com
 expect:
   - id: uploaded
     all:
@@ -223,6 +226,7 @@ Several steps, each its own write. Expect the final result, allow the steps.
 ```yaml title="specs/onboard-team.yaml"
 id: onboard-team-plan
 task: Complete onboarding for Acme Ltd on the Team plan with 5 seats
+site: https://app.example.com
 expect:
   - id: workspace_created
     all:
@@ -259,6 +263,7 @@ A destructive task where the exact status matters.
 ```yaml title="specs/cancel-subscription.yaml"
 id: cancel-pro-subscription
 task: Cancel the Pro subscription at the end of the billing period
+site: https://account.example.com
 expect:
   - id: cancelled
     all:
