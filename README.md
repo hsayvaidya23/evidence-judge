@@ -187,16 +187,21 @@ Full references: [docs/cli.md](docs/cli.md) (every command and option) and
 
 ```python
 import asyncio
+
 from evidence_judge.config import Settings
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.ingest import load_run
 from evidence_judge.llm import build_llm
+from evidence_judge.redact import Redactor
 
 settings = Settings()
 run = load_run(trace="trace.zip", har="run.har", answer_file="answer.txt")
+redactor = Redactor.from_settings(settings)  # Judge does not redact; the CLI does
+run, _ = redactor.redact_run(run)
+spec, _ = redactor.redact_model(TaskSpec.load("spec.yaml"))  # same key, so predicates match
 judge = Judge(settings, build_llm(settings))
-verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yaml"))))
+verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=spec)))
 print(verdict.outcome, verdict.summary)
 ```
 
