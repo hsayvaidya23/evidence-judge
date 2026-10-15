@@ -238,6 +238,10 @@ class FileEditEvent(_Event):
         description="The edit may add tests (a new test function, class or parametrize case), "
         "or its diff is unknown",
     )
+    tests_added: int | None = Field(
+        default=None,
+        description="How many Python test functions the edit adds, when that can be counted",
+    )
     session_store: bool = False
     guard_tamper: str | None = Field(
         default=None,

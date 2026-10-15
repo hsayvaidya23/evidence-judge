@@ -373,8 +373,11 @@ evidence*, never *supported*.
    directory unknown until an absolute `cd` back. Runs selected only by plain paths
    (`pytest tests pkg_b`, or `pytest tests` and `cd pkg_b && pytest` in separate calls) prove
    the whole suite together when their paths do not overlap, they ran exactly as many tests as
-   an earlier whole-suite run, every test file that run's output named lies inside them, and no
-   edit or command since that run may have added a test: then they ran every test of it.
+   an earlier whole-suite run plus the Python test functions (`def test_*`) the session's own
+   recorded edits added since, every test file that run's output named lies inside them, and no
+   command or edit since that run may have added tests that cannot be counted (a parametrize
+   case, a doctest, an unknown diff, a shell write): then they ran every test of it. The count
+   may never shrink.
    A skipped test is not a passing one: a run that skips more tests than that earlier run, or
    that sets (`CI=true pytest`, `env X=1 pytest`) or inherits from an `export` a variable no
    earlier test run had, is not the whole suite, since `skipif` markers read the environment.

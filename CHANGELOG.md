@@ -133,6 +133,12 @@ the names exported from `evidence_judge`) is defined under
 
 ### Fixed
 
+- An honest session that adds a regression test and then runs `pytest tests/` passes. Runs
+  selected by plain paths may now count the Python test functions (`def test_*`,
+  `async def test_*`) the session's own recorded edits added since the earlier whole-suite run:
+  3 tests before and one `def test_add_zero` added, `pytest tests/` must run exactly 4. Tests
+  that cannot be counted (a parametrize case, a doctest, an unknown diff, a shell write) still
+  rule the union out, and the count never shrinks.
 - A page with a shown `<iframe>` or `<frame>` that loads a document is opaque: a status the
   site shows inside a frame sends the run to review instead of failing it. Frame text is still
   never read, so it proves nothing; a hidden frame changes nothing.

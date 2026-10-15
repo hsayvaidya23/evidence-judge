@@ -379,14 +379,18 @@ class SessionIndex:
             scopes.append(scope)
         return None if _overlapping(scopes, []) else scopes
 
-    def _may_add_tests(self, after: int) -> SessionEvent | None:
-        """A change after event `after` that may have added tests to the suite."""
+    def _tests_added(self, after: int) -> int | None:
+        """How many test functions the changes after event `after` added, or None when a change
+        may have added tests that cannot be counted (a command, an unknown diff)."""
+        count = 0
         for position, event, _ in self.changes:
             if position <= after:
                 continue
-            if not isinstance(event, FileEditEvent) or event.adds_tests:
-                return event
-        return None
+            if not isinstance(event, FileEditEvent) or event.tests_added is None:
+                return None
+            if event.adds_tests:
+                count += event.tests_added
+        return count
 
     def covered(self, outcomes: list[RunOutcome], minimum: int | None = None) -> RunOutcome | None:
         """Passing runs over disjoint paths (`pytest tests`, `cd pkg_b && pytest`) that together
@@ -415,7 +419,8 @@ class SessionIndex:
         if not baselines:
             return None
         size, baseline = max(baselines, key=lambda b: b[0])
-        if size < (minimum or 1) or self._may_add_tests(baseline.seq) is not None:
+        added = self._tests_added(baseline.seq)
+        if size < (minimum or 1) or added is None:
             return None
         chosen: list[tuple[RunOutcome, list[str], int]] = []
         taken: list[str] = []
@@ -426,7 +431,7 @@ class SessionIndex:
                 continue
             chosen.append((outcome, scopes, total))
             taken.extend(scopes)
-        if sum(total for _, _, total in chosen) != size:
+        if sum(total for _, _, total in chosen) != size + added:
             return None
         skipped = sum(o.event.summary.skipped for o, _, _ in chosen if o.event.summary)
         if baseline.summary is not None and skipped > baseline.summary.skipped:
@@ -436,9 +441,14 @@ class SessionIndex:
             return None
         ids = ", ".join(o.event.id for o, _, _ in reversed(chosen))
         where = ", ".join(sorted(taken))
+        since = (
+            f"plus the {added} test function{'s' if added > 1 else ''} the session added since"
+            if added
+            else "with no test added since"
+        )
         reason = (
-            f"{ids} together ran {size} tests over {where}, every test of the whole-suite run "
-            f"{baseline.id}, with no test added since"
+            f"{ids} together ran {size + added} tests over {where}, every test of the "
+            f"whole-suite run {baseline.id}, {since}"
         )
         return RunOutcome(chosen[0][0].event, Result.PASS, reason, None)
 

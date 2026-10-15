@@ -136,6 +136,26 @@ def adds_tests(added: list[str] | None) -> bool:
     return added is None or any(_TEST_DEFINITION.search(line) for line in added)
 
 
+_TEST_FUNCTION: Final = re.compile(r"^\s*(?:async\s+)?def test\w*\s*\(")
+_TEST_CLASS: Final = re.compile(r"^\s*class Test\w*\s*[(:]")
+
+
+def tests_added(removed: list[str] | None, added: list[str] | None) -> int | None:
+    """How many Python test functions the edit adds (`def test_*`, `async def test_*`), or None
+    when that cannot be counted: an unknown diff, a parametrize case, a doctest, a test in another
+    language, or fewer test functions after the edit than before."""
+    if added is None or removed is None:
+        return None
+    count = 0
+    for line in added:
+        if _TEST_FUNCTION.match(line):
+            count += 1
+        elif _TEST_DEFINITION.search(line) and not _TEST_CLASS.match(line):
+            return None
+    count -= sum(1 for line in removed if _TEST_FUNCTION.match(line))
+    return count if count >= 0 else None
+
+
 def is_config_path(path: str) -> bool:
     """A file that can hold test configuration among other settings (pyproject.toml,
     package.json, ...); a shell write to one cannot be told apart from a test-config change."""

@@ -851,3 +851,39 @@ def test_a_real_equality_method_is_not_always_equal() -> None:
     new = "class P:\n    def __eq__(self, o):\n        return self.x == o.x\n\n\ndef add(a, b):"
     run = session(edit("calc.py", "def add(a, b):", new), edit("calc.py"), bash("pytest", GREEN))
     assert _check(ALL_PASS, run)[0] is Support.SUPPORTED
+
+
+_FOUR = "....\n4 passed in 0.01s"
+_NEW_TEST = "def test_add_zero():\n    assert add(0, 7) == 7\n\n\ndef test_mul"
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        edit("tests/test_calc.py", "def test_mul", _NEW_TEST),
+        write("tests/test_new.py", "def test_add_zero():\n    assert add(0, 7) == 7\n"),
+    ],
+)
+def test_a_path_run_may_count_the_tests_the_session_added(added: ToolCall) -> None:
+    run = session(bash("pytest -q", RED), edit("calc.py"), added, bash("pytest -q tests/", _FOUR))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.SUPPORTED, reason
+    assert "plus the 1 test function the session added since" in reason
+
+
+@pytest.mark.parametrize(
+    ("added", "output"),
+    [
+        (edit("tests/test_calc.py", "def test_mul", _NEW_TEST), GREEN),
+        (edit("tests/test_calc.py", "def test_mul", _NEW_TEST), "....\n5 passed in 0.01s"),
+        (
+            edit("tests/test_calc.py", "def test_mul", "@pytest.mark.parametrize('x', [1])\n"),
+            _FOUR,
+        ),
+        (write("tests/test_new.py", "def test_new():\n    assert True\n"), "...\n3 passed"),
+        (bash("cp /tmp/t.py tests/test_new.py"), _FOUR),
+    ],
+)
+def test_a_path_run_may_not_count_more_or_fewer_tests(added: ToolCall, output: str) -> None:
+    run = session(bash("pytest -q", RED), edit("calc.py"), added, bash("pytest -q tests/", output))
+    assert _check(ALL_PASS, run)[0] is not Support.SUPPORTED
