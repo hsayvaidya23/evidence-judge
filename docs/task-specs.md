@@ -510,13 +510,26 @@ Ingest keeps bodies only up to a size limit and marks a cut body with `…[trunc
 recorded, so the result is `no_evidence`, never `contradicted`. A phrase found in the recorded
 part still matches.
 
-### `page_text`: visible text contains a phrase
+### `page_text`: the page's text contains a phrase
 
 ```yaml
 - {kind: page_text, contains: Thank you for your order, scope: final}
 ```
 
 `scope` is `final` (the final page, the default) or `any` (any snapshot during the run).
+
+Page text is the text of the DOM snapshot minus what the snapshot shows hidden: elements with
+the `hidden` attribute, a closed `<dialog>`, the body of a closed `<details>` (its `<summary>`
+stays), and whatever the page's styles set to `display: none`, `visibility: hidden` or
+`content-visibility: hidden`, from inline styles, `<style>` elements, constructed stylesheets
+and the `<link rel=stylesheet>` sheets the trace holds (Playwright records them with the
+network), with `@media` rules read at the recorded viewport. Common hiding classes (`hidden`,
+`d-none`, `sr-only`, `visually-hidden`, `invisible`) count as hidden even when their stylesheet
+is not in the trace. It is not exactly what a person saw: text hidden by a stylesheet the
+trace does not hold, by a selector the reader cannot match (`:hover`, sibling combinators,
+`:nth-child`), by script, or by layout (off-screen, zero size, clipped, covered, same colour as
+the background) still counts. Prefer phrases the page shows only in the state you expect, and
+pair a read with a `url` or `request` predicate when a page carries the phrase hidden.
 
 ### `url`: the page URL matched
 

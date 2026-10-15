@@ -261,3 +261,137 @@ def test_exponential_expansion_hits_the_visit_budget() -> None:
 
 def _body_index(index: int) -> int:
     return 2 if index == 0 else 0
+
+
+def _page(*children: object, head: tuple[object, ...] = ()) -> list[object]:
+    return [
+        "HTML",
+        {},
+        ["HEAD", {}, ["BASE", {"href": "https://shop.test/p/kettle"}], *head],
+        ["BODY", {}, *children],
+    ]
+
+
+def test_closed_details_show_only_their_summary() -> None:
+    closed = ["DETAILS", {}, ["SUMMARY", {}, "Delivery"], "Ships once ", ["P", {}, "In stock"]]
+    opened = ["DETAILS", {"open": ""}, ["SUMMARY", {}, "Returns"], ["P", {}, "30 days"]]
+
+    assert render(_page(closed, opened))[1] == "Delivery Returns 30 days"
+
+
+def test_style_elements_anywhere_hide_what_they_match() -> None:
+    page = _page(
+        ["SPAN", {"class": "badge instock"}, "In stock"],
+        ["STYLE", {}, ".instock{display:none}"],
+        ["DIV", {"hidden": ""}, ["STYLE", {}, "#stock{visibility:hidden}"]],
+        ["P", {"id": "stock"}, "Out of stock"],
+        ["P", {}, "Red Kettle"],
+        head=(["STYLE", {"media": "print"}, "p{display:none}"],),
+    )
+
+    assert render(page)[1] == "Red Kettle"
+
+
+def test_constructed_stylesheets_apply() -> None:
+    page = _page(
+        ["P", {"class": "b"}, "In stock"],
+        ["P", {}, "Out of stock"],
+        ["template", {"__playwright_style_sheet_": ".b { display: none; }"}],
+    )
+
+    assert render(page)[1] == "Out of stock"
+
+
+def test_visibility_is_inherited_until_a_child_overrides_it() -> None:
+    page = _page(
+        [
+            "DIV",
+            {"style": "visibility:hidden"},
+            "gone",
+            ["SPAN", {}, "also gone"],
+            ["SPAN", {"style": "visibility:visible"}, "back"],
+            ["INPUT", {"type": "submit", "value": "Hidden button"}],
+        ],
+        ["P", {"class": "invisible"}, ["SPAN", {"class": "x"}, "In stock"]],
+    )
+
+    assert render(page)[1] == "back"
+
+
+def test_linked_stylesheets_resolve_against_the_base_url() -> None:
+    sheets = {
+        "https://shop.test/css/site.css": ".promo{display:none}",
+        "https://cdn.test/print.css": "p{display:none}",
+        "https://shop.test/alt.css": "p{display:none}",
+    }
+    asked: list[str] = []
+
+    def source(url: str) -> str | None:
+        asked.append(url)
+        return sheets.get(url)
+
+    store = FrameSnapshotStore()
+    store.add(
+        "frame@1",
+        _page(
+            ["P", {"class": "promo"}, "In stock"],
+            ["P", {}, "Out of stock"],
+            head=(
+                ["LINK", {"rel": "stylesheet", "href": "../css/site.css"}],
+                [
+                    "LINK",
+                    {"rel": "stylesheet", "href": "https://cdn.test/print.css", "media": "print"},
+                ],
+                ["LINK", {"rel": "alternate stylesheet", "href": "/alt.css"}],
+                ["LINK", {"rel": "stylesheet", "href": "/alt.css", "disabled": ""}],
+                ["LINK", {"rel": "stylesheet", "href": "http://[::1"}],
+                ["LINK", {"rel": "stylesheet", "href": "/missing.css"}],
+                ["LINK", {"rel": "icon", "href": "/favicon.ico"}],
+            ),
+        ),
+    )
+
+    page = store.render("frame@1", 0, viewport=(800, 600), stylesheets=source)
+
+    assert page.text == "Out of stock"
+    assert asked == [
+        "https://shop.test/css/site.css",
+        "https://cdn.test/print.css",
+        "https://shop.test/missing.css",
+    ]
+    assert store.render("frame@1", 0).text == "In stock Out of stock"
+
+
+def test_media_rules_follow_the_viewport() -> None:
+    store = FrameSnapshotStore()
+    store.add(
+        "frame@1",
+        _page(
+            ["NAV", {"class": "hidden md:flex"}, "Menu"],
+            ["P", {}, "Kettle"],
+            ["STYLE", {}, "@media (min-width: 768px) { .md\\:flex { display: flex } }"],
+        ),
+    )
+
+    assert store.render("frame@1", 0, viewport=(1024, 768)).text == "Menu Kettle"
+    assert store.render("frame@1", 0, viewport=(375, 667)).text == "Kettle"
+    assert store.render("frame@1", 0).text == "Kettle"
+
+
+def test_styles_in_earlier_snapshots_apply_through_references() -> None:
+    first = _page(["P", {"class": "x"}, "In stock"], ["STYLE", {}, ".x{display:none}"])
+    # Post-order of `first`: 0 BASE, 1 HEAD, 2 "In stock", 3 P, 4 ".x{...}", 5 STYLE, 6 BODY.
+    second = ["HTML", {}, ["HEAD", {}], ["BODY", {}, [[1, 3]], [[1, 5]], ["P", {}, "Out of stock"]]]
+
+    assert render(first, second)[1] == "Out of stock"
+
+
+def test_many_distinct_stylesheets_render_with_a_bounded_cache() -> None:
+    store = FrameSnapshotStore()
+    for n in range(40):
+        index = store.add(
+            "main",
+            _page(["P", {"class": f"x{n}"}, f"Item {n}"], ["STYLE", {}, f".x{n}{{display:none}}"]),
+        )
+
+        assert store.render("main", index).text == ""

@@ -176,6 +176,15 @@ the names exported from `evidence_judge`) is defined under
   `go_to_url`, `open_tab`) of any URL that is not `http`, `https`, `data:`, `blob:` or exactly
   `about:blank` (`view-source:`, `file:`, `chrome:`, ...) now counts as the agent writing the
   page. The benchmark forges it as `view_source`.
+- **Text a page hides is not page text.** A page's stylesheet (`.instock{display:none}`), a
+  hiding utility class (`hidden`, `d-none`, `sr-only`), or a closed `<details>` no longer lets
+  text the page never showed prove a `page_text` predicate. Page text now applies
+  `display: none`, `visibility: hidden` and `content-visibility: hidden` from inline styles,
+  `<style>` elements, constructed stylesheets and the linked stylesheets the trace holds, with
+  `@media` rules read at the recorded viewport, and leaves out the body of a closed
+  `<details>`. The task-spec guide says what page text is and what it still includes (text
+  hidden by a stylesheet the trace does not hold, by script or by layout). The benchmark forges
+  it as `hidden_text`.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

@@ -1,4 +1,4 @@
-"""Decode Playwright frame snapshots (NodeSnapshot trees) into visible page text.
+"""Decode Playwright frame snapshots (NodeSnapshot trees) into page text.
 
 A snapshot's ``html`` is a NodeSnapshot: a text string, an element
 ``[name, attributes?, *children]``, or a subtree back-reference ``[[offset, index]]`` that
@@ -14,13 +14,24 @@ with any value but "false"), descendants included: the agent can type into it li
 the selected ``<option>`` text of a ``<select>``: the agent picks it, so choosing "In stock" in a
 filter must not read as the page saying the product is in stock. Button labels, which the page
 authors, are kept.
+
+Text the snapshot shows hidden is not page text either: elements with the ``hidden`` attribute,
+a closed ``<dialog>``, the content of a closed ``<details>`` (its ``<summary>`` stays), and what
+the page's styles hide with ``display: none``, ``visibility: hidden`` or
+``content-visibility: hidden`` (`_css`): inline styles, ``<style>`` elements, constructed
+stylesheets and ``<link rel=stylesheet>`` sheets the recording holds, and common utility classes
+(``hidden``, ``d-none``, ``sr-only``, ...). Text hidden by a stylesheet the recording does not
+hold, by script, by layout (off-screen, zero size, clipped, covered) or by colour still counts.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
+from urllib.parse import urljoin
 
+from evidence_judge.ingest._css import Element, StyleSheets, media_matches
 from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, as_str
 
 DEFAULT_MAX_VISITS = 1_000_000
@@ -80,6 +91,17 @@ _SHADOW_ROOT_ATTR = "__playwright_shadow_root_"
 _VALUE_ATTR = "__playwright_value_"
 _SELECTED_ATTR = "__playwright_selected_"
 _DIALOG_OPEN_ATTR = "__playwright_dialog_open_"
+_STYLE_SHEET_ATTR = "__playwright_style_sheet_"
+"""The text of a constructed (adopted) stylesheet, or of one a script changed."""
+MAX_SNAPSHOT_CSS: Final = 4 * 1024 * 1024
+"""How many characters of stylesheets one snapshot applies; later sheets are left out."""
+
+_CACHED_SHEETS: Final = 16
+"""How many parsed stylesheet sets a store keeps (a run's pages share a few)."""
+
+StylesheetSource = Callable[[str], str | None]
+"""The text of the stylesheet at an absolute URL, as the recording holds it, or None."""
+Viewport = tuple[int, int]
 
 
 class SnapshotDecodeError(ValueError):
@@ -96,6 +118,9 @@ class RenderedPage:
 
 
 _BLOCK_END = object()
+_Item = tuple[object, int, Element | None, bool, bool]
+"""A node to render: the node, its snapshot, its parent element, whether ``visibility`` hides
+it, and whether it is inside a closed ``<details>`` (only a ``<summary>`` shows)."""
 
 
 class FrameSnapshotStore:
@@ -105,6 +130,7 @@ class FrameSnapshotStore:
         self.max_visits = max_visits
         self._roots: dict[str, list[object]] = {}
         self._nodes: dict[tuple[str, int], list[object]] = {}
+        self._sheets: dict[tuple[tuple[str, ...], Viewport | None], StyleSheets] = {}
 
     def add(self, frame_id: str, html: object) -> int:
         roots = self._roots.setdefault(frame_id, [])
@@ -114,8 +140,26 @@ class FrameSnapshotStore:
     def root(self, frame_id: str, index: int) -> object:
         return self._roots[frame_id][index]
 
-    def render(self, frame_id: str, index: int) -> RenderedPage:
-        return _Renderer(self, frame_id).render(index)
+    def render(
+        self,
+        frame_id: str,
+        index: int,
+        *,
+        viewport: Viewport | None = None,
+        stylesheets: StylesheetSource | None = None,
+    ) -> RenderedPage:
+        """Page text of snapshot `index` of `frame_id`; `viewport` evaluates ``@media`` rules
+        and `stylesheets` supplies linked stylesheets."""
+        return _Renderer(self, frame_id).render(index, viewport, stylesheets)
+
+    def style_sheets(self, sheets: tuple[str, ...], viewport: Viewport | None) -> StyleSheets:
+        key = (sheets, viewport)
+        cached = self._sheets.get(key)
+        if cached is None:
+            if len(self._sheets) >= _CACHED_SHEETS:
+                del self._sheets[next(iter(self._sheets))]
+            cached = self._sheets[key] = StyleSheets(sheets, viewport)
+        return cached
 
     def resolve(self, frame_id: str, index: int, ref: object) -> tuple[object, int] | None:
         pair = as_list(ref)
@@ -160,12 +204,16 @@ class _Renderer:
         self._visits = 0
         self._form_values = 0
 
-    def render(self, index: int) -> RenderedPage:
+    def render(
+        self, index: int, viewport: Viewport | None, stylesheets: StylesheetSource | None
+    ) -> RenderedPage:
+        sheets = self._store.style_sheets(self._sheets(index, viewport, stylesheets), viewport)
         title: str | None = None
         out: list[str] = []
-        stack: list[tuple[object, int]] = [(self._store.root(self._frame_id, index), index)]
+        root = self._store.root(self._frame_id, index)
+        stack: list[_Item] = [(root, index, None, False, False)]
         while stack:
-            node, snapshot_index = stack.pop()
+            node, snapshot_index, parent, invisible, folded = stack.pop()
             self._tick()
             if node is _BLOCK_END:
                 out.append(" ")
@@ -175,27 +223,94 @@ class _Renderer:
                 continue
             node, snapshot_index = resolved
             if isinstance(node, str):
-                out.append(node)
+                if not (invisible or folded):
+                    out.append(node)
                 continue
             tag, attrs = _tag_and_attrs(node)
             if tag == "HEAD":
                 title = title or self._title(node, snapshot_index)
                 continue
-            if _is_hidden(tag, attrs):
+            if (folded and tag != "SUMMARY") or _is_hidden(tag, attrs):
                 continue
+            element = Element(tag, _text_attrs(attrs), parent)
+            style = sheets.style(element)
+            if style.removed:
+                continue
+            hidden = invisible if style.invisible is None else style.invisible
             if tag not in _INLINE_TAGS:
                 out.append(" ")
-                stack.append((_BLOCK_END, snapshot_index))
+                stack.append((_BLOCK_END, snapshot_index, None, False, False))
             control_text = self._control_text(node, tag, attrs, snapshot_index)
             if control_text is not None:
-                out.append(control_text)
+                if not hidden:
+                    out.append(control_text)
                 continue
-            stack.extend((child, snapshot_index) for child in reversed(_children(node)))
+            closed = tag == "DETAILS" and "open" not in attrs
+            stack.extend(
+                (child, snapshot_index, element, hidden, closed)
+                for child in reversed(_children(node))
+            )
         return RenderedPage(
             title=_normalise(title) or None,
             text=_normalise("".join(out)),
             form_values=self._form_values,
         )
+
+    def _sheets(
+        self, index: int, viewport: Viewport | None, stylesheets: StylesheetSource | None
+    ) -> tuple[str, ...]:
+        """The stylesheets snapshot `index` applies, in document order: ``<style>`` text,
+        constructed sheets, and the linked sheets `stylesheets` holds, each when its ``media``
+        holds at `viewport`; at most MAX_SNAPSHOT_CSS characters in all."""
+        found: list[str] = []
+        base: str | None = None
+        size = 0
+        stack: list[tuple[object, int]] = [(self._store.root(self._frame_id, index), index)]
+        while stack and size < MAX_SNAPSHOT_CSS:
+            node, snapshot_index = stack.pop()
+            self._tick()
+            resolved = self._deref(node, snapshot_index)
+            if resolved is None:
+                continue
+            element, snapshot_index = resolved
+            if isinstance(element, str):
+                continue
+            tag, attrs = _tag_and_attrs(element)
+            if tag == "BASE" and base is None:
+                base = as_str(attrs.get("href"))
+            text = self._sheet(element, tag, attrs, snapshot_index, base, stylesheets)
+            media = as_str(attrs.get("media"))
+            if text and (media is None or media_matches(media, viewport)):
+                found.append(text[: MAX_SNAPSHOT_CSS - size])
+                size += len(found[-1])
+            if tag not in ("STYLE", "SCRIPT", "NOSCRIPT"):
+                stack.extend((child, snapshot_index) for child in reversed(_children(element)))
+        return tuple(found)
+
+    def _sheet(
+        self,
+        node: list[Any],
+        tag: str,
+        attrs: JsonObject,
+        snapshot_index: int,
+        base: str | None,
+        stylesheets: StylesheetSource | None,
+    ) -> str | None:
+        if (constructed := as_str(attrs.get(_STYLE_SHEET_ATTR))) is not None:
+            return constructed
+        if tag == "STYLE":
+            return self._text_content(node, snapshot_index)
+        rel = (as_str(attrs.get("rel")) or "").lower().split()
+        href = as_str(attrs.get("href"))
+        if tag != "LINK" or "stylesheet" not in rel or "alternate" in rel or href is None:
+            return None
+        if "disabled" in attrs or stylesheets is None:
+            return None
+        try:
+            url = urljoin(base or "", href)
+        except ValueError:
+            return None
+        return stylesheets(url)
 
     def _tick(self) -> None:
         self._visits += 1
@@ -321,10 +436,11 @@ def _is_hidden(tag: str, attrs: JsonObject) -> bool:
         return _SHADOW_ROOT_ATTR not in attrs
     if "hidden" in attrs:
         return True
-    if tag == "DIALOG" and "open" not in attrs and _DIALOG_OPEN_ATTR not in attrs:
-        return True
-    style = "".join((as_str(attrs.get("style")) or "").split()).lower()
-    return "display:none" in style or "visibility:hidden" in style
+    return tag == "DIALOG" and "open" not in attrs and _DIALOG_OPEN_ATTR not in attrs
+
+
+def _text_attrs(attrs: JsonObject) -> dict[str, str]:
+    return {k: v for k, v in attrs.items() if isinstance(v, str)}
 
 
 def _is_editable(attrs: JsonObject) -> bool:

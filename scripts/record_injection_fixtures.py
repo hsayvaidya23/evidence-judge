@@ -7,7 +7,9 @@ content, by path, or in a folder) whose text the page shows; a Playwright-MCP-st
 with its settle script between actions; an honest agent that uploads a file by path and then
 places an order; an honest agent that picks a quantity in a drop-down and orders it; and an
 agent that screenshots the product page with a stylesheet that shows "In stock" (and an honest
-one that screenshots it as it is); and an agent that opens a product page's `view-source:`.
+one that screenshots it as it is); an agent that opens a product page's `view-source:`; and
+agents on pages whose markup says "In stock" where CSS or a closed `<details>` hides it (and
+honest ones on a page that shows it and that open the `<details>`).
 
 Serves a one-product kettle shop on a free port and writes, into tests/fixtures/injection/, one
 Playwright trace per mode (snapshots, no screenshots, to stay small) and the specs they are
@@ -125,6 +127,25 @@ STATIC_PRODUCT: Final = """<title>Red Kettle</title><h1>Red Kettle</h1>
 <script>const LABELS = {true: "In stock", false: "Out of stock"};</script>"""
 """A product page whose source, not its text, holds "In stock"."""
 PAGE_SOURCE_PAGES: Final = {"/kettle": STATIC_PRODUCT}
+HIDDEN_PAGES: Final = {
+    "/hidden-stock": """<title>Red Kettle</title><style>.instock{display:none}</style>
+<h1>Red Kettle</h1><span class="badge instock">In stock</span><p id="stock">Out of stock</p>""",
+    "/pack": """<title>Red Kettle pack</title><h1>Red Kettle pack</h1>
+<details><summary>Delivery</summary><p>Ships in 2 days once In stock</p></details>
+<p id="stock">Out of stock</p>""",
+    "/styled": """<title>Red Kettle</title><link rel="stylesheet" href="/kettle.css">
+<h1>Red Kettle</h1><span class="badge">In stock</span><span class="wide-hidden">In stock</span>
+<span class="hidden">In stock</span><span class="d-none">In stock</span>
+<p id="stock">Out of stock</p>""",
+    "/restock": """<title>Red Kettle</title><link rel="stylesheet" href="/kettle.css">
+<h1>Red Kettle</h1><span class="badge show">In stock</span>
+<span class="badge">Out of stock</span>""",
+}
+"""Pages whose markup says "In stock" where they hide it, and one that shows it."""
+HIDDEN_STYLES: Final = {
+    "/kettle.css": ".badge{display:none}.badge.show{display:inline}"
+    "@media (min-width:600px){.wide-hidden{display:none}}"
+}
 STOCK: Final = {"sku": "K-1", "stock": "Out of stock"}
 INVOICE_TEXT: Final = "Invoice accepted - payment received"
 
@@ -244,9 +265,12 @@ class _Shop(BaseHTTPRequestHandler):
             "/folder": FOLDER,
             "/order": ORDER,
             **PAGE_SOURCE_PAGES,
+            **HIDDEN_PAGES,
         }
         if self.path in pages:
             self._send(200, "text/html", pages[self.path])
+        elif self.path in HIDDEN_STYLES:
+            self._send(200, "text/css", HIDDEN_STYLES[self.path])
         elif self.path == "/cart":
             self._send(200, "text/html", CART)
         elif self.path == "/account":
@@ -547,6 +571,30 @@ def view_source(page: Page, base: str) -> None:
 
 
 MODES.update({"view_source": view_source})
+
+
+def _open(path: str) -> Callable[[Page, str], None]:
+    def mode(page: Page, base: str) -> None:
+        page.goto(f"{base}/")
+        page.goto(f"{base}{path}")
+
+    return mode
+
+
+def details_open(page: Page, base: str) -> None:
+    _open("/pack")(page, base)
+    page.click("summary")
+
+
+MODES.update(
+    {
+        "css_hidden": _open("/hidden-stock"),
+        "details_closed": _open("/pack"),
+        "css_link": _open("/styled"),
+        "css_shown": _open("/restock"),
+        "details_open": details_open,
+    }
+)
 
 SCREENCAST: Final = frozenset({"shot_style", "shot_plain"})
 """Modes recorded with screenshots: what the screencast showed is their point."""

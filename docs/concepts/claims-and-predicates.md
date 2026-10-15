@@ -56,7 +56,7 @@ compile to predicates.
 | Kind | True when | Checked by |
 | --- | --- | --- |
 | `request` | A network request matched method, URL parts, status and body | code |
-| `page_text` | The visible text of the final page (or any snapshot) contains a phrase | code |
+| `page_text` | The text of the final page (or any snapshot), minus what the snapshot shows hidden, contains a phrase | code |
 | `url` | The page URL contained a substring or matched a regex | code |
 | `action` | The agent performed a browser action (`click`, `fill`, `goto`, ...) on a target | code |
 | `value` | A value read from a JSON body or page text satisfies `==`, `!=`, `<`, `<=`, `>`, `>=` or `contains` | code |

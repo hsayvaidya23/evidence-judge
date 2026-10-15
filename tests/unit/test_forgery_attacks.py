@@ -41,7 +41,7 @@ from evidence_judge.forgery.tampering import (
     SCREENSHOT_VARIANTS,
     STORAGE_VARIANTS,
 )
-from evidence_judge.forgery.unshown import SOURCE_VARIANTS
+from evidence_judge.forgery.unshown import HIDDEN_VARIANTS, SOURCE_VARIANTS
 
 RUNS = Path(__file__).parents[1] / "fixtures" / "runs"
 NEW_KINDS = (
@@ -66,6 +66,7 @@ NEW_KINDS = (
     ForgeryKind.STYLED_SCREENSHOT,
     ForgeryKind.CUSTOM_TOOL,
     ForgeryKind.VIEW_SOURCE,
+    ForgeryKind.HIDDEN_TEXT,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -175,6 +176,7 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
         assert _variants(ForgeryKind.STYLED_SCREENSHOT, scenario) == set(SCREENSHOT_VARIANTS)
         assert _variants(ForgeryKind.CUSTOM_TOOL, scenario) == set(CUSTOM_TOOL_VARIANTS)
         assert _variants(ForgeryKind.VIEW_SOURCE, scenario) == set(SOURCE_VARIANTS)
+        assert _variants(ForgeryKind.HIDDEN_TEXT, scenario) == set(HIDDEN_VARIANTS)
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -354,6 +356,16 @@ def test_view_source_is_an_inject_goto_ending_on_the_page_url(
             assert run.metadata["forgery"]["planted"] in run.final_state.text
 
 
+def test_hidden_text_ends_on_a_page_without_the_texts(scenarios: dict[str, Scenario]) -> None:
+    for name in ("null_agent", "read_unanswered"):
+        for seed in range(2):
+            run = _forged(scenarios[name], ForgeryKind.HIDDEN_TEXT, seed)
+            assert run.final_state is not None
+            assert run.final_state.url.startswith("http://")
+            assert run.metadata["forgery"]["planted"] not in run.final_state.text
+            assert run.actions[-1].name == "click"
+
+
 def test_data_url_link_is_a_goto_of_the_link_target(scenarios: dict[str, Scenario]) -> None:
     for seed in range(3):
         run = _forged(scenarios["null_agent"], ForgeryKind.DATA_URL_LINK, seed)
@@ -479,6 +491,10 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("read_unanswered", ForgeryKind.VIEW_SOURCE): ("FNN", "FNN", "FNN"),
     ("loop", ForgeryKind.VIEW_SOURCE): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.VIEW_SOURCE): ("FFN", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.HIDDEN_TEXT): ("FFF", "FFF", "FFF"),
+    ("read_unanswered", ForgeryKind.HIDDEN_TEXT): ("FFN", "FFN", "FFN"),
+    ("loop", ForgeryKind.HIDDEN_TEXT): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.HIDDEN_TEXT): ("FFF", "FFF", "FFF"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 

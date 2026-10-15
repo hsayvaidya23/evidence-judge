@@ -11,7 +11,7 @@ the **channels** the source actually recorded.
 | --- | --- | --- |
 | `actions` | Clicks, fills, navigations, key presses, selects, uploads | `act#N` |
 | `network` | Requests and responses: method, URL, status, headers, bodies (truncated at `EVJ_MAX_BODY_CHARS`) | `net#N` |
-| `snapshots` | DOM snapshots: URL, title, visible text, HTML | `snap#N` |
+| `snapshots` | DOM snapshots: URL, title, page text | `snap#N` |
 | `screenshots` | Screenshot images, read lazily | `shot#N` |
 | `console` | Console messages | `con#N` |
 | `final_state` | The page at the end of the run: URL, title, text | `final` |
@@ -58,7 +58,14 @@ run can pass: a trace whose HAR added anything is `partial`, so judge it without
 
 ### Page text and the final page
 
-Snapshot and final-state text is what the page itself shows. Text typed into `<input>` and
+Snapshot and final-state text is the text the page itself holds, minus what the snapshot shows
+hidden: the `hidden` attribute, a closed `<dialog>` or `<details>` (its `<summary>` stays), and
+`display: none`, `visibility: hidden` or `content-visibility: hidden` from inline styles,
+`<style>` elements, constructed stylesheets and the linked stylesheets the trace holds, plus
+the common hiding classes (`hidden`, `d-none`, `sr-only`, `visually-hidden`, `invisible`).
+Text hidden any other way (a stylesheet the trace does not hold, script, layout or colour)
+still counts; see [`page_text`](../task-specs.md#page_text-the-pages-text-contains-a-phrase).
+Text typed into `<input>` and
 `<textarea>` fields (and their default values) is left out, because the agent controls it: a
 search box holding "Order #1042 confirmed" is not the page confirming the order. So is the
 text of an editable (`contenteditable`) element and the selected `<option>` of every

@@ -56,7 +56,7 @@ Every `supported` or `contradicted` claim cites specific events:
 | --- | --- |
 | `act#N` | A browser action (click, fill, goto, ...) |
 | `net#N` | A network request and its response |
-| `snap#N` | A DOM snapshot: page URL and visible text at a point in time |
+| `snap#N` | A DOM snapshot: page URL and page text (minus what it shows hidden) at a point in time |
 | `shot#N` | A screenshot |
 | `con#N` | A console message |
 | `final` | The final page state |
