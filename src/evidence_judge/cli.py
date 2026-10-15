@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import zipfile
+from collections.abc import Callable
 from enum import IntEnum
 from pathlib import Path
 from typing import Annotated, Any
@@ -209,6 +210,14 @@ def _load_claims(path: Path) -> ClaimSet:
         raise CliError(f"invalid claims file {path}: {problems}", ExitCode.USAGE) from e
 
 
+def _write_output(path: Path, write: Callable[[Path], object]) -> None:
+    try:
+        write(path)
+    except OSError as e:
+        reason = e.strerror or str(e)
+        raise CliError(f"cannot write {path}: {reason}", ExitCode.USAGE) from e
+
+
 def _describe(report: RedactionReport) -> str:
     if not report.total:
         return "redaction: nothing sensitive found"
@@ -337,9 +346,9 @@ def judge(
         )
 
         if out:
-            write_json(verdict, out)
+            _write_output(out, lambda p: write_json(verdict, p))
         if html:
-            write_html(verdict, run, html)
+            _write_output(html, lambda p: write_html(verdict, run, p))
         export_warnings = exporters.export(verdict, otel=otel, langfuse_trace_id=langfuse_trace_id)
     except CliError as e:
         raise _fail(e) from None
@@ -402,7 +411,10 @@ def schema(
 ) -> None:
     """Print the JSON Schema of the verdict format."""
     if out:
-        export_schema(out)
+        try:
+            _write_output(out, export_schema)
+        except CliError as e:
+            raise _fail(e) from None
         _stderr().print(Text.assemble(("wrote ", "dim"), str(out)))
     else:
         typer.echo(schema_to_json(), nl=False)
@@ -505,9 +517,9 @@ def bench(
         )
         result = asyncio.run(runner.run(scenarios))
         if out:
-            write_json(result, out)
+            _write_output(out, lambda p: write_json(result, p))
         if markdown:
-            write_markdown(result, markdown)
+            _write_output(markdown, lambda p: write_markdown(result, p))
     except CliError as e:
         raise _fail(e) from None
     except Exception as e:

@@ -83,3 +83,12 @@ def test_baseline_runs_with_a_configured_llm(monkeypatch: pytest.MonkeyPatch) ->
     assert "| `llm-transcript` | **all manipulations** | 40 | 40 | 100% |" in result.output
     assert budgets[0] is not None
     assert budgets[0].max_cost_usd == pytest.approx(Settings().max_cost_usd * (7 + 45))
+
+
+@pytest.mark.parametrize("flag", ["--out", "--markdown"])
+def test_bench_unwritable_output_is_a_usage_error(tmp_path: Path, flag: str) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    result = runner.invoke(app, ["bench", str(RUNS), "--seeds", "1", flag, str(blocker / "r")])
+    assert result.exit_code == ExitCode.USAGE, result.output
+    assert "cannot write" in result.output

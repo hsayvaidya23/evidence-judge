@@ -360,6 +360,28 @@ def test_schema_stdout_and_file(tmp_path: Path) -> None:
     assert out.read_text(encoding="utf-8") == schema_to_json()
 
 
+@pytest.mark.parametrize("flag", ["--out", "--html"])
+def test_unwritable_output_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path, flag: str
+) -> None:
+    install(monkeypatch, calls)
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    target = blocker / "report"
+    result = runner.invoke(app, ["judge", "--har", str(evidence), flag, str(target), "-q"])
+    assert result.exit_code == ExitCode.USAGE, result.output
+    assert "cannot write" in result.output
+    assert "internal error" not in result.output
+
+
+def test_schema_to_an_unwritable_path_is_a_usage_error(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    result = runner.invoke(app, ["schema", "--out", str(blocker / "s.json")])
+    assert result.exit_code == ExitCode.USAGE, result.output
+    assert "cannot write" in result.output
+
+
 def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
