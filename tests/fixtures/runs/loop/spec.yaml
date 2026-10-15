@@ -1,6 +1,6 @@
 id: buy-red-kettle
 task: Buy a red kettle under $30
-site: 127.0.0.1
+site: 127.0.0.1:56432
 expect:
   - id: order_submitted
     description: An order request succeeded

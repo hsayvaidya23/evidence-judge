@@ -16,6 +16,7 @@ from evidence_judge.core.claims import Claim, ClaimKind
 from evidence_judge.core.evidence import Channel, NetworkEvent, Run
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import PageTextPredicate, RequestPredicate
+from evidence_judge.core.site import Site
 from evidence_judge.core.taskspec import AllowedRequest, TaskSpec
 from evidence_judge.core.verdict import Dimension, DimensionScore
 from tests.unit.conftest import (
@@ -414,9 +415,9 @@ async def test_first_party_plain_text_post_is_still_a_side_effect() -> None:
     assert len(dims[Dimension.SIDE_EFFECTS].findings) == 1
 
 
-def test_primary_host_is_the_first_page_the_run_was_on() -> None:
-    assert EvidenceIndex(honest_run()).primary_host == "shop.test"
-    assert EvidenceIndex(make_run()).primary_host is None
+def test_primary_site_is_the_first_page_the_run_was_on() -> None:
+    assert EvidenceIndex(honest_run()).primary_site == Site("shop.test")
+    assert EvidenceIndex(make_run()).primary_site is None
 
 
 @pytest.mark.perf

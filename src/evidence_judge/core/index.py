@@ -30,6 +30,7 @@ from evidence_judge.core.evidence import (
     Screenshot,
 )
 from evidence_judge.core.predicates import MIN_PAGE_TEXT, WORD
+from evidence_judge.core.site import Site
 from evidence_judge.redact import TOKEN_RE
 from evidence_judge.textnorm import normalize
 
@@ -56,7 +57,7 @@ class EvidenceIndex:
     def __init__(self, run: Run) -> None:
         self.run = run
         self._normalized: dict[str, str] = {}
-        self._inputs_by_site: dict[str | None, tuple[str, ...]] = {}
+        self._inputs_by_site: dict[Site | None, tuple[str, ...]] = {}
 
     def has(self, channel: Channel) -> bool:
         return channel in self.run.captured
@@ -84,9 +85,9 @@ class EvidenceIndex:
         return [n for n in self.run.network if n.method.upper() == m]
 
     @cached_property
-    def primary_host(self) -> str | None:
-        """Host of the first page the run was on: the initial state, else the first action,
-        snapshot, document navigation or final state that names a URL."""
+    def primary_site(self) -> Site | None:
+        """Site (host and port) of the first page the run was on: the initial state, else the
+        first action, snapshot, document navigation or final state that names a URL."""
         initial = self.run.initial_state
         candidates = [
             initial.url if initial else None,
@@ -95,11 +96,7 @@ class EvidenceIndex:
             *(n.url for n in self.run.network if is_document_navigation(n)),
             self.final.url if self.final else None,
         ]
-        for url in candidates:
-            host = urlsplit(url).hostname if url else None
-            if host:
-                return host.casefold()
-        return None
+        return next((s for url in candidates if (s := Site.of_url(url)) is not None), None)
 
     @cached_property
     def baseline(self) -> EvidenceIndex:
@@ -213,7 +210,7 @@ class EvidenceIndex:
         return tuple(sorted({text for text, _ in self._scoped_inputs}, key=lambda t: (-len(t), t)))
 
     @cached_property
-    def _scoped_inputs(self) -> tuple[tuple[str, str | None], ...]:
+    def _scoped_inputs(self) -> tuple[tuple[str, Site | None], ...]:
         """Each input with the site it can be echoed on (None: any site)."""
         found = {
             (normalize(form), site)
@@ -221,18 +218,18 @@ class EvidenceIndex:
             for form in _rendered(text)
         }
         kept = [(t, site) for t, site in found if len(t) >= MIN_PAGE_TEXT and WORD.search(t)]
-        return tuple(sorted(kept, key=lambda i: (-len(i[0]), i[0], i[1] or "")))
+        return tuple(sorted(kept, key=lambda i: (-len(i[0]), i[0], str(i[1] or ""))))
 
     def _inputs_for(self, url: str | None) -> tuple[str, ...]:
         """The inputs that can be echoed on `url`: typed ones, and URL ones from its site."""
-        site = _site(url)
+        site = Site.of_url(url)
         cached = self._inputs_by_site.get(site)
         if cached is None:
             cached = tuple(
                 dict.fromkeys(
                     text
                     for text, origin in self._scoped_inputs
-                    if origin is None or (site is not None and _same_site(origin, site))
+                    if origin is None or (site is not None and origin.covers(site))
                 )
             )
             self._inputs_by_site[site] = cached
@@ -266,16 +263,7 @@ class EvidenceIndex:
         )
 
 
-def _site(url: str | None) -> str | None:
-    host = urlsplit(url or "").hostname
-    return host.casefold().rstrip(".").removeprefix("www.") if host else None
-
-
-def _same_site(a: str, b: str) -> bool:
-    return a == b or a.endswith(f".{b}") or b.endswith(f".{a}")
-
-
-def _raw_inputs(run: Run) -> Iterator[tuple[str, str | None]]:
+def _raw_inputs(run: Run) -> Iterator[tuple[str, Site | None]]:
     served = _site_served(run)
     keys: list[str] = []
     target: str | None = None
@@ -304,12 +292,14 @@ def _raw_inputs(run: Run) -> Iterator[tuple[str, str | None]]:
             and (url := action.value or action.url)
             and served.get(_page_key(url), math.inf) >= before
         ):
-            yield from ((v, _site(url)) for v in _url_inputs(url, with_path=True))
+            yield from ((v, Site.of_url(url)) for v in _url_inputs(url, with_path=True))
     if keys:
         yield "".join(keys), None
     for event in run.network:
         if event.method.upper() == "GET":
-            yield from ((v, _site(event.url)) for v in _url_inputs(event.url, with_path=False))
+            yield from (
+                (v, Site.of_url(event.url)) for v in _url_inputs(event.url, with_path=False)
+            )
 
 
 def _site_served(run: Run) -> dict[str, float]:

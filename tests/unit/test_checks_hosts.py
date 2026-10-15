@@ -20,6 +20,7 @@ from evidence_judge.core.predicates import (
     UrlPredicate,
     ValuePredicate,
 )
+from evidence_judge.core.site import Site
 from evidence_judge.core.taskspec import Expectation, TaskSpec
 from evidence_judge.core.verdict import Outcome, Support
 from evidence_judge.engine import Judge, JudgeOptions
@@ -74,11 +75,19 @@ async def test_unscoped_checks_still_see_every_host() -> None:
     assert res.status is Support.SUPPORTED
 
 
-async def test_mutation_on_a_subdomain_of_the_primary_host_counts() -> None:
+def _api_order_run() -> Run:
     run = honest_run()
     order = net(9, "POST", "/api/orders", 201, host="https://api.shop.test")
-    run = run.model_copy(update={"network": [e for e in run.network if e.id != "net#6"] + [order]})
-    assert (await _check(ORDER, _scoped(run))).status is Support.SUPPORTED
+    return run.model_copy(update={"network": [e for e in run.network if e.id != "net#6"] + [order]})
+
+
+async def test_mutation_on_a_subdomain_is_off_the_site_unless_allowed() -> None:
+    res = await _check(ORDER, _scoped(_api_order_run()))
+    assert res.status is Support.NO_EVIDENCE
+    assert "went to api.shop.test, outside the run's host (shop.test)" in res.reason
+    for allowed in (["shop.test", "api.shop.test"], ["shop.test", "*.shop.test"]):
+        res = await _check(ORDER, _scoped(_api_order_run(), allowed))
+        assert res.status is Support.SUPPORTED, allowed
 
 
 async def test_allowed_hosts_restrict_reads_too() -> None:
@@ -112,26 +121,45 @@ NON_WEB_PAGES = [
 @pytest.mark.parametrize("url", NON_WEB_PAGES)
 def test_only_http_and_https_pages_are_web_pages(url: str) -> None:
     assert not is_web_page_url(url)
-    assert not EvidenceScope(primary_host="shop.test").page_allowed(url)
+    assert not _site_scope("shop.test").page_allowed(url)
+
+
+def _site_scope(host: str) -> EvidenceScope:
+    return EvidenceScope((Site.parse(host, wildcard=True),))
 
 
 @pytest.mark.parametrize(
     ("host", "url"),
     [
         ("shop.test", "https://shop.test/order"),
+        ("shop.test", "http://shop.test/order"),
         ("shop.test", "https://www.shop.test/order"),
-        ("www.shop.test", "https://checkout.shop.test/order"),
-        ("127.0.0.1", "http://127.0.0.1:8000/order"),
+        ("www.shop.test", "https://shop.test/order"),
+        ("*.shop.test", "https://checkout.shop.test/order"),
+        ("127.0.0.1:8000", "http://127.0.0.1:8000/order"),
+        ("http://127.0.0.1", "http://127.0.0.1:80/order"),
     ],
 )
 def test_site_pages_on_http_and_https_are_allowed(host: str, url: str) -> None:
     assert is_web_page_url(url)
-    assert EvidenceScope(primary_host=host).page_allowed(url)
+    assert _site_scope(host).page_allowed(url)
 
 
-@pytest.mark.parametrize("url", ["https://gist.test/u/7f3a", "https://shop.test.evil/order"])
-def test_pages_off_the_site_are_not_allowed(url: str) -> None:
-    assert not EvidenceScope(primary_host="shop.test").page_allowed(url)
+@pytest.mark.parametrize(
+    ("host", "url"),
+    [
+        ("shop.test", "https://gist.test/u/7f3a"),
+        ("shop.test", "https://shop.test.evil/order"),
+        ("shop.test", "https://checkout.shop.test/order"),
+        ("www.shop.test", "https://checkout.shop.test/order"),
+        ("shop.test", "https://shop.test:8443/order"),
+        ("127.0.0.1", "http://127.0.0.1:8000/order"),
+        ("127.0.0.1:8000", "http://127.0.0.1:8001/order"),
+        ("*.shop.test", "https://shop.test/order"),
+    ],
+)
+def test_pages_off_the_site_are_not_allowed(host: str, url: str) -> None:
+    assert not _site_scope(host).page_allowed(url)
 
 
 def _gist_run(answer: str) -> Run:

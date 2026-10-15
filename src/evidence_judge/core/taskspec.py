@@ -26,32 +26,13 @@ Example (YAML):
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final
-from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from evidence_judge.core.evidence import MUTATION_METHODS
 from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
-
-MUTATION_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-
-
-def site_host(value: str) -> str:
-    """The host a `site` names, given as a URL ('https://shop.example.com/') or a host name."""
-    text = value.strip()
-    invalid = ValueError(f"site {value!r} is not an http(s) URL or a host name")
-    if not text or any(c.isspace() for c in text):
-        raise invalid
-    try:
-        parts = urlsplit(text if "://" in text else f"https://{text}")
-        host = parts.hostname
-        _ = parts.port
-    except ValueError:
-        raise invalid from None
-    if parts.scheme not in ("http", "https") or not host:
-        raise invalid
-    return host.rstrip(".")
+from evidence_judge.core.site import Site
 
 
 class Expectation(BaseModel):
@@ -112,21 +93,39 @@ class TaskSpec(BaseModel):
     )
     constraints: list[ValuePredicate] = Field(default_factory=list[ValuePredicate])
     allowed_hosts: list[str] = Field(
-        default_factory=list[str], description="Mutations to other hosts count as side effects"
+        default_factory=list[str],
+        description=(
+            "More hosts that are part of the site, as URLs or host names, with a port when it is "
+            "not the default; '*.shop.example.com' names every subdomain. With it set, mutations "
+            "to hosts outside the site and these count as side effects"
+        ),
     )
     site: str | None = Field(
         default=None,
         description=(
-            "The site the task is on, as a URL or host name. Evidence that proves a claim or an "
-            "expect entry must come from it or its subdomains (or the allowed hosts); without "
-            "it or allowed_hosts, the site is inferred from the run's first page"
+            "The site the task is on, as a URL or host name, with a port when it is not the "
+            "default. Evidence that proves a claim or an expect entry must come from it (with "
+            "or without 'www.', on its port) or the allowed hosts; without it or allowed_hosts, "
+            "no run can pass"
         ),
     )
 
     @field_validator("site")
     @classmethod
-    def _site_host(cls, value: str | None) -> str | None:
-        return None if value is None else site_host(value)
+    def _site(cls, value: str | None) -> str | None:
+        return None if value is None else str(Site.parse(value))
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _allowed_hosts(cls, value: list[str]) -> list[str]:
+        return [str(Site.parse(h, what="allowed host", wildcard=True)) for h in value]
+
+    def sites(self) -> list[Site]:
+        """The site and the allowed hosts: the hosts the spec names, in order."""
+        named = [self.site] if self.site else []
+        return list(
+            dict.fromkeys(Site.parse(h, wildcard=True) for h in [*named, *self.allowed_hosts])
+        )
 
     def changes_state(self) -> bool:
         """Whether an `expect` entry needs a mutation request: the task writes something."""

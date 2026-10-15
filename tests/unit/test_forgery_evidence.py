@@ -10,6 +10,7 @@ from evidence_judge.bench import load_scenario
 from evidence_judge.config import Settings
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.site import Site
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.engine import Judge, JudgeOptions
@@ -50,6 +51,7 @@ def test_evidence_kinds() -> None:
         ForgeryKind.ECHO_BYPASS,
         ForgeryKind.OFFSITE_CONFIRMATION,
         ForgeryKind.AGENT_CHOSEN_HOST,
+        ForgeryKind.PORT_MIRROR,
         ForgeryKind.REDIRECT_TO_ERROR,
         ForgeryKind.BASELINE_TAUTOLOGY,
     } == EVIDENCE_KINDS
@@ -84,7 +86,7 @@ def test_third_party_order_starts_on_the_third_party(null_agent: Run) -> None:
     assert (run.network[0].method, run.network[0].url) == ("GET", "https://httpbin.org/")
     assert run.actions[0].ts < run.network[0].ts < first_ts
     assert run.actions[1:] == null_agent.actions
-    assert EvidenceIndex(run).primary_host == "httpbin.org"
+    assert EvidenceIndex(run).primary_site == Site("httpbin.org")
 
 
 def test_text_only_kinds_leave_evidence_alone(null_agent: Run) -> None:

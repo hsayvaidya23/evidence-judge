@@ -11,7 +11,8 @@ controls with Wilson 95% intervals.
 the judge receives the claims an injection-controlled extractor would return
 (`forgery.injection`), carrying vacuous, weak or tautological predicates, after the extractor's
 own validation. The `forgery.evidence` kinds also plant the evidence a gaming agent would
-(echoes, off-site pages, its own mirror of the site, a redirected order, an old confirmation);
+(echoes, off-site pages, its own mirror of the site on another host or port, a redirected
+order, an old confirmation);
 write-only kinds skip read-only tasks, and `agent_chosen_host` is judged with `site` and
 `allowed_hosts` removed from the specs.
 """

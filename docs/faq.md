@@ -32,6 +32,10 @@ description: Frequently asked questions about Evidence Judge - LLM judges, NEEDS
       became checkable claims.
     - **An unexplained side effect**: a successful mutation your spec does not `expect` or
       `allow`.
+    - **No site named.** A run only passes when the spec's `site` (or `allowed_hosts`) or
+      `--site` says which site the task is on, with or without a spec: otherwise the site would
+      be whatever page the agent opened first. Name the port too when it is not 80 or 443
+      (`--site 127.0.0.1:8000`), and list subdomains the site uses in `allowed_hosts`.
 
     The full list is on [Outcomes & rules](concepts/outcomes.md).
 
@@ -78,7 +82,7 @@ description: Frequently asked questions about Evidence Judge - LLM judges, NEEDS
 
     It is honest about its size: seven recorded runs on one demo shop, judged against two tasks
     (a purchase and a read-only stock check), with template forgeries, so the intervals are wide
-    (0 of 243 bounds the false-PASS rate below about 2%, and each kind alone below about 20%).
+    (0 of 261 bounds the false-PASS rate below about 1.5%, and each kind alone below about 20%).
     Run it on your own recorded runs with
     [`evidence-judge bench`](guides/benchmark-your-agent.md). Limitations are listed on the
     [benchmark page](benchmark.md#limitations).

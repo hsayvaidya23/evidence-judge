@@ -7,6 +7,9 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, PlainValidator
 
+MUTATION_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+"""HTTP methods that change state: a request with one is a mutation."""
+
 BlobLoader = Callable[[], bytes | None]
 """Reads one blob on demand; returns None when it can no longer be read."""
 
@@ -126,7 +129,7 @@ class NetworkEvent(_Frozen):
 
     @property
     def is_mutation(self) -> bool:
-        return self.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
+        return self.method.upper() in MUTATION_METHODS
 
     @property
     def ok(self) -> bool:

@@ -21,7 +21,8 @@ from evidence_judge import __version__, engine, ingest
 from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
-from evidence_judge.core.taskspec import TaskSpec, site_host
+from evidence_judge.core.site import Site
+from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
 from evidence_judge.ingest import MismatchedEvidenceError
 from evidence_judge.integrations import exporters
@@ -196,9 +197,9 @@ def _load_spec(path: Path) -> TaskSpec:
 
 def _site(value: str) -> str:
     try:
-        return site_host(value)
+        return str(Site.parse(value, what="--site"))
     except ValueError as e:
-        raise CliError(f"invalid --site: {e}", ExitCode.USAGE) from e
+        raise CliError(str(e), ExitCode.USAGE) from e
 
 
 def _load_claims(path: Path) -> ClaimSet:

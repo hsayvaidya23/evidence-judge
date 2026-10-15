@@ -12,9 +12,8 @@ Rules, first match wins:
    attempt at a forbidden action); if LLM claim extraction failed and heuristics were used; if
    claim coverage is below the review threshold; if nothing (no decided key claim, no
    expectation) establishes success; or if nothing names the site (no `site`, no
-   `allowed_hosts`, no --site) and either a spec is given, so the run's own first page decided
-   which host counts, or there is no spec and the run's pages span several sites
-   (`unanchored`).
+   `allowed_hosts`, no --site), so the run's own first page decided which host counts, with a
+   spec or without one (`unanchored`).
 4. PASS otherwise.
 
 The score is a weighted mean of the assessable dimension scores plus the claim-support share,

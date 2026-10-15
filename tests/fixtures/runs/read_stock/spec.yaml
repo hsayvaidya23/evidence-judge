@@ -2,7 +2,7 @@
 # the Red Kettle's product page, not on the start page.
 id: red-kettle-stock
 task: Check whether the red kettle is in stock
-site: 127.0.0.1
+site: 127.0.0.1:56432
 expect:
   - id: product_page_opened
     description: The red kettle's product page was opened
