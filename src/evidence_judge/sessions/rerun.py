@@ -617,6 +617,15 @@ def _git(root: Path, *args: str, env: dict[str, str]) -> subprocess.CompletedPro
         return None
 
 
+def head_revision(root: Path) -> str | None:
+    """The commit `root`'s git tree is at, or None."""
+    env = {"PATH": judge_path(), "HOME": str(_real_home()), "LANG": "C.UTF-8"}
+    done = _git(root, "rev-parse", "--verify", "--quiet", "HEAD^{commit}", env=env)
+    if done is None or done.returncode != 0:
+        return None
+    return done.stdout.decode("ascii", "replace").strip() or None
+
+
 def git_files(root: Path, env: dict[str, str]) -> list[str] | None:
     """Tracked and untracked, not ignored, files under `root`, or None outside a git tree."""
     done = _git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", env=env)

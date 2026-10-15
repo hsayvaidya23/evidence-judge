@@ -9,17 +9,31 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
 
+import yaml
+
 from evidence_judge.hooks.judge import (
     Judged,
     JudgeFailed,
     JudgeRequest,
+    SessionRequest,
     feedback,
     headline,
     run_judge,
+    run_session_judge,
+    session_feedback,
     trace_label,
 )
+from evidence_judge.hooks.record import log_path
 from evidence_judge.hooks.settings import HookSettings
-from evidence_judge.hooks.state import digest, load_snapshot, read_spec
+from evidence_judge.hooks.state import (
+    BROWSER_SPEC,
+    LOG_KEY_FILE,
+    SESSION_SPEC,
+    digest,
+    load_snapshot,
+    log_head_path,
+    read_spec,
+)
 from evidence_judge.hooks.traces import (
     TraceFile,
     fresh_traces,
@@ -36,6 +50,7 @@ SPEC_FILES: Final = (
     "evidence-judge.yaml",
     "evidence-judge.yml",
 )
+SESSION_SPEC_FILES: Final = (".evidence-judge/session.yaml", ".evidence-judge/session.yml")
 NOTICE_PREFIX: Final = "evidence-judge hook: "
 _AGAIN: Final = (
     "WARNING: the agent stopped again after being sent back, and its answer is still not backed "
@@ -58,6 +73,10 @@ class HookContext:
     answer: str | None
     turn: Turn
     session_id: str = ""
+    transcript: Path | None = None
+    """The agent's own session record, when the harness names one."""
+    transcript_kind: str | None = None
+    """``claude-code`` or ``codex``: how ``session judge`` reads ``transcript``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,9 +93,11 @@ def allow(notice: str | None = None) -> Decision:
     return Decision(notice=None if notice is None else NOTICE_PREFIX + notice)
 
 
-def find_spec(root: Path, configured: Path | None) -> Path | None:
+def find_spec(
+    root: Path, configured: Path | None, conventional: tuple[str, ...] = SPEC_FILES
+) -> Path | None:
     """The configured spec, else the first conventional one; only files inside ``root``."""
-    names = (configured,) if configured is not None else (Path(n) for n in SPEC_FILES)
+    names = (configured,) if configured is not None else (Path(n) for n in conventional)
     for name in names:
         candidate = (name if name.is_absolute() else root / name).resolve()
         if candidate.is_file() and (configured is not None or candidate.is_relative_to(root)):
@@ -163,12 +184,20 @@ def _bad_evidence(
 
 
 def _turn_spec(
-    root: Path, settings: HookSettings, state: Path | None, session_id: str
+    root: Path,
+    settings: HookSettings,
+    state: Path | None,
+    session_id: str,
+    kind: str = BROWSER_SPEC,
 ) -> tuple[Path | None, str | None]:
     """The spec to judge with, and what changed about it during the turn. With a snapshot from
     the turn-start hook, the spec as the turn started is used, whatever the agent did to it."""
-    live = find_spec(root, settings.spec)
-    snapshot = load_snapshot(state, session_id) if state is not None and session_id else None
+    live = (
+        find_spec(root, settings.spec)
+        if kind == BROWSER_SPEC
+        else find_spec(root, settings.session_spec, SESSION_SPEC_FILES)
+    )
+    snapshot = load_snapshot(state, session_id, kind) if state is not None and session_id else None
     if snapshot is None:
         return live, None
     if digest(read_spec(live)) == snapshot.sha256:
@@ -204,10 +233,16 @@ def _with_spec_change(
     return _block(context, f"{blocked}\n{rest}".rstrip())
 
 
-def evaluate(context: HookContext, settings: HookSettings, state: Path | None = None) -> Decision:
+def evaluate(
+    context: HookContext,
+    settings: HookSettings,
+    state: Path | None = None,
+    log_dir: Path | None = None,
+) -> Decision:
     """Decide whether the agent may stop. Never raises for expected failures; callers still
     wrap it so that anything unexpected fails open. ``state`` is the hooks' private state
-    directory, where the turn-start hook saved the spec."""
+    directory, where the turn-start hook saved the specs; ``log_dir`` holds the evidence logs
+    when the hooks record them."""
     if not settings.enabled:
         return allow()
     root = _project_root(context.cwd)
@@ -215,7 +250,84 @@ def evaluate(context: HookContext, settings: HookSettings, state: Path | None = 
         return allow()
     spec, change = _turn_spec(root, settings, state, context.session_id)
     decision = _judge_turn(context, settings, root, spec)
-    return _with_spec_change(context, settings, decision, change)
+    decision = _with_spec_change(context, settings, decision, change)
+    if decision.block:
+        return decision
+    session_spec, session_change = _turn_spec(
+        root, settings, state, context.session_id, SESSION_SPEC
+    )
+    rerun = _rerun_turn(context, settings, root, session_spec, state, log_dir)
+    rerun = _with_spec_change(context, settings, rerun, session_change)
+    if rerun.block:
+        return rerun
+    notices = [n for n in (decision.notice, rerun.notice) if n]
+    return Decision(notice="\n".join(notices) if notices else None)
+
+
+def _has_rerun(spec: Path) -> bool:
+    try:
+        data: object = yaml.safe_load(read_spec(spec) or b"")
+    except yaml.YAMLError:
+        return True
+    return isinstance(data, dict) and "rerun" in data
+
+
+def _session_record(
+    context: HookContext, state: Path | None, log_dir: Path | None
+) -> tuple[str, ...]:
+    """``session judge`` options naming what this session left behind: the evidence log with
+    its key and anchor, and the agent's own transcript."""
+    record: list[str] = []
+    if log_dir is not None and context.session_id:
+        log = log_path(log_dir, context.session_id)
+        if log.is_file():
+            record += ["--evidence-log", str(log)]
+            if state is not None:
+                key = state / LOG_KEY_FILE
+                anchor = log_head_path(state, context.session_id)
+                record += ["--log-key", str(key)] if key.is_file() else []
+                record += ["--log-anchor", str(anchor)] if anchor.is_file() else []
+    if context.transcript is not None and context.transcript_kind in ("claude-code", "codex"):
+        record += [f"--{context.transcript_kind}", str(context.transcript)]
+    return tuple(record)
+
+
+def _rerun_turn(
+    context: HookContext,
+    settings: HookSettings,
+    root: Path,
+    spec: Path | None,
+    state: Path | None,
+    log_dir: Path | None,
+) -> Decision:
+    """Re-run the tests the session spec names and judge the session against the result: the
+    stop is blocked when the suite, run by the judge itself, contradicts the answer."""
+    if spec is None or not _has_rerun(spec):
+        return Decision()
+    snapshot = (
+        load_snapshot(state, context.session_id, SESSION_SPEC)
+        if state is not None and context.session_id
+        else None
+    )
+    request = SessionRequest(
+        root=root,
+        spec=spec,
+        answer=context.answer or context.turn.last_text or "",
+        record=_session_record(context, state, log_dir),
+        base=snapshot.git_head if snapshot is not None else None,
+        llm=settings.llm,
+        timeout_s=settings.timeout_s,
+        pass_env=tuple(settings.pass_env),
+    )
+    result = run_session_judge(request)
+    if isinstance(result, JudgeFailed):
+        return allow(f"the test re-run was not judged: {result.reason}; not blocking")
+    blocking = result.outcome == "fail" or (
+        result.outcome == "needs_review" and settings.block_on_needs_review
+    )
+    if blocking:
+        return _block(context, session_feedback(result.outcome, result.verdict))
+    return Decision(notice=headline(result.outcome, result.verdict, "the test re-run"))
 
 
 def _judge_turn(

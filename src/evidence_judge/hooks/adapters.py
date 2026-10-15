@@ -35,25 +35,34 @@ def _transcript(data: HookInput, *keys: str) -> Path | None:
     return None
 
 
-def _context(data: HookInput, answer_key: str, turn: Turn) -> HookContext:
+def _context(
+    data: HookInput,
+    answer_key: str,
+    turn: Turn,
+    transcript: Path | None = None,
+    kind: str | None = None,
+) -> HookContext:
     return HookContext(
         cwd=_str(data, "cwd") or "",
         stop_hook_active=data.get("stop_hook_active") is True,
         answer=_str(data, answer_key),
         turn=turn,
         session_id=_str(data, "session_id") or "",
+        transcript=transcript,
+        transcript_kind=kind if transcript is not None else None,
     )
 
 
 def claude_code_context(data: HookInput) -> HookContext:
     path = _transcript(data, "agent_transcript_path", "transcript_path")
-    return _context(data, "last_assistant_message", claude_code_turn(path) if path else Turn())
+    turn = claude_code_turn(path) if path else Turn()
+    return _context(data, "last_assistant_message", turn, path, "claude-code")
 
 
 def codex_context(data: HookInput) -> HookContext:
     path = _transcript(data, "transcript_path")
     turn = codex_turn(path, _str(data, "turn_id")) if path else Turn()
-    return _context(data, "last_assistant_message", turn)
+    return _context(data, "last_assistant_message", turn, path, "codex")
 
 
 def gemini_context(data: HookInput) -> HookContext:

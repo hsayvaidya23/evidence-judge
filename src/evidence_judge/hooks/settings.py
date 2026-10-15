@@ -47,6 +47,11 @@ class HookSettings(BaseSettings):
         description="Task spec to judge with, relative to the project root; an absolute path "
         "outside the workspace keeps it out of the agent's reach",
     )
+    session_spec: Path | None = Field(
+        default=None,
+        description="Session spec whose rerun: block the stop hooks run, relative to the project "
+        "root; an absolute path outside the workspace keeps it out of the agent's reach",
+    )
     pass_env: list[str] = Field(
         default_factory=list[str],
         description="EVJ_* variables the judge child may inherit; every other EVJ_* is dropped",

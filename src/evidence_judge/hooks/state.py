@@ -16,8 +16,8 @@ from typing import Final, cast
 
 DEFAULT_STATE_DIR: Final = Path.home() / ".evidence-judge" / "state"
 _SESSION_ID: Final = re.compile(r"\A[A-Za-z0-9_.-]{1,128}\Z")
-_SNAPSHOT_META: Final = "spec-snapshot.json"
-_SNAPSHOT_BODY: Final = "spec-snapshot"
+BROWSER_SPEC: Final = "spec"
+SESSION_SPEC: Final = "session-spec"
 _MAX_SPEC_BYTES: Final = 1024 * 1024
 
 
@@ -86,43 +86,59 @@ class SpecSnapshot:
     copy: Path | None
     """The private copy to judge with."""
     taken_at: float
+    git_head: str | None = None
+    """The project's git revision when the turn started, for comparing runner configuration."""
 
 
-def snapshot_spec(base: Path, session_id: str, spec: Path | None) -> SpecSnapshot:
-    """Save the spec the turn starts with (or that there is none) in the session's state."""
+def snapshot_spec(
+    base: Path,
+    session_id: str,
+    spec: Path | None,
+    *,
+    kind: str = BROWSER_SPEC,
+    git_head: str | None = None,
+) -> SpecSnapshot:
+    """Save the spec of this ``kind`` the turn starts with (or that there is none) in the
+    session's state."""
     directory = session_dir(base, session_id)
     data = read_spec(spec)
     copy: Path | None = None
     if data is not None and spec is not None:
-        copy = directory / f"{_SNAPSHOT_BODY}{spec.suffix}"
+        copy = directory / f"{kind}-snapshot{spec.suffix}"
         write_private(copy, data)
     snapshot = SpecSnapshot(
         source=str(spec) if data is not None else None,
         sha256=digest(data),
         copy=copy,
         taken_at=time.time(),
+        git_head=git_head,
     )
     meta = {
         "source": snapshot.source,
         "sha256": snapshot.sha256,
         "copy": str(copy) if copy else None,
         "taken_at": snapshot.taken_at,
+        "git_head": git_head,
     }
-    write_private(directory / _SNAPSHOT_META, json.dumps(meta).encode("utf-8"))
+    write_private(directory / f"{kind}-snapshot.json", json.dumps(meta).encode("utf-8"))
     return snapshot
 
 
-def load_snapshot(base: Path, session_id: str) -> SpecSnapshot | None:
-    """The session's spec snapshot, or None when no turn-start hook saved one. A snapshot whose
-    copy no longer matches its digest matches no spec."""
+def load_snapshot(base: Path, session_id: str, kind: str = BROWSER_SPEC) -> SpecSnapshot | None:
+    """The session's spec snapshot of this ``kind``, or None when no turn-start hook saved one.
+    A snapshot whose copy no longer matches its digest matches no spec."""
     try:
-        raw: object = json.loads((session_dir(base, session_id) / _SNAPSHOT_META).read_bytes())
+        raw: object = json.loads(
+            (session_dir(base, session_id) / f"{kind}-snapshot.json").read_bytes()
+        )
     except (OSError, ValueError):
         return None
     if not isinstance(raw, dict):
         return None
     meta = cast(dict[str, object], raw)
-    source, sha, copy, taken = (meta.get(k) for k in ("source", "sha256", "copy", "taken_at"))
+    source, sha, copy, taken, head = (
+        meta.get(k) for k in ("source", "sha256", "copy", "taken_at", "git_head")
+    )
     if not isinstance(taken, int | float):
         return None
     copy_path = Path(copy) if isinstance(copy, str) else None
@@ -133,6 +149,7 @@ def load_snapshot(base: Path, session_id: str) -> SpecSnapshot | None:
         sha256=sha if isinstance(sha, str) else None,
         copy=copy_path,
         taken_at=float(taken),
+        git_head=head if isinstance(head, str) else None,
     )
 
 

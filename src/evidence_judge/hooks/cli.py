@@ -12,7 +12,14 @@ import typer
 from pydantic import ValidationError
 
 from evidence_judge.hooks.adapters import CLAUDE_CODE, CODEX, GEMINI, Adapter, HookInput
-from evidence_judge.hooks.core import NOTICE_PREFIX, Decision, allow, evaluate, find_spec
+from evidence_judge.hooks.core import (
+    NOTICE_PREFIX,
+    SESSION_SPEC_FILES,
+    Decision,
+    allow,
+    evaluate,
+    find_spec,
+)
 from evidence_judge.hooks.guard import deny_message, guard_reason
 from evidence_judge.hooks.record import (
     Agent,
@@ -23,7 +30,8 @@ from evidence_judge.hooks.record import (
     stop_record,
 )
 from evidence_judge.hooks.settings import HookSettings
-from evidence_judge.hooks.state import resolve_state_dir, snapshot_spec
+from evidence_judge.hooks.state import SESSION_SPEC, resolve_state_dir, snapshot_spec
+from evidence_judge.sessions.rerun import head_revision
 
 MAX_INPUT_CHARS: Final = 8 * 1024 * 1024
 
@@ -75,7 +83,7 @@ def decide(
         context = adapter.context(data)
         if log_dir is not None:
             _log_stop(adapter, data, context.answer, log_dir, state_dir)
-        return evaluate(context, settings, state_dir)
+        return evaluate(context, settings, state_dir, log_dir)
     except ValueError as exc:
         return allow(f"unreadable hook input ({exc}); not checking")
     except Exception as exc:
@@ -108,8 +116,8 @@ _StateDir = Annotated[
 
 
 def turn_start(stream: TextIO, state_dir: Path) -> None:
-    """Save the spec the turn starts with. Never fails the agent: a problem is one line on
-    stderr."""
+    """Save the specs the turn starts with, and the git revision when there is a session
+    spec. Never fails the agent: a problem is one line on stderr."""
     try:
         settings = HookSettings()
         data = _read_input(stream)
@@ -120,7 +128,16 @@ def turn_start(stream: TextIO, state_dir: Path) -> None:
         root = Path(cwd)
         if not root.is_absolute() or not root.is_dir():
             return
-        snapshot_spec(state_dir, session, find_spec(root.resolve(), settings.spec))
+        project = root.resolve()
+        snapshot_spec(state_dir, session, find_spec(project, settings.spec))
+        session_spec = find_spec(project, settings.session_spec, SESSION_SPEC_FILES)
+        snapshot_spec(
+            state_dir,
+            session,
+            session_spec,
+            kind=SESSION_SPEC,
+            git_head=head_revision(project) if session_spec is not None else None,
+        )
     except Exception as exc:
         sys.stderr.write(f"{NOTICE_PREFIX}could not save the turn's spec ({type(exc).__name__})\n")
 
