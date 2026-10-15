@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import bisect
 import math
-import re
 from collections.abc import Iterable, Iterator
 from functools import cached_property
 from typing import Final
 from urllib.parse import parse_qsl, quote, quote_plus, unquote, unquote_plus, urlsplit, urlunsplit
 
+from evidence_judge.core.actions import FILL, GOTO, PRESS, canonical_action
 from evidence_judge.core.evidence import (
     ActionEvent,
     Channel,
@@ -17,30 +17,12 @@ from evidence_judge.core.evidence import (
     Run,
     Screenshot,
 )
-from evidence_judge.core.predicates import MIN_PAGE_TEXT
+from evidence_judge.core.predicates import MIN_PAGE_TEXT, WORD
 from evidence_judge.textnorm import normalize
 
 FINAL_KEY = "final"
-NAVIGATIONS = frozenset({"goto", "navigate", "visit", "open", "go_to_url", "open_tab"})
-"""Action names that only open a page; the first other action starts the agent's work."""
-ACTION_ALIASES: Final = {
-    "navigate": "goto",
-    "visit": "goto",
-    "open": "goto",
-    "type": "fill",
-    "input": "fill",
-    "tap": "click",
-    "press_key": "press",
-}
-TYPING_ACTIONS: Final = frozenset({"fill", "insert_text", "input_text"})
 MASK: Final = "\x00"
 """Stands in for agent input in masked evidence; it is never part of a predicate."""
-_WORD = re.compile(r"[^\W_]")
-
-
-def canonical_action(name: str) -> str:
-    key = normalize(name).replace(" ", "_")
-    return ACTION_ALIASES.get(key, key)
 
 
 class EvidenceIndex:
@@ -126,7 +108,7 @@ class EvidenceIndex:
 
     def _baseline_cut(self) -> float:
         if self.run.actions:
-            acted = [a.ts for a in self.run.actions if a.name.casefold() not in NAVIGATIONS]
+            acted = [a.ts for a in self.run.actions if canonical_action(a.name) != GOTO]
             return min(acted, default=math.inf)
         loads = [n.ts for n in self.run.network if is_document_navigation(n)]
         marks = [n.ts for n in self.run.network if n.is_mutation] + loads[1:2]
@@ -196,7 +178,7 @@ class EvidenceIndex:
     @cached_property
     def _agent_inputs(self) -> tuple[str, ...]:
         found = {normalize(text) for text in _raw_inputs(self.run)}
-        kept = [t for t in found if len(t) >= MIN_PAGE_TEXT and _WORD.search(t)]
+        kept = [t for t in found if len(t) >= MIN_PAGE_TEXT and WORD.search(t)]
         return tuple(sorted(kept, key=lambda t: (-len(t), t)))
 
     @cached_property
@@ -232,7 +214,7 @@ def _raw_inputs(run: Run) -> Iterator[str]:
     target: str | None = None
     for action in run.actions:
         name = canonical_action(action.name)
-        if name == "press" and action.value is not None and len(action.value) == 1:
+        if name == PRESS and action.value is not None and len(action.value) == 1:
             if keys and action.selector != target:
                 yield "".join(keys)
                 keys.clear()
@@ -242,9 +224,9 @@ def _raw_inputs(run: Run) -> Iterator[str]:
         if keys:
             yield "".join(keys)
             keys.clear()
-        if name in TYPING_ACTIONS and action.value:
+        if name == FILL and action.value:
             yield action.value
-        elif name == "goto" and (url := action.value or action.url):
+        elif name == GOTO and (url := action.value or action.url):
             yield from _url_inputs(url, with_path=True)
     if keys:
         yield "".join(keys)
