@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -62,10 +63,14 @@ class EvidenceScope:
         return not hosts or host_allowed(url_host(event.url), hosts)
 
     def page_allowed(self, url: str) -> bool:
-        if not is_web_page_url(url):
-            return False
-        hosts = self.site_hosts
-        return not hosts or host_allowed(url_host(url), hosts)
+        return _page_allowed(url, tuple(self.site_hosts))
+
+
+@functools.lru_cache(maxsize=4096)
+def _page_allowed(url: str, hosts: tuple[str, ...]) -> bool:
+    if not is_web_page_url(url):
+        return False
+    return not hosts or host_allowed(url_host(url), list(hosts))
 
 
 @dataclass(slots=True)

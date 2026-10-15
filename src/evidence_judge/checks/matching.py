@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import re
@@ -260,9 +261,14 @@ def url_contains(url: str, needle: str) -> bool:
 
 def url_location_contains(url: str, needle: str) -> bool:
     """Substring of the scheme, host and path; the query and fragment are ignored."""
+    return needle.casefold() in _location(url)
+
+
+@functools.lru_cache(maxsize=4096)
+def _location(url: str) -> str:
     parts = urlsplit(url)
     location = f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.netloc else parts.path
-    return url_contains(location, needle)
+    return unquote(location).casefold()
 
 
 def url_path_contains(url: str, needle: str) -> bool:
