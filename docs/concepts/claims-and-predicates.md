@@ -194,7 +194,10 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   value=SAVE50)`): opening a CDP session (what it then sends is not recorded), mocking a
   WebSocket (`route_web_socket`, `WebSocketRoute.send`), writing local storage or cookies
   (`add_cookies`, `clear_cookies`, `set_storage_state`), extra HTTP headers, geolocation,
-  offline mode, permissions, the clock, `route.abort`, `request.fetch` from the test, a
+  offline mode, permissions, the clock, a `route.abort` of anything but an image, font or media
+  (blocking those to save bandwidth cannot change what a page says; blocking a document, script,
+  stylesheet or API call can, and an abort no recorded request is marked for counts too),
+  `request.fetch` from the test, a
   `dispatch_event` that carries event data, a dialog accepted with prompt text, and any method
   the allowlist does not know, including ones a later Playwright adds. A `route.fallback` with
   overrides marks no request, so its `inject` is placed where the first route handler was

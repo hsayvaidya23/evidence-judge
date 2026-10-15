@@ -179,6 +179,38 @@ async def test_playwright_mcp_settle_waits_are_not_injections() -> None:
     assert [m for _, m in results] == [True, True]
 
 
+async def test_blocking_images_is_not_an_injection() -> None:
+    run = load_playwright_trace(FIXTURES / "block_images.zip")
+
+    assert [a.name for a in run.actions] == ["goto", "click"]
+    assert any(n.url.endswith("/kettle.png") and n.failed for n in run.network)
+    got, _, results = await _judge("block_images", "out_of_stock", "No, it is Out of stock.")
+    assert got.value == "pass"
+    assert [m for _, m in results] == [True, True]
+
+
+def test_blocking_an_api_call_is_an_injection_naming_it() -> None:
+    run = load_playwright_trace(FIXTURES / "block_stock_api.zip")
+
+    injected = [a for a in run.actions if a.name == "inject"]
+    assert len(injected) == 1
+    assert injected[0].value is not None
+    assert injected[0].value.startswith("route.abort(fetch ")
+    assert injected[0].value.endswith("/api/stock.json)")
+
+
+def test_an_abort_no_request_is_marked_for_still_taints(tmp_path: Path) -> None:
+    def drop_marks(name: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for event in events:
+            event.get("snapshot", {}).pop("_wasAborted", None)
+        return events
+
+    trace = rewrite_trace(FIXTURES / "block_images.zip", tmp_path / "t.zip", drop_marks)
+    run = load_playwright_trace(trace)
+
+    assert [a.value for a in run.actions if a.name == "inject"] == ["route.abort()"]
+
+
 def _rewrite(match: str, change: Any) -> Any:
     """A transform that passes the first `before` event whose method is `match` to `change`."""
 

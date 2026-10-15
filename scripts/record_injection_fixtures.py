@@ -30,6 +30,10 @@ from playwright.sync_api import Page, Route, sync_playwright
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = ROOT / "tests" / "fixtures" / "injection"
 SETTLE_MS = 300
+FIXTURE_PORT = 63911
+PIXEL: Final = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+)
 MCP_SETTLE: Final = "(ms) => new Promise((f) => setTimeout(f, ms))"
 """What Playwright MCP evaluates to wait between actions."""
 
@@ -58,7 +62,8 @@ CART: Final = """<title>Cart</title><p id="coupon">Cart</p>
 const coupon = localStorage.getItem('coupon');
 if (coupon) document.getElementById('coupon').textContent = 'Coupon ' + coupon + ' applied';
 </script>"""
-PRODUCT: Final = """<title>Red Kettle</title><h1>Red Kettle</h1><p id="stock">loading</p>
+PRODUCT: Final = """<title>Red Kettle</title><h1>Red Kettle</h1><img src="/kettle.png" alt="">
+<p id="stock">loading</p>
 <button id="buy">Pre-order</button><p id="result"></p>
 <script>
 fetch('/api/stock.json').then(r => r.json()).then(j => {
@@ -168,6 +173,8 @@ class _Shop(BaseHTTPRequestHandler):
             plan = re.search(r"plan=(\w+)", self.headers.get("Cookie") or "")
             shown = plan.group(1) if plan else "Free"
             self._send(200, "text/html", f"<title>Account</title><p>Plan: {shown}</p>")
+        elif self.path == "/kettle.png":
+            self._send(200, "image/png", PIXEL)
         elif self.path == "/api/stock.json":
             self._send(200, "application/json", json.dumps(STOCK))
         else:
@@ -179,10 +186,11 @@ class _Shop(BaseHTTPRequestHandler):
         reply = {"order": "P-1", "qty": body.get("qty")}
         self._send(201, "application/json", json.dumps(reply))
 
-    def _send(self, status: int, mime: str, body: str) -> None:
-        data = body.encode()
+    def _send(self, status: int, mime: str, body: str | bytes) -> None:
+        data = body.encode() if isinstance(body, str) else body
         self.send_response(status)
-        self.send_header("Content-Type", f"{mime}; charset=utf-8")
+        charset = "; charset=utf-8" if mime.startswith(("text/", "application/")) else ""
+        self.send_header("Content-Type", f"{mime}{charset}")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -192,8 +200,8 @@ class _Shop(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def running_shop() -> Generator[str]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Shop)
+def running_shop(port: int = 0) -> Generator[str]:
+    server = ThreadingHTTPServer(("127.0.0.1", port), _Shop)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -321,6 +329,17 @@ def mcp_settle(page: Page, base: str) -> None:
     page.wait_for_selector("#stock:not(:text('loading'))")
 
 
+def block_images(page: Page, base: str) -> None:
+    page.route("**/*.png", lambda route: route.abort())
+    _open_product(page, base)
+
+
+def block_stock_api(page: Page, base: str) -> None:
+    page.route("**/api/stock.json", lambda route: route.abort())
+    page.goto(f"{base}/")
+    page.click("#red")
+
+
 def data_link(page: Page, base: str) -> None:
     page.goto(f"{base}/")
     link = f'<a id="go" href="{base}/orders/A77">order A77</a>'
@@ -343,6 +362,8 @@ MODES: Final[dict[str, Callable[[Page, str], None]]] = {
     "websocket": websocket,
     "upload": upload,
     "mcp_settle": mcp_settle,
+    "block_images": block_images,
+    "block_stock_api": block_stock_api,
 }
 
 
@@ -370,9 +391,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Record the agent-made-evidence fixtures.")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--only", nargs="*", choices=list(MODES))
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=FIXTURE_PORT,
+        help="port to serve the shop on; the committed specs name this one",
+    )
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    with running_shop() as base:
+    with running_shop(args.port) as base:
         write_specs(base, args.out)
         for mode in args.only or MODES:
             path = record(mode, base, args.out)

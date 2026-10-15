@@ -293,6 +293,8 @@ API the agent called, and the parameter holding the code."""
 _ROUTE_CLASS: Final = "Route"
 _ROUTE_OVERRIDES: Final = ("url", "method", "headers", "postData")
 """``Route.continue`` parameters that rewrite the request the site gets."""
+_HARMLESS_ABORTS: Final = frozenset({"image", "font", "media"})
+"""Resource types an agent may block (to save bandwidth) without changing what a page says."""
 _MOCKED_ROUTE: Final = "Route"
 """Method of the INJECT action recorded for a route call no request is marked for."""
 _INTERCEPT: Final = "setNetworkInterceptionPatterns"
@@ -449,6 +451,10 @@ class _RawConsole:
     text: str
 
 
+def _entry_url(entry: JsonObject) -> str:
+    return as_str(as_object(entry.get("request")).get("url")) or ""
+
+
 @dataclass(slots=True)
 class _RawRoute:
     """A ``Route.fulfill`` or ``Route.continue`` call of the agent's route handler."""
@@ -487,6 +493,7 @@ class _TraceReader:
     fulfills: list[_RawRoute] = field(default_factory=list["_RawRoute"])
     continues: list[_RawRoute] = field(default_factory=list["_RawRoute"])
     fallbacks: list[_RawRoute] = field(default_factory=list["_RawRoute"])
+    aborts: list[float] = field(default_factory=list[float])
     """``route.fallback`` calls with overrides: no recorded request is marked for them."""
     intercepts: list[float] = field(default_factory=list[float])
     """When a route handler was registered (``_INTERCEPT`` with patterns)."""
@@ -619,8 +626,11 @@ class _TraceReader:
             self.action_pages[self._key(call_id)] = page_id
 
     def _on_route(self, method: str, params: JsonObject, start: float) -> bool:
-        """Record a ``Route.fulfill`` or ``Route.continue``; False for any other Route call
-        (abort, redirectNavigationRequest), which is an action that taints the run."""
+        """Record a ``Route.fulfill``, ``Route.continue`` or ``Route.abort``; False for any other
+        Route call (redirectNavigationRequest), which is an action that taints the run."""
+        if method == "abort":
+            self.aborts.append(start)
+            return True
         if method == "fulfill":
             body = as_str(params.get("body")) or ""
             self.fulfills.append(_RawRoute(start, f"route.fulfill({body[:80]})", overrides=True))
@@ -750,7 +760,7 @@ class _TraceReader:
         snapshot_times = [s.time for s in self.snapshots]
         out: list[ActionEvent] = []
         actions = dict(self.actions)
-        unmarked = [*self.fallbacks]
+        unmarked = [*self.fallbacks, *self._content_aborts()]
         if not any(n.synthetic for n in network):
             unmarked += [r for r in [*self.fulfills, *self.continues] if r.overrides]
         for n, route in enumerate(unmarked):
@@ -800,6 +810,24 @@ class _TraceReader:
                 event = event.model_copy(update={"synthetic": True})
             out.append(event)
         return out
+
+    def _content_aborts(self) -> list[_RawRoute]:
+        """The ``Route.abort`` calls that could change what a page shows. Blocking an image, a
+        font or media (to save bandwidth) cannot; blocking a document, script, stylesheet or API
+        call can (the page falls back to text the agent chose to leave). Aborted entries
+        (``_wasAborted``) pair, in order, with the calls; when the counts differ, every call
+        counts."""
+        aborted = sorted(
+            (e for e in self.resources if e.get("_wasAborted") is True), key=self._resource_time
+        )
+        calls = sorted(self.aborts)
+        if len(calls) != len(aborted):
+            return [_RawRoute(t, "route.abort()", overrides=True) for t in calls]
+        return [
+            _RawRoute(t, f"route.abort({kind} {_entry_url(e)[:80]})", overrides=True)
+            for t, e in zip(calls, aborted, strict=True)
+            if (kind := as_str(e.get("_resourceType")) or "unknown") not in _HARMLESS_ABORTS
+        ]
 
     def _rewritten(self, entries: list[JsonObject]) -> set[int]:
         """Ids of the entries the agent's ``route.continue`` rewrote. The continued entries
