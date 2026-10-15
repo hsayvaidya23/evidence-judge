@@ -2,8 +2,11 @@
 
 A predicate that is supported on the run can still prove nothing about what the agent did: it
 only holds on evidence from after the agent ran its own code in the page or mocked a response
-(core.provenance), the run already met it before the agent acted (the baseline), or it only
-holds where a page, a URL or a response echoes the agent's own input. Claims and `expect` entries share these guards;
+(core.provenance), the run already met it before the agent acted (the baseline), it only
+holds where a page, a URL or a response echoes the agent's own input, or it is a screenshot in a
+run where the agent typed or injected anything and nothing deterministic backs it up (an image
+shows the typed field and the site's echo of it, and no mask can be applied to pixels). Claims
+and `expect` entries share these guards;
 `forbid` entries and constraints do not use them, since masking or a baseline could hide a real
 violation.
 """
@@ -22,10 +25,11 @@ from evidence_judge.core.predicates import (
     Predicate,
     RequestPredicate,
     Scope,
+    ScreenshotPredicate,
     UrlPredicate,
     ValuePredicate,
 )
-from evidence_judge.core.provenance import tampering
+from evidence_judge.core.provenance import injections, tampering
 from evidence_judge.core.verdict import PredicateResult, Support
 from evidence_judge.textnorm import normalize
 
@@ -33,8 +37,9 @@ MAX_SHOWN_INPUTS: Final = 3
 
 
 def reads_agent_reachable_text(predicate: Predicate) -> bool:
-    """True if `predicate` reads something the site can repeat the agent's input back in: page
-    text, a URL, or a request (its URL or response); an action or a screenshot cannot."""
+    """True if `predicate` reads text the agent's input can be masked out of: page text, a URL,
+    or a request (its URL or response). An action reads no site text. A screenshot shows the
+    agent's input too, but pixels cannot be masked; `unwitnessed_screenshot` guards it instead."""
     return isinstance(
         predicate, PageTextPredicate | UrlPredicate | RequestPredicate | ValuePredicate
     )
@@ -95,6 +100,35 @@ async def echoed(
     )
 
 
+def unwitnessed_screenshot(predicate: Predicate, ctx: CheckContext) -> str | None:
+    """Why `predicate`, a screenshot, cannot prove anything alone in this run, or None.
+
+    A screenshot shows the field the agent typed into and any page that repeats its input back,
+    and the echo masking (`echoed`) only works on text. So in a run with any agent input
+    (EvidenceIndex.agent_inputs) or any injected code (core.provenance.injections), a vision
+    model's "yes" may be reading the agent's own text; it proves something only with a
+    deterministic co-witness, which the caller checks.
+    """
+    if not isinstance(predicate, ScreenshotPredicate):
+        return None
+    inputs = ctx.index.agent_inputs()
+    if inputs:
+        shown = ", ".join(quoted(i) for i in inputs[:MAX_SHOWN_INPUTS])
+        more = (
+            f" and {len(inputs) - MAX_SHOWN_INPUTS} more" if len(inputs) > MAX_SHOWN_INPUTS else ""
+        )
+        what = f"the agent put its own text into the run ({shown}{more})"
+    elif injections(ctx.index.run):
+        what = "the agent ran its own code in the page"
+    else:
+        return None
+    return (
+        f"{what}, and a screenshot shows it and any echo of it without a way to mask them, so a "
+        "screenshot alone proves nothing; a page_text, url or request predicate that also holds "
+        "is needed"
+    )
+
+
 def _cited_inputs(inputs: tuple[str, ...], supported: PredicateResult) -> tuple[str, ...]:
     """The inputs that appear in what `supported` cites, else all of them."""
     cited = " ".join(normalize(unquote_plus(c.excerpt or "")) for c in supported.citations)
@@ -135,11 +169,14 @@ async def unproving(
     registry: CheckerRegistry,
     *,
     check_start: bool = True,
+    co_witnessed: bool = False,
 ) -> str | None:
     """Why `predicate`, `supported` on the evidence, still proves nothing in this run, or None:
     a predicate that only holds on evidence the agent made (`tampered`); with `check_start`, a
-    deterministic predicate the run met before the agent acted; and a
-    predicate that only holds on an echo of the agent's own input."""
+    deterministic predicate the run met before the agent acted; a
+    predicate that only holds on an echo of the agent's own input; and, unless `co_witnessed`
+    (a deterministic predicate of the same claim or `expect` entry is supported), a screenshot
+    in a run with agent input (`unwitnessed_screenshot`)."""
     if (reason := await tampered(predicate, ctx, registry)) is not None:
         return reason
     if check_start and registry.is_deterministic(predicate):
@@ -149,18 +186,26 @@ async def unproving(
                 "it was already true before the agent acted, so every run of the task meets it "
                 f"({before.reason})"
             )
+    if not co_witnessed and (reason := unwitnessed_screenshot(predicate, ctx)) is not None:
+        return reason
     return await echoed(predicate, supported, ctx, registry)
 
 
 async def guarded(
-    predicate: Predicate, ctx: CheckContext, registry: CheckerRegistry, what: str
+    predicate: Predicate,
+    ctx: CheckContext,
+    registry: CheckerRegistry,
+    what: str,
+    *,
+    co_witnessed: bool = False,
 ) -> PredicateResult:
     """`predicate` evaluated on the evidence; a support that proves nothing (`unproving`) becomes
-    NO_EVIDENCE with the reason, keeping its citations. `what` names what it was to prove."""
+    NO_EVIDENCE with the reason, keeping its citations. `what` names what it was to prove;
+    `co_witnessed` as for `unproving`."""
     res = await registry.evaluate(predicate, ctx)
     if res.status is not Support.SUPPORTED:
         return res
-    reason = await unproving(predicate, res, ctx, registry)
+    reason = await unproving(predicate, res, ctx, registry, co_witnessed=co_witnessed)
     if reason is None:
         return res
     return result(
