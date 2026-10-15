@@ -222,6 +222,10 @@ the names exported from `evidence_judge`) is defined under
   layer, `@supports not`, `@import`, `[hidden]` override or shadow root showed text on no longer
   FAIL; text hidden by styles the reader does not model no longer PASSes. The benchmark forges
   it as `unmodelled_hiding`.
+- `url` predicates take `path`, the whole decoded path matched exactly (ignoring case and a
+  trailing slash): `contains: /p/red-kettle` is a substring and is also met by
+  `/p/red-kettle-lid`. The task-spec guide steers exact pages to `path` or an anchored `regex`.
+  Like `regex`, a `path` the agent typed into the address bar cannot prove itself, however short.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

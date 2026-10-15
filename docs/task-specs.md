@@ -575,13 +575,18 @@ when a page carries the phrase hidden.
 ```yaml
 - {kind: url, contains: /order/confirmation}
 - {kind: url, contains: /search, query_contains: q=red kettle}
+- {kind: url, path: /p/red-kettle}
 - {kind: url, regex: '/orders/\d+$', scope: any}
 ```
 
 `contains` matches the scheme, host and path only, like a request's `url_contains`, so a final
 URL of `/login?next=/order/confirmation` does not count as reaching `/order/confirmation`.
-`query_contains` matches the decoded query string, and `regex` the full URL. When several are
-given, all must hold.
+`query_contains` matches the decoded query string, `path` the whole decoded path (ignoring case
+and a trailing slash), and `regex` the full URL. When several are given, all must hold.
+
+`contains` is a substring: `contains: /p/red-kettle` is also met by `/p/red-kettle-lid` or
+`/shop/p/red-kettle`. To name one page exactly, use `path: /p/red-kettle`, or a `regex`
+anchored on the path's end (`regex: '/p/red-kettle/?(?:[?#]|$)'`).
 
 With `scope: any`, visited URLs come from page snapshots, the page URL of each action and
 document navigations in the network log (GET requests for a `document`, or answered with

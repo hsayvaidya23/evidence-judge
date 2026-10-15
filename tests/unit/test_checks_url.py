@@ -168,3 +168,38 @@ async def test_regex_still_sees_the_full_url() -> None:
     run = make_run(final_state=final("/login?next=/order/confirmation", "Please sign in"))
     pred = UrlPredicate(regex=r"next=/order/")
     assert (await UrlChecker().evaluate(pred, ctx(run))).status is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    ("final_path", "status"),
+    [
+        ("/p/red-kettle", Support.SUPPORTED),
+        ("/p/red-kettle/", Support.SUPPORTED),
+        ("/P/Red-Kettle?ref=home#top", Support.SUPPORTED),
+        ("/p/red%2Dkettle", Support.SUPPORTED),
+        ("/p/red-kettle-lid", Support.CONTRADICTED),
+        ("/shop/p/red-kettle", Support.CONTRADICTED),
+        ("/p", Support.CONTRADICTED),
+    ],
+)
+async def test_path_matches_the_whole_path(final_path: str, status: Support) -> None:
+    run = make_run(final_state=final(final_path, "Red Kettle"))
+    res = await UrlChecker().evaluate(UrlPredicate(path="/p/red-kettle"), ctx(run))
+
+    assert res.status is status
+    if status is Support.CONTRADICTED:
+        assert "which does not have the path '/p/red-kettle'" in res.reason
+
+
+async def test_root_path() -> None:
+    pred = UrlPredicate(path="/")
+    home = make_run(final_state=final("/", "Home"))
+    assert (await UrlChecker().evaluate(pred, ctx(home))).status is Support.SUPPORTED
+    cart = make_run(final_state=final("/cart", "Cart"))
+    assert (await UrlChecker().evaluate(pred, ctx(cart))).status is Support.CONTRADICTED
+
+
+@pytest.mark.parametrize("path", ["p/red-kettle", "/p?x=1", "/p#top", " "])
+def test_path_must_be_a_bare_url_path(path: str) -> None:
+    with pytest.raises(ValidationError):
+        UrlPredicate(path=path)

@@ -221,7 +221,8 @@ async def test_a_short_word_still_cannot_prove_itself(
 
 
 @pytest.mark.parametrize(
-    "predicate", [UrlPredicate(contains="/cart"), UrlPredicate(regex=r"/cart$")]
+    "predicate",
+    [UrlPredicate(contains="/cart"), UrlPredicate(regex=r"/cart$"), UrlPredicate(path="/cart")],
 )
 async def test_a_short_url_path_the_agent_typed_cannot_prove_itself(predicate: Predicate) -> None:
     run = make_run(

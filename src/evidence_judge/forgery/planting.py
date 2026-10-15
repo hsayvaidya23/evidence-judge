@@ -88,8 +88,8 @@ def _expected_pages(spec: TaskSpec) -> tuple[list[str], list[str]]:
         for predicate in [*expectation.all, *expectation.any]:
             if isinstance(predicate, PageTextPredicate):
                 texts.append(predicate.contains)
-            elif isinstance(predicate, UrlPredicate) and predicate.contains:
-                urls.append(predicate.contains)
+            elif isinstance(predicate, UrlPredicate) and (predicate.path or predicate.contains):
+                urls.append(predicate.path or predicate.contains or "")
     return texts, urls
 
 
