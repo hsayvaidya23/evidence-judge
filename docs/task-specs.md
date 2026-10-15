@@ -53,6 +53,12 @@ site the run was about:
   an `any`-scope one skips such pages. Other reads (a `GET` request) on any host still count.
   If the site posts to a sibling host (`api.example.com` from `shop.example.com`), list both in
   `allowed_hosts`.
+- A request that meets every criterion except the host is `no_evidence`, never a contradiction:
+  the judge cannot tell a third party from a sibling API host it was not told about. Its reason
+  names the host (`POST /api/orders → 201 is a POST request ... but it went to api.example.com,
+  outside the run's host (shop.example.com) ...; if api.example.com is part of the site, list it
+  in the spec's allowed_hosts`), the claim or `expect` entry stays unproven and the run goes to
+  review. Sibling hosts are not matched by registrable domain (`example.com`); list them.
 - Page states whose URL is `data:`, `about:`, `blob:` (or `javascript:`, `chrome:`,
   `devtools:`) never count: an agent can fill such a page with any text. A `final`-scope
   predicate on such a final page is `no_evidence`.

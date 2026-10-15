@@ -59,8 +59,14 @@ async def _check(
 
 async def test_third_party_mutation_cannot_prove_an_order() -> None:
     res = await _check(ORDER, _scoped(_third_party_order()))
-    assert res.status is Support.CONTRADICTED
-    assert "httpbin.org" in res.reason
+    assert res.status is Support.NO_EVIDENCE
+    assert res.reason == (
+        "POST /api/orders → 201 is a POST request whose URL contains '/api/orders' with a 2xx "
+        "or 3xx status, but it went to httpbin.org, outside the run's host (shop.test), so it "
+        "cannot prove anything; if httpbin.org is part of the site, list it in the spec's "
+        "allowed_hosts"
+    )
+    assert [c.evidence_id for c in res.citations] == ["net#9"]
 
 
 async def test_unscoped_checks_still_see_every_host() -> None:
@@ -79,7 +85,7 @@ async def test_allowed_hosts_restrict_reads_too() -> None:
     run = make_run(network=[net(1, "GET", "/search?q=kettle", host="https://other.test")])
     search = RequestPredicate(method="GET", path_contains=["/search"])
     assert (await _check(search, _scoped(run))).status is Support.SUPPORTED
-    assert (await _check(search, _scoped(run, ["shop.test"]))).status is Support.CONTRADICTED
+    assert (await _check(search, _scoped(run, ["shop.test"]))).status is Support.NO_EVIDENCE
 
 
 async def test_final_data_page_cannot_show_a_confirmation() -> None:
@@ -243,7 +249,66 @@ async def test_forbid_still_sees_third_party_mutations() -> None:
 async def test_expect_is_scoped_inside_evaluate_spec() -> None:
     results = await evaluate_spec(shop_spec(), ctx(_third_party_order()), default_registry())
     order = next(r for r in results if r.expectation_id == "order_submitted")
-    assert order.met is False
+    assert order.met is None
+    assert "went to httpbin.org" in order.reason
+
+
+async def test_request_missing_on_every_host_is_still_contradicted() -> None:
+    res = await _check(
+        RequestPredicate(method="POST", url_contains=["/api/refunds"]),
+        _scoped(_third_party_order()),
+    )
+    assert res.status is Support.CONTRADICTED
+    assert res.reason.startswith("No POST request whose URL contains '/api/refunds'")
+
+
+def _sibling_api_run() -> Run:
+    """An honest run on shop.example.com whose API lives on api.example.com."""
+    run = honest_run()
+
+    def rehost(url: str) -> str:
+        if "/api/" in url:
+            return url.replace("https://shop.test", "https://api.example.com")
+        return url.replace("shop.test", "shop.example.com")
+
+    return run.model_copy(
+        update={
+            "actions": [a.model_copy(update={"url": a.url and rehost(a.url)}) for a in run.actions],
+            "network": [n.model_copy(update={"url": rehost(n.url)}) for n in run.network],
+            "snapshots": [s.model_copy(update={"url": rehost(s.url)}) for s in run.snapshots],
+            "final_state": final("/order/A1", CONFIRMATION_TEXT).model_copy(
+                update={"url": "https://shop.example.com/order/A1"}
+            ),
+            "agent_answer": "I placed order A1 for the Red Kettle at $24.00.",
+        }
+    )
+
+
+@pytest.mark.parametrize("with_spec", [False, True])
+async def test_order_on_a_sibling_api_host_needs_review_not_fail(with_spec: bool) -> None:
+    judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
+    spec = shop_spec() if with_spec else None
+    verdict = await judge.judge(_sibling_api_run(), JudgeOptions(offline=True, spec=spec))
+
+    assert verdict.outcome is Outcome.NEEDS_REVIEW, verdict.summary
+    assert "No POST request" not in verdict.summary
+    [order] = [c for c in verdict.claims if c.claim_text == "The agent placed an order"]
+    assert order.status is Support.NO_EVIDENCE
+    assert "went to api.example.com, outside the run's host (shop.example.com)" in order.reason
+    assert "allowed_hosts" in order.reason
+    if with_spec:
+        assert verdict.summary == (
+            "NEEDS_REVIEW: side effect: net#6: POST /api/orders → 201 went to api.example.com, "
+            "outside the run's host (shop.example.com), so no expectation can explain it; if "
+            "api.example.com is part of the site, list it in the spec's allowed_hosts."
+        )
+
+
+async def test_order_on_a_sibling_api_host_passes_with_allowed_hosts() -> None:
+    judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
+    spec = shop_spec(allowed_hosts=["shop.example.com", "api.example.com"])
+    verdict = await judge.judge(_sibling_api_run(), JudgeOptions(offline=True, spec=spec))
+    assert verdict.outcome is Outcome.PASS, verdict.summary
 
 
 async def test_claim_on_a_third_party_mutation_is_not_supported() -> None:

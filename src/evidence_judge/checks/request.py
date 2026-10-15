@@ -32,10 +32,12 @@ from evidence_judge.core.verdict import PredicateResult, Support
 
 @dataclass(frozen=True, slots=True)
 class Miss:
-    """One unmet criterion. `unrecorded` means the evidence needed to decide it was not captured."""
+    """One unmet criterion. `unrecorded` means the evidence needed to decide it was not captured;
+    `off_site` that the request went to a host outside the evidence scope."""
 
     reason: str
     unrecorded: bool = False
+    off_site: bool = False
 
 
 class RequestMatcher:
@@ -114,7 +116,11 @@ class RequestMatcher:
         out.extend(_body_misses(event.request_body, p.body_contains, "request body"))
         out.extend(_body_misses(event.response_body, p.response_contains, "response body"))
         if self.scope is not None and not self.scope.request_allowed(event):
-            out.append(Miss(f"went to {url_host(event.url)}, outside {self.scope.describe()}"))
+            out.append(
+                Miss(
+                    f"went to {url_host(event.url)}, outside {self.scope.describe()}", off_site=True
+                )
+            )
         return out
 
     def matches(self, event: NetworkEvent) -> bool:
@@ -190,6 +196,22 @@ def check_request(
             [cite_request(event)],
         )
 
+    off_site = [(event, misses) for event, misses in scored if _only_off_site(misses)]
+    if off_site:
+        event, misses = off_site[-1]
+        host = url_host(event.url)
+        unread = [m.reason for m in misses if not m.off_site]
+        but = f" (and {' and '.join(unread)})" if unread else ""
+        where = matcher.scope.describe() if matcher.scope else "the site"
+        return result(
+            Support.NO_EVIDENCE,
+            f"{describe_request(event)} is a {matcher.describe()}{but}, but it went to {host}, "
+            f"outside {where}, so it cannot prove anything; if {host} is part of the site, "
+            "list it in the spec's allowed_hosts",
+            RequestChecker.kind,
+            [cite_request(event)],
+        )
+
     if not index.has(Channel.NETWORK):
         return result(
             Support.NO_EVIDENCE,
@@ -212,6 +234,11 @@ def check_request(
         RequestChecker.kind,
         [cite_request(event)],
     )
+
+
+def _only_off_site(misses: list[Miss]) -> bool:
+    """True if the request meets every criterion except the host scope (and ones not recorded)."""
+    return any(m.off_site for m in misses) and all(m.off_site or m.unrecorded for m in misses)
 
 
 def _nearest_miss(
