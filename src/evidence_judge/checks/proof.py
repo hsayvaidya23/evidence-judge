@@ -29,7 +29,7 @@ from evidence_judge.core.predicates import (
     UrlPredicate,
     ValuePredicate,
 )
-from evidence_judge.core.provenance import injections, tampering
+from evidence_judge.core.provenance import doubt, injections
 from evidence_judge.core.verdict import PredicateResult, Support
 from evidence_judge.textnorm import normalize
 
@@ -139,10 +139,11 @@ async def tampered(
     predicate: Predicate, ctx: CheckContext, registry: CheckerRegistry
 ) -> str | None:
     """Why `predicate`, supported on the evidence, only holds on evidence the agent made: after
-    it ran code in the page or its route handler answered a request (core.provenance), or None.
+    it ran code in the page, its route handler answered a request or it uploaded a file the
+    recording does not hold (core.provenance), or None.
     The predicate is evaluated again on the evidence from before that; if it no longer holds,
     the agent's own code or responses supported it."""
-    why = tampering(ctx.index.run)
+    why = doubt(ctx.index.run)
     if why is None:
         return None
     if (await registry.evaluate(predicate, ctx.untampered())).status is Support.SUPPORTED:

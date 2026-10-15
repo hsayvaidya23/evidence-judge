@@ -112,6 +112,32 @@ def test_typed_form_values_are_not_page_text() -> None:
     assert page.form_values == 4
 
 
+def test_editable_element_text_is_not_page_text() -> None:
+    store = FrameSnapshotStore()
+    store.add(
+        "frame@1",
+        [
+            "HTML",
+            {},
+            [
+                "BODY",
+                {},
+                ["P", {}, "Out of stock"],
+                ["DIV", {"contenteditable": "true"}, ["P", {}, "In stock"]],
+                ["DIV", {"contentEditable": ""}, "Order confirmed"],
+                ["DIV", {"contenteditable": "plaintext-only"}, "Paid"],
+                ["DIV", {"contenteditable": "False"}, "Read only"],
+                ["DIV", {"contenteditable": "true"}],
+            ],
+        ],
+    )
+
+    page = store.render("frame@1", 0)
+
+    assert page.text == "Out of stock Read only"
+    assert page.form_values == 3
+
+
 def test_inline_elements_do_not_split_words() -> None:
     _, text = render(["HTML", {}, ["BODY", {}, ["P", {}, "$", ["B", {}, "24"], ".00"]]])
 

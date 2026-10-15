@@ -10,6 +10,10 @@ GOTO: Final = "goto"
 CLICK: Final = "click"
 FILL: Final = "fill"
 PRESS: Final = "press"
+KEY_DOWN: Final = "key_down"
+"""A key pressed and held (``keyboard.down``): it types like PRESS, and a held modifier applies
+to the keys that follow until its KEY_UP."""
+KEY_UP: Final = "key_up"
 SELECT: Final = "select"
 CHECK: Final = "check"
 UNCHECK: Final = "uncheck"
@@ -41,6 +45,8 @@ _SPELLINGS: Final[dict[str, tuple[str, ...]]] = {
         "keyboardInsertText",
     ),
     PRESS: ("press", "press_key", "keyboardPress", "send_keys"),
+    KEY_DOWN: ("key_down", "keyboardDown"),
+    KEY_UP: ("key_up", "keyboardUp"),
     SELECT: ("select", "selectOption", "select_dropdown", "select_dropdown_option"),
     CHECK: ("check",),
     UNCHECK: ("uncheck",),

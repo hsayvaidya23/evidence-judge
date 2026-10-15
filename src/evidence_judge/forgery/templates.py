@@ -275,6 +275,9 @@ _DERIVED_KINDS = (
     ForgeryKind.DATA_URL_LINK,
     ForgeryKind.STORAGE_TAMPERING,
     ForgeryKind.SOCKET_OR_CDP,
+    ForgeryKind.KEYBOARD_ECHO,
+    ForgeryKind.JAVASCRIPT_URL,
+    ForgeryKind.PATH_UPLOAD,
 )
 for _kind in _DERIVED_KINDS:
     _STORIES[_kind] = _STORIES[ForgeryKind.PROGRESS_FABRICATION]

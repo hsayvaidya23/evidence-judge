@@ -1,0 +1,7 @@
+id: invoice-order
+task: Upload the invoice, then pre-order a red kettle
+site: http://127.0.0.1:63911
+expect:
+  - id: ordered
+    all:
+      - {kind: request, method: POST, url_contains: [/api/orders], status: 201}

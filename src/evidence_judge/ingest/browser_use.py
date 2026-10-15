@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-from evidence_judge.core.actions import INJECT, OTHER, injected, known_action
+from evidence_judge.core.actions import GOTO, INJECT, OTHER, injected, known_action
 from evidence_judge.core.evidence import (
     ActionEvent,
     Channel,
@@ -25,7 +25,7 @@ from evidence_judge.core.evidence import (
     Screenshot,
     is_web_page_url,
 )
-from evidence_judge.core.provenance import mark_agent_page_navigations
+from evidence_judge.core.provenance import is_script_url, mark_agent_page_navigations, script_hash
 from evidence_judge.ingest._json import (
     JsonObject,
     as_float,
@@ -172,12 +172,19 @@ class _HistoryBuilder:
         state: JsonObject,
     ) -> None:
         canonical = known_action(name) or OTHER
+        sha: str | None = None
         if canonical == INJECT:
             value = injected(
                 name, next((v for k in _CODE_KEYS if (v := as_str(params.get(k)))), None)
             )
         else:
             value = next((v for k in _VALUE_KEYS if (v := as_str(params.get(k)))), None)
+        if canonical == GOTO and is_script_url(value):
+            canonical, sha, value = (
+                INJECT,
+                script_hash("goto", value or ""),
+                injected("goto", value),
+            )
         self.actions.append(
             ActionEvent(
                 id=f"act#{len(self.actions) + 1}",
@@ -187,6 +194,7 @@ class _HistoryBuilder:
                 value=value,
                 url=as_str(state.get("url")),
                 error=as_str(result.get("error")),
+                script_sha256=sha,
             )
         )
 

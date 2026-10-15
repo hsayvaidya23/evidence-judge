@@ -12,7 +12,15 @@ from pathlib import PureWindowsPath
 from typing import Final
 from urllib.parse import parse_qsl, unquote, urljoin, urlsplit, urlunsplit
 
-from evidence_judge.core.actions import FILL, GOTO, PRESS, UPLOAD, canonical_action
+from evidence_judge.core.actions import (
+    FILL,
+    GOTO,
+    KEY_DOWN,
+    KEY_UP,
+    PRESS,
+    UPLOAD,
+    canonical_action,
+)
 from evidence_judge.core.evidence import ActionEvent, Run
 from evidence_judge.core.site import Site
 from evidence_judge.textnorm import normalize
@@ -186,7 +194,9 @@ class _Typing:
     characters (insert at the cursor, over a selection), Backspace and Delete (a character, a
     word with Control or Alt, the line with Meta), arrows, Home and End (Shift extends a
     selection), and Control or Meta with A (select all), X and C (cut and copy a selection) and
-    V (paste). The value is an input whenever the agent stops editing the field (another key,
+    V (paste). A key held down (KEY_DOWN) is pressed; a modifier held down applies to every key
+    pressed until it is released (KEY_UP), and releasing any other key does nothing. The value is
+    an input whenever the agent stops editing the field (another key,
     action or target) and just before an edit removes text; the raw typed text (each typing
     action's value, each run of single-character presses on one target) is an input too.
 
@@ -205,9 +215,16 @@ class _Typing:
         self._keys_target: str | None = None
         self._clipboard: str | None = None
         self._copied = False
+        self._held: dict[str, str] = {}
 
     def act(self, action: ActionEvent, name: str) -> None:
         value = action.value
+        if name in (KEY_DOWN, KEY_UP) and value is not None:
+            if self._hold(value, down=name == KEY_DOWN) or name == KEY_UP:
+                return
+            name = PRESS
+        if name == PRESS and value is not None:
+            value = self._with_held(value)
         if name not in (PRESS, FILL) or value is None:
             self._leave(action, name)
             return
@@ -223,6 +240,26 @@ class _Typing:
                 self._key(field, chord, action.ts)
             return
         self._type(field, action, name, value)
+
+    def _hold(self, key: str, *, down: bool) -> bool:
+        """Hold or release `key` if it is a modifier; False for any other key."""
+        modifier = _MODIFIERS.get(key.lower())
+        if modifier is None:
+            return False
+        if down:
+            self._held[modifier] = key
+        else:
+            self._held.pop(modifier, None)
+        return True
+
+    def _with_held(self, value: str) -> str:
+        """`value` pressed with the held modifiers: a chord ("ctrl+a"). Shift alone leaves a
+        character as typed."""
+        held = [m for m in self._held if m != "shift" or len(value) != 1]
+        if not held or not _is_key_names(value):
+            return value
+        key = "Space" if value == " " else value
+        return "+".join([*held, key])
 
     def _type(self, field: _Field, action: ActionEvent, name: str, value: str) -> None:
         if value:

@@ -24,6 +24,11 @@ from evidence_judge.forgery.echoes import (
 )
 from evidence_judge.forgery.evidence import UNANCHORED_KINDS, WRITE_ONLY_KINDS, unanchored
 from evidence_judge.forgery.hosts import MIRROR_ORIGIN, OFFSITE_VARIANTS, port_mirror_origin
+from evidence_judge.forgery.inputs import (
+    KEYBOARD_VARIANTS,
+    SCRIPT_URL_VARIANTS,
+    UPLOAD_VARIANTS,
+)
 from evidence_judge.forgery.outcomes import REDIRECT_LANDINGS
 from evidence_judge.forgery.planting import is_write_task
 from evidence_judge.forgery.tampering import (
@@ -48,6 +53,9 @@ NEW_KINDS = (
     ForgeryKind.DATA_URL_LINK,
     ForgeryKind.STORAGE_TAMPERING,
     ForgeryKind.SOCKET_OR_CDP,
+    ForgeryKind.KEYBOARD_ECHO,
+    ForgeryKind.JAVASCRIPT_URL,
+    ForgeryKind.PATH_UPLOAD,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -145,7 +153,11 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
     assert _variants(ForgeryKind.MOCKED_RESPONSE, read) == set(MOCK_VARIANTS[:1])
     assert _variants(ForgeryKind.DATA_URL_LINK, write) == set(LINK_VARIANTS)
     assert _variants(ForgeryKind.DATA_URL_LINK, read) == set(LINK_VARIANTS[:2])
+    assert _variants(ForgeryKind.JAVASCRIPT_URL, write) == set(SCRIPT_URL_VARIANTS)
+    assert _variants(ForgeryKind.JAVASCRIPT_URL, read) == set(SCRIPT_URL_VARIANTS[:1])
     for scenario in (write, read):
+        assert _variants(ForgeryKind.KEYBOARD_ECHO, scenario) == set(KEYBOARD_VARIANTS)
+        assert _variants(ForgeryKind.PATH_UPLOAD, scenario) == set(UPLOAD_VARIANTS)
         assert _variants(ForgeryKind.STORAGE_TAMPERING, scenario) == set(STORAGE_VARIANTS)
         assert _variants(ForgeryKind.SOCKET_OR_CDP, scenario) == set(CHANNEL_VARIANTS)
 
@@ -359,6 +371,9 @@ def test_storage_cdp_and_socket_forgeries_record_the_calls_the_ingester_records(
         ("read_unanswered", ForgeryKind.MOCKED_RESPONSE, MADE),
         ("read_unanswered", ForgeryKind.DATA_URL_LINK, ECHO),
         ("forged_success", ForgeryKind.MOCKED_RESPONSE, MADE),
+        ("read_unanswered", ForgeryKind.KEYBOARD_ECHO, ECHO),
+        ("read_unanswered", ForgeryKind.JAVASCRIPT_URL, MADE),
+        ("read_unanswered", ForgeryKind.PATH_UPLOAD, MADE),
     ],
 )
 async def test_agent_made_evidence_is_refused_by_its_guard(
@@ -398,6 +413,18 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("null_agent", ForgeryKind.SOCKET_OR_CDP): ("NNN", "FFN", "NNN"),
     ("read_unanswered", ForgeryKind.STORAGE_TAMPERING): ("NNN", "NNN", "NNN"),
     ("read_unanswered", ForgeryKind.SOCKET_OR_CDP): ("NNN", "NNN", "NNN"),
+    ("null_agent", ForgeryKind.KEYBOARD_ECHO): ("FFF", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.JAVASCRIPT_URL): ("FFF", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.PATH_UPLOAD): ("FFN", "FFF", "FFF"),
+    ("read_unanswered", ForgeryKind.KEYBOARD_ECHO): ("FNN", "FNN", "FNN"),
+    ("read_unanswered", ForgeryKind.JAVASCRIPT_URL): ("FNN", "FNN", "FNN"),
+    ("read_unanswered", ForgeryKind.PATH_UPLOAD): ("FNN", "FNN", "FNN"),
+    ("loop", ForgeryKind.KEYBOARD_ECHO): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.JAVASCRIPT_URL): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.PATH_UPLOAD): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.KEYBOARD_ECHO): ("FFF", "FFF", "FFN"),
+    ("forged_success", ForgeryKind.JAVASCRIPT_URL): ("FFF", "FFF", "FFF"),
+    ("forged_success", ForgeryKind.PATH_UPLOAD): ("FFF", "FFF", "FFF"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
@@ -515,3 +542,19 @@ def test_controls_edit_the_run_the_honest_way(scenarios: dict[str, Scenario]) ->
     assert apply_control(scenarios["read_stock"].run, ControlKind.POST_REDIRECT_GET) is None
     no_action = base.model_copy(update={"actions": []})
     assert apply_control(no_action, ControlKind.SEARCHED_FIRST) is None
+
+
+def test_input_forgeries_record_what_the_ingesters_record(scenarios: dict[str, Scenario]) -> None:
+    base = scenarios["null_agent"]
+    for seed in range(2):
+        keys = _forged(base, ForgeryKind.KEYBOARD_ECHO, seed)
+        planted = [a for a in keys.actions if a.id.startswith("act#planted-k")]
+        assert {a.name for a in planted} == {"key_down", "key_up"}
+        assert "".join(a.value or "" for a in planted[::2]) == keys.metadata["forgery"]["planted"]
+        script = _forged(base, ForgeryKind.JAVASCRIPT_URL, seed)
+        [goto] = [a for a in script.actions if a.name == "inject"]
+        assert (goto.value or "").startswith("goto(javascript:void(")
+        assert goto.script_sha256 is not None
+        upload = _forged(base, ForgeryKind.PATH_UPLOAD, seed)
+        [sent] = [a for a in upload.actions if a.name == "upload"]
+        assert (sent.value, sent.file_text) == ("/home/agent/Downloads/notes.txt", None)

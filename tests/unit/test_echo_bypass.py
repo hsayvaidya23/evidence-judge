@@ -39,6 +39,11 @@ ECHO_REASON = "it holds only where a page, URL or response echoes the agent's ow
 JUDGE = Judge(Settings(anthropic_api_key=None, cache_dir=None))
 
 
+def _with_text(upload: ActionEvent) -> ActionEvent:
+    """An upload whose file text the recording holds, so only its name can be echoed."""
+    return upload.model_copy(update={"file_text": "Invoice total 12.00"})
+
+
 def _run(action: ActionEvent, final_text: str) -> Run:
     return make_run(
         actions=[act(1, "goto", url=f"{HOST}/"), action],
@@ -54,11 +59,11 @@ ECHOES = {
         "You wrote Order A77 confirmed",
     ),
     "uploaded file name": (
-        act(2, "upload", "#file", value="Order A77 confirmed.pdf"),
+        _with_text(act(2, "upload", "#file", value="Order A77 confirmed.pdf")),
         "Uploaded: Order A77 confirmed.pdf",
     ),
     "uploaded file stem from a path": (
-        act(2, "upload_file", "#file", value="/tmp/run/Order A77 confirmed.pdf"),
+        _with_text(act(2, "upload_file", "#file", value="/tmp/run/Order A77 confirmed.pdf")),
         "Your document Order A77 confirmed was received",
     ),
     "pressed text (browser-use send_keys)": (
@@ -93,7 +98,7 @@ GENUINE = {
         "Order A77 confirmed",
     ),
     "unrelated upload": (
-        act(2, "upload", "#file", value="receipt.pdf"),
+        _with_text(act(2, "upload", "#file", value="receipt.pdf")),
         "Order A77 confirmed",
     ),
 }

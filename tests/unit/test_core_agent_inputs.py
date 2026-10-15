@@ -312,3 +312,32 @@ def test_many_inputs_are_matched_in_one_pass_over_the_text() -> None:
     typed = [f"Product {i:03d} in stock" for i in range(80)]
     text = "Catalogue: product 007 in stock, item 999 sold out"
     assert _masked_final(typed, text) == f"catalogue: {MASK}, item 999 sold out"
+
+
+def test_keys_held_down_type_and_their_release_does_nothing() -> None:
+    held = _keys(*[(name, c) for c in "In stock" for name in ("key_down", "key_up")])
+    held += _keys(("key_down", "Enter"), ("key_up", "Enter"))
+    assert "in stock" in _inputs(actions=held)
+
+
+def test_a_held_modifier_applies_to_the_keys_pressed_until_its_release() -> None:
+    replaced = _keys(
+        ("fill", "kettle"),
+        ("key_down", "Control"),
+        ("key_down", "a"),
+        ("key_up", "a"),
+        ("key_up", "Control"),
+        ("type", "In stock"),
+    )
+    assert _inputs(actions=replaced) == ("in stock", "kettle")
+    shifted = _keys(
+        ("key_down", "Shift"),
+        ("press", "I"),
+        ("key_up", "Shift"),
+        ("key_down", "n"),
+        ("key_down", " "),
+        ("key_down", "s"),
+    )
+    assert "in s" in _inputs(actions=shifted)
+    released = _keys(("fill", "kettle"), ("key_down", "Meta"), ("key_up", "Meta"), ("press", "a"))
+    assert "kettlea" in _inputs(actions=released)

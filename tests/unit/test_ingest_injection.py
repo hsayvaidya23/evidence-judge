@@ -12,7 +12,7 @@ import pytest
 
 from evidence_judge.config import Settings
 from evidence_judge.core.index import EvidenceIndex
-from evidence_judge.core.provenance import script_hash, trust_scripts
+from evidence_judge.core.provenance import script_hash, trust_scripts, unseen_uploads
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.engine import Judge, JudgeOptions
@@ -23,6 +23,7 @@ from .test_ingest_playwright_trace import rewrite_trace
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "injection"
 MADE = "it holds only on evidence the agent made itself"
 ECHO = "echoes the agent's own input"
+UNSEEN = "uploaded invoice.txt (act#3) whose contents are not in the recording"
 
 
 async def _judge(
@@ -153,6 +154,11 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("cdp_fetch", "stock_api", "Yes, it is In stock.", "needs_review", [None], MADE),
         ("websocket", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
         ("upload", "invoice", "The invoice was accepted.", "needs_review", [None], ECHO),
+        ("upload_path", "invoice", "The invoice was accepted.", "needs_review", [None], UNSEEN),
+        ("upload_path", "invoice", "Done.", "needs_review", [None], UNSEEN),
+        ("kd_echo", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
+        ("kd_note", "stock", "Yes, In stock.", "fail", [False, True], "does not contain"),
+        ("goto_js", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
     ],
 )
 async def test_agent_made_evidence_never_passes(
@@ -415,3 +421,47 @@ async def test_a_trusted_script_is_not_an_injection() -> None:
 def test_trusted_scripts_must_be_sha256_digests() -> None:
     with pytest.raises(ValueError, match="not a SHA-256 hex digest"):
         TaskSpec.model_validate({"id": "t", "task": "t", "trusted_scripts": ["abc"]})
+
+
+def test_keys_held_down_are_recorded_with_their_key() -> None:
+    run = load_playwright_trace(FIXTURES / "kd_echo.zip")
+
+    keys = [(a.name, a.value) for a in run.actions[2:]]
+    assert keys == [
+        *[(name, c) for c in "In stock" for name in ("key_down", "key_up")],
+        ("press", "Enter"),
+    ]
+    assert "in stock" in EvidenceIndex(run).agent_inputs()
+
+
+def test_text_typed_into_an_editable_element_is_not_page_text() -> None:
+    run = load_playwright_trace(FIXTURES / "kd_note.zip")
+
+    assert run.final_state is not None
+    assert run.final_state.text == "Note to the shop Out of stock"
+    assert run.metadata["form_values_excluded"] > 0
+
+
+def test_goto_of_a_javascript_url_is_an_inject_action_its_hash_trusts() -> None:
+    run = load_playwright_trace(FIXTURES / "goto_js.zip")
+
+    url = "javascript:void(document.getElementById('stock').textContent='In stock')"
+    assert [a.name for a in run.actions] == ["goto", "click", "inject"]
+    assert run.actions[2].value == f"goto({url})"
+    assert run.actions[2].script_sha256 == script_hash("goto", url)
+    assert [a.name for a in trust_scripts(run, [script_hash("goto", url)]).actions][2] == "other"
+
+
+def test_upload_by_path_holds_no_file_text() -> None:
+    run = load_playwright_trace(FIXTURES / "upload_path.zip")
+
+    [upload] = unseen_uploads(run)
+    assert (upload.value, upload.file_text) == ("invoice.txt", None)
+    assert run.final_state is not None and "Invoice accepted" in run.final_state.text
+
+
+async def test_an_order_placed_after_an_upload_by_path_still_passes() -> None:
+    got, text, results = await _judge("upload_path_order", "invoice_order", "Done.")
+
+    assert got is Outcome.PASS, text
+    assert results == [("ordered", True)]

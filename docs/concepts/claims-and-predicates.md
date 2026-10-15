@@ -115,7 +115,8 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   nothing: typing "Order #1042 confirmed" into a search box and landing on its results page, or
   opening `/search?q=Order+%231042+confirmed` directly, shows the phrase without any order
   existing. The agent's input is every typed value (`fill`, `type`, `insert_text`), each run of
-  single-key `press` actions on one target, every value a field took as the agent edited it,
+  single-key `press` actions on one target (keys held with `keyboard.down` count as pressed;
+  their `keyboard.up` does nothing), every value a field took as the agent edited it,
   the path segments and query values of every URL it
   opened with a `goto`, and the query values of every `GET` request (a submitted search form,
   or a navigation a HAR-only run cannot attribute), decoded and normalised like page text. A
@@ -127,7 +128,8 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   inputs shorter than three characters or without a letter or digit are ignored. Edits are
   replayed per field, so typing "In stocX", pressing Backspace and typing "k" makes "In stock"
   an input: Backspace and Delete (a character, a word with Control or Alt, the line with Meta),
-  arrows, Home and End (Shift selects), Control or Meta with A, X, C and V, including
+  arrows, Home and End (Shift selects), Control or Meta with A, X, C and V (also when the
+  modifier is held with `keyboard.down` until its `keyboard.up`), including
   browser-use `send_keys` sequences such as `Home Delete`; the field's value counts whenever
   the agent stops editing it and just before an edit removes text, next to the raw typed text.
   Copying from the page (Control+C with no selection in a field the agent typed into) makes
@@ -183,7 +185,8 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   does not prove the order went through.
 - **Evidence the agent made in the browser.** An agent that runs its own code in the page
   (`page.evaluate`, `$eval`, `wait_for_function`, `add_init_script`, `add_script_tag`,
-  `add_style_tag`, `set_content`, `expose_binding`; browser-use's `evaluate`) can write any text
+  `add_style_tag`, `set_content`, `expose_binding`; browser-use's `evaluate`; a `goto` of a
+  `javascript:` or `vbscript:` URL, in Playwright or browser-use) can write any text
   and push any URL; one whose route handler answers a request (`route.fulfill`) or rewrites it
   (`route.continue` or `route.fallback` with a new URL, method, headers or body) makes the
   response, or the request the site got, its own. Ingesters record the first as an `inject`
@@ -192,6 +195,9 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   requests from then on, and the page URLs of later actions. A predicate that only holds on
   what was set aside cannot support a claim, and the reason names the call
   (`evaluate(document.querySelector('#stock').textContent = 'In stock') (act#3, sha256 …)`).
+  A script URL's scheme is read the way a browser reads it (leading spaces and control
+  characters dropped, tabs and newlines ignored, any case), and its `inject` is named
+  `goto(javascript:…)`; its hash is over api `goto` and the whole URL.
   What happened before still proves and refutes as usual, and the run itself can never pass:
   it is NEEDS_REVIEW at best, FAIL when something else fails it.
 - **Deny by default.** The Playwright trace ingester treats every recorded call as agent-made
@@ -220,8 +226,18 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
 - **Uploaded files are agent input.** The text of a file the agent uploads with its content
   (`set_input_files` with a buffer; the first 64 KB of each file, decoded as UTF-8 or UTF-16,
   or the runs of printable text in a binary file) counts as typed, line by line, so a page that
-  previews the file proves nothing by showing it. Files uploaded from a path are not in the
-  trace; only their names count.
+  previews the file proves nothing by showing it. A file uploaded from a path or a stream (or a
+  binary file with no text) is not in the recording, and the page may show what it holds: from
+  the first such upload on, page states, screenshots, page URLs and response bodies are set
+  aside like evidence the agent made, so a `page_text`, `url`, `value` or `request` predicate
+  (with `response_contains`) that only holds on them cannot support a claim ("the agent
+  uploaded invoice.txt (act#3) whose contents are not in the recording"). Unlike an injection,
+  this does not cap the run: a request the browser sent after the upload, and its status, are
+  still the site's, so an order `POST` placed after uploading a file still proves the order.
+- **Editable text is the agent's.** Text inside an element with `contenteditable` (any value
+  but `false`), descendants included, is left out of page text like the values of `<input>`
+  and `<textarea>` fields, since the agent can type into it; a site's own text in an editable
+  element (a prefilled rich-text editor) cannot prove anything either.
 - **Links on a page the agent wrote.** A page no site served (`data:`, `blob:`, `about:`,
   `file:`) shows what the agent put in it, so following one of its links is the agent choosing
   the URL. Ingesters record such a navigation as a `goto` of the link's target (id
