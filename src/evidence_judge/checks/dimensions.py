@@ -34,7 +34,7 @@ from evidence_judge.core.predicates import (
     Scope,
     UrlPredicate,
 )
-from evidence_judge.core.site import Site, on_any
+from evidence_judge.core.site import Site, on_any, registrable_domain
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import (
     ClaimVerdict,
@@ -116,14 +116,17 @@ class _Budget:
     limit: int | None
     names: tuple[str, ...] = ()
     """An allow entry's url_contains, case-folded: an off-site mutation is explained only by an
-    entry that names its host."""
+    entry that names its host or the domain it is registered under."""
     hits: list[NetworkEvent] = field(default_factory=list[NetworkEvent])
     explained: int = 0
     excess: list[NetworkEvent] = field(default_factory=list[NetworkEvent])
 
     def names_host(self, event: NetworkEvent) -> bool:
         site = Site.of_url(event.url)
-        return site is not None and any(site.host in n for n in self.names)
+        if site is None:
+            return False
+        domain = registrable_domain(site.host)
+        return any(site.host in n or domain in n for n in self.names)
 
     @property
     def has_room(self) -> bool:
@@ -291,7 +294,7 @@ def assess_side_effects(
     redacted values, or one sent outside the site and `allowed_hosts`, is flagged
     (_telemetry_leak). A mutation outside the site and the allowed hosts (or, with neither
     named, the inferred site) is explained only by an `allow` entry whose url_contains names
-    its host, the way a spec lets a payment provider's callback through without letting the
+    its host or registrable domain, the way a spec lets a payment provider's callback through without letting the
     provider's pages prove the task (off_site_hint).
 
     Only the spec explains a mutation: each `expect` entry explains up to `max_count` (default 1)

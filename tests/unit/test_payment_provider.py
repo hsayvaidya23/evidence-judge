@@ -129,6 +129,12 @@ async def test_following_the_hint_passes_the_honest_checkout() -> None:
     }
 
 
+async def test_an_allow_entry_may_name_the_provider_by_its_registered_domain() -> None:
+    allow = {"kind": "request", "method": "POST", "url_contains": ["payprovider.test/3ds"]}
+    verdict = await _judge(_spec(allow=[allow]))
+    assert verdict.outcome is Outcome.PASS, verdict.summary
+
+
 async def test_an_allow_entry_explains_another_host_only_by_name() -> None:
     allow = {"kind": "request", "method": "POST", "url_contains": ["/3ds"]}
     verdict = await _judge(_spec(allow=[allow]))

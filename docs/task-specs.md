@@ -100,7 +100,7 @@ NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
   an `any`-scope one skips such pages. Other reads (a `GET` request) on any host still count
   until the site is named.
 - A mutation outside the site and the allowed hosts is a side effect, unless an `allow` entry
-  names its host (see [Payment providers, APIs and CDNs](#payment-providers-apis-and-cdns)).
+  names its host or registrable domain (see [Payment providers, APIs and CDNs](#payment-providers-apis-and-cdns)).
 - A request that meets every criterion except the host is `no_evidence`, never a contradiction:
   the judge cannot tell a third party from a sibling API host it was not told about. Its reason
   names the host (`POST /api/orders → 201 is a POST request ... but it went to api.example.com,
@@ -128,7 +128,8 @@ it:
   requests could prove the task: a provider page that says "Payment successful" would pass a
   checkout the shop never confirmed. Explain its mutations with an `allow` entry whose
   `url_contains` names the host. An `allow` entry explains a mutation to another host only
-  when it names that host, so `url_contains: [/3ds]` does not cover
+  when it names that host or the domain it is registered under (`payprovider.test/3ds` covers
+  `hooks.payprovider.test/3ds/authenticate`), so `url_contains: [/3ds]` does not cover
   `hooks.payprovider.test/3ds/authenticate`, and neither does `/api/cart` cover a POST to a
   mirror at `shop.example.com:8443/api/cart`.
 

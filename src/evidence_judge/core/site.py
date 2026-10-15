@@ -164,6 +164,15 @@ class Site:
         return f"{WILDCARD if self.wildcard else ''}{host}{port}"
 
 
+def registrable_domain(host: str) -> str:
+    """The name a host was registered under: `payprovider.test` for `hooks.payprovider.test`,
+    `my-store.myshopify.com` for `www.my-store.myshopify.com`; the host itself for an IP
+    address, `localhost` or a public suffix."""
+    if Site(host).is_ip:
+        return host
+    return _public_suffixes().privatesuffix(host) or host
+
+
 def _display(host: str, port: int | None) -> str:
     return f"{host}:{port}" if port is not None else host
 

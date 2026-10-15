@@ -18,7 +18,7 @@ from evidence_judge.core.claims import Claim, ClaimKind
 from evidence_judge.core.evidence import PageSnapshot, PageState, Run
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import PageTextPredicate, Scope
-from evidence_judge.core.site import InvalidSiteError, Site
+from evidence_judge.core.site import InvalidSiteError, Site, registrable_domain
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict, Support
 from evidence_judge.engine import Judge, JudgeOptions
@@ -242,6 +242,20 @@ def test_a_path_refusal_explains_a_site_is_a_whole_host() -> None:
         "of one. Name the host alone (github.com) only if all of it belongs to the site under "
         "test, and require the pages you mean with url predicates in `expect`"
     )
+
+
+@pytest.mark.parametrize(
+    ("host", "domain"),
+    [
+        ("hooks.payprovider.test", "payprovider.test"),
+        ("www.my-store.myshopify.com", "my-store.myshopify.com"),
+        ("a.b.example.co.uk", "example.co.uk"),
+        ("localhost", "localhost"),
+        ("127.0.0.1", "127.0.0.1"),
+    ],
+)
+def test_registrable_domain(host: str, domain: str) -> None:
+    assert registrable_domain(host) == domain
 
 
 def test_a_subdomain_of_a_private_suffix_is_a_site() -> None:
