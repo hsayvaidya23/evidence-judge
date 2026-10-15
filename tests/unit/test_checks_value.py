@@ -289,6 +289,20 @@ async def test_spaced_thousands_are_compared_numerically() -> None:
     assert res.status is Support.CONTRADICTED
 
 
+@pytest.mark.parametrize(
+    ("text", "status"),
+    [
+        ("Total: $25¹ (¹ incl. VAT)", Support.SUPPORTED),
+        ("Total: $9²9", Support.NO_EVIDENCE),
+    ],
+)
+async def test_a_superscript_is_a_footnote_never_more_digits(text: str, status: Support) -> None:
+    """NFKC folds '¹' into '1': '$25¹' must not read as 251, nor '$9²9' as 929."""
+    run = make_run(final_state=final("/checkout", text))
+    pred = ValuePredicate(field="total", page_regex=r"Total:\s*(\S+)", op="<=", value=30)
+    assert (await ValueChecker().evaluate(pred, ctx(run))).status is status
+
+
 async def test_violation_wins_over_unparseable_observation() -> None:
     run = make_run(
         network=[

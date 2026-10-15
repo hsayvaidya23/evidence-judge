@@ -6,6 +6,7 @@ import functools
 import json
 import math
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import Enum
 from typing import Final, Literal, cast
@@ -84,6 +85,13 @@ def parse_number(value: object) -> float | None:
     spaces) or apostrophes ('24,000.50', '1 500', "1'500", '1.500,00 €'). A comma followed by
     one or two digits is a decimal comma ('24,5'). Ambiguous forms such as '1.500' (1.5 or
     1500) and malformed grouping ('1,50,000') are rejected.
+
+    Superscript or subscript marks right after the last digit are a footnote and dropped
+    ('$9¹' is 9); anywhere else, or any other character that only folds into a digit ('20 m²',
+    '½', '①'), makes the text not a number, so it never reads as more digits ('2²' is not 22).
+    Text is never read in scientific notation ('1e3'), as NaN or infinity, or as an
+    accounting negative ('(24.00)'): those are not numbers. A JSON number is a number whatever
+    its notation.
     """
     if isinstance(value, bool):
         return None
@@ -91,7 +99,10 @@ def parse_number(value: object) -> float | None:
         return float(value) if math.isfinite(value) else None
     if not isinstance(value, str):
         return None
-    match = _NUMBER.match(normalize(value))
+    text = _without_footnote(value)
+    if text is None:
+        return None
+    match = _NUMBER.match(normalize(text))
     if match is None or (match["sign"] and match["sign2"]):
         return None
     number = _parse_digits(match["core"])
@@ -100,6 +111,30 @@ def parse_number(value: object) -> float | None:
     if match["suffix"]:
         number *= _SUFFIX_SCALE[match["suffix"]]
     return -number if "-" in (match["sign"], match["sign2"]) else number
+
+
+def _is_mark(char: str) -> bool:
+    return unicodedata.decomposition(char).startswith(("<super>", "<sub>"))
+
+
+def _without_footnote(text: str) -> str | None:
+    """`text` without superscript or subscript marks that follow its last digit, or None if any
+    character other than a decimal digit would fold into one under NFKC."""
+    if text.isascii():
+        return text
+    end = len(text.rstrip())
+    start = end
+    while start > 0 and _is_mark(text[start - 1]):
+        start -= 1
+    if 0 < start < end and text[start - 1].isdecimal():
+        text = text[:start]
+    if any(not c.isdecimal() and _folds_to_digit(c) for c in text):
+        return None
+    return text
+
+
+def _folds_to_digit(char: str) -> bool:
+    return any(d.isdigit() for d in unicodedata.normalize("NFKC", char))
 
 
 def _grouped(digits: str, separator: str) -> str | None:
