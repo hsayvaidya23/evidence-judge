@@ -51,7 +51,7 @@ def describe_request(event: NetworkEvent) -> str:
     status = "no response" if event.status is None else str(event.status)
     if event.failed:
         status = f"{status}, failed"
-    return f"{event.method.upper()} {url_path(event.url)} → {status}"
+    return f"{event.shown_method} {url_path(event.url)} → {status}"
 
 
 def took_effect(event: NetworkEvent) -> bool:

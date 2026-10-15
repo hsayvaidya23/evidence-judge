@@ -182,6 +182,15 @@ the names exported from `evidence_judge`) is defined under
 
 ### Security
 
+- **A GET that names the write it acts as is a mutation.** A request with an
+  `X-HTTP-Method-Override`, `X-HTTP-Method` or `X-Method-Override` header naming POST, PUT,
+  PATCH or DELETE, a `_method=` query naming one (any case), or a GraphQL GET whose decoded
+  `query` is a mutation (acting as a POST) is judged as that write: an unexplained one is a side
+  effect, and a `request` predicate with that method matches it. Reports show it as
+  `GET as DELETE /api/cart/1`. A plain GET that changes state cannot be told from a read; the
+  task-spec docs show how to forbid such endpoints by `url_contains`, and how to keep a
+  first-party analytics beacon (`POST /collect`) from failing a "forbid any POST" spec. Forgery
+  kind `mutating_get` covers the three forms.
 - **An object that equals everything weakens the suite.** An edit of any Python file, test or
   not, that defines `__eq__`, `__ne__`, `__hash__` or `__bool__` to return a constant (a method
   whose body is one `return True`, or a constant lambda) needs review: `add` returning an `int`

@@ -101,8 +101,8 @@ class RequestMatcher:
     def misses(self, event: NetworkEvent) -> list[Miss]:
         p = self.predicate
         out: list[Miss] = []
-        if p.method and event.method.upper() != p.method.upper():
-            out.append(Miss(f"method {event.method.upper()}, expected {p.method.upper()}"))
+        if p.method and p.method.upper() not in (event.method.upper(), event.write_method):
+            out.append(Miss(f"method {event.shown_method}, expected {p.method.upper()}"))
         out.extend(
             Miss(f"URL lacks {quoted(u)}")
             for u in p.url_contains

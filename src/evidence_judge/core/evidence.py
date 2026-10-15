@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterator, Mapping
 from enum import StrEnum
 from typing import Annotated, Any, Final, Literal, Self, cast
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, PlainValidator
 
 MUTATION_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 """HTTP methods that change state: a request with one is a mutation."""
+METHOD_OVERRIDE_HEADERS: Final = frozenset(
+    {"x-http-method-override", "x-http-method", "x-method-override"}
+)
+"""Headers a server may read as the request's real method (a GET that acts as a DELETE)."""
+_GRAPHQL_MUTATION: Final = re.compile(r"^(?:[\s,\ufeff]|#[^\n]*)*mutation\b[^{}]*\{")
+"""A GraphQL document that is a mutation: `mutation`, after whitespace, commas or comments,
+then an optional name, variables and directives, then its selection set."""
 
 HarField = Literal[
     "status",
@@ -194,8 +202,35 @@ class NetworkEvent(_Frozen):
         return self.model_copy(update={**cleared, "har_filled": frozenset[HarField]()})
 
     @property
+    def write_method(self) -> str | None:
+        """The state-changing method the request acts as, or None: its own method, one an
+        override header (`X-HTTP-Method-Override: DELETE`) or a `_method=` query names, or POST
+        for a GraphQL GET whose `query` is a mutation."""
+        method = self.method.upper()
+        if method in MUTATION_METHODS:
+            return method
+        for name, value in self.request_headers.items():
+            named = value.strip().upper()
+            if name.lower() in METHOD_OVERRIDE_HEADERS and named in MUTATION_METHODS:
+                return named
+        for key, value in parse_qsl(urlsplit(self.url).query, keep_blank_values=True):
+            if key.lower() == "_method" and value.strip().upper() in MUTATION_METHODS:
+                return value.strip().upper()
+            if key == "query" and _GRAPHQL_MUTATION.match(value):
+                return "POST"
+        return None
+
+    @property
     def is_mutation(self) -> bool:
-        return self.method.upper() in MUTATION_METHODS
+        return self.write_method is not None
+
+    @property
+    def shown_method(self) -> str:
+        """The method as recorded, with the write it acts as when that differs (`GET as
+        DELETE`)."""
+        method = self.method.upper()
+        acts = self.write_method
+        return f"{method} as {acts}" if acts is not None and acts != method else method
 
     @property
     def ok(self) -> bool:

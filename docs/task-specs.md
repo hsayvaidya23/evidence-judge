@@ -94,7 +94,8 @@ NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
 
 - With `site` or `allowed_hosts` set, request, page text, URL and value predicates only match
   requests and page states on the site: a `GET` to another host or port proves nothing either.
-- With the site inferred, a mutation (POST, PUT, PATCH, DELETE) and every page state (page text,
+- With the site inferred, a mutation (POST, PUT, PATCH, DELETE, or a GET that acts as one;
+  see [What counts as a mutation](#what-counts-as-a-mutation)) and every page state (page text,
   URLs, values read with `page_regex`) must be on the inferred site. A POST to a third party
   (`https://httpbin.org/anything/order`) cannot prove "order placed", and it is reported as a
   side effect; a confirmation shown on another host (a gist or paste page the agent opened)
@@ -199,6 +200,34 @@ predicate whose status is `ok` (the default), `2xx` or `null` is checked twice:
 
 To forbid only one exact outcome, give an exact code such as `status: "201"`; that predicate is
 not widened. `expect` entries are unaffected: a request there must succeed to count.
+
+### What counts as a mutation
+
+A request is a mutation when its method is POST, PUT, PATCH or DELETE, and also when a GET (or
+any other method) says it acts as one:
+
+- an `X-HTTP-Method-Override`, `X-HTTP-Method` or `X-Method-Override` header naming a write
+  method (`X-HTTP-Method-Override: DELETE`);
+- a `_method=` query parameter naming a write method (`/api/cart/1?_method=delete`; the key and
+  the value are matched in any case);
+- a GraphQL GET whose `query` parameter, decoded, is a mutation (`mutation`, after optional
+  whitespace, commas, comments and an operation name, then a selection set). It acts as a POST.
+
+Such a request is judged like the write it names: a side effect when nothing explains it, and a
+`request` predicate with `method: DELETE` (or `POST` for the GraphQL case) matches it, as does
+one with `method: GET`. Reports show it as `GET as DELETE /api/cart/1`.
+
+A plain GET that changes state (`<img src="/api/cart/delete?id=1">`, a link to `/logout`) cannot
+be told apart from a read: the judge does not know the endpoint's semantics. If the site has such
+endpoints, name them in a `forbid` entry, `{kind: request, method: GET, url_contains:
+[/api/cart/delete]}`, so a run that calls one fails.
+
+First-party analytics beacons are POSTs too (`navigator.sendBeacon("/collect", ...)` on every
+click). A `forbid` entry that matches any POST (`{kind: request, method: POST}`) therefore fails
+an honest read-only run on such a site. Scope `forbid` entries to the endpoints that matter with
+`url_contains` (`/api/order`, `/cart`), and explain the beacon with an `allow` entry
+(`{kind: request, method: POST, url_contains: [/collect]}`) so it is not reported as a side
+effect.
 
 ### Allowed intermediate mutations
 

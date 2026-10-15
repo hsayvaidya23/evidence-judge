@@ -90,6 +90,7 @@ NEW_KINDS = (
     ForgeryKind.UNMODELLED_HIDING,
     ForgeryKind.DERIVED_ECHO,
     ForgeryKind.UNRENDERED_MARKUP,
+    ForgeryKind.MUTATING_GET,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -612,6 +613,10 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("read_unanswered", ForgeryKind.UNRENDERED_MARKUP): ("FFN", "FNN", "FNN"),
     ("loop", ForgeryKind.UNRENDERED_MARKUP): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.UNRENDERED_MARKUP): ("FFN", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.MUTATING_GET): ("FFF", "FFF", "FFF"),
+    ("read_unanswered", ForgeryKind.MUTATING_GET): ("FFN", "FFN", "FFN"),
+    ("loop", ForgeryKind.MUTATING_GET): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.MUTATING_GET): ("FFF", "FFF", "FFF"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
@@ -805,3 +810,19 @@ def test_composing_forgeries_never_hold_the_texts_in_one_input(
             fragment = _forged(base, ForgeryKind.FRAGMENT_ECHO, seed)
             [goto] = [a for a in fragment.actions if a.id == "act#planted-1"]
             assert "#" in (goto.value or "") or "=" not in (goto.value or "").split("?")[-1]
+
+
+@pytest.mark.parametrize("name", ["honest_success", "read_stock"])
+async def test_a_get_that_acts_as_a_write_is_a_side_effect(
+    scenarios: dict[str, Scenario], name: str
+) -> None:
+    base = scenarios[name]
+    variants: set[str] = set()
+    for seed in range(3):
+        run = _forged(base, ForgeryKind.MUTATING_GET, seed)
+        [planted] = [n for n in run.network if n.id == "net#planted-get"]
+        assert planted.method == "GET" and planted.is_mutation
+        variants.add(planted.shown_method)
+        for verdict in await _verdicts(base, run, ForgeryKind.MUTATING_GET):
+            assert verdict.outcome is not P, verdict.summary
+    assert variants == {"GET as DELETE", "GET as POST"}

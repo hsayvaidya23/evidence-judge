@@ -78,6 +78,7 @@ def test_evidence_kinds() -> None:
         ForgeryKind.UNMODELLED_HIDING,
         ForgeryKind.DERIVED_ECHO,
         ForgeryKind.UNRENDERED_MARKUP,
+        ForgeryKind.MUTATING_GET,
     } == EVIDENCE_KINDS
 
 

@@ -219,3 +219,33 @@ async def test_url_regex_still_sees_the_full_url() -> None:
     run = make_run(network=[net(1, "GET", "/api/search?q=kettle")])
     pred = RequestPredicate(url_regex=r"\?q=kettle$")
     assert (await RequestChecker().evaluate(pred, ctx(run))).status is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    ("path", "headers", "acts_as"),
+    [
+        ("/api/cart/1", {"X-HTTP-Method-Override": "DELETE"}, "DELETE"),
+        ("/api/cart/1", {"x-http-method": "put"}, "PUT"),
+        ("/api/cart/1", {"X-Method-Override": " Patch "}, "PATCH"),
+        ("/api/cart/1?_method=DELETE", {}, "DELETE"),
+        ("/api/cart/1?_METHOD=delete", {}, "DELETE"),
+        ("/graphql?query=mutation%7BplaceOrder(sku%3A1)%7Bid%7D%7D", {}, "POST"),
+        ("/graphql?query=%20%23note%0A%2Cmutation%20Place(%24s%3AID)%20%7Bx%7D", {}, "POST"),
+        ("/api/cart/1", {"X-HTTP-Method-Override": "GET"}, None),
+        ("/api/cart/1?_method=GET", {}, None),
+        ("/graphql?query=%7Bproduct(id%3A1)%7Bname%7D%7D", {}, None),
+        ("/graphql?query=query%20Q%7Bmutation%7D", {}, None),
+        ("/search?query=mutation+testing", {}, None),
+        ("/api/cart/delete?id=1", {}, None),
+    ],
+)
+def test_a_get_acts_as_the_write_it_names(
+    path: str, headers: dict[str, str], acts_as: str | None
+) -> None:
+    event = net(1, "GET", path).model_copy(update={"request_headers": headers})
+    assert event.write_method == acts_as
+    assert event.is_mutation is (acts_as is not None)
+    if acts_as is not None:
+        assert event.shown_method == f"GET as {acts_as}"
+        assert RequestMatcher(RequestPredicate(method=acts_as)).misses(event) == []
+        assert RequestMatcher(RequestPredicate(method="GET")).misses(event) == []
