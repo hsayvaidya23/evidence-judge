@@ -207,6 +207,35 @@
       "title": "Support",
       "type": "string"
     },
+    "TamperDetection": {
+      "additionalProperties": false,
+      "description": "Whether the run's evidence source can show the agent tampering with the page or its\nrequests (running its own code, mocking responses, writing storage).",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/TamperLevel",
+          "description": "full: a Playwright trace with its call log; partial: browser-use history (model-level actions only); none: no record of the agent's calls (HAR only)"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "reason"
+      ],
+      "title": "TamperDetection",
+      "type": "object"
+    },
+    "TamperLevel": {
+      "enum": [
+        "full",
+        "partial",
+        "none"
+      ],
+      "title": "TamperLevel",
+      "type": "string"
+    },
     "Usage": {
       "additionalProperties": false,
       "properties": {
@@ -331,6 +360,18 @@
       "default": null,
       "description": "Share of claim verdicts decided without an LLM",
       "title": "Deterministic Share"
+    },
+    "tamper_detection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TamperDetection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "What the evidence source can show of tampering; None when not assessed"
     },
     "warnings": {
       "items": {

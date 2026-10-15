@@ -26,7 +26,13 @@ from evidence_judge.core.provenance import (
 )
 from evidence_judge.core.site import Site
 from evidence_judge.core.taskspec import TaskSpec
-from evidence_judge.core.verdict import ClaimVerdict, RunVerdict, Usage
+from evidence_judge.core.verdict import (
+    ClaimVerdict,
+    RunVerdict,
+    TamperDetection,
+    TamperLevel,
+    Usage,
+)
 from evidence_judge.extract import ClaimExtractor, HeuristicExtractor, LLMClaimExtractor, coverage
 from evidence_judge.llm.base import (
     BudgetExceededError,
@@ -51,6 +57,9 @@ class JudgeOptions:
     claims: ClaimSet | None = None
     site: str | None = None
     """The site the task is on (URL or host); overrides the spec's `site`."""
+    require_tamper_evidence: bool = False
+    """Cap the run at NEEDS_REVIEW unless its source can fully show tampering (`tamper_detection`);
+    also set by the spec's `require_tamper_evidence`."""
 
 
 @dataclass(slots=True)
@@ -78,6 +87,54 @@ class _FatalErrorTrap:
             raise
 
 
+_TRACE_SOURCE = "playwright-trace"
+_AGENT_HISTORY_SOURCE = "browser-use"
+
+
+def tamper_detection(run: Run) -> TamperDetection:
+    """What `run`'s evidence source can show of the agent tampering with the page or its
+    requests. Only a Playwright trace records every call the agent made through the browser
+    (`full`); browser-use history records the model's actions, not what ran beneath them
+    (`partial`); a HAR or any other source records no calls at all (`none`)."""
+    sources = set(run.source.split("+"))
+    has_calls = Channel.ACTIONS in run.captured
+    if _TRACE_SOURCE in sources and has_calls:
+        return TamperDetection(
+            level=TamperLevel.FULL,
+            reason=(
+                "the Playwright trace records every call the agent made through Playwright, so "
+                "injected scripts, mocked or rewritten requests and storage writes show"
+            ),
+        )
+    if _AGENT_HISTORY_SOURCE in sources and has_calls:
+        return TamperDetection(
+            level=TamperLevel.PARTIAL,
+            reason=(
+                "browser-use history records the agent's model-level actions only; scripts, CDP "
+                "calls or request changes made beneath them are invisible, so it cannot fully "
+                "show whether the agent tampered with the page or its requests"
+            ),
+        )
+    return TamperDetection(
+        level=TamperLevel.NONE,
+        reason=(
+            f"this source ({run.source}) records no calls the agent made, so it cannot show "
+            "whether the agent tampered with the page or its requests; a forged HAR would look "
+            "the same"
+        ),
+    )
+
+
+def _untrusted_source(required: bool, detection: TamperDetection) -> str | None:
+    """Why the run cannot pass when tamper evidence is `required`, or None."""
+    if not required or detection.level is TamperLevel.FULL:
+        return None
+    return (
+        f"tamper evidence is required, but tamper detection is {detection.level.value}: "
+        f"{detection.reason}; record a Playwright trace from the harness"
+    )
+
+
 def _unanchored(spec: TaskSpec | None, scope: EvidenceScope) -> str | None:
     """Why the run cannot pass: no site was named, so nothing but the agent's own navigation
     says which site it was on, and a run on the agent's choice of host would prove itself."""
@@ -91,6 +148,12 @@ def _unanchored(spec: TaskSpec | None, scope: EvidenceScope) -> str | None:
         "have chosen; set `site` in the task spec (or pass --site) so evidence from another "
         "host cannot prove the task"
     )
+
+
+def _tamper_warnings(detection: TamperDetection) -> list[str]:
+    if detection.level is TamperLevel.FULL:
+        return []
+    return [f"tamper detection is {detection.level.value}: {detection.reason}"]
 
 
 class Judge:
@@ -144,6 +207,10 @@ class Judge:
             raise llm.error
         dimensions = assess_dimensions(run, ctx.index, claim_verdicts, expectations, spec)
         claim_coverage = coverage(extraction.claims.claims, run.agent_answer, [])
+        detection = tamper_detection(run)
+        required = opts.require_tamper_evidence or (
+            spec is not None and spec.require_tamper_evidence
+        )
         outcome, score, summary = decide(
             claim_verdicts,
             expectations,
@@ -154,6 +221,7 @@ class Judge:
             has_spec=spec is not None,
             unanchored=_unanchored(spec, scope),
             tampered=tampering(run),
+            untrusted_source=_untrusted_source(required, detection),
         )
         return RunVerdict(
             judge_version=__version__,
@@ -167,7 +235,12 @@ class Judge:
             dimensions=dimensions,
             claim_coverage=claim_coverage,
             deterministic_share=self._deterministic_share(claim_verdicts),
-            warnings=[*extraction.warnings, *self._capture_warnings(run)],
+            warnings=[
+                *extraction.warnings,
+                *self._capture_warnings(run),
+                *_tamper_warnings(detection),
+            ],
+            tamper_detection=detection,
             usage=ctx.usage,
         )
 

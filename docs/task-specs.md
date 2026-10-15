@@ -23,6 +23,7 @@ allow: [...]                        # request predicates for expected intermedia
 allowed_hosts: [api.example.com]    # more hosts of the site; '*.example.com' for every subdomain
 failure_markers: [...]              # regexes that mark a page a redirect lands on as a failure
 trusted_scripts: [...]              # sha256 hashes of harness scripts that do not change the page
+require_tamper_evidence: false      # true: only a Playwright trace can pass (see below)
 ```
 
 Each entry in `expect` and `forbid` is an expectation:
@@ -303,6 +304,20 @@ Only an exact match is exempt: another argument or one changed character is anot
 Calls that are not scripts (cookies, storage, CDP sessions, WebSocket routes) have no hash and
 cannot be trusted; give a harness's login state to the browser context when it is created
 (`storage_state=`), which the trace does not record as a call.
+
+### `require_tamper_evidence`: only a source that shows tampering can pass
+
+Every verdict says what its evidence can show of the agent tampering with the page or its
+requests (`tamper_detection` in the verdict JSON): `full` for a Playwright trace, whose call
+log records injected scripts, mocked or rewritten requests and storage writes; `partial` for a
+browser-use history, which records the model's actions but not what ran beneath them; `none`
+for a HAR alone or any other source without a call log. A hand-written HAR looks exactly like a
+recorded one. With `require_tamper_evidence: true` (or `--require-tamper-evidence`), a run
+whose level is not `full` is `NEEDS_REVIEW` at best:
+
+```yaml
+require_tamper_evidence: true
+```
 
 ## Predicates
 

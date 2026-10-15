@@ -32,6 +32,7 @@ class JudgeOptions:
     spec: TaskSpec | None = None
     claims: ClaimSet | None = None
     site: str | None = None
+    require_tamper_evidence: bool = False
 
 
 @dataclass
@@ -240,6 +241,16 @@ def test_spec_and_claims_are_loaded_and_redacted(
     assert calls.load_kwargs is not None and calls.load_kwargs["task"] == "Email the receipt"
     assert EMAIL not in opts.spec.model_dump_json()
     assert EMAIL not in opts.claims.model_dump_json()
+
+
+def test_require_tamper_evidence_reaches_the_judge(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path
+) -> None:
+    install(monkeypatch, calls, outcome=Outcome.PASS)
+    runner.invoke(app, ["judge", "--har", str(evidence), "-q"])
+    assert calls.options is not None and not calls.options.require_tamper_evidence
+    runner.invoke(app, ["judge", "--har", str(evidence), "--require-tamper-evidence", "-q"])
+    assert calls.options is not None and calls.options.require_tamper_evidence
 
 
 @pytest.mark.parametrize(

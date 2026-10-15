@@ -35,7 +35,11 @@ Weak contradictions (0.6) never fail a run, however many there are.
 - no site was named (no `site`, no `allowed_hosts`, no `--site`; any one of them names it), so
   the run's own first page decided which host counts. This holds with a spec or without one, read-only or not: without a
   spec the summary reads ``NEEDS_REVIEW: no site was named; pass --site or set `site` in a
-  spec.`` See [task specs](../task-specs.md#which-hosts-can-prove-something).
+  spec.`` See [task specs](../task-specs.md#which-hosts-can-prove-something);
+- tamper evidence is required (`--require-tamper-evidence` or the spec's
+  `require_tamper_evidence`) and the source cannot fully show tampering: its
+  `tamper_detection` level is `partial` (browser-use history) or `none` (HAR only). See
+  [evidence channels](evidence-channels.md#what-each-source-captures).
 </li>
 <li markdown="block">
 <span class="ej-badge ej-badge--pass">PASS</span> **Otherwise.**

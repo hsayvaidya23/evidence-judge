@@ -30,6 +30,27 @@ class Dimension(StrEnum):
     LOOPS = "loops"
 
 
+class TamperLevel(StrEnum):
+    FULL = "full"
+    PARTIAL = "partial"
+    NONE = "none"
+
+
+class TamperDetection(BaseModel):
+    """Whether the run's evidence source can show the agent tampering with the page or its
+    requests (running its own code, mocking responses, writing storage)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    level: TamperLevel = Field(
+        description=(
+            "full: a Playwright trace with its call log; partial: browser-use history (model-level "
+            "actions only); none: no record of the agent's calls (HAR only)"
+        )
+    )
+    reason: str
+
+
 class Citation(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -116,6 +137,10 @@ class RunVerdict(BaseModel):
     claim_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
     deterministic_share: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Share of claim verdicts decided without an LLM"
+    )
+    tamper_detection: TamperDetection | None = Field(
+        default=None,
+        description="What the evidence source can show of tampering; None when not assessed",
     )
     warnings: list[str] = Field(default_factory=list[str])
     usage: Usage = Field(default_factory=Usage)
