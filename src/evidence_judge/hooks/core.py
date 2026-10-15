@@ -30,6 +30,7 @@ from evidence_judge.hooks.state import (
     LOG_KEY_FILE,
     SESSION_SPEC,
     digest,
+    environment_path,
     load_snapshot,
     log_head_path,
     read_spec,
@@ -264,7 +265,7 @@ def evaluate(
     return Decision(notice="\n".join(notices) if notices else None)
 
 
-def _has_rerun(spec: Path) -> bool:
+def has_rerun(spec: Path) -> bool:
     try:
         data: object = yaml.safe_load(read_spec(spec) or b"")
     except yaml.YAMLError:
@@ -302,7 +303,7 @@ def _rerun_turn(
 ) -> Decision:
     """Re-run the tests the session spec names and judge the session against the result: the
     stop is blocked when the suite, run by the judge itself, contradicts the answer."""
-    if spec is None or not _has_rerun(spec):
+    if spec is None or not has_rerun(spec):
         return Decision()
     snapshot = (
         load_snapshot(state, context.session_id, SESSION_SPEC)
@@ -315,6 +316,11 @@ def _rerun_turn(
         answer=context.answer or context.turn.last_text or "",
         record=_session_record(context, state, log_dir),
         base=snapshot.git_head if snapshot is not None else None,
+        baseline=(
+            environment_path(state, context.session_id)
+            if state is not None and snapshot is not None and snapshot.source is not None
+            else None
+        ),
         llm=settings.llm,
         timeout_s=settings.timeout_s,
         pass_env=tuple(settings.pass_env),

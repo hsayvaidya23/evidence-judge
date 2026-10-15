@@ -4,6 +4,7 @@ evidence-log key and head anchor, so a rewritten or truncated log shows."""
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -151,6 +152,24 @@ def load_snapshot(base: Path, session_id: str, kind: str = BROWSER_SPEC) -> Spec
         taken_at=float(taken),
         git_head=head if isinstance(head, str) else None,
     )
+
+
+def environment_path(base: Path, session_id: str) -> Path:
+    """Where the turn-start hook keeps the fingerprint of the project's dependency directories
+    (see ``sessions.fingerprint``) for the stop hook's re-run."""
+    return session_dir(base, session_id) / f"{SESSION_SPEC}-environment.json"
+
+
+def save_environment(base: Path, session_id: str, fingerprint: dict[str, object]) -> Path:
+    path = environment_path(base, session_id)
+    write_private(path, json.dumps(fingerprint).encode("utf-8"))
+    return path
+
+
+def drop_environment(base: Path, session_id: str) -> None:
+    """Forget the fingerprint, so a turn without one is never compared with an older turn's."""
+    with contextlib.suppress(OSError):
+        environment_path(base, session_id).unlink()
 
 
 LOG_CHAIN: Final = "hmac-sha256"

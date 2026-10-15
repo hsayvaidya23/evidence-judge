@@ -97,6 +97,16 @@ _RerunBase = Annotated[
         "rerun.base, else HEAD)",
     ),
 ]
+_RerunBaseline = Annotated[
+    Path | None,
+    typer.Option(
+        "--rerun-baseline",
+        help="Fingerprint of .venv, venv and node_modules saved when the turn started (the "
+        "turn-start hook writes it); the re-run needs review when they changed since",
+        dir_okay=False,
+        resolve_path=True,
+    ),
+]
 _Codex = Annotated[
     Path | None,
     typer.Option(help="Codex `exec --json` output or rollout .jsonl", **_IN_FILE),
@@ -287,6 +297,7 @@ def judge_command(
         ),
     ] = False,
     rerun_base: _RerunBase = None,
+    rerun_baseline: _RerunBaseline = None,
     run_id: Annotated[str | None, typer.Option(help="Override the run id")] = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: _Debug = False,
@@ -308,7 +319,7 @@ def judge_command(
             log_anchor=log_anchor,
         )
         rerun_result = (
-            _rerun(_rerun_spec(session_spec), project, rerun_base, run.cwd, quiet)
+            _rerun(_rerun_spec(session_spec), project, rerun_base, run.cwd, quiet, rerun_baseline)
             if rerun
             else None
         )
@@ -360,14 +371,19 @@ def _rerun_spec(spec: SessionSpec | None) -> RerunSpec:
 
 
 def _rerun(
-    spec: RerunSpec, project: Path | None, base: str | None, session_cwd: str | None, quiet: bool
+    spec: RerunSpec,
+    project: Path | None,
+    base: str | None,
+    session_cwd: str | None,
+    quiet: bool,
+    baseline: Path | None = None,
 ) -> RerunResult:
     root = (project or Path.cwd()).resolve()
     if not quiet:
         _stderr().print(
             Text(f"re-running {' '.join(spec.command)} on a copy of {root}", style="dim")
         )
-    return execute(spec, root, base=base or spec.base, session_cwd=session_cwd)
+    return execute(spec, root, base=base or spec.base, session_cwd=session_cwd, baseline=baseline)
 
 
 def rerun_verdict(result: RerunResult, run_id: str | None = None) -> RunVerdict:
@@ -412,6 +428,7 @@ def rerun_command(
     spec: Annotated[Path, typer.Option(help="Session spec YAML with a rerun: block", **_IN_FILE)],
     project: _Project = None,
     rerun_base: _RerunBase = None,
+    rerun_baseline: _RerunBaseline = None,
     out: Annotated[
         Path | None, typer.Option(help="Write the verdict JSON here", **_OUT_FILE)
     ] = None,
@@ -423,7 +440,9 @@ def rerun_command(
     review, 3 bad input, 4 internal."""
     try:
         rerun_spec = _rerun_spec(_spec(spec))
-        verdict = rerun_verdict(_rerun(rerun_spec, project, rerun_base, None, quiet))
+        verdict = rerun_verdict(
+            _rerun(rerun_spec, project, rerun_base, None, quiet, rerun_baseline)
+        )
         if out:
             try:
                 write_json(verdict, out)

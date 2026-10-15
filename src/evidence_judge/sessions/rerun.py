@@ -36,6 +36,8 @@ from typing import Final, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from evidence_judge.sessions import fingerprint
+
 Runner = Literal["pytest", "go", "jest", "vitest", "cargo", "node", "unittest"]
 
 _ENV_NAME: Final = re.compile(r"\A[A-Za-z_][A-Za-z0-9_]*\Z")
@@ -1023,15 +1025,26 @@ def _same_dir(a: str | None, b: Path) -> bool:
         return False
 
 
+def _environment_changes(root: Path, baseline: Path | None) -> list[str]:
+    if baseline is None:
+        return []
+    saved = fingerprint.load(baseline)
+    if saved is None:
+        return ["the environment fingerprint from the start of the turn is missing or unreadable"]
+    return fingerprint.changes(saved, fingerprint.fingerprint(root))
+
+
 def execute(
     spec: RerunSpec,
     root: Path,
     *,
     base: str | None = None,
     session_cwd: str | None = None,
+    baseline: Path | None = None,
 ) -> RerunResult:
     """Copy `root`, run the spec's command on the copy and read the runner's report. Runs once;
-    never raises for a problem with the project, the command or the report."""
+    never raises for a problem with the project, the command or the report. `baseline` is the
+    fingerprint of the dependency directories the turn started with (see `fingerprint`)."""
     root = root.resolve()
     runner = spec.runner or infer_runner(spec.command)
     started = time.monotonic()
@@ -1104,6 +1117,7 @@ def execute(
             )
         extra: dict[str, object] = {"config_changes": changes, "base": sha, "notes": notes}
         found = configuration_above(copy, runner, env)
+        drift = _environment_changes(root, baseline)
         stdout = workspace / "stdout"
         report = stdout if plan.from_stdout else plan.report
         launched = time.time()
@@ -1132,10 +1146,16 @@ def execute(
                 )
             _kill_group(proc)
         found.extend(p for p in configuration_above(copy, runner, env) if p not in found)
+        drift.extend(d for d in _environment_changes(root, baseline) if d not in drift)
         if found:
             problems.append(
                 f"{', '.join(found[:3])} sits above the re-run's copy, where {runner} reads it as "
                 "the project's configuration"
+            )
+        if drift:
+            problems.append(
+                f"the environment changed during the session ({'; '.join(drift)}); the re-run "
+                "used the changed environment"
             )
         extra["exit_code"] = code
         return _decide(spec, runner, report, launched, code, done, extra)

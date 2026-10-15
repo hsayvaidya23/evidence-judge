@@ -19,6 +19,7 @@ from evidence_judge.hooks.core import (
     allow,
     evaluate,
     find_spec,
+    has_rerun,
 )
 from evidence_judge.hooks.guard import deny_message, guard_reason
 from evidence_judge.hooks.record import (
@@ -30,7 +31,14 @@ from evidence_judge.hooks.record import (
     stop_record,
 )
 from evidence_judge.hooks.settings import HookSettings
-from evidence_judge.hooks.state import SESSION_SPEC, resolve_state_dir, snapshot_spec
+from evidence_judge.hooks.state import (
+    SESSION_SPEC,
+    drop_environment,
+    resolve_state_dir,
+    save_environment,
+    snapshot_spec,
+)
+from evidence_judge.sessions.fingerprint import fingerprint
 from evidence_judge.sessions.rerun import head_revision
 
 MAX_INPUT_CHARS: Final = 8 * 1024 * 1024
@@ -116,8 +124,9 @@ _StateDir = Annotated[
 
 
 def turn_start(stream: TextIO, state_dir: Path) -> None:
-    """Save the specs the turn starts with, and the git revision when there is a session
-    spec. Never fails the agent: a problem is one line on stderr."""
+    """Save the specs the turn starts with; with a session spec, the git revision, and with a
+    `rerun:` block the fingerprint of the project's dependency directories. Never fails the
+    agent: a problem is one line on stderr."""
     try:
         settings = HookSettings()
         data = _read_input(stream)
@@ -138,6 +147,9 @@ def turn_start(stream: TextIO, state_dir: Path) -> None:
             kind=SESSION_SPEC,
             git_head=head_revision(project) if session_spec is not None else None,
         )
+        drop_environment(state_dir, session)
+        if session_spec is not None and has_rerun(session_spec):
+            save_environment(state_dir, session, fingerprint(project))
     except Exception as exc:
         sys.stderr.write(f"{NOTICE_PREFIX}could not save the turn's spec ({type(exc).__name__})\n")
 

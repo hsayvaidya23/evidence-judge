@@ -102,12 +102,16 @@ class SessionRequest:
     llm: bool
     timeout_s: float
     pass_env: tuple[str, ...] = ()
+    baseline: Path | None = None
+    """The dependency-directory fingerprint the turn-start hook saved."""
 
 
 def _session_argv(request: SessionRequest, answer_file: Path, out: Path) -> list[str]:
     common = ["--spec", str(request.spec), "--project", str(request.root), "--out", str(out)]
     if request.base:
         common += ["--rerun-base", request.base]
+    if request.baseline is not None:
+        common += ["--rerun-baseline", str(request.baseline)]
     if not request.record:
         return [sys.executable, "-m", "evidence_judge", "session", "rerun", *common, "--quiet"]
     argv = [sys.executable, "-m", "evidence_judge", "session", "judge", *request.record]

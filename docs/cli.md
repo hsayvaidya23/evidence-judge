@@ -182,6 +182,7 @@ the final answer when the log lacks them.
 | `--rerun` | Run the spec's `rerun` command on a copy of `--project` in a clean environment and decide `test_result` predicates from the runner's own report instead of the recorded output; see [Independent re-run](design/coding-agent-sessions.md#independent-re-run) |
 | `--require-rerun` | Refuse a pass unless a re-run decided the suite's result |
 | `--rerun-base REV` | Git revision the runner configuration is compared with (default: the spec's `rerun.base`, else `HEAD`) |
+| `--rerun-baseline FILE` | Fingerprint of `.venv`, `venv` and `node_modules` saved when the turn started (the turn-start hooks write it); the re-run needs review when they changed since, or when the file is missing or unreadable |
 | `--run-id TEXT` | Override the run id (default: the session id) |
 | `--quiet`, `-q` | Only set the exit code |
 | `--debug` / `--no-debug` | Show tracebacks for internal errors |
@@ -203,6 +204,7 @@ from the base revision. The verdict's `verification.method` is `rerun`.
 | `--spec FILE` | Session spec YAML with a `rerun` block |
 | `--project PATH` | The project to copy (default: the current directory) |
 | `--rerun-base REV` | As for `session judge` |
+| `--rerun-baseline FILE` | As for `session judge` |
 | `--out FILE` | Write the verdict JSON here |
 | `--quiet`, `-q` | Only set the exit code |
 | `--debug` / `--no-debug` | Show tracebacks for internal errors |
