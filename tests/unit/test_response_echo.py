@@ -249,4 +249,4 @@ def test_mutation_urls_are_kept_and_other_urls_masked() -> None:
     run = make_run(actions=[act(1, "fill", "#c", value="SAVE-TEN")], network=[post, get])
     masked = EvidenceIndex(run).without_agent_input.run.network
     assert masked[0].url == post.url
-    assert masked[1].url == f"{HOST}/api/orders?coupon=%00"
+    assert masked[1].url == f"{HOST}/api/orders?%00=%00"

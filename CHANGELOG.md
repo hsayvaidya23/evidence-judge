@@ -211,6 +211,12 @@ the names exported from `evidence_judge`) is defined under
   `display:none` span between the words) previewed as HTML showed "In stock" and passed. Each
   input with markup now also counts as the text a page shows for it, read by the same rules as
   a snapshot's page text: comments, scripts, styles, templates and hidden elements left out.
+- **A URL fragment or a valueless query key the agent opened is input.** Only query values
+  and path segments were, and a `goto` back to a page the site had served added nothing, so
+  reopening the product page with `#In%20stock`, or opening it with `?In%20stock`, that its
+  script showed as "Showing: In stock" passed. The fragment of every URL the agent opens (whole
+  and split on `/`, `?`, `&`, `=`) and every query key of an opened URL or `GET` request are
+  now inputs; the fragment counts even on a page the site had already served.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

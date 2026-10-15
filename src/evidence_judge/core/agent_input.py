@@ -1,6 +1,7 @@
 """What the agent put into a run itself, replayed from its actions: typed text and the values
 fields took as it edited them, text it copied from pages, the options it chose in drop-downs,
-uploaded file names and file text, and the values of URLs it opened and GET requests it sent;
+uploaded file names and file text, the query keys and values of URLs it opened and GET
+requests it sent, and the path and fragment of URLs it opened;
 and every value a form field held in a snapshot, however it got there."""
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ _MODIFIERS: Final = {
 _SHORTCUTS: Final = frozenset("acxvzy")
 """Keys that, with Control or Meta, are editing shortcuts."""
 _TYPED_KEY = re.compile(r"key([a-z])|digit(\d)|numpad(\d)")
+_FRAGMENT_PARTS = re.compile(r"[/?&=]")
 _LINE_BREAK = re.compile(r"\n|(?<=[.!?])\s+")
 COPIED_WORDS: Final = 32
 """Longest run of words a copied page contributes as one input."""
@@ -83,8 +85,10 @@ def _action_inputs(run: Run, typing: _Typing) -> Iterator[tuple[str, Site | None
             yield from ((text, None) for text in _uploaded(action))
         elif name == SELECT and action.value:
             yield from ((text, None) for text in _chosen(action.value))
-        elif name == GOTO and (url := _agent_opened(action, served, before)):
-            yield from ((v, Site.of_url(url)) for v in _url_inputs(url, with_path=True))
+        elif name == GOTO and (url := action.value or action.url):
+            opened = _agent_opened(url, served, before)
+            values = _url_inputs(url, with_path=True) if opened else _fragment_inputs(url)
+            yield from ((v, Site.of_url(url)) for v in values)
 
 
 def _uploaded(action: ActionEvent) -> Iterator[str]:
@@ -101,13 +105,10 @@ def _chosen(value: str) -> Iterator[str]:
     yield from dict.fromkeys([value, *value.split(", ")])
 
 
-def _agent_opened(action: ActionEvent, served: dict[str, float], before: float) -> str | None:
-    """The URL a GOTO opened, unless the browser had already loaded it, or been redirected to
-    it, before the previous action."""
-    url = action.value or action.url
-    if url and served.get(_page_key(url), math.inf) >= before:
-        return url
-    return None
+def _agent_opened(url: str, served: dict[str, float], before: float) -> bool:
+    """A GOTO of `url` opened it, unless the browser had already loaded it, or been redirected
+    to it, before the previous action (its fragment aside, which the site never sees)."""
+    return served.get(_page_key(url), math.inf) >= before
 
 
 class _Field:
@@ -470,8 +471,21 @@ def _file_names(value: str) -> Iterator[str]:
 
 
 def _url_inputs(url: str, *, with_path: bool) -> list[str]:
+    """The decoded query keys and values of `url`; `with_path`, also its path segments and its
+    fragment (`_fragment_inputs`)."""
     parts = urlsplit(url)
-    values = [value for _, value in parse_qsl(parts.query)]
+    values = [text for pair in parse_qsl(parts.query, keep_blank_values=True) for text in pair]
     if with_path:
         values += [unquote(segment) for segment in parts.path.split("/")]
+        values += _fragment_inputs(url)
     return values
+
+
+def _fragment_inputs(url: str) -> list[str]:
+    """The decoded fragment of a URL the agent opened, and each part of it between "/", "?",
+    "&" and "=": the site never chose it, even on a page it served, and its script can show it
+    ("#In%20stock" shown as "Showing: In stock")."""
+    fragment = urlsplit(url).fragment
+    if not fragment:
+        return []
+    return [unquote(fragment), *(unquote(part) for part in _FRAGMENT_PARTS.split(fragment))]

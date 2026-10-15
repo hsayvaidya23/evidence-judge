@@ -186,9 +186,10 @@ class EvidenceIndex:
         field took as the agent edited it (Backspace, Delete, cursor moves, selections, cut and
         paste replayed; see core.agent_input), each line and sentence of a page it copied text from, the
         name (with and without extension) of every uploaded file and each line and sentence of
-        the text it holds (ActionEvent.file_text), the decoded path segments
-        and query values of every URL the agent opened, and the decoded query values of every
-        GET request (a form the agent submitted, or a navigation a HAR cannot attribute); the
+        the text it holds (ActionEvent.file_text), the decoded path segments,
+        query keys and values and fragment (whole and each part between "/", "?", "&" and "=")
+        of every URL the agent opened (only the fragment of one the site had already served),
+        and the decoded query keys and values of every GET request (a form the agent submitted, or a navigation a HAR cannot attribute); the
         URL inputs only count as echoed on the site of the URL they came from. Every value a
         form field held in a snapshot (PageSnapshot.field_values) is one too: replaying the
         keyboard misses values made with the mouse (a click that moves the caret, a drag and

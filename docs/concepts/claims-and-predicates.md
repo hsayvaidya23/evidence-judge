@@ -118,12 +118,15 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   single-key `press` actions on one target (keys held with `keyboard.down` count as pressed;
   their `keyboard.up` does nothing), every value a field took as the agent edited it, every
   option it chose (`select_option`, browser-use `select_dropdown_option`; the label or value
-  as the action recorded it, and each of several), the path segments and query values of every URL it
-  opened with a `goto`, and the query values of every `GET` request (a submitted search form,
-  or a navigation a HAR-only run cannot attribute), decoded and normalised like page text. A
-  `goto` back to a URL the site had already loaded or redirected to before the agent's previous
-  action (re-opening `/order/A1` after checkout redirected there) adds no path input, because
-  the site chose that URL. URL inputs only count as echoed on pages and URLs of the site they
+  as the action recorded it, and each of several), the path segments, query keys and values
+  and fragment (whole, and each part between `/`, `?`, `&` and `=`) of every URL it opened
+  with a `goto`, and the query keys and values of every `GET` request (a submitted search
+  form, or a navigation a HAR-only run cannot attribute), decoded and normalised like page
+  text; a key without a value (`?In%20stock`) counts like a value. A `goto` back to a URL the
+  site had already loaded or redirected to before the agent's previous action (re-opening
+  `/order/A1` after checkout redirected there) adds no path or query input, because the site
+  chose that URL; its fragment still counts, since the site never sees it and its script can
+  show it (`#In%20stock` shown as "Showing: In stock"). URL inputs only count as echoed on pages and URLs of the site they
   came from: typing `https://en.wikipedia.org/wiki/Kettle` does not make the shop's own
   `/products/red-kettle` an echo;
   inputs without a letter or digit are ignored, and those shorter than three characters are

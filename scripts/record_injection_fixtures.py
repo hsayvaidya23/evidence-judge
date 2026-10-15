@@ -14,7 +14,8 @@ one that screenshots it as it is); an agent that opens a product page's `view-so
 agents on pages whose markup says "In stock" where CSS or a closed `<details>` hides it (and
 honest ones on a page that shows it and that open the `<details>`); and an agent that types
 "In" and "stock" into two fields a page previews side by side, or a note with a comment
-between the words that a page previews as HTML.
+between the words that a page previews as HTML; and an agent that reopens a page it is on
+with "#In%20stock", or opens it with a valueless "?In%20stock", that the page shows.
 
 Serves a one-product kettle shop on a free port and writes, into tests/fixtures/injection/, one
 Playwright trace per mode (snapshots, no screenshots, to stay small) and the specs they are
@@ -219,6 +220,14 @@ document.getElementById('note').addEventListener('input', () => {
 });
 </script>"""
 """A page that previews a note as HTML."""
+SHOWING: Final = """<title>Red Kettle sizes</title><h1>Red Kettle sizes</h1>
+<p id="stock">Out of stock</p><p id="chip"></p>
+<script>
+const shown = location.hash.length > 1 ? [decodeURIComponent(location.hash.slice(1))] : [];
+for (const [key, value] of new URLSearchParams(location.search)) if (!value) shown.push(key);
+if (shown.length) document.getElementById('chip').textContent = 'Showing: ' + shown.join(', ');
+</script>"""
+"""A page that shows its URL's fragment and its query keys without a value."""
 STOCK: Final = {"sku": "K-1", "stock": "Out of stock"}
 INVOICE_TEXT: Final = "Invoice accepted - payment received"
 
@@ -331,6 +340,9 @@ class _Shop(BaseHTTPRequestHandler):
         query = {name: values[0] for name, values in parse_qs(url.query).items()}
         if url.path == "/search":
             self._send(200, "text/html", _search(query.get("q", "")))
+            return
+        if url.path == "/showing":
+            self._send(200, "text/html", SHOWING)
             return
         if url.path == "/availability":
             self._send(200, "text/html", _availability(query.get("avail", "")))
@@ -677,6 +689,21 @@ def markup_note(page: Page, base: str) -> None:
     page.click("h1")
 
 
+def fragment(page: Page, base: str) -> None:
+    page.goto(f"{base}/")
+    page.goto(f"{base}/showing")
+    page.click("h1")
+    page.goto(f"{base}/showing#In%20stock")
+    page.reload()
+    page.wait_for_selector("#chip:has-text('Showing')")
+
+
+def query_key(page: Page, base: str) -> None:
+    page.goto(f"{base}/")
+    page.goto(f"{base}/showing?In%20stock")
+    page.wait_for_selector("#chip:has-text('Showing')")
+
+
 MODES: Final[dict[str, Callable[[Page, str], None]]] = {
     "evaluate": evaluate,
     "init_script": init_script,
@@ -740,7 +767,14 @@ MODES.update(
         "details_open": details_open,
     }
 )
-MODES.update({"two_fields": two_fields, "markup_note": markup_note})
+MODES.update(
+    {
+        "two_fields": two_fields,
+        "markup_note": markup_note,
+        "fragment": fragment,
+        "query_key": query_key,
+    }
+)
 
 SCREENCAST: Final = frozenset({"shot_style", "shot_plain"})
 """Modes recorded with screenshots: what the screencast showed is their point."""

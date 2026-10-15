@@ -48,7 +48,14 @@ def test_goto_paths_and_queries_and_get_queries_are_inputs() -> None:
             net(3, "GET", "/api/items"),
         ],
     )
-    assert inputs == ("order a77 confirmed", "payment=success", "receipt", "orders", "a 77")
+    assert inputs == (
+        "order a77 confirmed",
+        "payment=success",
+        "receipt",
+        "orders",
+        "a 77",
+        "note",
+    )
 
 
 def test_reopening_a_url_the_site_sent_the_browser_to_is_not_input() -> None:
@@ -58,11 +65,40 @@ def test_reopening_a_url_the_site_sent_the_browser_to_is_not_input() -> None:
     actions = [
         act(1, "click", "#buy"),
         act(3, "click", "#details"),
-        act(4, "goto", url=f"{HOST}/order/Shipped-A77#top"),
+        act(4, "goto", url=f"{HOST}/order/Shipped-A77"),
         act(5, "goto", url=f"{HOST}/track/Linked-B12"),
     ]
     network = [redirect, net(3, "GET", "/track/Linked-B12")]
     assert _inputs(actions=actions, network=network) == ()
+
+
+def test_the_fragment_of_a_url_the_agent_opens_is_input_even_on_a_served_page() -> None:
+    actions = [
+        act(1, "goto", url=f"{HOST}/p/red"),
+        act(2, "click", "h1"),
+        act(3, "goto", url=f"{HOST}/p/red#In%20stock"),
+        act(4, "goto", url=f"{HOST}/p/red#/tab=Shipped-A77&sort"),
+    ]
+    network = [net(1, "GET", "/p/red")]
+    assert _inputs(actions=actions, network=network) == (
+        "/tab=shipped-a77&sort",
+        "shipped-a77",
+        "in stock",
+        "sort",
+        "red",
+        "tab",
+    )
+
+
+def test_query_keys_without_a_value_are_input() -> None:
+    actions = [act(1, "goto", url=f"{HOST}/p/red?In%20stock&Sold+out=")]
+    network = [net(2, "GET", "/search?Order%20A77")]
+    assert _inputs(actions=actions, network=network) == (
+        "order a77",
+        "in stock",
+        "sold out",
+        "red",
+    )
 
 
 def test_a_url_the_agent_opened_first_stays_input_when_the_site_serves_it_later() -> None:
