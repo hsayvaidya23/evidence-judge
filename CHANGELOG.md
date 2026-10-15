@@ -2,33 +2,134 @@
 
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
-[Semantic Versioning](https://semver.org/).
+[Semantic Versioning](https://semver.org/). What SemVer covers (the CLI, the verdict JSON and
+the names exported from `evidence_judge`) is defined under
+[Stability](docs/reference/python-api.md#stability).
 
 ## [Unreleased]
 
 ### Added
-- Ingest of Playwright traces (format v7–v10), HAR 1.2 and browser-use history into one normalised `Run` model.
-- Claim extraction with Claude (structured output, verbatim-quote validation, prompt-injection defences) and an offline heuristic extractor.
-- Typed predicates (`request`, `page_text`, `url`, `action`, `value`, `screenshot`) with deterministic checkers; the screenshot vision check runs only as a last resort.
-- Task specs with `expect`, `forbid`, `constraints`, `allow` and `allowed_hosts`.
+
+- Ingest of Playwright traces (format v7–v10), HAR 1.2 and browser-use histories (a history file
+  or a run directory) into one normalised `Run`; a HAR recorded with a trace is merged into it.
+- Claim extraction with Claude (structured output, verbatim-quote validation, prompt-injection
+  defences) and an offline heuristic extractor. Offline, "changed the X to Y" becomes a claim
+  proven by the `POST`, `PUT` or `PATCH` that carried Y.
+- Typed predicates (`request`, `page_text`, `url`, `action`, `value`, `screenshot`) with
+  deterministic checkers; the screenshot vision check runs only as a last resort.
+- Task specs with `expect`, `forbid`, `constraints`, `allow`, `site` and `allowed_hosts`,
+  validated when they load (statuses, regexes, JSON paths, numbers, hosts). `request` predicates
+  gain `query_contains`; `allowed_hosts` takes `*.` wildcards for subdomains.
+- `failure_markers` in a spec: regexes, in any language, for failure pages a redirect can land
+  on.
+- `trusted_scripts` in a spec: the sha256 of harness scripts you vouch for, so they do not
+  count as the agent tampering with the page.
 - Six verdict dimensions: success, side effects, state, guardrails, recovery and loops.
 - PASS / FAIL / NEEDS_REVIEW outcomes; evidence absence counts only on captured channels.
-- Secret and PII redaction with HMAC fingerprints so redacted values still match.
-- JSON (versioned schema), self-contained HTML and console reports.
-- `evidence-judge` CLI (`judge`, `inspect`, `schema`, `version`) with CI-friendly exit codes.
-- LLM budget, disk cache and fake client for tests.
-- Demo shop and seven recorded agent runs with a golden regression test.
-- Forgery lab: deterministic and LLM forgers for the four manipulation kinds from "Gaming the Judge" plus a style-only control.
-- `evidence-judge bench`: false-PASS rates with Wilson intervals for Evidence Judge (with and without a spec) and a transcript LLM-judge baseline.
-- Benchmark forgeries for attacks that once got a false PASS (`expect_echo`, `echo_bypass`, `offsite_confirmation`, `agent_chosen_host`, `redirect_to_error`, `baseline_tautology`), a read-only task scenario and honest-edit controls with false REVIEW/FAIL rates.
+- Secret and PII redaction with HMAC fingerprints, so redacted values still match, and a stable
+  per-installation redaction key, so LLM cache hits survive restarts.
+- JSON (versioned schema `evidence-judge/run-verdict@1`), self-contained HTML and console
+  reports. The HTML report meets WCAG AA contrast and works on phones.
+- `evidence-judge` CLI (`judge`, `inspect`, `bench`, `schema`, `version`) with CI-friendly exit
+  codes; `judge --site` names the site the task is on. `inspect` lists every call that made
+  evidence the agent's own, with each script's sha256 for `trusted_scripts`.
+- A public Python API exported from `evidence_judge` (`Judge`, `JudgeOptions`, `load_run`,
+  `TaskSpec`, `RunVerdict`, `Outcome`, `Settings`, `build_llm`, `Redactor`).
+- LLM cost budget per judged run, concurrency cap, disk cache and a fake client for tests.
+- Integrations (optional extras): OpenTelemetry `gen_ai.evaluation.result` events, Langfuse
+  scores, Arize Phoenix span annotations and an Inspect AI scorer; `judge --otel` and
+  `--langfuse-trace-id` export from the CLI.
+- Docker image (non-root, multi-stage, base images pinned by digest, dependencies installed from
+  the lockfile with hashes), built and smoke-tested in CI.
+- Reusable GitHub Action with job-summary output and `outcome`, `score` and `report` outputs;
+  pin it to a release tag or commit SHA.
+- Demo shop and seven recorded agent runs with a golden regression test, plus real Chromium
+  traces of agents that make their own evidence.
+- Forgery lab: deterministic and LLM forgers for the four manipulation kinds from "Gaming the
+  Judge", a style-only control, and evidence attacks: injected predicates, echoes of the agent's
+  input, off-site confirmations, a mirror on another port, response echoes, script injection,
+  mocked responses, links on agent-made pages, storage tampering and CDP or WebSocket tampering.
+- `evidence-judge bench`: false-PASS rates with Wilson intervals for Evidence Judge (with a task
+  spec, a generic spec and none) and a transcript LLM-judge baseline, a read-only task scenario
+  and honest-edit controls with false REVIEW/FAIL rates.
+- Documentation site: getting started, concepts, a spec cookbook (payment providers, settings
+  changes, telemetry), CI, Docker, benchmarking and recording guides, and reference pages.
+
+### Changed
+
+- A run passes only when the site is named: the spec's `site` or `allowed_hosts`, or `--site`.
+  A site is a host and its port; `www.` is the same site, other subdomains are not unless
+  `allowed_hosts` lists them. Without a named site a run gets NEEDS_REVIEW, with a spec or
+  without one.
+- A `site`, `--site` or `allowed_hosts` value that is a public suffix (checked against the full
+  Public Suffix List, private section included), a single-label name other than `localhost`, or
+  carries a path, query, fragment or user info is refused (exit code 3).
+- A request predicate's `status` defaults to `ok` (2xx or 3xx), so POST/Redirect/GET passes;
+  `url_contains` matches scheme, host and path, never the query string.
+- A redirected mutation is judged by the page it landed on: the landing page must load, and its
+  URL and text must carry no failure marker. A page text the spec expects on it decides.
+- A mutation answered 200 whose body reports a failure (`errors`, `ok: false`, a failed
+  `status`) proves nothing.
+- `value` predicates read both the request and the response body, and every value of a repeated
+  key; a value that only some of them satisfy is no evidence.
+- An `allow` entry explains a mutation to another host only when its `url_contains` names that
+  host or its registered domain; hints point third parties to `allow`, not `allowed_hosts`.
+- Unexplained side effects, a contradicted non-key claim, conflicting evidence and failed
+  attempts at forbidden actions send the run to review; needs-review scores are capped at 0.69.
+- Screenshots are no longer sent to the LLM unless `EVJ_SCREENSHOTS_TO_LLM` is set.
+- Blocking images, fonts or media with `route.abort` is not tampering.
 
 ### Fixed
-- A spec without `site` (or `allowed_hosts`, or `--site`) no longer passes a read-only task; a spec-less run whose pages span several sites goes to review; once the site is named, a request to another host proves nothing.
-- A page shown before the agent acted, left and revisited at the end no longer meets a `final`-scope expectation or claim.
-- A URL the agent opened on one site no longer counts as an echo on another site's pages.
-- Integrations: OpenTelemetry `gen_ai.evaluation.result` events, Langfuse scores, Arize Phoenix span annotations and an Inspect AI scorer (optional extras).
-- Docker image (non-root, multi-stage) built and smoke-tested in CI.
-- Reusable GitHub Action (`uses: hsayvaidya23/evidence-judge@main`) with job-summary output and a guard against workflow-command injection from agent text.
+
+- A page shown before the agent acted, left and revisited at the end no longer meets a
+  `final`-scope expectation or claim.
+- An honest read done by typing the product page's URL can pass: only the navigation that opens
+  the start page is set-up.
+- A short word the agent typed only masks a needle that short, so typing "Your" no longer hides
+  "Thank you for your order".
+- A superscript after a number is a footnote (`$9¹` is 9, not 91); text that only folds into
+  digits is not a number.
+- The final state comes from the main page, never a blank or inline frame.
+- Non-finite JSON numbers read as missing instead of crashing; a blank `ANTHROPIC_API_KEY` or
+  `EVJ_REDACTION_KEY` means unset; an unwritable output path is a usage error (exit code 3).
+- A rejected API key or unknown model is fatal instead of falling back silently, and a heuristic
+  fallback after LLM extraction fails cannot PASS.
+- The GitHub Action judges into a fresh directory, so a second step never reuses an earlier
+  verdict, and fails on bad input or internal errors.
 
 ### Security
-- Confined browser-use screenshot paths, zip-bomb and size limits for traces, HAR mismatch detection, redaction of secret `<input>` values in snapshots.
+
+- **Agent-made evidence proves nothing.** Code the agent runs in the page (`evaluate`,
+  `add_init_script`, `set_content`, browser-use `evaluate`), responses its route handlers supply
+  or rewrite, and links it follows on `data:`, `blob:`, `about:` or `file:` pages cut the
+  evidence: what comes after can only send the run to review.
+- **Trace calls are deny-by-default.** Every recorded Playwright call outside a list of
+  navigation, interaction, reading and waiting methods counts as tampering: CDP sessions,
+  WebSocket routes, storage and cookie writes, extra headers, clocks, `route.fallback` overrides
+  and methods the list does not know. Uploaded file text counts as the agent's input.
+- **Echoes of the agent's own input are masked.** Text the agent typed, pressed, pasted, uploaded
+  or opened as a URL, replayed through edits, selections and copy-paste, cannot prove itself when
+  the site repeats it in a page, a URL or a response body; any word-start part of 8 or more
+  characters is masked too.
+- **Only the site can prove anything.** Evidence from other hosts, other ports and non-http(s)
+  pages proves nothing; the site is anchored by the spec or `--site`, never by the agent's first
+  page.
+- **Vacuous and tautological predicates are rejected**: claims every run meets, or that a
+  baseline page already showed, prove nothing.
+- **Untrusted regexes are bounded** with a per-match timeout, and catastrophic patterns are
+  refused.
+- **Constraint values are read only from mutations that took effect**, and telemetry that leaves
+  the allowed hosts or carries redacted data is flagged.
+- **Recordings are untrusted input**: browser-use screenshot and HAR file paths are confined to
+  the recording, trace, HAR and history sizes are capped before reading (zip-bomb checks
+  included), memory stays bounded, and a HAR from another run is refused.
+- **Redaction covers more**: secret `<input>` values in snapshots and bodies, URLs, credential
+  pairs and `Authorization` values in free text, CVV, PIN, OTP, SSN and phone fields,
+  percent-encoded PII, and typed form values kept out of snapshot text.
+- **The GitHub Action resists injection from agent text**: workflow commands are suspended while
+  evidence-judge runs, and the job summary is HTML-escaped.
+- **Release supply chain**: every action is pinned by commit SHA, workflows are audited with
+  zizmor, releases ship a CycloneDX SBOM and build-provenance attestations, and PyPI publishing
+  uses trusted publishing.
+
+[Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main

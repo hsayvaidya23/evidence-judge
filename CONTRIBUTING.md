@@ -43,6 +43,10 @@ unless you run `uv run pytest -m live`.
 - Library code never prints; only `cli.py` writes to the terminal.
 - Conventional commit messages: `feat(checks): ...`, `fix(ingest): ...`, `test(report): ...`,
   `docs: ...`, `ci: ...`. Keep commits small and focused.
+- **Changes to `src/` need a changelog entry** under `[Unreleased]` in `CHANGELOG.md`, written
+  for users. CI fails a pull request that changes `src/` without one; a change users cannot
+  notice (a refactor, a typo) can carry the `skip-changelog` label instead (then re-run the
+  check).
 
 ## Adding a checker
 
@@ -84,3 +88,19 @@ Adapters live in `src/evidence_judge/ingest/` and turn a recording format into a
 
 Report code is in `src/evidence_judge/report/`. The HTML report is a single self-contained file
 with a strict Content-Security-Policy: no scripts, no external requests. Keep it that way.
+
+## Releasing
+
+A maintainer cuts releases from `main`:
+
+1. Set `version` in `pyproject.toml` to the release (`0.1.0`, without the `.dev0` suffix) and
+   run `uv lock`.
+2. In `CHANGELOG.md`, rename `[Unreleased]` to a dated section (`## [0.1.0] - 2026-11-02`),
+   add a new empty `[Unreleased]` above it, and update the link references at the bottom.
+3. Merge that pull request, then tag the merge commit `vX.Y.Z` and push the tag
+   (`git tag -s v0.1.0 -m v0.1.0`, `git push origin v0.1.0`).
+4. `release.yml` runs the full CI, checks that the tag matches the package version, builds the
+   wheel and sdist with a CycloneDX SBOM, attests their build provenance, publishes to PyPI
+   with trusted publishing, and creates the GitHub Release from the changelog section with the
+   distributions and SBOM attached.
+5. On `main`, set `version` to the next development version (`0.1.1.dev0`).
