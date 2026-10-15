@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Final, cast
 from urllib.parse import parse_qsl, unquote_plus, urljoin, urlsplit
 
+import regex
+
 from evidence_judge.checks._common import (
     MAX_CITATIONS,
     cite_request,
@@ -33,6 +35,7 @@ from evidence_judge.core.evidence import Channel, NetworkEvent
 from evidence_judge.core.index import EvidenceIndex, is_document_navigation
 from evidence_judge.core.predicates import STATUS_ANY, Predicate, RequestPredicate
 from evidence_judge.core.verdict import PredicateResult, Support
+from evidence_judge.textnorm import normalize
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,7 +198,7 @@ def _hit_result(
     hits = [event for event, misses in scored if not misses]
     if not hits:
         return None
-    doubts = _doubts(hits, index) if matcher.scope is not None else {}
+    doubts = _doubts(hits, index, matcher.scope) if matcher.scope is not None else {}
     proven = [e for e in hits if e.id not in doubts]
     if not proven:
         event = hits[-1]
@@ -210,8 +213,8 @@ def _hit_result(
     )
 
 
-def _doubts(hits: list[NetworkEvent], index: EvidenceIndex) -> dict[str, str]:
-    return {e.id: d for e in hits if (d := redirect_doubt(e, index) or response_doubt(e))}
+def _doubts(hits: list[NetworkEvent], index: EvidenceIndex, scope: EvidenceScope) -> dict[str, str]:
+    return {e.id: d for e in hits if (d := redirect_doubt(e, index, scope) or response_doubt(e))}
 
 
 def _no_evidence(matcher: RequestMatcher, event: NetworkEvent, but: str) -> PredicateResult:
@@ -280,13 +283,21 @@ def _absent_result(
     )
 
 
+_LETTER_BEFORE = r"(?<![^\W\d_])"
+_LETTER_AFTER = r"(?![^\W\d_])"
 _URL_FAILURE = re.compile(
-    r"(?<![a-z])(?:errors?|err|fail(?:s|ed|ures?)?|declin(?:e|es|ed)|refus(?:e|ed|al)"
+    _LETTER_BEFORE + r"(?:errors?|err|fail(?:s|ed|ures?)?|declin(?:e|es|ed)|refus(?:al|ed|e|ée?s?)?"
     r"|reject(?:s|ed|ion)?|cancel(?:l?ed|lation)|invalid|denied|unauthori[sz]ed|expired"
-    r"|insufficient|try[\s_-]*again|problems?|unable"
-    r"|not[\s_-]+(?:be[\s_-]+)?(?:processed|completed|placed))(?![a-z])",
+    r"|insufficient|try[\s_-]*again|problems?|unable|unsuccessful|timed?[\s_-]*out"
+    r"|abgelehnt|fehl(?:er|geschlagen)?|rechaz(?:ad[oa]s?|o)|rifiut(?:at[oaie]|o)"
+    r"|[ée]checs?|[ée]chou[ée]e?s?"
+    r"|not[\s_-]+(?:be[\s_-]+)?(?:processed|completed|placed))" + _LETTER_AFTER,
     re.IGNORECASE,
 )
+_STATUS_KEY = re.compile(r"(?:status|state|result|outcome)$", re.IGNORECASE)
+_STATUS_FAILURE: Final = frozenset({"ko", "nok", "nack"})
+_SUCCESS_KEY = re.compile(r"^(?:ok|success|succeeded|successful|paid|approved)$", re.IGNORECASE)
+_FALSE: Final = frozenset({"false", "0", "no"})
 _TEXT_FAILURE = re.compile(
     r"\b(?:errors?|failed|failure|declined|refused|rejected|invalid|denied|unauthori[sz]ed"
     r"|expired|insufficient|try\s+again|unable\s+to|went\s+wrong"
@@ -302,15 +313,23 @@ _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")
 
 def url_failure(url: str) -> str | None:
     """The failure marker in a URL's decoded path or query (`/checkout/failed`,
-    `?payment=card_refused`, `paymentDeclined`), or None. A query field whose value is unset
-    (`?error=`, `?errors=0`) marks nothing."""
+    `?payment=card_refused`, `paymentDeclined`, `?statut=refusé`, `?status=abgelehnt`), or None.
+
+    Markers are whole words, in English and a few other languages. A query field whose value
+    is unset (`?error=`, `?errors=0`) marks nothing; a status-like field (`status`, `state`,
+    `result`, `outcome`, or a name ending in one) whose whole value is `ko` or `nok` marks a
+    failure, and so does a success flag (`ok`, `success`, `paid`, ...) set to false, 0 or no.
+    """
     parts = urlsplit(url)
     fields = [unquote_plus(parts.path)]
-    fields += [
-        f"{key} {value}"
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if value.strip().casefold() not in _UNSET
-    ]
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        folded = value.strip().casefold()
+        if _STATUS_KEY.search(key) and folded in _STATUS_FAILURE:
+            return value
+        if _SUCCESS_KEY.match(key) and folded in _FALSE:
+            return f"{key}={value}"
+        if folded not in _UNSET:
+            fields.append(f"{key} {value}")
     for field in fields:
         if found := _URL_FAILURE.search(_CAMEL.sub(" ", field)):
             return found.group()
@@ -385,16 +404,46 @@ def _text_before(origin: str, event: NetworkEvent, index: EvidenceIndex) -> str 
     return _page_text(shown[-1].title, shown[-1].text) if shown else None
 
 
-def redirect_doubt(event: NetworkEvent, index: EvidenceIndex) -> str | None:
+def _marker(markers: tuple[regex.Pattern[str], ...], texts: list[str]) -> str | None:
+    """The first match of one of the spec's `failure_markers` in `texts`, or None."""
+    for text in texts:
+        for marker in markers:
+            if found := regex_search(marker, text):
+                return found.group()
+    return None
+
+
+def _shows_success(landing: str, texts: list[str], scope: EvidenceScope | None) -> bool:
+    """Whether the landing page, on the site, shows a page text the spec expects."""
+    if scope is None or not scope.success_texts or not scope.page_allowed(landing):
+        return False
+    shown = [normalize(t) for t in texts]
+    return any(normalize(p) in t for p in scope.success_texts for t in shown)
+
+
+def redirect_doubt(
+    event: NetworkEvent, index: EvidenceIndex, scope: EvidenceScope | None = None
+) -> str | None:
     """Why a mutation answered with a redirect cannot be shown to have succeeded, or None.
 
     A 3xx answers a form that worked (POST/Redirect/GET) and one that failed (a redirect back to
-    the cart with `?error=card_declined`) alike, so it proves the mutation took effect only when
-    the page it led to (the page load matching its Location header, else the next page load)
-    loaded with a 2xx and neither its URL nor what it showed before the browser moved on marks a
-    failure. A redirect back to the page the request was sent from (a settings form saving in
-    place) also needs what that page then showed recorded, and different from before. Any other
-    status returns None.
+    the cart with `?error=card_declined`) alike, so what it proves depends on the page it led to
+    (the page load matching its Location header, else the next page load), and what that page
+    showed before the browser moved on:
+
+    - it must load with a 2xx, and neither its URL (url_failure) nor, for the spec's own
+      `failure_markers` (regexes, any language), its URL or text may mark a failure;
+    - if the landing page is on the site and shows a page text the spec's `expect` asks for
+      (`scope.success_texts`, 'Thank you for your order'), that positive evidence decides: it
+      proves the mutation, whatever else the page says ('if a payment is declined later, ...');
+    - otherwise its whole text is scanned for a failure message (text_failure). Recorded page
+      text is flat, so nothing says which part is a footer; scanning less would let a landing
+      that says 'Your card was declined' prove the order. A spec that names the confirmation
+      text avoids the scan;
+    - a redirect back to the page the request was sent from (a settings form saving in place)
+      also needs what that page then showed recorded, and different from before.
+
+    Any other status returns None.
     """
     if event.status is None or not 300 <= event.status < 400:
         return None
@@ -405,9 +454,14 @@ def redirect_doubt(event: NetworkEvent, index: EvidenceIndex) -> str | None:
     led = f"{answered} and led to {describe_request(landing)}"
     if landing.status is None or not 200 <= landing.status < 300 or landing.failed:
         return f"{led}, which did not load"
-    if mark := url_failure(landing.url):
+    markers = scope.failure_markers if scope else ()
+    if mark := url_failure(landing.url) or _marker(markers, [unquote_plus(landing.url)]):
         return f"{led}, whose URL marks a failure ({quoted(mark)})"
     texts = _landing_texts(landing, index)
+    if mark := _marker(markers, texts):
+        return f"{led}, whose page shows a failure marker of the spec ({quoted(mark)})"
+    if _shows_success(landing.url, texts, scope):
+        return None
     if mark := next(filter(None, map(text_failure, texts)), None):
         return f"{led}, whose page reports a failure ({quoted(mark)})"
     origin = _origin(event, index)
@@ -423,7 +477,6 @@ def redirect_doubt(event: NetworkEvent, index: EvidenceIndex) -> str | None:
 
 _FLAG_KEYS: Final = ("ok", "success", "succeeded")
 _STATE_KEYS: Final = ("status", "state", "result", "outcome")
-_FALSE: Final = frozenset({"false", "0", "no"})
 
 
 def _reported(value: object) -> bool:
@@ -454,8 +507,9 @@ def _first_message(value: object) -> str:
 
 
 def _null_fields(data: object) -> list[str]:
-    fields = _fields(data)
-    return [k for k, v in fields.items() if v is None] if fields is not None else []
+    if not isinstance(data, dict):
+        return []
+    return [str(k) for k, v in cast(dict[object, object], data).items() if v is None]
 
 
 def response_doubt(event: NetworkEvent) -> str | None:

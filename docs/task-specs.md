@@ -21,6 +21,7 @@ forbid: [...]                       # expectations that must NOT be met
 constraints: [...]                  # value predicates that must hold
 allow: [...]                        # request predicates for expected intermediate mutations
 allowed_hosts: [api.example.com]    # more hosts of the site; '*.example.com' for every subdomain
+failure_markers: [...]              # regexes that mark a page a redirect lands on as a failure
 ```
 
 Each entry in `expect` and `forbid` is an expectation:
@@ -237,27 +238,74 @@ navigation, prove the visit with what the page shows (`page_text`) instead of it
 
 The default `ok` accepts redirects because a form that posts and then redirects
 (POST/Redirect/GET) answers the `POST` with `303` and the browser loads the result page with a
-`GET`. Write `status: 2xx` or an exact code when a redirect must not count. A failed form is
-often redirected too (`POST /api/orders → 302`, then `GET /cart?error=card_declined`), so when
-a mutation answered with a 3xx is to *prove* something (a claim or an `expect` entry), the page
-it led to is checked as well. The page load matching its `Location` header (else the next page
-load) must answer 2xx, and neither its decoded path and query nor what it showed before the
-browser moved on (its snapshots, or the final state if the run ended there) may mark a failure.
-URL markers are whole words such as `error`, `failed`, `declined`, `refused`, `rejected`,
-`cancelled`, `invalid`, `denied`, `unauthorized`, `expired`, `insufficient`, `try-again`,
-`problem`, `unable` and `not-processed` (a query field left empty or `0`, like `?errors=0`,
-marks nothing); page text is held to a narrower list of messages (`declined`, `refused`,
-`Something went wrong`, `Please try again`, `could not be placed`, ...) that ignores negations
-such as `No errors`. A redirect back to the page the request was sent from (a settings form that
-saves in place) counts only when that page's text after the redirect was recorded and differs
-from before. Otherwise the request is `no_evidence` (`... but it was answered 302 and led to GET
-/cart?error=card_declined → 200, whose URL marks a failure ('error')`) and the run goes to
-review. A
-`forbid` entry or a constraint skips this check: a forbidden `POST` answered with any 3xx
-happened. `null` needs a
+`GET`. Write `status: 2xx` or an exact code when a redirect must not count. `null` needs a
 response of any status; a request that never got one (a connection error, or one the browser
 blocked) only matches `none` or `any`. A status that is none of these is refused when the spec
 loads.
+
+#### What a mutation proves
+
+When a mutation is to *prove* something (a claim or an `expect` entry), matching it is not
+enough: a failed write is often answered like a successful one. The request is `no_evidence`,
+and the run goes to review, when:
+
+- **its response reports a failure.** A `2xx` whose JSON (or form-encoded) body has a
+  top-level `errors` or `error` that holds something, an `ok`, `success` or `succeeded` that is
+  false, or a `status`, `state`, `result` or `outcome` that names a failure (`failed`,
+  `declined`, `payment_refused`, ...). A GraphQL `{"data": {"placeOrder": null}, "errors":
+  [{"message": "Payment declined"}]}` answered `200` reads `... but it was answered 200 and its
+  response reports an error ('Payment declined'), with 'placeOrder' null`.
+- **it was redirected to a failure.** A failed form is often redirected too (`POST
+  /api/orders → 302`, then `GET /cart?error=card_declined`), so a 3xx is judged by the page it
+  led to: the page load matching its `Location` header, else the next page load, and what that
+  page showed before the browser moved on (its snapshots, or the final state if the run ended
+  there). In order:
+    1. The page must load with a 2xx.
+    2. Its decoded path and query must not mark a failure. URL markers are whole words:
+       `error`, `failed`, `declined`, `refused`, `rejected`, `cancelled`, `invalid`, `denied`,
+       `unauthorized`, `expired`, `insufficient`, `try-again`, `problem`, `unable`,
+       `unsuccessful`, `timeout`, `timed-out`, `not-processed`, and a few common words in
+       other languages (`refusé`, `abgelehnt`, `fehlgeschlagen`, `Fehler`, `rechazado`,
+       `rifiutato`, `échec`). A status-like query field (`status`, `state`, `result`,
+       `outcome`, or a name ending in one, such as `paymentStatus`) whose whole value is `ko`
+       or `nok` marks a failure, and so does a success flag (`ok`, `success`, `paid`,
+       `approved`, ...) set to `false`, `0` or `no`. A query field left empty or `0`, like
+       `?errors=0`, marks nothing.
+    3. Neither its URL nor its text may match one of the spec's `failure_markers` (below).
+    4. If the page is on the site and shows a page text that an `expect` entry asks for
+       (`Thank you for your order`), that positive evidence decides: the mutation is proven,
+       whatever else the page says. A confirmation page with a footer such as `If a payment is
+       declined later, we will email you` passes.
+    5. Otherwise the whole page text is scanned for a failure message (`declined`, `refused`,
+       `Something went wrong`, `Please try again`, `could not be placed`, ...; negations such
+       as `No errors` are ignored). Recorded page text is flat, so nothing tells a footer from
+       the message; a landing page that says `Your card was declined` must not prove the
+       order, so the scan reads all of it, and a footer that mentions a failure sends the run
+       to review. Name the confirmation text in an `expect` entry and step 4 applies instead.
+    6. A redirect back to the page the request was sent from (a settings form that saves in
+       place) counts only when that page's text after the redirect was recorded and differs
+       from before.
+
+    A failed check reads like `... but it was answered 302 and led to GET
+    /cart?error=card_declined → 200, whose URL marks a failure ('error')`.
+
+A URL `expect` entry does not stand in for step 4: an order page such as `/order/A1` is
+reached whether or not its payment went through. A `forbid` entry or a constraint skips all of
+this: a forbidden `POST` answered with any 3xx, or with a `200` that reports errors, happened.
+
+#### `failure_markers`: failures in your site's words
+
+The built-in markers are mostly English. List the words or messages your site shows when the
+task fails, in any language, as `failure_markers`: case-insensitive regular expressions matched
+against the decoded URL and the text of the page a redirect lands on. A match always makes the
+mutation `no_evidence`, even when the page also shows the expected confirmation text.
+
+```yaml
+failure_markers:
+  - Zahlung\s+(wurde\s+)?abgelehnt     # "payment declined"
+  - paiement\s+refus                    # "paiement refusé"
+  - estado=rechazado
+```
 
 `url_contains` ignores the query string so that `POST /api/log?next=/api/orders` cannot pass for
 an order request. Use `query_contains` to match query parameters, or `url_regex` for the whole

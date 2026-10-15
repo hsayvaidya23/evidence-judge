@@ -203,10 +203,17 @@ async def evaluate_expectation(
 def spec_scope(
     spec: TaskSpec | None, index: EvidenceIndex, site: str | None = None
 ) -> EvidenceScope:
-    """The hosts that may prove claims and `expect` entries for a run graded with `spec`;
-    `site` stands in for the spec's own `site` (a --site given without a spec)."""
+    """The hosts that may prove claims and `expect` entries for a run graded with `spec`, with
+    the spec's page texts and `failure_markers` that decide what a redirect proves; `site`
+    stands in for the spec's own `site` (a --site given without a spec)."""
+    if spec is None:
+        return EvidenceScope.of(index, [], site)
     return EvidenceScope.of(
-        index, spec.allowed_hosts if spec else [], site or (spec.site if spec else None)
+        index,
+        spec.allowed_hosts,
+        site or spec.site,
+        success_texts=spec.success_texts(),
+        failure_markers=spec.failure_markers,
     )
 
 

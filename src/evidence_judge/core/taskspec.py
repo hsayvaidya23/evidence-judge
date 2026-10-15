@@ -31,7 +31,13 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from evidence_judge.core.evidence import MUTATION_METHODS
-from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
+from evidence_judge.core.predicates import (
+    PageTextPredicate,
+    Pattern,
+    Predicate,
+    RequestPredicate,
+    ValuePredicate,
+)
 from evidence_judge.core.site import Site
 
 
@@ -110,6 +116,15 @@ class TaskSpec(BaseModel):
         ),
     )
 
+    failure_markers: list[Pattern] = Field(
+        default_factory=list[Pattern],
+        description=(
+            "Regexes (case-insensitive, any language) that mark a page as a failure: a "
+            "mutation answered with a redirect proves nothing when the page it lands on has "
+            "one in its URL or text, e.g. 'Zahlung abgelehnt' or 'statut=refus'"
+        ),
+    )
+
     @field_validator("site")
     @classmethod
     def _site(cls, value: str | None) -> str | None:
@@ -125,6 +140,17 @@ class TaskSpec(BaseModel):
         named = [self.site] if self.site else []
         return list(
             dict.fromkeys(Site.parse(h, wildcard=True) for h in [*named, *self.allowed_hosts])
+        )
+
+    def success_texts(self) -> list[str]:
+        """The page texts its `expect` entries ask for, in order."""
+        return list(
+            dict.fromkeys(
+                p.contains
+                for e in self.expect
+                for p in [*e.all, *e.any]
+                if isinstance(p, PageTextPredicate)
+            )
         )
 
     def changes_state(self) -> bool:
