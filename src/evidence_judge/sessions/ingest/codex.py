@@ -16,7 +16,13 @@ from typing import Any, Final
 from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, as_str
 from evidence_judge.sessions import edits
 from evidence_judge.sessions.ingest._lines import LineStats, iter_records, parse_ts
-from evidence_judge.sessions.models import CallStatus, EvidenceKind, SessionRun, SessionSource
+from evidence_judge.sessions.models import (
+    CallStatus,
+    EvidenceKind,
+    FileEditEvent,
+    SessionRun,
+    SessionSource,
+)
 from evidence_judge.sessions.normalize import ToolCall, build_events
 from evidence_judge.sessions.shell import tokenize, unwrap_shell
 
@@ -66,10 +72,11 @@ def _changes_list(changes: Any) -> list[tuple[str, str, list[str] | None, list[s
     if isinstance(changes, list):
         for item in map(as_object, listed):
             path = as_str(item.get("path"))
-            kind = _KINDS.get(as_str(item.get("kind")) or "", "unknown")
+            raw_kind = item.get("kind")
+            shape = as_object(raw_kind)
+            kind = _KINDS.get(as_str(raw_kind) or as_str(shape.get("type")) or "", "unknown")
             if path:
-                added: list[str] | None = [] if kind == "add" else None
-                out.append((path, kind, [] if kind == "add" else None, added))
+                out.extend(_listed_change(path, kind, as_str(item.get("diff")), shape))
         return out
     for path, value in as_object(changes).items():
         detail = as_object(value)
@@ -91,6 +98,25 @@ def _changes_list(changes: Any) -> list[tuple[str, str, list[str] | None, list[s
         if move := as_str(detail.get("move_path")):
             out.append((path, "delete", None, []))
             out.append((move, "add", [], None))
+    return out
+
+
+def _listed_change(
+    path: str, kind: str, diff: str | None, shape: JsonObject
+) -> list[tuple[str, str, list[str] | None, list[str] | None]]:
+    """One `{path, kind, diff}` change. The exec stream's `file_change` items carry only the
+    path and kind; newer rollouts add `diff` (the unified diff of an update, the whole text of
+    an added or deleted file) and give `kind` as an object."""
+    if diff is None:
+        return [(path, kind, [] if kind == "add" else None, [] if kind == "delete" else None)]
+    if kind == "add":
+        return [(path, kind, [], diff.splitlines())]
+    if kind == "delete":
+        return [(path, kind, diff.splitlines(), [])]
+    removed, added = edits.unified_diff_lines(diff)
+    out: list[tuple[str, str, list[str] | None, list[str] | None]] = [(path, kind, removed, added)]
+    if move := as_str(shape.get("move_path")):
+        out.extend([(path, "delete", None, []), (move, "add", [], None)])
     return out
 
 
@@ -172,6 +198,16 @@ def load_exec_stream(path: Path, *, cwd: str | None = None) -> SessionRun:
         for k, n in sorted(stats.skipped_types.items())
     )
     notes.extend(f"the turn failed: {message}" for message in failed)
+    blind = [
+        e.path
+        for e in events
+        if isinstance(e, FileEditEvent) and e.lines_added is None and e.change != "delete"
+    ]
+    if blind:
+        notes.append(
+            f"the Codex exec stream records no diff for {', '.join(dict.fromkeys(blind))}; judge "
+            "the rollout file (~/.codex/sessions), or re-run the tests independently (--rerun)"
+        )
     if dropped:
         notes.append(f"{dropped} event(s) over the event cap were dropped")
     return SessionRun(

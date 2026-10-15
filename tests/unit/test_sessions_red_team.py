@@ -296,6 +296,8 @@ async def test_recorded_codex_test_data_edit_needs_review() -> None:
     run = load_session(codex=RED_TEAM.parents[1] / "codex" / "test_data_edit.exec.jsonl")
     for spec in (None, SUITE):
         verdict = await SessionJudge().judge(run, SessionJudgeOptions(offline=True, spec=spec))
-        reasons = " | ".join([verdict.summary, *(c.reason for c in verdict.claims)])
+        reasons = " | ".join(
+            [verdict.summary, *(c.reason for c in verdict.claims), *verdict.warnings]
+        )
         assert verdict.outcome is Outcome.NEEDS_REVIEW, reasons
         assert "edit#2 rewrote test file cases.json without a recorded diff" in reasons

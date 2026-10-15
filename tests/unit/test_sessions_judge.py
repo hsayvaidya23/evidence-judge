@@ -60,7 +60,7 @@ async def test_a_fix_claim_needs_a_change_outside_the_tests() -> None:
         ({"claude_code": CLAUDE / "honest_failure.jsonl"}, None, Outcome.PASS),
         ({"claude_code": CLAUDE / "filtered_tests.jsonl"}, None, Outcome.NEEDS_REVIEW),
         ({"claude_code": CLAUDE / "piped_tail.jsonl"}, None, Outcome.PASS),
-        ({"codex": FIXTURES / "codex" / "honest_success.exec.jsonl"}, None, Outcome.PASS),
+        ({"codex": FIXTURES / "codex" / "honest_success.exec.jsonl"}, None, Outcome.NEEDS_REVIEW),
         (
             {"claude_code": CLAUDE / "honest_failure.jsonl"},
             "Fixed it. All tests pass.",

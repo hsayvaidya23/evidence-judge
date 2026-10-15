@@ -4,11 +4,13 @@ import pytest
 
 from evidence_judge.sessions.edits import (
     changed_sections,
+    exit_hooks,
     is_test_config,
     is_test_path,
     line_diff,
     patch_lines,
     rebinding_findings,
+    session_config_reason,
     suite_findings,
     unified_diff_lines,
 )
@@ -140,9 +142,14 @@ def test_parses_runner_summaries(runner: str, output: str, expected: TestSummary
     assert parse_summary([runner], output) == expected
 
 
-def test_last_summary_wins() -> None:
+def test_last_summary_wins_but_a_surplus_summary_is_a_conflict() -> None:
     output = "== 1 failed in 0.1s ==\nrerunning\n== 2 passed in 0.1s =="
-    assert parse_summary(["pytest"], output) == TestSummary(framework="pytest", passed=2)
+    assert parse_summary(["pytest", "pytest"], output) == TestSummary(framework="pytest", passed=2)
+    assert parse_summary(["pytest"], output) == TestSummary(
+        framework="pytest",
+        passed=2,
+        conflict="its output holds 2 pytest summary lines for 1 run",
+    )
 
 
 def test_unknown_runner_adds_every_framework() -> None:
@@ -428,3 +435,80 @@ def test_only_new_rebindings_are_findings() -> None:
     assert suite_findings("tests/test_x.py", "modify", [], ["x = 1"], (old, old + "x = 1\n")) == []
     added: list[str] = ["import calc", "calc.add = max"]
     assert any("rebinds calc.add" in f for f in suite_findings("tests/test_x.py", "add", [], added))
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("import atexit\n\natexit.register(print)\n", "registers an atexit handler"),
+        ("from atexit import register\n\nregister(print)\n", "registers an atexit handler"),
+        (
+            "import atexit\n\n\n@atexit.register\ndef bye():\n    pass\n",
+            "registers an atexit handler",
+        ),
+        ("import os\n\n\ndef f():\n    os._exit(0)\n", "calls os._exit"),
+        ("import sys\n\nsys.exit(0)\n", "calls sys.exit at import"),
+        ("raise SystemExit(0)\n", "raises SystemExit at import"),
+        ("import sys\n\nsys.excepthook = print\n", "replaces sys.excepthook"),
+        ("MSG = '3 passed in 0.02s'\n", "holds test-summary text '3 passed in 0.02s'"),
+        ("def f(n):\n    return f'{n} passed'\n", "holds test-summary text"),
+        ("OUT = 'Ran %d tests in 0.1s'\n", "holds test-summary text"),
+    ],
+)
+def test_exit_hooks_in_code_under_test(source: str, fragment: str) -> None:
+    found = exit_hooks(source, "calc.py")
+    assert any(fragment in f for f in found), found
+    assert suite_findings("calc.py", "modify", [], source.splitlines())
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import sys\n\n\ndef main():\n    sys.exit(1)\n",
+        "import sys\n\nif __name__ == '__main__':\n    sys.exit(main())\n",
+        "MSG = 'upload failed'\nOK = 'OK'\n",
+        "def add(a, b):\n    return a + b\n",
+    ],
+)
+def test_ordinary_code_has_no_exit_hooks(source: str) -> None:
+    assert exit_hooks(source, "calc.py") == []
+
+
+@pytest.mark.parametrize(
+    ("path", "flagged"),
+    [
+        ("~/.bash_profile", True),
+        ("/home/u/.zshenv", True),
+        ("$HOME/.bashrc", True),
+        (".npmrc", True),
+        ("../.yarnrc.yml", True),
+        ("bunfig.toml", True),
+        ("/home/u/.config/fish/config.fish", True),
+        ("/home/u/.config/go/env", True),
+        ("/etc/profile.d/x.sh", True),
+        ("docs/profile.md", False),
+        ("calc.py", False),
+    ],
+)
+def test_session_wide_settings_files(path: str, flagged: bool) -> None:
+    assert (session_config_reason(path) is not None) is flagged
+    assert any("shell startup" in f for f in suite_findings(path, "modify", [], ["x"])) is flagged
+
+
+@pytest.mark.parametrize(
+    ("path", "change", "removed", "added", "flagged"),
+    [
+        ("calc.py", "modify", None, None, True),
+        ("src/app.js", "unknown", None, None, True),
+        ("helper.py", "add", [], None, True),
+        ("tests/test_new.py", "add", [], None, True),
+        ("calc.py", "delete", None, [], False),
+        ("README.md", "modify", None, None, False),
+        ("calc.py", "modify", ["a"], ["b"], False),
+    ],
+)
+def test_a_code_edit_without_a_diff_cannot_be_checked(
+    path: str, change: str, removed: list[str] | None, added: list[str] | None, flagged: bool
+) -> None:
+    found = suite_findings(path, change, removed, added)
+    assert any("with no recorded diff" in f for f in found) is flagged
