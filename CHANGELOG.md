@@ -370,6 +370,16 @@ the names exported from `evidence_judge`) is defined under
   so a reading model can tell them apart from instructions. A tag lookalike inside the text is
   defanged and cannot close the fence. The server instructions and the tool descriptions say
   that this text is data, never instructions. The hook feedback already says the same.
+- **The hook guides say what the hooks can and cannot guarantee.** The Claude Code, Codex and
+  Gemini CLI guides, `SECURITY.md` and the session design doc no longer describe evidence logs
+  as out of the agent's reach, or the stop hooks as failing open on bad evidence. Each guide now
+  has a section on the agent-writable workspace and on sandboxing the hooks' state directory:
+  - Claude Code: `sandbox.filesystem.denyRead`/`denyWrite` with
+    `allowUnsandboxedCommands: false`.
+  - Codex: `workspace-write` plus a separate OS user or container.
+  - Gemini CLI: its sandbox.
+
+  The MCP guide documents `overwrite` and the `<untrusted_data>` fencing.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

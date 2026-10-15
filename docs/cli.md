@@ -216,16 +216,20 @@ always exits 0.
 
 | Command | Agent event | Output |
 | --- | --- | --- |
-| `claude-code-stop` | Claude Code `Stop`, `SubagentStop` | `{"decision": "block", "reason": ...}` on FAIL, else `{}` or `{"systemMessage": ...}` |
+| `claude-code-stop` | Claude Code `Stop`, `SubagentStop` | `{"decision": "block", "reason": ...}` on FAIL, bad evidence after Playwright use, or a spec changed during the turn (never twice in a row); else `{}` or `{"systemMessage": ...}` |
 | `codex-stop` | Codex `Stop` | as above |
 | `gemini-after-agent` | Gemini CLI `AfterAgent` | `{"decision": "deny", "reason": ...}` on FAIL, else `{}` or `{"systemMessage": ...}` |
 | `claude-code-record` | Claude Code `UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied` | nothing; appends to the evidence log |
 | `codex-record` | Codex `UserPromptSubmit`, `PostToolUse` | nothing; appends to the evidence log |
 | `gemini-record` | Gemini CLI `BeforeAgent`, `AfterTool` | `{}`; appends to the evidence log |
+| `claude-code-turn-start` | Claude Code `UserPromptSubmit` (synchronous) | nothing; saves the turn's task spec to the state directory |
+| `codex-turn-start` | Codex `UserPromptSubmit` (synchronous) | nothing; as above |
+| `gemini-turn-start` | Gemini CLI `BeforeAgent` | `{}`; as above |
 
 | Option | Description |
 | --- | --- |
 | `--log-dir DIR` | Evidence-log directory (absolute). Record hooks default to `~/.evidence-judge/sessions`; stop hooks log the final answer only when this or `EVJ_HOOK_LOG_DIR` is set |
+| `--state-dir DIR` | The hooks' private state (absolute): spec snapshots, the evidence-log key and head anchors. Default `EVJ_HOOK_STATE_DIR`, else `$CLAUDE_PLUGIN_DATA/state`, else `~/.evidence-judge/state`. Keep it out of the agent's reach |
 
 Settings are `EVJ_HOOK_*` environment variables; see the
 [Claude Code guide](guides/claude-code.md#configuration).

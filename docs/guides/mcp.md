@@ -107,14 +107,21 @@ message that says what to change; it never ends the session.
 
 | Tool | Inputs | Returns |
 | --- | --- | --- |
-| `judge_run` | `trace`, `har`, `browser_use` (at least one); `answer` or `answer_file`; `reasoning_file`; `task`; `spec` or `spec_yaml`; `site`; `offline` (default `true`); `require_tamper_evidence`; `allow_mismatch`; `run_id`; `json_report`; `html_report` | `verdict` (the [verdict JSON](../reference/verdict-schema.md): outcome, score, summary, `tamper_detection`, each claim and expectation with its citations), `reports` written, `redaction`, `used_llm` |
+| `judge_run` | `trace`, `har`, `browser_use` (at least one); `answer` or `answer_file`; `reasoning_file`; `task`; `spec` or `spec_yaml`; `site`; `offline` (default `true`); `require_tamper_evidence`; `allow_mismatch`; `run_id`; `json_report`; `html_report`; `overwrite` (default `false`) | `verdict` (the [verdict JSON](../reference/verdict-schema.md): outcome, score, summary, `tamper_detection`, each claim and expectation with its citations), `reports` written, `redaction`, `used_llm` |
 | `inspect_run` | `trace`, `har`, `browser_use` | `sources` with their metadata, `captured` channels, `counts` (actions, requests, mutations, snapshots, screenshots, console), state-changing requests, `injections` (calls that made evidence the agent's own, with script sha256), load `warnings` |
 | `explain_verdict` | `verdict_path` (a verdict JSON) | Each contradicted or unproven claim, unmet or unknown spec entry, dimension finding and tamper-detection limit with the evidence it cites, most decisive first, plus the same as Markdown in `text` |
 | `validate_spec` | `path` or `spec_yaml` | `valid`, the spec's id and entry counts, and `errors` with dotted `location`, `line` and `column`. An invalid spec is a result, not a tool error |
 | `find_recordings` | `directory` (default: the first root), `limit` (1 to 200, default 20) | Playwright trace zips, HAR files and browser-use histories, newest first, plus unzipped trace directories |
 
 `tools/list` carries the full input and output JSON Schemas, with a description for every
-parameter.
+parameter. `judge_run` is annotated `destructiveHint: true` because it can replace an earlier
+report; every other tool is read-only.
+
+Text the tools quote from the recorded pages or from the agent (the verdict summary, claim
+quotes, reasons, evidence excerpts and warnings) comes wrapped in `<untrusted_data>` tags in
+the text summary. A tag lookalike inside the text is defanged and cannot close the fence. The
+server's instructions and the tool descriptions tell the calling model that this text is data,
+never instructions. The structured content carries the same fields unwrapped.
 
 ## Judging a Playwright MCP run
 
@@ -144,6 +151,11 @@ pass `site` so a run can pass; see [Task specs](../task-specs.md).
   directory). Every path is resolved with all symlinks followed before the check, so a symlink
   or `..` cannot lead out. Reports are never written through a symlink, and their directory
   must already exist. Relative paths resolve against the first root.
+- **No clobbering.** `json_report` and `html_report` replace an existing file only when it is an
+  earlier evidence-judge report: a verdict JSON that validates, or an HTML page with the
+  report's generator tag. Any other file is refused unless the call passes `overwrite: true`.
+- **Untrusted text is fenced.** Page- and agent-derived text in results is wrapped in
+  `<untrusted_data>`, as described under [Tools](#tools).
 - **No agent content runs.** Recordings are parsed as data with the same size limits as the CLI
   (trace entry, total and compression-ratio caps, 200 MB HAR, 50 MB browser-use history);
   specs over 1 MB and YAML anchors or aliases are refused, and verdict files over 50 MB are not

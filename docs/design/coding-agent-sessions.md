@@ -168,7 +168,8 @@ log** written by a hook the *harness* runs after every tool call (Claude Code an
 
 | Source | `tamper_detection.level` | Why |
 | --- | --- | --- |
-| evidence log (`--evidence-log`) | `full` | written by a harness hook outside the agent's reach, one record per tool call with its status |
+| evidence log (`--evidence-log`) with `--trusted-log` | `full` | written by a harness hook, one record per tool call with its status; its HMAC chain and head anchor verify, and the user asserts the log, key and anchor were outside the agent's reach |
+| evidence log without `--trusted-log`, or that does not verify | `partial` | an agent running unsandboxed as the same OS user can read the key, sign a forged log and update the anchor; the reason names what is missing |
 | `codex exec --json` stream saved by the harness | `full` | the harness captured stdout; the agent never had the file |
 | transcript or rollout file | `partial` | written by the agent's process; an agent with shell access can rewrite it |
 
@@ -220,25 +221,45 @@ Optional, used when present:
 | `duration_ms` | int | duration of the call |
 | `agent_id` | string | the subagent that made the call; its calls are evidence, not an unknown change |
 | `result` | object | the structured tool response without its output text: `structuredPatch`, `type` (`create`/`update`), `userModified` for Claude Code edits; `changes` for Codex patches |
-| `seq`, `prev` | int, string | a hash chain: `seq` counts lines from 0, `prev` is the hex SHA-256 of the previous line's bytes (without its newline), `null` on line 0 |
+| `seq`, `prev` | int, string | the chain: `seq` counts lines from 0 in arrival order (assigned under the file lock); `prev` is the hex HMAC-SHA256, under the installation's log key, of the previous line's bytes (without its newline), or the plain SHA-256 when the line has no `chain`; `null` on line 0 |
+| `chain`, `key_id` | string, string | `hmac-sha256` and a public fingerprint of the key that signed the line |
 
 How the judge reads it:
 
 - **Exit status.** `exit_code` is used as recorded. For a Gemini `run_shell_command` with a null
-  `exit_code`, the `Exit Code: N` line of the output is used. Recorders must never guess: a
-  Claude Code `PostToolUse` for `Bash` without `returnCodeInterpretation` is `0`, a
-  `PostToolUseFailure` whose `error` starts `Exit code N` is `N`, anything else is `null`.
+  `exit_code`, the `Exit Code: N` line of the output is used. Recorders must never guess:
+    - Claude Code: a `PostToolUse` for `Bash` without `returnCodeInterpretation` is `0`, and a
+      `PostToolUseFailure` whose `error` starts `Exit code N` is `N`.
+    - Codex: the payload's `exit_code` / `exitCode`, else the first `Process exited with code N`
+      line, which Codex writes before the command's own output.
+    - Anything else is `null`.
 - **Completeness of output.** An excerpt proves a summary only when it is the whole output:
   `output_truncated` is false, or the SHA-256 of the excerpt equals `stdout_sha256`. Otherwise
   the output counts as truncated.
 - **Edits.** Edit inputs give the old and new text; `result.structuredPatch` (or the Codex
   `changes` diff) gives removed lines for `Write` and patches. A `Write` to an existing test file
   without patch data counts as a test-file rewrite (rule 7).
-- **Integrity.** A line that does not parse, a record with a missing required key, or a broken
-  `seq`/`prev` chain makes the log `partial` and the run needs review. Without `seq`/`prev` the
-  judge cannot detect edits made after the fact, so recorders should write the chain and keep the
-  log where the agent's sandbox cannot reach (for a Claude Code plugin,
-  `${CLAUDE_PLUGIN_DATA}/evidence/<session_id>.jsonl`).
+- **Integrity.** A line that does not parse, a record with a missing required key, a broken
+  `seq`/`prev` chain, or a log that does not end where its head anchor says makes the run
+  incomplete, and it needs review. The verdict's `tamper_detection` comes from the log's own
+  checks:
+    - **Key.** The recorder keys the chain with a per-installation secret (`log-key`, mode
+      `0600`, in the hooks' state directory: `--state-dir`, `EVJ_HOOK_STATE_DIR`, or
+      `${CLAUDE_PLUGIN_DATA}/state`). A plain SHA-256 chain can be recomputed by anyone who can
+      write the file, so it is never more than `partial`.
+    - **Anchor.** After every line, including the stop hook's `stop` line, the recorder writes
+      the line count and the last line's MAC to `<state>/<session_id>/log-head.json`. Without
+      the anchor, lines cut off the end would not show.
+    - **Trust.** Both checks only bind an agent that cannot read the key. An agent running
+      unsandboxed as the same OS user can, so a verified log is `full` only when the user
+      passes `--trusted-log` (or sets `trusted_evidence_log: true`). Without it, the log is
+      `partial`, with the reason.
+    - **Defaults.** `session judge` finds the key and anchor in the default state directory
+      (`--log-key` and `--log-anchor` override it).
+- **Order.** Recorder hooks run `async`, so lines can arrive in a different order from the
+  calls. The judge orders calls by `seq`, the arrival order assigned under the lock. `ts` is
+  the hook's own clock, and `tool_use_id` ties a line to the transcript when the order there
+  matters.
 
 **Other sources.** Claude Code's OpenTelemetry `tool_result` events carry `tool_name`,
 `tool_use_id`, `success` and `duration_ms` (and the input only with `OTEL_LOG_TOOL_DETAILS=1`),

@@ -125,6 +125,47 @@ For gating CI on verdicts:
 - Treat a `PASS` on a HAR-only or browser-use run as "the recording is consistent with the
   claim", not as proof that the run happened.
 
+## Agent hooks and evidence logs
+
+The coding-agent hooks (Claude Code, Codex, Gemini CLI) and their evidence logs run beside an
+agent that can usually read and write files as your OS user. The threat is that agent
+weakening the check of its own answer.
+
+| Attack | What the hooks do |
+| --- | --- |
+| Stop again after being sent back, hoping the second answer is not checked | The answer is judged again. The hook does not block twice, to avoid a loop, but the user gets a warning that names what is wrong |
+| Edit or delete `.evidence-judge/spec.yaml` during the turn | The turn-start hook saved the spec, outside the workspace, before the agent acted. The judge uses that copy, and the agent is sent back for changing the spec |
+| Write a junk trace, so the judge refuses it and the hook fails open | A trace the judge refuses is bad evidence. After Playwright use, the agent is sent back |
+| Plant an older clean trace with a fresh mtime | Every trace of the turn is judged, not just the newest. A trace whose own recorded `wallTime` predates the turn is rejected. When `browser_stop_tracing` reported trace paths, only those count |
+| Delete the traces | Playwright use with no trace sends the agent back |
+| Write a `.env` in the project to change the judge's settings | The judge runs in a private temporary directory, with `EVJ_*` variables dropped unless the hook config passes them on |
+| Rewrite the evidence log and recompute its chain, or cut lines off its end | Lines are HMAC-chained under a per-installation key, mode `0600` in the hooks' state directory. A head anchor there records the line count and last MAC |
+
+Two limits remain, and the verdicts say so:
+
+- **The key and the state directory are only private if the agent cannot reach them.** An
+  unsandboxed agent running as your user can read the key, sign a forged log and update the
+  anchor; it can also forge a whole trace. So `session judge` reports a verified evidence log
+  as `partial` tamper evidence unless you pass `--trusted-log` (or set `trusted_evidence_log:
+  true` in the session spec). Pass it only when the log, key and anchor are out of the agent's
+  reach. Three ways to get there:
+    - Claude Code's sandbox with `sandbox.filesystem.denyRead`/`denyWrite` on
+      `~/.evidence-judge` and `~/.claude/plugins/data`, plus `allowUnsandboxedCommands: false`.
+    - Codex `workspace-write` together with a separate OS user or container, since that
+      sandbox confines writes but not reads.
+    - Running the agent in a container or VM that does not mount those directories.
+
+  The [Claude Code guide](docs/guides/claude-code.md#what-the-hooks-can-and-cannot-guarantee)
+  has the settings.
+- **Fail-open is limited to the hooks' own problems.** Bad hook input, invalid settings, a
+  timeout or a judge crash let the stop through with a notice, so a broken install never traps
+  the agent. Gemini CLI's hook input does not show which tools ran, so there missing or junk
+  traces are only a notice.
+
+The MCP server applies the same rule to what it returns. Page- and agent-derived text is
+fenced in `<untrusted_data>` tags. `judge_run` never replaces a file that is not an earlier
+evidence-judge report unless the caller passes `overwrite: true`.
+
 ## Untrusted recordings
 
 Recordings are treated as untrusted input, since they may come from a third party or a
