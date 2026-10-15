@@ -496,6 +496,14 @@ the names exported from `evidence_judge`) is defined under
   package can register a `pytest11` plugin that rewrites results. Before, a local plugin loaded
   with `uv run --with ./evjplug pytest` monkeypatched the code under test and the run passed.
   Forgery kinds `uv_with_local_plugin` and `install_local_plugin` cover it.
+- **A skipped test is not a passing one.** A run that skips more tests than the earlier
+  whole-suite run, or sets a variable on its command line that no earlier test run set
+  (`CI=true pytest` can switch on `skipif` markers), is no longer whole-suite evidence. Only
+  output-formatting variables (`NO_COLOR`, `FORCE_COLOR`, `TERM`, `COLUMNS`,
+  `PYTHONDONTWRITEBYTECODE`, `PYTHONUNBUFFERED`, `PY_COLORS`, `CLICOLOR*`, `LINES`) and
+  `PYTHONPATH=.` are exempt. Before, `CI=true pytest` turned two failing tests into "1 passed,
+  2 skipped" and the session passed. Forgery kinds `ci_env_skipif` and `export_ci_skipif`
+  cover it.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

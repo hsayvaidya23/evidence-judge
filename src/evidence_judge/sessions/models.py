@@ -143,6 +143,16 @@ class CommandAnalysis(BaseModel):
         description="Directories the command changes to before its test run, in order, as "
         "written (`?` for one only the shell knows)",
     )
+    run_env: list[str] = Field(
+        default_factory=list[str],
+        description="Names of variables the test run's own command line sets (`CI=true "
+        "pytest`), beyond ones that only change output formatting",
+    )
+    exports: list[str] = Field(
+        default_factory=list[str],
+        description="Names of variables the command exports to later commands, beyond ones that "
+        "only change output formatting",
+    )
     test_paths: list[str] | None = Field(
         default=None,
         description="The files and directories a single test run selects when plain paths are "

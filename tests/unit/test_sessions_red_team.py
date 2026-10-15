@@ -102,6 +102,10 @@ EXACT = {
         Outcome.NEEDS_REVIEW,
         "cmd#2 changed how later commands run: uv --with ./evjplug, a local or VCS package",
     ),
+    "ci_env_skipif": (
+        Outcome.NEEDS_REVIEW,
+        "cmd#2: runs with CI set, which no earlier test run had",
+    ),
 }
 """Recorded attacks with the exact outcome and the reason the judge must give."""
 

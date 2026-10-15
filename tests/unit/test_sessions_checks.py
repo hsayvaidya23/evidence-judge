@@ -309,6 +309,40 @@ def test_an_inline_cd_back_to_the_session_directory_is_whole() -> None:
     assert "a directory only the shell knows" in _check(ALL_PASS, subshell)[1]
 
 
+def test_more_skips_than_the_baseline_is_not_a_pass() -> None:
+    skipped = "1 passed, 2 skipped in 0s"
+    run = session(bash("pytest -q", RED, 1), edit("calc.py"), bash("pytest -q", skipped))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE
+    assert "skipped 2 tests, more than the 0 of the earlier whole-suite run cmd#1" in reason
+    same = session(
+        bash("pytest -q", "1 failed, 2 skipped"),
+        edit("calc.py"),
+        bash("pytest -q", "1 passed, 2 skipped"),
+    )
+    assert _check(ALL_PASS, same)[0] is Support.SUPPORTED
+
+
+def test_a_new_env_prefix_on_the_run_is_not_the_whole_suite() -> None:
+    run = session(bash("pytest -q", RED, 1), edit("calc.py"), bash("CI=true pytest -q", GREEN))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE
+    assert "runs with CI set, which no earlier test run had" in reason
+    via_env = session(edit("calc.py"), bash("env DEBUG=1 pytest -q", GREEN))
+    assert "runs with DEBUG set" in _check(ALL_PASS, via_env)[1]
+    kept = session(
+        bash("CI=true pytest -q", RED, 1), edit("calc.py"), bash("CI=true pytest -q", GREEN)
+    )
+    assert _check(ALL_PASS, kept)[0] is Support.SUPPORTED
+    exported = session(edit("calc.py"), bash("export CI=true"), bash("pytest -q", GREEN))
+    assert "runs with CI set" in _check(ALL_PASS, exported)[1]
+    formatting = session(edit("calc.py"), bash("export NO_COLOR=1"), bash("pytest -q", GREEN))
+    assert _check(ALL_PASS, formatting)[0] is Support.SUPPORTED
+    for prefix in ("NO_COLOR=1", "FORCE_COLOR=1", "PYTHONPATH=.", "COLUMNS=200", "TERM=dumb"):
+        allowed = session(edit("calc.py"), bash(f"{prefix} pytest -q", GREEN))
+        assert _check(ALL_PASS, allowed)[0] is Support.SUPPORTED, prefix
+
+
 def test_a_shrunken_suite_is_not_the_whole_suite() -> None:
     run = session(
         bash("pytest -q", RED, 1), edit("calc.py"), bash("pytest -q", ".\n1 passed in 0s")

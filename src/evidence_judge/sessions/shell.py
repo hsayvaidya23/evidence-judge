@@ -735,6 +735,8 @@ class _Classified:
     paths: list[str] | None = None
     """The paths a test run selects when plain paths are its only filters."""
     nested: CommandAnalysis | None = None
+    run_env: list[str] = field(default_factory=list[str])
+    """Variables set for a test run on its own command line (`CI=true pytest`)."""
 
 
 def _split_operators(token: str) -> Iterator[str]:
@@ -1659,6 +1661,11 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
         result.filters.extend(f"runs with {name} changed" for name in changed)
         if changed:
             result.paths = None
+        result.run_env = [
+            name
+            for name, value in _command_env(simple).items()
+            if name not in RUN_ENV_ALLOWED and not _harmless_env(name, value)
+        ]
     named = result.touched
     if named is None:
         mutating = result.category is Category.MUTATING and not read_only
@@ -1670,6 +1677,29 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
         elif built := next((p for p in result.touched if _unspelled(p)), None):
             result.opaque = f"writes {built}, a path the shell builds at run time"
     return result
+
+
+RUN_ENV_ALLOWED: Final = frozenset(
+    {"PYTHONPATH", "NO_COLOR", "FORCE_COLOR", "TERM", "PYTHONDONTWRITEBYTECODE", "COLUMNS",
+     "PYTHONUNBUFFERED", "PY_COLORS", "CLICOLOR", "CLICOLOR_FORCE", "LINES"}
+)  # fmt: skip
+"""Variables a test command may set without changing which tests run or how they decide."""
+
+
+def _command_env(simple: _Simple) -> dict[str, str]:
+    """The variables a simple command sets for its program: leading assignments and those
+    passed through `env`."""
+    env = dict(simple.env)
+    words = simple.words
+    if words and program_name(words[0]) == "env":
+        for word in words[1:]:
+            if word.startswith("-"):
+                continue
+            if not _ASSIGNMENT.match(word):
+                break
+            name, _, value = word.partition("=")
+            env[name] = value
+    return env
 
 
 HARNESS_ENV: Final = frozenset(
@@ -1840,6 +1870,26 @@ def _package_change(words: list[str]) -> str | None:
     return None
 
 
+def _exports(pipelines: list[_Pipeline]) -> list[str]:
+    """Variables the command exports to later commands (`export CI=true`), beyond ones that only
+    change output formatting."""
+    names: list[str] = []
+    for pipeline in pipelines:
+        for simple in pipeline.commands:
+            words = simple.words
+            prog = program_name(words[0]) if words else ""
+            exporting = prog == "export" or (
+                prog in ("declare", "typeset") and any(re.fullmatch(r"-\w*x\w*", w) for w in words)
+            )
+            if not exporting:
+                continue
+            for word in words[1:]:
+                name, eq, value = word.partition("=")
+                if eq and name not in RUN_ENV_ALLOWED and not _harmless_env(name, value):
+                    names.append(name)
+    return names
+
+
 def _harness_change(pipelines: list[_Pipeline], command: str) -> str | None:
     """Why a command changes how later commands run (aliases, functions, PATH, packages the
     runner may load), or None."""
@@ -1977,6 +2027,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     cds: list[str] = []
     test_paths: list[str] | None = None
     run_cds: list[str] = []
+    run_env: list[str] = []
     persisting: list[str] = []
     mutating_at: list[tuple[int, int]] = []
     nested_after = False
@@ -2016,6 +2067,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 if nested.runners:
                     run_cds = [*cds, *nested.run_cds]
                     test_paths = nested.test_paths
+                    run_env = list(nested.run_env)
                 if nested.runners or (classified.category in _CHECKS and not runners):
                     nested_after = nested.mutation_after_check
                     primary = (p_index, c_index)
@@ -2028,6 +2080,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 runners.append(classified.runner)
                 filters.extend(classified.filters)
                 run_cds = list(cds)
+                run_env = list(classified.run_env)
                 test_paths = (
                     classified.paths
                     if classified.paths is not None
@@ -2105,6 +2158,8 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         opaque_write=opaque,
         lasting_mutation=lasting,
         run_cds=run_cds,
+        run_env=run_env,
+        exports=_exports(pipelines),
         test_paths=test_paths if len(runners) == 1 else None,
         cd_targets=persisting,
         mutation_after_check=mutation_after,
