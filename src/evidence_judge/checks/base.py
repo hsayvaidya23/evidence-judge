@@ -17,28 +17,42 @@ from evidence_judge.llm.base import LLMClient
 class EvidenceScope:
     """Which hosts may prove a claim or an `expect` entry.
 
-    With `allowed_hosts` set, only requests and page states on those hosts (or their subdomains)
-    count. Without it, a mutation must go to the run's primary host or a subdomain of it (a
-    leading 'www.' is ignored), so a POST to a third party cannot prove "order placed"; reads
-    and page states on any host still count. Only http and https page states count: data:,
-    about:, view-source:, file:, browser-internal and extension pages never do.
+    The site is the spec's (or --site) `site` together with `allowed_hosts`; with neither, it is
+    the run's primary host, inferred from the first page the run was on (`inferred`). Mutations
+    and page states must be on a site host or a subdomain of it (a leading 'www.' is ignored),
+    so a POST to a third party cannot prove "order placed" and neither can a confirmation page
+    on another host. Other reads count on any host unless `allowed_hosts` is set. Only http and
+    https page states count: data:, about:, view-source:, file:, browser-internal and extension
+    pages never do.
     """
 
     allowed_hosts: tuple[str, ...] = ()
     primary_host: str | None = None
+    site: str | None = None
 
     @classmethod
-    def of(cls, index: EvidenceIndex, allowed_hosts: Sequence[str] = ()) -> EvidenceScope:
-        return cls(tuple(allowed_hosts), index.primary_host)
+    def of(
+        cls, index: EvidenceIndex, allowed_hosts: Sequence[str] = (), site: str | None = None
+    ) -> EvidenceScope:
+        return cls(tuple(allowed_hosts), index.primary_host, site)
+
+    @property
+    def inferred(self) -> bool:
+        """True when nothing but the run itself says which site it was about."""
+        return not (self.site or self.allowed_hosts)
 
     @property
     def site_hosts(self) -> list[str]:
-        if self.allowed_hosts:
-            return list(self.allowed_hosts)
-        return [self.primary_host.removeprefix("www.")] if self.primary_host else []
+        if self.inferred:
+            return [self.primary_host.removeprefix("www.")] if self.primary_host else []
+        named = [self.site.removeprefix("www.")] if self.site else []
+        return list(dict.fromkeys([*named, *self.allowed_hosts]))
 
     def describe(self) -> str:
-        label = "the allowed hosts" if self.allowed_hosts else "the run's host"
+        if self.inferred:
+            label = "the run's host"
+        else:
+            label = "the allowed hosts" if self.allowed_hosts else "the site"
         return f"{label} ({', '.join(self.site_hosts)})"
 
     def request_allowed(self, event: NetworkEvent) -> bool:
@@ -50,7 +64,8 @@ class EvidenceScope:
     def page_allowed(self, url: str) -> bool:
         if not is_web_page_url(url):
             return False
-        return not self.allowed_hosts or host_allowed(url_host(url), list(self.allowed_hosts))
+        hosts = self.site_hosts
+        return not hosts or host_allowed(url_host(url), hosts)
 
 
 @dataclass(slots=True)

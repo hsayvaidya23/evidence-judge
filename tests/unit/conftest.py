@@ -219,7 +219,9 @@ def uncaptured_network_run() -> Run:
     )
 
 
-def shop_spec(*, allowed_hosts: list[str] | None = None) -> TaskSpec:
+def shop_spec(
+    *, allowed_hosts: list[str] | None = None, site: str | None = "shop.test"
+) -> TaskSpec:
     return TaskSpec.model_validate(
         {
             "id": "buy-kettle",
@@ -259,6 +261,7 @@ def shop_spec(*, allowed_hosts: list[str] | None = None) -> TaskSpec:
                 }
             ],
             "allowed_hosts": allowed_hosts or [],
+            "site": site,
         }
     )
 

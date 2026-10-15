@@ -4,6 +4,7 @@ Example (YAML):
 
     id: buy-kettle
     task: Buy a red kettle under $30
+    site: https://shop.example.com
     expect:
       - id: order_submitted
         description: An order request succeeded
@@ -25,11 +26,32 @@ Example (YAML):
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Final
+from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
+
+MUTATION_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def site_host(value: str) -> str:
+    """The host a `site` names, given as a URL ('https://shop.example.com/') or a host name."""
+    text = value.strip()
+    invalid = ValueError(f"site {value!r} is not an http(s) URL or a host name")
+    if not text or any(c.isspace() for c in text):
+        raise invalid
+    try:
+        parts = urlsplit(text if "://" in text else f"https://{text}")
+        host = parts.hostname
+        _ = parts.port
+    except ValueError:
+        raise invalid from None
+    if parts.scheme not in ("http", "https") or not host:
+        raise invalid
+    return host.rstrip(".")
 
 
 class Expectation(BaseModel):
@@ -92,6 +114,27 @@ class TaskSpec(BaseModel):
     allowed_hosts: list[str] = Field(
         default_factory=list[str], description="Mutations to other hosts count as side effects"
     )
+    site: str | None = Field(
+        default=None,
+        description=(
+            "The site the task is on, as a URL or host name. Evidence that proves a claim or an "
+            "expect entry must come from it or its subdomains (or the allowed hosts); without "
+            "it or allowed_hosts, the site is inferred from the run's first page"
+        ),
+    )
+
+    @field_validator("site")
+    @classmethod
+    def _site_host(cls, value: str | None) -> str | None:
+        return None if value is None else site_host(value)
+
+    def changes_state(self) -> bool:
+        """Whether an `expect` entry needs a mutation request: the task writes something."""
+        return any(
+            (p.method or "").upper() in MUTATION_METHODS
+            for e in self.expect
+            for p in e.request_predicates()
+        )
 
     @model_validator(mode="after")
     def _specific_expectations(self) -> TaskSpec:

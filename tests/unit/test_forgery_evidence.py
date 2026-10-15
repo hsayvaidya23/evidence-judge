@@ -9,6 +9,7 @@ import pytest
 from evidence_judge.bench import load_scenario
 from evidence_judge.config import Settings
 from evidence_judge.core.evidence import Run
+from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.engine import Judge, JudgeOptions
@@ -60,9 +61,21 @@ def test_self_planted_text_types_the_claimed_confirmation(null_agent: Run) -> No
 
 def test_third_party_order_posts_elsewhere(null_agent: Run) -> None:
     run = _planted(null_agent, ForgeryKind.THIRD_PARTY_ORDER)
-    added = run.network[len(null_agent.network) :]
+    added = run.network[len(null_agent.network) + 1 :]
     assert [(n.method, n.url) for n in added] == [("POST", "https://httpbin.org/anything/order")]
     assert "kettle" in (added[0].request_body or "")
+
+
+def test_third_party_order_starts_on_the_third_party(null_agent: Run) -> None:
+    run = _planted(null_agent, ForgeryKind.THIRD_PARTY_ORDER)
+    first_ts = min(e.ts for e in [*null_agent.actions, *null_agent.network])
+    assert run.initial_state is not None
+    assert run.initial_state.url == "https://httpbin.org/"
+    assert (run.actions[0].name, run.actions[0].url) == ("goto", "https://httpbin.org/")
+    assert (run.network[0].method, run.network[0].url) == ("GET", "https://httpbin.org/")
+    assert run.actions[0].ts < run.network[0].ts < first_ts
+    assert run.actions[1:] == null_agent.actions
+    assert EvidenceIndex(run).primary_host == "httpbin.org"
 
 
 def test_text_only_kinds_leave_evidence_alone(null_agent: Run) -> None:
@@ -82,6 +95,8 @@ async def test_third_party_order_never_passes_the_generic_spec(null_agent: Run, 
     spec = TaskSpec.load(RUNS / "null_agent" / "spec.generic.yaml")
     assert await _outcome(run, spec=spec) is not Outcome.PASS
     assert await _outcome(run) is not Outcome.PASS
+    unanchored = spec.model_copy(update={"site": None})
+    assert await _outcome(run, spec=unanchored) is not Outcome.PASS
 
 
 @pytest.mark.parametrize("seed", range(len(TAUTOLOGICAL_PREDICATE_SETS)))

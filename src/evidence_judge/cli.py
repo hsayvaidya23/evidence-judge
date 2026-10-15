@@ -21,7 +21,7 @@ from evidence_judge import __version__, engine, ingest
 from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
-from evidence_judge.core.taskspec import TaskSpec
+from evidence_judge.core.taskspec import TaskSpec, site_host
 from evidence_judge.core.verdict import Outcome, RunVerdict
 from evidence_judge.ingest import MismatchedEvidenceError
 from evidence_judge.integrations import exporters
@@ -131,8 +131,9 @@ def _run_judge(
     offline: bool,
     spec: TaskSpec | None,
     claims: ClaimSet | None,
+    site: str | None = None,
 ) -> RunVerdict:
-    options = engine.JudgeOptions(offline=offline, spec=spec, claims=claims)
+    options = engine.JudgeOptions(offline=offline, spec=spec, claims=claims, site=site)
     try:
         return asyncio.run(engine.Judge(settings, llm).judge(run, options))
     except LLMConfigError as e:
@@ -191,6 +192,13 @@ def _load_spec(path: Path) -> TaskSpec:
         return TaskSpec.load(path)
     except (OSError, ValueError, yaml.YAMLError) as e:
         raise CliError(f"invalid task spec {path}: {e}", ExitCode.USAGE) from e
+
+
+def _site(value: str) -> str:
+    try:
+        return site_host(value)
+    except ValueError as e:
+        raise CliError(f"invalid --site: {e}", ExitCode.USAGE) from e
 
 
 def _load_claims(path: Path) -> ClaimSet:
@@ -318,6 +326,10 @@ def judge(
         Path | None, typer.Option(help="File with the agent's reasoning", **_IN_FILE)
     ] = None,
     spec: Annotated[Path | None, typer.Option(help="Task spec YAML", **_IN_FILE)] = None,
+    site: Annotated[
+        str | None,
+        typer.Option(help="Site the task is on (URL or host); overrides the spec's site"),
+    ] = None,
     claims: Annotated[
         Path | None, typer.Option(help="Pre-extracted ClaimSet JSON", **_IN_FILE)
     ] = None,
@@ -351,6 +363,7 @@ def judge(
         _check_exporters(otel, langfuse_trace_id)
         settings = _settings()
         task_spec = _load_spec(spec) if spec else None
+        site_name = _site(site) if site is not None else None
         claim_set = _load_claims(claims) if claims else None
         run = _load_run(
             trace=trace,
@@ -377,7 +390,13 @@ def judge(
         if not quiet:
             _warn_about_model(err, settings, llm, offline=offline)
         verdict = _run_judge(
-            settings, llm, run, offline=offline or llm is None, spec=task_spec, claims=claim_set
+            settings,
+            llm,
+            run,
+            offline=offline or llm is None,
+            spec=task_spec,
+            claims=claim_set,
+            site=site_name,
         )
 
         if out:

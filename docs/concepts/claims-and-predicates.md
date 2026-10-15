@@ -128,7 +128,10 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   does not prove the order went through.
 
 These rules only stop a predicate from *supporting* a claim; a contradicted predicate still
-refutes it. Evidence must also come from the site itself; see
+refutes it. The first two apply to a task spec's `expect` entries as well (every predicate there
+is checked against the baseline, as for an outcome claim): such a predicate leaves the entry
+unknown (`met: null`, *predicate cannot prove an expectation*), so the run goes to review.
+`forbid` entries and `constraints` read the evidence as recorded. Evidence must also come from the site itself; see
 [which hosts can prove something](../task-specs.md#which-hosts-can-prove-something).
 
 ## Confidence

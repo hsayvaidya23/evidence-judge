@@ -93,10 +93,14 @@ So a score of 0.70 or more always means a pass, and a run waiting for review nev
 
 ## Which hosts can prove something
 
-Claims and `expect` entries are checked through an `EvidenceScope` (`checks/base.py`): with the
-spec's `allowed_hosts`, only those hosts count; without them, mutations must go to the run's
-primary host (or a subdomain), so a third-party POST cannot satisfy "order placed". Page states
-on `data:`, `about:`, `blob:` and similar URLs never prove anything. `forbid` entries and
+Claims and `expect` entries are checked through an `EvidenceScope` (`checks/base.py`): the
+site is the spec's `site` (or `--site`) and `allowed_hosts`; without either it is the run's
+primary host (`EvidenceIndex.primary_host`), inferred from the first page the run was on.
+Mutations and page states must be on a site host (or a subdomain), so a third-party POST or a
+confirmation on another host cannot satisfy "order placed"; a matching request on another host
+is `no_evidence`. Because the agent may choose the first page, a spec with a state-changing
+`expect` never passes on an inferred site (`engine._unanchored`). Page states on `data:`,
+`about:`, `blob:` and similar URLs never prove anything. `forbid` entries and
 constraints see every host. See [task specs](task-specs.md#which-hosts-can-prove-something).
 
 ## Side effects and telemetry
@@ -115,8 +119,8 @@ is not a change to application state and is skipped (`checks/dimensions.py`, `is
    whatever their host.
 2. **Untyped sendBeacon.** A POST with no resource type (or `other`) and a `text/plain`
    content type, which is what `sendBeacon` sends for a string body, is skipped only when it
-   goes to a third-party host. First-party hosts are the spec's `allowed_hosts`, or, when that
-   is empty, the run's primary host: the host of the initial state, else of the first action,
+   goes to a third-party host. First-party hosts are the site's hosts (the spec's `site` and
+   `allowed_hosts`), or, when both are empty, the run's primary host: the host of the initial state, else of the first action,
    snapshot, document navigation or final state that names a URL.
 
 Skipping telemetry as a state change does not make its body harmless: a beacon is also the

@@ -10,6 +10,10 @@ catches failed attempts: a matching request with any other status, or no respons
 result unknown, so the run goes to review instead of passing as if nothing was tried. A
 forbidden request answered 2xx or 3xx happened (a POST answered 303 took effect).
 
+An `expect` entry is proven like a claim (`checks.proof`): a predicate the run met before the
+agent acted, or one that only holds on an echo of the agent's own input, leaves it unknown.
+`forbid` entries and constraints read the evidence as recorded.
+
 An `expect` entry with an explicit `max_count` is broken when more mutations that took effect
 match its request predicates than that: "exactly once" is part of the expectation.
 """
@@ -30,6 +34,7 @@ from evidence_judge.checks._common import (
 from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.errors import RegexTimeoutError
 from evidence_judge.checks.matching import as_text
+from evidence_judge.checks.proof import guarded
 from evidence_judge.checks.registry import CheckerRegistry
 from evidence_judge.checks.request import RequestMatcher
 from evidence_judge.core.evidence import NetworkEvent
@@ -93,16 +98,18 @@ def _explaining(
 
 
 async def _evaluate(
-    predicates: Sequence[Predicate], ctx: CheckContext, registry: CheckerRegistry
+    predicates: Sequence[Predicate], ctx: CheckContext, registry: CheckerRegistry, proving: bool
 ) -> list[PredicateResult]:
+    if proving:
+        return [await guarded(p, ctx, registry, "an expectation") for p in predicates]
     return [await registry.evaluate(p, ctx) for p in predicates]
 
 
 async def _happened(
-    expectation: Expectation, ctx: CheckContext, registry: CheckerRegistry
+    expectation: Expectation, ctx: CheckContext, registry: CheckerRegistry, *, proving: bool
 ) -> tuple[bool | None, list[PredicateResult]]:
-    all_results = await _evaluate(expectation.all, ctx, registry)
-    any_results = await _evaluate(expectation.any, ctx, registry)
+    all_results = await _evaluate(expectation.all, ctx, registry, proving)
+    any_results = await _evaluate(expectation.any, ctx, registry, proving)
     happened = holds(all_results, any_results)
     return happened, _explaining(happened, all_results, any_results)
 
@@ -173,14 +180,14 @@ async def evaluate_expectation(
 ) -> ExpectationResult:
     if kind == EXPECT and (exceeded := _over_count(expectation, ctx)) is not None:
         return exceeded
-    happened, deciders = await _happened(expectation, ctx, registry)
+    happened, deciders = await _happened(expectation, ctx, registry, proving=kind == EXPECT)
     met = happened
     reason = join_reasons(deciders)
     if kind == FORBID:
         met = None if happened is None else not happened
         attempt = _attempt_of(expectation) if happened is not True else None
         if attempt is not None:
-            attempted, attempts = await _happened(attempt, ctx, registry)
+            attempted, attempts = await _happened(attempt, ctx, registry, proving=False)
             if attempted is True:
                 met, deciders = None, attempts
                 reason = f"attempted forbidden action: {join_reasons(attempts)}"
@@ -193,9 +200,14 @@ async def evaluate_expectation(
     )
 
 
-def spec_scope(spec: TaskSpec | None, index: EvidenceIndex) -> EvidenceScope:
-    """The hosts that may prove claims and `expect` entries for a run graded with `spec`."""
-    return EvidenceScope.of(index, spec.allowed_hosts if spec else [])
+def spec_scope(
+    spec: TaskSpec | None, index: EvidenceIndex, site: str | None = None
+) -> EvidenceScope:
+    """The hosts that may prove claims and `expect` entries for a run graded with `spec`;
+    `site` stands in for the spec's own `site` (a --site given without a spec)."""
+    return EvidenceScope.of(
+        index, spec.allowed_hosts if spec else [], site or (spec.site if spec else None)
+    )
 
 
 def constraint_id(constraint: ValuePredicate) -> str:

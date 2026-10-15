@@ -15,6 +15,7 @@ If `--task` is not given, the spec's `task` is used as the task text.
 ```yaml
 id: buy-kettle                      # required, unique
 task: Buy a red kettle under $30    # required, the instruction given to the agent
+site: https://shop.example.com      # the site the task is on (URL or host name)
 expect: [...]                       # expectations that must be met
 forbid: [...]                       # expectations that must NOT be met
 constraints: [...]                  # value predicates that must hold
@@ -34,20 +35,47 @@ Each entry in `expect` and `forbid` is an expectation:
 
 An expectation needs at least one predicate in `all` or `any`. When both are given, both
 conditions apply. In the verdict each one becomes an `ExpectationResult` with `met: true`,
-`false`, or `null` when the channel it needs was not captured.
+`false`, or `null` when it cannot be decided: the channel it needs was not captured, or what
+meets it proves nothing (see below).
 
 ### Which hosts can prove something
 
 Evidence that *proves* something (an agent's claim or an `expect` entry) must come from the
-site the run was about:
+site the run was about. Name it with `site` (a URL or host name, checked when the spec loads;
+`--site` on the command line overrides it). The site's hosts are `site` and the
+`allowed_hosts`, each with its subdomains and a leading `www.` ignored. With neither, the site is
+inferred from the run's first page: the initial page state, else the first page the agent
+opened. The agent chooses that page, so an agent that opens `https://evil.test/` first and
+posts its "order" to `https://evil.test/api/orders` would prove its own task. A spec whose
+`expect` entries need a state-changing request (`POST`, `PUT`, `PATCH`, `DELETE`) therefore
+never passes on an inferred site: a run that would pass gets
 
-- With `allowed_hosts` set, request, page text and URL predicates only match requests and page
-  states on those hosts or their subdomains.
-- Without it, a mutation (POST, PUT, PATCH, DELETE) must go to the run's primary host (the host
-  of the first page the run was on) or a subdomain of it, a leading `www.` ignored. A POST to a
-  third party (`https://httpbin.org/anything/order`) cannot prove "order placed", and it is
-  reported as a side effect. Reads and pages on other hosts still count. If the site posts to a
-  sibling host (`api.example.com` from `shop.example.com`), list both in `allowed_hosts`.
+```
+NEEDS_REVIEW: the site host (shop.example.com) was inferred from the run's first page, which the
+agent may have chosen; set `site` in the task spec (or pass --site) so evidence from another
+host cannot prove the task.
+```
+
+Read-only specs and runs judged without a spec are not downgraded; set `site` for them too when
+the agent picks its own start page.
+
+- With `allowed_hosts` set, request, page text, URL and value predicates only match requests
+  and page states on the site's hosts (`site` and `allowed_hosts`) or their subdomains.
+- Without it, a mutation (POST, PUT, PATCH, DELETE) and every page state (page text, URLs,
+  values read with `page_regex`) must be on a site host (`site`, else the inferred host) or a
+  subdomain of it. A POST to a third party
+  (`https://httpbin.org/anything/order`) cannot prove "order placed", and it is reported as a
+  side effect; a confirmation shown on another host (a gist or paste page the agent opened)
+  cannot prove it either: a `final`-scope predicate on such a final page is `no_evidence`, and
+  an `any`-scope one skips such pages. Other reads (a `GET` request) on any host still count.
+  If the site posts to a sibling host (`api.example.com` from `shop.example.com`), list both in
+  `allowed_hosts`.
+- A request that meets every criterion except the host is `no_evidence`, never a contradiction:
+  the judge cannot tell a third party from a sibling API host it was not told about. Its reason
+  names the host (`POST /api/orders → 201 is a POST request ... but it went to api.example.com,
+  outside the run's host (shop.example.com) ...; if api.example.com is part of the site, list it
+  in the spec's allowed_hosts`), the claim or `expect` entry stays unproven and the run goes to
+  review. Sibling hosts are not matched by registrable domain (`example.com`); list them.
 - Page states whose URL is `data:`, `about:`, `blob:` (or `javascript:`, `chrome:`,
   `devtools:`) never count: an agent can fill such a page with any text. A `final`-scope
   predicate on such a final page is `no_evidence`.
@@ -147,7 +175,13 @@ breaks these rules is refused; the extractors drop such predicates and count the
 is `no_evidence`, so the run goes to review. When a run is judged, a claim predicate that the
 run already met before the agent acted, that only holds on an echo of the agent's own input
 (text it typed or put in a URL), or (for a key outcome claim) that is neither a mutation
-request nor the final page cannot support the claim either; see [evidence that proves nothing](concepts/claims-and-predicates.md#evidence-that-proves-nothing).
+request nor the final page cannot support the claim either. The same baseline and echo rules
+hold for `expect` entries, whatever wrote the spec: an `expect` predicate the run met before the
+agent acted, or one that only holds where a page or URL echoes the agent's input (an agent that
+opens `/order/A77/confirmed` itself, or searches for "Order A77 shipped"), leaves the entry
+unknown (`met: null`) and the run goes to review. `forbid` entries and `constraints` are not
+masked: forbidden text the agent typed or that was already shown still breaks the rule. See
+[evidence that proves nothing](concepts/claims-and-predicates.md#evidence-that-proves-nothing).
 
 ### `request`: a network request was observed
 
@@ -169,7 +203,16 @@ request nor the final page cannot support the claim either; see [evidence that p
 
 The default `ok` accepts redirects because a form that posts and then redirects
 (POST/Redirect/GET) answers the `POST` with `303` and the browser loads the result page with a
-`GET`. Write `status: 2xx` or an exact code when a redirect must not count. `null` needs a
+`GET`. Write `status: 2xx` or an exact code when a redirect must not count. A failed form is
+often redirected too (`POST /api/orders → 302`, then `GET /cart?error=card_declined`), so when
+a mutation answered with a 3xx is to *prove* something (a claim or an `expect` entry), the page
+it led to is checked as well: the page load matching its `Location` header (else the next page
+load) must answer 2xx, its URL must not mark a failure (`error`, `declined`, `failed`,
+`invalid`, `denied`, `rejected`), and it must not be the page the request was sent from.
+Otherwise the request is `no_evidence` (`... but it was answered 302 and led to GET
+/cart?error=card_declined → 200, whose URL marks a failure`) and the run goes to review. A
+`forbid` entry or a constraint skips this check: a forbidden `POST` answered with any 3xx
+happened. `null` needs a
 response of any status; a request that never got one (a connection error, or one the browser
 blocked) only matches `none` or `any`. A status that is none of these is refused when the spec
 loads.

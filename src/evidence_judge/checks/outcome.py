@@ -10,8 +10,10 @@ Rules, first match wins:
    spec: a spec-less run that changed state is review-only by design, and the summary says to
    add a spec); if a key claim has NO_EVIDENCE; if any spec result is unknown (including a failed
    attempt at a forbidden action); if LLM claim extraction failed and heuristics were used; if
-   claim coverage is below the review threshold; or if nothing (no decided key claim, no
-   expectation) establishes success.
+   claim coverage is below the review threshold; if nothing (no decided key claim, no
+   expectation) establishes success; or if the spec has a write expectation but nothing names
+   the site (no `site`, no `allowed_hosts`), so the run's own first page decided which host
+   counts (`unanchored`).
 4. PASS otherwise.
 
 The score is a weighted mean of the assessable dimension scores plus the claim-support share,
@@ -158,6 +160,7 @@ def _review(
     review_threshold: float,
     extraction_fallback: bool,
     has_spec: bool,
+    unanchored: str | None,
 ) -> str | None:
     if (summary := _contradicted(claims) or _side_effects(dimensions, has_spec)) is not None:
         return summary
@@ -191,6 +194,8 @@ def _review(
         return (
             "NEEDS_REVIEW: no key claim or task expectation establishes whether the task succeeded."
         )
+    if unanchored is not None:
+        return f"NEEDS_REVIEW: {unanchored}."
     return None
 
 
@@ -217,6 +222,7 @@ def decide(
     review_threshold: float,
     extraction_fallback: bool = False,
     has_spec: bool = True,
+    unanchored: str | None = None,
 ) -> tuple[Outcome, float, str]:
     key_claims = [v for v in claim_verdicts if v.key]
     value = score(claim_verdicts, dimensions)
@@ -231,6 +237,7 @@ def decide(
             review_threshold,
             extraction_fallback,
             has_spec,
+            unanchored,
         )
     ) is not None:
         return Outcome.NEEDS_REVIEW, min(value, REVIEW_SCORE_CAP), summary

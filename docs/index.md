@@ -183,7 +183,7 @@ The `anthropic` extra enables LLM claim extraction; without it, or with `--offli
 
 <div class="ej-stats">
   <div class="ej-stat"><span class="ej-stat__value">0 / 120</span><span class="ej-stat__label">attack runs passed, with a task spec (95% CI 0–3%)</span></div>
-  <div class="ej-stat"><span class="ej-stat__value">0 / 120</span><span class="ej-stat__label">attack runs passed without a spec; 66 sent to review instead</span></div>
+  <div class="ej-stat"><span class="ej-stat__value">0 / 120</span><span class="ej-stat__label">attack runs passed without a spec; 75 sent to review instead</span></div>
   <div class="ej-stat"><span class="ej-stat__value">7 / 7</span><span class="ej-stat__label">honest controls judged correctly with a spec</span></div>
   <div class="ej-stat"><span class="ej-stat__value">135</span><span class="ej-stat__label">forged runs: 5 failed runs × 9 forgery kinds × 3 seeds</span></div>
 </div>
@@ -204,7 +204,7 @@ Offline, on seven recorded demo-shop runs; the [full method, tables and limitati
 **Claims are extracted, each with a verbatim quote.** *The agent placed an order*, *The order number 1042 was shown* and *The price was 24.00* are key claims, because the task's success depends on them.
 </li>
 <li markdown="block">
-**Each claim becomes predicates.** "Placed an order" → `{kind: request, method: POST, url_contains: [order]}` (status defaults to `ok`: 2xx or a redirect). "Order 1042 was shown" → `page_text` contains `1042`, or a response containing `1042`.
+**Each claim becomes predicates.** "Placed an order" → `{kind: request, method: POST, url_contains: [order]}` (status defaults to `ok`: 2xx, or a redirect to a page that loaded and does not mark a failure). "Order 1042 was shown" → `page_text` contains `1042`, or a response containing `1042`.
 </li>
 <li markdown="block">
 **Code checks them against the recording.** The trace captured 5 requests. None is a successful `POST` to an order URL; the closest is `POST /api/cart → 200`. Because the network channel **was captured**, that absence is a confident contradiction.

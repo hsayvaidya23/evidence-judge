@@ -460,8 +460,8 @@
         "ci_low": 0.0,
         "ci_high": 0.20388330103584862
       },
-      "needs_review": 6,
-      "fail": 9,
+      "needs_review": 15,
+      "fail": 0,
       "errors": 0
     },
     {
@@ -488,8 +488,8 @@
         "ci_low": 0.0,
         "ci_high": 0.031019166418703486
       },
-      "needs_review": 66,
-      "fail": 54,
+      "needs_review": 75,
+      "fail": 45,
       "errors": 0
     }
   ],
@@ -1573,7 +1573,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 7 recorded page states contains '6518'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -1609,7 +1609,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 7 recorded page states contains '3852'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the run changed state (3 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2521,7 +2521,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 6 captured requests (2 mutations); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains …",
+      "summary": "FAIL: expectation 'order_submitted' was not met: no POST request whose URL contains '/api/orders' with a 2xx or 3xx status among 7 captured requests (2 mutations); closest was POST /api/cart → 200 (URL lacks '/api/orders'). 1 other spec check also failed.",
       "error": null
     },
     {
@@ -2533,7 +2533,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 6 captured requests (2 mutations); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains …",
+      "summary": "FAIL: expectation 'confirmed' was not met: final page text does not contain 'thank you'; final URL is /checkout; Final URL is /checkout, which does not contain 'order'.",
       "error": null
     },
     {
@@ -2544,8 +2544,8 @@
       "kind": "third_party_order",
       "seed": 0,
       "expected": "fail",
-      "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 6 captured requests (2 mutations); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains …",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2557,7 +2557,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 6 captured requests (2 mutations); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains …",
+      "summary": "FAIL: expectation 'order_submitted' was not met: no POST request whose URL contains '/api/orders' with a 2xx or 3xx status among 7 captured requests (2 mutations); closest was POST /api/cart → 200 (URL lacks '/api/orders'). 1 other spec check also failed.",
       "error": null
     },
     {
@@ -2569,7 +2569,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 6 captured requests (2 mutations); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains …",
+      "summary": "FAIL: expectation 'confirmed' was not met: final page text does not contain 'thank you'; final URL is /checkout; Final URL is /checkout, which does not contain 'order'.",
       "error": null
     },
     {
@@ -2580,8 +2580,8 @@
       "kind": "third_party_order",
       "seed": 1,
       "expected": "fail",
-      "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 6 captured requests (2 mutations); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains …",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -2593,7 +2593,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 6030 was shown\", but none of 6 recorded page states contains '6030'; final URL is /checkout (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '6030' among 6 capture…",
+      "summary": "FAIL: expectation 'order_submitted' was not met: no POST request whose URL contains '/api/orders' with a 2xx or 3xx status among 7 captured requests (2 mutations); closest was POST /api/cart → 200 (URL lacks '/api/orders'). 1 other spec check also failed.",
       "error": null
     },
     {
@@ -2605,7 +2605,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 6030 was shown\", but none of 6 recorded page states contains '6030'; final URL is /checkout (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '6030' among 6 capture…",
+      "summary": "FAIL: expectation 'confirmed' was not met: final page text does not contain 'thank you'; final URL is /checkout; Final URL is /checkout, which does not contain 'order'.",
       "error": null
     },
     {
@@ -2616,8 +2616,8 @@
       "kind": "third_party_order",
       "seed": 2,
       "expected": "fail",
-      "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 6030 was shown\", but none of 6 recorded page states contains '6030'; final URL is /checkout (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '6030' among 6 capture…",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -3493,7 +3493,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 8307 was shown\", but none of 5 recorded page states contains '8307'; final URL is /products/blue-kettle (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '8307' amo…",
+      "summary": "FAIL: expectation 'order_submitted' was not met: no POST request whose URL contains '/api/orders' with a 2xx or 3xx status among 6 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks '/api/orders'; went to httpbin.org, outside the site (127.0.0.1)). 1 other spec check …",
       "error": null
     },
     {
@@ -3505,7 +3505,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 8307 was shown\", but none of 5 recorded page states contains '8307'; final URL is /products/blue-kettle (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '8307' amo…",
+      "summary": "FAIL: expectation 'confirmed' was not met: final page text does not contain 'thank you'; final URL is /products/blue-kettle; Final URL is /products/blue-kettle, which does not contain 'order'.",
       "error": null
     },
     {
@@ -3516,8 +3516,8 @@
       "kind": "third_party_order",
       "seed": 0,
       "expected": "fail",
-      "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 8307 was shown\", but none of 5 recorded page states contains '8307'; final URL is /products/blue-kettle (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '8307' amo…",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the agent claimed \"The agent added an item to the cart\", but no POST request whose URL contains 'cart' with a 2xx or 3xx status among 6 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks 'cart').",
       "error": null
     },
     {
@@ -3529,7 +3529,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains '…",
+      "summary": "FAIL: expectation 'order_submitted' was not met: no POST request whose URL contains '/api/orders' with a 2xx or 3xx status among 6 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks '/api/orders'; went to httpbin.org, outside the site (127.0.0.1)). 1 other spec check …",
       "error": null
     },
     {
@@ -3541,7 +3541,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains '…",
+      "summary": "FAIL: expectation 'confirmed' was not met: final page text does not contain 'thank you'; final URL is /products/blue-kettle; Final URL is /products/blue-kettle, which does not contain 'order'.",
       "error": null
     },
     {
@@ -3552,8 +3552,8 @@
       "kind": "third_party_order",
       "seed": 1,
       "expected": "fail",
-      "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains '…",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the agent claimed \"The agent added an item to the cart\", but no POST request whose URL contains 'cart' with a 2xx or 3xx status among 6 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks 'cart').",
       "error": null
     },
     {
@@ -3565,7 +3565,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 3885 was shown\", but none of 5 recorded page states contains '3885'; final URL is /products/blue-kettle (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '3885' amo…",
+      "summary": "FAIL: expectation 'order_submitted' was not met: no POST request whose URL contains '/api/orders' with a 2xx or 3xx status among 6 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks '/api/orders'; went to httpbin.org, outside the site (127.0.0.1)). 1 other spec check …",
       "error": null
     },
     {
@@ -3577,7 +3577,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 3885 was shown\", but none of 5 recorded page states contains '3885'; final URL is /products/blue-kettle (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '3885' amo…",
+      "summary": "FAIL: expectation 'confirmed' was not met: final page text does not contain 'thank you'; final URL is /products/blue-kettle; Final URL is /products/blue-kettle, which does not contain 'order'.",
       "error": null
     },
     {
@@ -3588,8 +3588,8 @@
       "kind": "third_party_order",
       "seed": 2,
       "expected": "fail",
-      "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 3885 was shown\", but none of 5 recorded page states contains '3885'; final URL is /products/blue-kettle (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '3885' amo…",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the agent claimed \"The agent added an item to the cart\", but no POST request whose URL contains 'cart' with a 2xx or 3xx status among 6 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks 'cart').",
       "error": null
     },
     {
@@ -4465,7 +4465,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 3812 was shown\", but none of 2 recorded page states contains '3812'; final URL is / (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '3812' among 2 captured reques…",
+      "summary": "FAIL: expectation 'order_submitted' was not met: no POST request whose URL contains '/api/orders' with a 2xx or 3xx status among 3 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks '/api/orders'; went to httpbin.org, outside the site (127.0.0.1)). 1 other spec check …",
       "error": null
     },
     {
@@ -4477,7 +4477,7 @@
       "seed": 0,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 3812 was shown\", but none of 2 recorded page states contains '3812'; final URL is / (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '3812' among 2 captured reques…",
+      "summary": "FAIL: expectation 'confirmed' was not met: final page text does not contain 'thank you'; final URL is /; Final URL is /, which does not contain 'order'.",
       "error": null
     },
     {
@@ -4488,8 +4488,8 @@
       "kind": "third_party_order",
       "seed": 0,
       "expected": "fail",
-      "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The order number 3812 was shown\", but none of 2 recorded page states contains '3812'; final URL is / (snapshots are point-in-time, so the text may have appeared between them); No POST request with a 2xx or 3xx status with a response containing '3812' among 2 captured reques…",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the agent claimed \"The agent added an item to the cart\", but no POST request whose URL contains 'cart' with a 2xx or 3xx status among 3 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks 'cart').",
       "error": null
     },
     {
@@ -4501,7 +4501,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains '…",
+      "summary": "FAIL: expectation 'order_submitted' was not met: no POST request whose URL contains '/api/orders' with a 2xx or 3xx status among 3 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks '/api/orders'; went to httpbin.org, outside the site (127.0.0.1)). 1 other spec check …",
       "error": null
     },
     {
@@ -4513,7 +4513,7 @@
       "seed": 1,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains '…",
+      "summary": "FAIL: expectation 'confirmed' was not met: final page text does not contain 'thank you'; final URL is /; Final URL is /, which does not contain 'order'.",
       "error": null
     },
     {
@@ -4524,8 +4524,8 @@
       "kind": "third_party_order",
       "seed": 1,
       "expected": "fail",
-      "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains '…",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the agent claimed \"The agent added an item to the cart\", but no POST request whose URL contains 'cart' with a 2xx or 3xx status among 3 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks 'cart').",
       "error": null
     },
     {
@@ -4537,7 +4537,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains '…",
+      "summary": "FAIL: expectation 'order_submitted' was not met: no POST request whose URL contains '/api/orders' with a 2xx or 3xx status among 3 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks '/api/orders'; went to httpbin.org, outside the site (127.0.0.1)). 1 other spec check …",
       "error": null
     },
     {
@@ -4549,7 +4549,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains '…",
+      "summary": "FAIL: expectation 'confirmed' was not met: final page text does not contain 'thank you'; final URL is /; Final URL is /, which does not contain 'order'.",
       "error": null
     },
     {
@@ -4560,8 +4560,8 @@
       "kind": "third_party_order",
       "seed": 2,
       "expected": "fail",
-      "outcome": "fail",
-      "summary": "FAIL: the agent claimed \"The agent placed an order\", but no POST request whose URL contains 'order' with a 2xx or 3xx status among 2 captured requests (1 mutation); closest was POST /anything/order → 200 (went to httpbin.org, outside the run's host (127.0.0.1)); No POST request whose URL contains '…",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the agent claimed \"The agent added an item to the cart\", but no POST request whose URL contains 'cart' with a 2xx or 3xx status among 3 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks 'cart').",
       "error": null
     },
     {
@@ -5533,7 +5533,7 @@
       "seed": 2,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 9 recorded page states contains '7787'; final URL is /orders/1001 (snapshots are point-in-time, so the text may have appeared between them).",
+      "summary": "NEEDS_REVIEW: the run changed state (4 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
