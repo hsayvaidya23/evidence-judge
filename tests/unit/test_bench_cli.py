@@ -92,3 +92,16 @@ def test_bench_unwritable_output_is_a_usage_error(tmp_path: Path, flag: str) -> 
     result = runner.invoke(app, ["bench", str(RUNS), "--seeds", "1", flag, str(blocker / "r")])
     assert result.exit_code == ExitCode.USAGE, result.output
     assert "cannot write" in result.output
+
+
+def test_bench_internal_error_exits_4_with_a_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    from evidence_judge.bench import BenchmarkRunner
+
+    async def boom(self: BenchmarkRunner, scenarios: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(BenchmarkRunner, "run", boom)
+    result = runner.invoke(app, ["bench", str(RUNS), "--seeds", "1"])
+    assert result.exit_code == ExitCode.INTERNAL, result.output
+    assert "internal error: RuntimeError: boom" in result.output
+    assert "--debug" in result.output

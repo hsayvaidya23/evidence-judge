@@ -525,14 +525,7 @@ def bench(
     except Exception as e:
         if debug:
             raise
-        _stderr().print(
-            Text.assemble(
-                ("internal error: ", "bold red"),
-                f"{type(e).__name__}: {e}",
-                ("  (re-run with --debug for a traceback)", "dim"),
-            )
-        )
-        raise typer.Exit(int(ExitCode.INTERNAL)) from None
+        raise _internal(e) from None
 
     if not quiet:
         typer.echo(to_markdown(result), nl=False)
