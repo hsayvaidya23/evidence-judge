@@ -133,6 +133,17 @@ the names exported from `evidence_judge`) is defined under
 
 ### Fixed
 
+- A page with a shown `<iframe>` or `<frame>` that loads a document is opaque: a status the
+  site shows inside a frame sends the run to review instead of failing it. Frame text is still
+  never read, so it proves nothing; a hidden frame changes nothing.
+- A linked stylesheet whose request the trace records as failed without a response (a refused
+  connection, an unsafe port) counts as an empty sheet, like one with an error status, instead
+  of leaving the whole page's text unsure. One the agent's route handler aborted does not.
+- The value of a shown `readonly` or `disabled` field is text the page may show: a status a
+  site puts in one sends the run to review instead of failing it, and still proves nothing.
+- A page whose `::before` or `::after` rule gives a shown element text (`content` with a letter
+  or digit, `attr()` or a counter) is opaque: a phrase missing from its snapshot sends the run to
+  review instead of failing it.
 - A page shown before the agent acted, left and revisited at the end no longer meets a
   `final`-scope expectation or claim.
 - An honest read done by typing the product page's URL can pass: only the navigation that opens
@@ -151,6 +162,10 @@ the names exported from `evidence_judge`) is defined under
 
 ### Security
 
+- **A needle the site derives from one input a few letters off proves nothing.** "instok"
+  searched for and "Did you mean: In stock?" shown, a plural stemmed away, or the input turned
+  round by the page: an occurrence within two letter edits of one input (a substitution counts
+  as two; one edit for a needle of four letters or fewer) is masked like an echo. Forgery kind `derived_echo` covers it.
 - **Agent-made evidence proves nothing.** Code the agent runs in the page (`evaluate`,
   `add_init_script`, `set_content`, browser-use `evaluate`), responses its route handlers supply
   or rewrite, and links it follows on `data:`, `blob:`, `about:` or `file:` pages cut the

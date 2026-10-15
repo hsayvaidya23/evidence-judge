@@ -422,11 +422,29 @@ async def test_a_needle_composed_from_short_inputs_goes_to_review(
 @pytest.mark.parametrize(
     ("values", "text"),
     [
+        (("instok",), "Red Kettle Out of stock. Did you mean: In stock?"),
+        (("Ins stocks",), "Red Kettle Out of stock. Showing results for In stock"),
+        (("kcots ni",), "Red Kettle Out of stock. In Stock"),
+        (("in stokc",), "Red Kettle Out of stock. Did you mean: In stock?"),
+    ],
+    ids=["misspelt", "stemmed", "reversed", "swapped"],
+)
+async def test_a_needle_a_few_letters_from_one_input_goes_to_review(
+    values: tuple[str, ...], text: str
+) -> None:
+    assert await _judged(_fields(*values, text=text), STOCK_SPEC) is Outcome.NEEDS_REVIEW
+
+
+@pytest.mark.parametrize(
+    ("values", "text"),
+    [
         (("In",), "Red Kettle In stock. Engraving: In"),
         (("tin", "stock"), "Red Kettle In stock. Engraving: tin stock"),
         (("Red Kettle", "1"), "Red Kettle In stock"),
+        (("stock",), "Red Kettle In stock"),
+        (("instructions",), "Red Kettle In stock"),
     ],
-    ids=["one-word-typed", "inside-a-word", "unrelated"],
+    ids=["one-word-typed", "inside-a-word", "unrelated", "one-word-of-it", "near-letters"],
 )
 async def test_a_needle_with_a_word_the_agent_did_not_type_is_evidence(
     values: tuple[str, ...], text: str

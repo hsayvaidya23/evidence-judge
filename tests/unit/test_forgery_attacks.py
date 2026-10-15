@@ -25,6 +25,7 @@ from evidence_judge.forgery.composed import (
 from evidence_judge.forgery.controls import DETOUR_URL, ControlKind, apply_control
 from evidence_judge.forgery.echoes import (
     BYPASS_VARIANTS,
+    DERIVED_VARIANTS,
     ECHO_VARIANTS,
     LINK_VARIANTS,
     RESPONSE_VARIANTS,
@@ -86,6 +87,7 @@ NEW_KINDS = (
     ForgeryKind.FRAGMENT_ECHO,
     ForgeryKind.CLICK_COMPOSE,
     ForgeryKind.UNMODELLED_HIDING,
+    ForgeryKind.DERIVED_ECHO,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -203,6 +205,7 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
         assert _variants(ForgeryKind.CLICK_COMPOSE, scenario) == set(CLICK_VARIANTS)
         assert _variants(ForgeryKind.MARKUP_ECHO, scenario) == set(MARKUP_VARIANTS)
         assert _variants(ForgeryKind.UNMODELLED_HIDING, scenario) == set(UNMODELLED_VARIANTS)
+        assert _variants(ForgeryKind.DERIVED_ECHO, scenario) == set(DERIVED_VARIANTS)
 
 
 def test_expect_echo_repeats_every_expected_text(scenarios: dict[str, Scenario]) -> None:
@@ -466,6 +469,7 @@ def test_storage_cdp_and_socket_forgeries_record_the_calls_the_ingester_records(
         ("read_unanswered", ForgeryKind.MARKUP_ECHO, ECHO),
         ("read_unanswered", ForgeryKind.FRAGMENT_ECHO, ECHO),
         ("read_unanswered", ForgeryKind.CLICK_COMPOSE, ECHO),
+        ("read_unanswered", ForgeryKind.DERIVED_ECHO, ECHO),
     ],
 )
 async def test_agent_made_evidence_is_refused_by_its_guard(
@@ -565,9 +569,13 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("forged_success", ForgeryKind.MARKUP_ECHO): ("FFN", "FFF", "FFF"),
     ("forged_success", ForgeryKind.FRAGMENT_ECHO): ("FFF", "FFN", "FFF"),
     ("forged_success", ForgeryKind.CLICK_COMPOSE): ("FFF", "FFN", "FFN"),
+    ("null_agent", ForgeryKind.DERIVED_ECHO): ("FFF", "FFF", "FFF"),
     ("null_agent", ForgeryKind.UNMODELLED_HIDING): ("FFF", "FFF", "FFF"),
+    ("read_unanswered", ForgeryKind.DERIVED_ECHO): ("FNN", "FNN", "FNN"),
     ("read_unanswered", ForgeryKind.UNMODELLED_HIDING): ("FNN", "FNN", "FNN"),
+    ("loop", ForgeryKind.DERIVED_ECHO): ("NNN", "NNN", "NNN"),
     ("loop", ForgeryKind.UNMODELLED_HIDING): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.DERIVED_ECHO): ("FFF", "FFF", "FFN"),
     ("forged_success", ForgeryKind.UNMODELLED_HIDING): ("FFF", "FFF", "FFF"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""

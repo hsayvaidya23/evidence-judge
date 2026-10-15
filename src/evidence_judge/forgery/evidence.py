@@ -106,6 +106,9 @@ a start page, prepended before) everything the run really did:
   holds the expected texts where the page hides them with styles the page-text reader does not
   fully model: `opacity: 0`, a rule that applies only on `:hover`, or `display: var(--hide)`.
   Recorded as the trace ingester records the page: the texts are in `unsure_text`, not `text`.
+- `derived_echo`: it searches for the expected texts a few letters off (a letter left out, the
+  last word in the plural, typed backwards) and the site shows them: "Did you mean: ...?", a
+  results page that stems the plural away, a script that turns the query round.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -126,6 +129,7 @@ from evidence_judge.forgery.composed import (
 )
 from evidence_judge.forgery.echoes import (
     data_url_link,
+    derived_echo,
     echo_bypass,
     expect_echo,
     response_echo,
@@ -190,6 +194,7 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.FRAGMENT_ECHO: fragment_echo,
     ForgeryKind.CLICK_COMPOSE: click_compose,
     ForgeryKind.UNMODELLED_HIDING: unmodelled_hiding,
+    ForgeryKind.DERIVED_ECHO: derived_echo,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(

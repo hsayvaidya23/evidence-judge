@@ -40,6 +40,7 @@ from evidence_judge.ingest._css import (
     HIDDEN,
     ROOT,
     SHOWN,
+    UNSURE,
     Computed,
     Element,
     Sheet,
@@ -52,6 +53,8 @@ from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, 
 
 DEFAULT_MAX_VISITS = 1_000_000
 
+_FRAMES = frozenset({"IFRAME", "FRAME"})
+"""Elements that show another document, which the snapshot of this one does not hold."""
 _SKIPPED_TAGS = frozenset(
     {
         "SCRIPT",
@@ -139,7 +142,8 @@ class RenderedPage:
     unsure_text: str = ""
     """The text whose visibility the reader is unsure of, in document order."""
     opaque: bool = False
-    """The page may show text the snapshot does not hold (a closed shadow root)."""
+    """The page may show text the snapshot does not hold (a closed shadow root, text a
+    ``::before`` or ``::after`` rule gives a shown element, a shown frame's document)."""
 
 
 _BLOCK_END = object()
@@ -285,6 +289,7 @@ class _Renderer:
         self._shown: list[str] = []
         self._unsure: list[str] = []
         self._opaque = False
+        self._fixed = ""
 
     def render(self, index: int) -> RenderedPage:
         root = self._store.root(self._frame_id, index)
@@ -346,6 +351,9 @@ class _Renderer:
         stack: list[_Item],
     ) -> None:
         if tag in _SKIPPED_TAGS or (tag == "TEMPLATE" and _SHADOW_ROOT_ATTR not in attrs):
+            if tag in _FRAMES and _loads_content(attrs):
+                style = scope.sheets.style(element, inherited, ua_hide=_ua_hide(tag, attrs))
+                self._opaque = self._opaque or (not style.removed and style.text != HIDDEN)
             return
         children = self._resolved(node, snapshot_index, parent=element)
         shadow = next(
@@ -374,7 +382,9 @@ class _Renderer:
             return
         if scope.parts and "part" in element.attrs and not style.unsure:
             style = replace(style, unsure=True)
-        if "-" in tag and not children:
+        if ("-" in tag and not children) or (
+            style.text != HIDDEN and scope.sheets.generates(element)
+        ):
             self._opaque = True
         if tag not in _INLINE_TAGS:
             self._emit(" ", None)
@@ -382,6 +392,9 @@ class _Renderer:
         control_text = self._control_text(node, tag, attrs, snapshot_index)
         if control_text is not None:
             self._emit(control_text, style.text)
+            if self._fixed:
+                self._emit(f" {self._fixed} ", max(style.text, UNSURE))
+                self._fixed = ""
             return
         closed = tag == "DETAILS" and "open" not in attrs
         if inner is not None and shadow is not None and isinstance(shadow.node, list):
@@ -640,21 +653,27 @@ class _Renderer:
             if kind in _BUTTON_INPUTS:
                 return as_str(attrs.get("value")) or ""
             value = as_str(attrs.get(_VALUE_ATTR)) or as_str(attrs.get("value"))
-            return self._excluded_value(value)
+            return self._excluded_value(value, fixed=_is_fixed(attrs))
         if tag == "TEXTAREA":
             value = as_str(attrs.get(_VALUE_ATTR))
             if value is None:
                 value = self._text_content(node, snapshot_index)
-            return self._excluded_value(value)
+            return self._excluded_value(value, fixed=_is_fixed(attrs))
         if tag == "SELECT":
             return self._excluded_value(self._selected_option_text(node, snapshot_index))
         if _is_editable(attrs):
             return self._excluded_value(self._text_content(node, snapshot_index))
         return None
 
-    def _excluded_value(self, value: str | None) -> str:
+    def _excluded_value(self, value: str | None, *, fixed: bool = False) -> str:
+        """Keep a field's value out of the text, as a field value. A `fixed` field's value (one
+        the agent cannot type into) is text the page may show: it is the site's, but it is a
+        field value too, so it never proves a predicate; it only keeps a phrase's absence from
+        contradicting one."""
         if value := _normalise(value):
             self._field_values.append(value)
+            if fixed:
+                self._fixed = value
         return ""
 
     def _selected_option_text(self, select: list[Any], snapshot_index: int) -> str:
@@ -730,3 +749,16 @@ def _is_selected(attrs: JsonObject) -> bool:
 
 def _normalise(text: str | None) -> str:
     return " ".join(text.split()) if text else ""
+
+
+def _is_fixed(attrs: JsonObject) -> bool:
+    """A ``readonly`` or ``disabled`` field: the agent cannot type into it."""
+    return "readonly" in attrs or "disabled" in attrs
+
+
+def _loads_content(attrs: JsonObject) -> bool:
+    """A frame with a ``srcdoc`` or a ``src`` other than ``about:blank`` shows a document."""
+    if as_str(attrs.get("srcdoc")):
+        return True
+    src = (as_str(attrs.get("src")) or "").strip().lower()
+    return bool(src) and src != "about:blank"

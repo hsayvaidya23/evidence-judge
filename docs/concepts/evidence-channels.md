@@ -67,16 +67,22 @@ constructed stylesheets, and the linked and `@import`ed stylesheets the trace ho
 root is its own scope). Text whose visibility depends on something the judge does not fully
 model (a condition or selector it cannot evaluate, `var()`, near-zero opacity or font size, a
 transparent colour, clipping, off-screen offsets, a utility class no recorded sheet defines, or
-a stylesheet the trace does not hold) goes to `unsure_text` instead: it never proves a
+a stylesheet the trace does not hold; one the trace records as failed, with an error status or
+without a response, applied nothing and counts as empty) goes to `unsure_text` instead: it never proves a
 predicate and keeps its absence from contradicting one. `opaque` marks a page with an empty
-custom element, which may render a closed shadow root no snapshot holds. See
+custom element, which may render a closed shadow root no snapshot holds, or with a shown element
+a `::before` or `::after` rule gives text (`content` with a letter or digit, `attr()` or a
+counter), or with a shown `<iframe>` or `<frame>` that loads a document (`src` or `srcdoc`):
+the reader does not read frames, so their text never proves anything either way. See
 [`page_text`](../task-specs.md#page_text-the-pages-text-contains-a-phrase).
 Text typed into `<input>` and
 `<textarea>` fields (and their default values) is left out, because the agent controls it: a
 search box holding "Order #1042 confirmed" is not the page confirming the order. So is the
 text of an editable (`contenteditable`) element and the selected `<option>` of every
 `<select>`: the agent picks the option, so choosing "In stock" in a filter is not the page
-saying the product is in stock. Button labels are kept. The number of values left out is in the
+saying the product is in stock. Button labels are kept. The value of a `readonly` or `disabled`
+field, which the agent cannot type into, goes to `unsure_text` as well: a site that shows a
+status in one is not contradicted, but the value never proves anything. The number of values left out is in the
 trace's `metadata["form_values_excluded"]`.
 
 `final_state` comes from the **main page**: the tab of the agent's last action (other than code it

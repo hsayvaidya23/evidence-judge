@@ -187,6 +187,8 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("css_shadow", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("css_layered", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("css_unhidden", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
+        ("dym_server", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
+        ("stem_echo", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
     ],
 )
 async def test_agent_made_evidence_never_passes(
@@ -654,6 +656,37 @@ def test_linked_stylesheets_come_from_the_recorded_responses(
     assert (run.final_state.text, run.final_state.unsure_text) == text
 
 
+@pytest.mark.parametrize(
+    ("failure", "aborted", "text"),
+    [
+        ("net::ERR_CONNECTION_REFUSED", False, FAILED_SHEET),
+        ("net::ERR_UNSAFE_PORT", False, FAILED_SHEET),
+        ("net::ERR_FAILED", True, UNSURE_WITHOUT_SHEET),
+        ("", False, UNSURE_WITHOUT_SHEET),
+    ],
+    ids=["refused", "unsafe-port", "aborted-by-a-route", "no-failure-recorded"],
+)
+def test_a_stylesheet_request_that_failed_is_an_empty_sheet(
+    tmp_path: Path, failure: str, aborted: bool, text: tuple[str, str]
+) -> None:
+    def change(name: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for event in events:
+            entry = event.get("snapshot", {})
+            if event["type"] == "resource-snapshot" and entry["request"]["url"].endswith(".css"):
+                content = {"size": -1, "mimeType": "x-unknown"}
+                entry["response"] = {**entry["response"], "status": -1, "content": content}
+                entry["response"]["_failureText"] = failure
+                if aborted:
+                    entry["_wasAborted"] = True
+        return events
+
+    trace = rewrite_trace(FIXTURES / "css_link.zip", tmp_path / "t.zip", change)
+    run = load_playwright_trace(trace)
+
+    assert run.final_state is not None
+    assert (run.final_state.text, run.final_state.unsure_text) == text
+
+
 def _stored(source: Path, target: Path) -> Path:
     with zipfile.ZipFile(source) as zin, zipfile.ZipFile(target, "w") as zout:
         for name in zin.namelist():
@@ -778,3 +811,22 @@ def test_a_screenshot_that_restyles_the_page_is_an_injection(
     [inject] = [a for a in run.actions if a.name == "inject"]
     assert inject.value is not None and inject.value.startswith(f"Page.{method}(")
     assert next(iter(option)) in inject.value
+
+
+@pytest.mark.parametrize(
+    ("mode", "outcome", "met", "why"),
+    [
+        ("frame_status", "needs_review", [None, True], "a shown frame holds a page"),
+        ("readonly_status", "needs_review", [None, True], "may hide"),
+        ("pseudo_status", "needs_review", [None, True], "::before or ::after rule"),
+        ("failed_sheet", "pass", [True, True], ""),
+    ],
+)
+async def test_an_honest_status_the_reader_cannot_read_is_never_a_fail(
+    mode: str, outcome: str, met: list[bool | None], why: str
+) -> None:
+    got, text, results = await _judge(mode, "out_of_stock", "No, it is Out of stock.")
+
+    assert got.value == outcome, text
+    assert [m for _, m in results] == met
+    assert why in text
