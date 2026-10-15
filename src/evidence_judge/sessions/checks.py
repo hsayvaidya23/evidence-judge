@@ -739,6 +739,20 @@ def check_rerun(predicate: TestResultPredicate, index: SessionIndex) -> Predicat
 def check_test_result(predicate: TestResultPredicate, index: SessionIndex) -> PredicateResult:
     if index.rerun is not None and _rerun_applies(predicate, index.rerun):
         return check_rerun(predicate, index)
+    outcomes = _fresh_outcomes(predicate, index)
+    if isinstance(outcomes, PredicateResult):
+        return outcomes
+    fails, passes = _deciding(predicate, outcomes)
+    if predicate.expect == "fail":
+        return _expect_fail(predicate, outcomes, fails)
+    return _expect_pass(predicate, index, outcomes, fails, passes)
+
+
+def _fresh_outcomes(
+    predicate: TestResultPredicate, index: SessionIndex
+) -> list[RunOutcome] | PredicateResult:
+    """The outcomes of the test runs after the last change, with their union when no single run
+    passed the whole suite; or why there are none."""
     runs = index.test_runs(predicate.runner)
     what = f"{predicate.runner} " if predicate.runner else ""
     if not runs:
@@ -758,6 +772,13 @@ def check_test_result(predicate: TestResultPredicate, index: SessionIndex) -> Pr
         union := index.covered(outcomes, predicate.min_tests)
     ):
         outcomes = sorted([*outcomes, union], key=lambda o: o.event.seq)
+    return outcomes
+
+
+def _deciding(
+    predicate: TestResultPredicate, outcomes: list[RunOutcome]
+) -> tuple[list[RunOutcome], list[RunOutcome]]:
+    """The failing and passing outcomes that speak to the claim."""
     name = predicate.mentions
     if name:
         fails = [o for o in outcomes if o.result is Result.FAIL and _named_failure(o.event, name)]
@@ -771,32 +792,44 @@ def check_test_result(predicate: TestResultPredicate, index: SessionIndex) -> Pr
             for o in outcomes
             if o.result is Result.PASS and (o.whole or not predicate.whole_suite)
         ]
+    return fails, passes
 
-    if predicate.expect == "fail":
-        whole_pass = [o for o in outcomes if o.result is Result.PASS and o.whole]
-        if fails and whole_pass and whole_pass[-1].event.seq > fails[-1].event.seq:
-            return _flaky(fails[-1], whole_pass[-1])
-        if fails:
-            return _result(Support.SUPPORTED, fails[-1].reason, fails[-1].event)
-        if whole_pass:
-            return _result(Support.CONTRADICTED, whole_pass[-1].reason, whole_pass[-1].event)
-        return _undecided(outcomes, predicate)
 
+def _expect_fail(
+    predicate: TestResultPredicate, outcomes: list[RunOutcome], fails: list[RunOutcome]
+) -> PredicateResult:
+    whole_pass = [o for o in outcomes if o.result is Result.PASS and o.whole]
+    if fails and whole_pass and whole_pass[-1].event.seq > fails[-1].event.seq:
+        return _flaky(fails[-1], whole_pass[-1])
+    if fails:
+        return _result(Support.SUPPORTED, fails[-1].reason, fails[-1].event)
+    if whole_pass:
+        return _result(Support.CONTRADICTED, whole_pass[-1].reason, whole_pass[-1].event)
+    return _undecided(outcomes, predicate)
+
+
+def _expect_pass(
+    predicate: TestResultPredicate,
+    index: SessionIndex,
+    outcomes: list[RunOutcome],
+    fails: list[RunOutcome],
+    passes: list[RunOutcome],
+) -> PredicateResult:
     if fails and passes and passes[-1].event.seq > fails[-1].event.seq:
         return _flaky(fails[-1], passes[-1])
     if fails:
         return _result(Support.CONTRADICTED, fails[-1].reason, fails[-1].event)
-    if passes:
-        if index.tampering:
-            source, finding = index.tampering[0]
-            return _result(
-                Support.NO_EVIDENCE,
-                f"{passes[-1].reason}, but {_blocker(finding)}: {source.id} {finding}",
-                passes[-1].event,
-                source,
-            )
-        return _result(Support.SUPPORTED, passes[-1].reason, passes[-1].event)
-    return _undecided(outcomes, predicate)
+    if not passes:
+        return _undecided(outcomes, predicate)
+    if index.tampering:
+        source, finding = index.tampering[0]
+        return _result(
+            Support.NO_EVIDENCE,
+            f"{passes[-1].reason}, but {_blocker(finding)}: {source.id} {finding}",
+            passes[-1].event,
+            source,
+        )
+    return _result(Support.SUPPORTED, passes[-1].reason, passes[-1].event)
 
 
 def _flaky(fail: RunOutcome, passed: RunOutcome) -> PredicateResult:
