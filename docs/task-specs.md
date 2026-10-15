@@ -208,10 +208,13 @@ any other method) says it acts as one:
 
 - an `X-HTTP-Method-Override`, `X-HTTP-Method` or `X-Method-Override` header naming a write
   method (`X-HTTP-Method-Override: DELETE`);
-- a `_method=` query parameter naming a write method (`/api/cart/1?_method=delete`; the key and
-  the value are matched in any case);
-- a GraphQL GET whose `query` parameter, decoded, is a mutation (`mutation`, after optional
-  whitespace, commas, comments and an operation name, then a selection set). It acts as a POST.
+- a `_method=` query parameter naming a write method (`/api/cart/1?_method=delete`, also after
+  a `;` separator; the key and the value are matched in any case);
+- a GraphQL GET whose `query` parameter, decoded, runs a mutation. The document is read
+  definition by definition, past strings, comments, variables and directives, and fragments
+  are skipped: the operation `operationName` names decides, else the only operation; when there
+  are several and none is resolved, any mutation among them makes the request a write. It acts
+  as a POST.
 
 Such a request is judged like the write it names: a side effect when nothing explains it, and a
 `request` predicate with `method: DELETE` (or `POST` for the GraphQL case) matches it, as does
