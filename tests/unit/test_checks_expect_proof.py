@@ -90,6 +90,30 @@ async def test_expect_met_only_by_typed_text_is_unknown() -> None:
     assert ECHO in verdict.expectations[0].reason
 
 
+def _shown_then_left() -> Run:
+    """Opens a page that already shows the text, leaves it, acts elsewhere and comes back."""
+    return make_run(
+        actions=[
+            act(1, "goto", url=f"{HOST}/thanks", value=f"{HOST}/thanks"),
+            act(2, "goto", url=f"{HOST}/", value=f"{HOST}/"),
+            act(3, "click", "#x"),
+            act(4, "goto", url=f"{HOST}/thanks", value=f"{HOST}/thanks"),
+        ],
+        network=[net(1, "GET", "/thanks"), net(2, "GET", "/"), net(4, "GET", "/thanks")],
+        snapshots=[snap(1, "/thanks", "Thank you for your message"), snap(2, "/", "Welcome")],
+        final_state=final("/thanks", "Thank you for your message"),
+    )
+
+
+async def test_expect_met_on_a_page_shown_before_the_agent_acted_is_unknown() -> None:
+    spec = _spec("Thank you for your message").model_copy(update={"site": "shop.test"})
+    verdict = await _judge(_shown_then_left(), spec, "Done.")
+
+    assert verdict.outcome is Outcome.NEEDS_REVIEW, verdict.summary
+    assert verdict.expectations[0].met is None
+    assert BASELINE in verdict.expectations[0].reason
+
+
 async def test_expect_met_before_the_agent_acted_is_unknown() -> None:
     verdict = await _judge(_already_shown(), _spec("Order A77 confirmed"))
 
