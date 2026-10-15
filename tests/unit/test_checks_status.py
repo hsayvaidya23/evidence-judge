@@ -5,12 +5,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.expectations import evaluate_expectation
 from evidence_judge.checks.matching import status_matches
 from evidence_judge.checks.registry import default_registry
 from evidence_judge.checks.request import RequestChecker
 from evidence_judge.config import Settings
 from evidence_judge.core.evidence import Run
+from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import RequestPredicate
 from evidence_judge.core.taskspec import Expectation
 from evidence_judge.core.verdict import Outcome, Support
@@ -59,9 +61,122 @@ def test_status_matches(status: int | None, failed: bool, spec: str | None, expe
     assert status_matches(status, spec, failed=failed) is expected
 
 
-async def test_post_redirect_get_order_is_supported() -> None:
-    res = await RequestChecker().evaluate(ORDER, ctx(_prg_run()))
+def _proving(run: Run) -> CheckContext:
+    index = EvidenceIndex(run)
+    return CheckContext(index=index, scope=EvidenceScope.of(index))
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+async def test_post_redirect_get_order_is_supported(scoped: bool) -> None:
+    run = _prg_run()
+    res = await RequestChecker().evaluate(ORDER, _proving(run) if scoped else ctx(run))
     assert res.status is Support.SUPPORTED, res.reason
+
+
+def _redirected(landing: str, *, status: int = 200, location: str | None = None) -> Run:
+    """The order POST answers 302; the next page load is `landing`."""
+    run = honest_run()
+    order = net(6, "POST", "/api/orders", 302, body={"items": [{"price": 24.0}]})
+    if location is not None:
+        order = order.model_copy(update={"response_headers": {"Location": location}})
+    network = [
+        order if e.id == "net#6" else net(7, "GET", landing, status) if e.id == "net#7" else e
+        for e in run.network
+    ]
+    return run.model_copy(update={"network": network})
+
+
+@pytest.mark.parametrize(
+    ("landing", "status", "reason"),
+    [
+        (
+            "/cart?error=card_declined",
+            200,
+            "POST /api/orders → 302 meets every other criterion of a POST request whose URL "
+            "contains '/api/orders' with a 2xx or 3xx status, but it was answered 302 and led to "
+            "GET /cart?error=card_declined → 200, whose URL marks a failure",
+        ),
+        (
+            "/checkout/failed",
+            200,
+            "POST /api/orders → 302 meets every other criterion of a POST request whose URL "
+            "contains '/api/orders' with a 2xx or 3xx status, but it was answered 302 and led to "
+            "GET /checkout/failed → 200, whose URL marks a failure",
+        ),
+        (
+            "/checkout",
+            200,
+            "POST /api/orders → 302 meets every other criterion of a POST request whose URL "
+            "contains '/api/orders' with a 2xx or 3xx status, but it was answered 302 and led to "
+            "GET /checkout → 200, back to the page it was sent from",
+        ),
+        (
+            "/order/A1",
+            500,
+            "POST /api/orders → 302 meets every other criterion of a POST request whose URL "
+            "contains '/api/orders' with a 2xx or 3xx status, but it was answered 302 and led to "
+            "GET /order/A1 → 500, which did not load",
+        ),
+    ],
+)
+async def test_redirect_to_a_failure_cannot_prove_the_order(
+    landing: str, status: int, reason: str
+) -> None:
+    res = await RequestChecker().evaluate(ORDER, _proving(_redirected(landing, status=status)))
+    assert res.status is Support.NO_EVIDENCE
+    assert res.reason == reason
+
+
+async def test_redirect_without_a_later_page_load_cannot_prove_the_order() -> None:
+    run = _redirected("/order/A1")
+    run = run.model_copy(update={"network": [e for e in run.network if e.id != "net#7"]})
+    res = await RequestChecker().evaluate(ORDER, _proving(run))
+    assert res.status is Support.NO_EVIDENCE
+    assert res.reason.endswith(
+        "it was answered 302 and no page load after it was recorded, so where it led is unknown"
+    )
+
+
+async def test_redirect_follows_the_location_header() -> None:
+    run = _redirected("/order/A1", location="/order/A1")
+    beacon = net(7, "GET", "/cart?error=stale", 200).model_copy(
+        update={"id": "net#6b", "ts": 650.0}
+    )
+    run = run.model_copy(update={"network": [*run.network, beacon]})
+    res = await RequestChecker().evaluate(ORDER, _proving(run))
+    assert res.status is Support.SUPPORTED, res.reason
+
+
+async def test_redirect_to_a_failure_is_not_checked_without_a_scope() -> None:
+    res = await RequestChecker().evaluate(ORDER, ctx(_redirected("/cart?error=card_declined")))
+    assert res.status is Support.SUPPORTED
+
+
+async def test_order_redirected_to_a_declined_cart_does_not_pass() -> None:
+    run = _redirected("/cart?error=card_declined").model_copy(
+        update={"agent_answer": "I placed the order for the red kettle at $24."}
+    )
+    spec = shop_spec()
+    spec = spec.model_copy(update={"expect": spec.expect[:1]})
+    verdict = await Judge(Settings(anthropic_api_key=None, cache_dir=None)).judge(
+        run, JudgeOptions(offline=True, spec=spec)
+    )
+    assert verdict.outcome is Outcome.NEEDS_REVIEW, verdict.summary
+    [order] = verdict.expectations[:1]
+    assert order.met is None
+    assert "whose URL marks a failure" in order.reason
+
+
+async def test_forbidden_mutation_redirected_to_an_error_page_still_breaks_the_rule() -> None:
+    run = _redirected("/cart?error=card_declined")
+    forbid = Expectation.model_validate(
+        {
+            "id": "no_orders",
+            "any": [{"kind": "request", "method": "POST", "url_contains": ["/api/orders"]}],
+        }
+    )
+    res = await evaluate_expectation(forbid, "forbid", ctx(run), default_registry())
+    assert res.met is False
 
 
 async def test_explicit_2xx_still_rejects_a_redirect() -> None:

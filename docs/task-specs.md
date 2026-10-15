@@ -186,7 +186,16 @@ masked: forbidden text the agent typed or that was already shown still breaks th
 
 The default `ok` accepts redirects because a form that posts and then redirects
 (POST/Redirect/GET) answers the `POST` with `303` and the browser loads the result page with a
-`GET`. Write `status: 2xx` or an exact code when a redirect must not count. `null` needs a
+`GET`. Write `status: 2xx` or an exact code when a redirect must not count. A failed form is
+often redirected too (`POST /api/orders → 302`, then `GET /cart?error=card_declined`), so when
+a mutation answered with a 3xx is to *prove* something (a claim or an `expect` entry), the page
+it led to is checked as well: the page load matching its `Location` header (else the next page
+load) must answer 2xx, its URL must not mark a failure (`error`, `declined`, `failed`,
+`invalid`, `denied`, `rejected`), and it must not be the page the request was sent from.
+Otherwise the request is `no_evidence` (`... but it was answered 302 and led to GET
+/cart?error=card_declined → 200, whose URL marks a failure`) and the run goes to review. A
+`forbid` entry or a constraint skips this check: a forbidden `POST` answered with any 3xx
+happened. `null` needs a
 response of any status; a request that never got one (a connection error, or one the browser
 blocked) only matches `none` or `any`. A status that is none of these is refused when the spec
 loads.

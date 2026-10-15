@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from urllib.parse import unquote_plus, urljoin, urlsplit
 
 from evidence_judge.checks._common import (
     MAX_CITATIONS,
@@ -20,12 +22,13 @@ from evidence_judge.checks.matching import (
     status_matches,
     url_host,
     url_location_contains,
+    url_path,
     url_path_contains,
     url_query_contains,
     validate_status_spec,
 )
 from evidence_judge.core.evidence import Channel, NetworkEvent
-from evidence_judge.core.index import EvidenceIndex
+from evidence_judge.core.index import EvidenceIndex, is_document_navigation
 from evidence_judge.core.predicates import STATUS_ANY, Predicate, RequestPredicate
 from evidence_judge.core.verdict import PredicateResult, Support
 
@@ -172,6 +175,18 @@ def check_request(
     requests = index.requests()
     scored = [(event, matcher.misses(event)) for event in requests]
     hits = [event for event, misses in scored if not misses]
+    doubts = {e.id: d for e in hits if scope is not None and (d := redirect_doubt(e, index))}
+    proven = [e for e in hits if e.id not in doubts]
+    if hits and not proven:
+        event = hits[-1]
+        return result(
+            Support.NO_EVIDENCE,
+            f"{describe_request(event)} meets every other criterion of a {matcher.describe()}, "
+            f"but {doubts[event.id]}",
+            RequestChecker.kind,
+            [cite_request(event)],
+        )
+    hits = proven
     if hits:
         latest = hits[-1]
         extra = f" ({len(hits)} matching requests)" if len(hits) > 1 else ""
@@ -234,6 +249,59 @@ def check_request(
         RequestChecker.kind,
         [cite_request(event)],
     )
+
+
+_FAILURE_MARK = re.compile(
+    r"(?<![a-z])(?:errors?|err|declined?|fail(?:s|ed|ure)?|invalid|denied|rejected)(?![a-z])",
+    re.IGNORECASE,
+)
+
+
+def _page_load(event: NetworkEvent) -> bool:
+    """A document GET, or a GET whose type was not recorded (it may be one)."""
+    if event.method.upper() != "GET":
+        return False
+    if event.resource_type or event.mime_type:
+        return is_document_navigation(event)
+    return True
+
+
+def _same_page(a: str, b: str) -> bool:
+    pa, pb = urlsplit(a), urlsplit(b)
+    return (pa.hostname, pa.path.rstrip("/")) == (pb.hostname, pb.path.rstrip("/"))
+
+
+def redirect_doubt(event: NetworkEvent, index: EvidenceIndex) -> str | None:
+    """Why a mutation answered with a redirect cannot be shown to have succeeded, or None.
+
+    A 3xx answers a form that worked (POST/Redirect/GET) and one that failed (a redirect back to
+    the cart with `?error=card_declined`) alike, so it proves the mutation took effect only when
+    the page it led to (the page load matching its Location header, else the next page load)
+    loaded with a 2xx, carries no error marker in its URL and is not the page the request was
+    sent from (the last page load before it, else the last action's page). Any other status
+    returns None.
+    """
+    if event.status is None or not 300 <= event.status < 400:
+        return None
+    location = next((v for k, v in event.response_headers.items() if k.lower() == "location"), None)
+    target = urljoin(event.url, location) if location else None
+    loads = [n for n in index.requests("GET") if n.ts > event.ts and _page_load(n)]
+    landing = next((n for n in loads if target and _same_page(n.url, target)), None)
+    landing = landing or (loads[0] if loads else None)
+    answered = f"it was answered {event.status}"
+    if landing is None:
+        return f"{answered} and no page load after it was recorded, so where it led is unknown"
+    led = f"{answered} and led to {describe_request(landing)}"
+    if landing.status is None or not 200 <= landing.status < 300 or landing.failed:
+        return f"{led}, which did not load"
+    if _FAILURE_MARK.search(unquote_plus(url_path(landing.url))):
+        return f"{led}, whose URL marks a failure"
+    earlier = [n.url for n in index.requests("GET") if n.ts < event.ts and _page_load(n)]
+    earlier = earlier or [a.url for a in index.run.actions if a.url and a.ts < event.ts]
+    origin = earlier[-1] if earlier else None
+    if origin is not None and _same_page(origin, landing.url):
+        return f"{led}, back to the page it was sent from"
+    return None
 
 
 def _only_off_site(misses: list[Miss]) -> bool:

@@ -204,7 +204,7 @@ Offline, on seven recorded demo-shop runs; the [full method, tables and limitati
 **Claims are extracted, each with a verbatim quote.** *The agent placed an order*, *The order number 1042 was shown* and *The price was 24.00* are key claims, because the task's success depends on them.
 </li>
 <li markdown="block">
-**Each claim becomes predicates.** "Placed an order" → `{kind: request, method: POST, url_contains: [order]}` (status defaults to `ok`: 2xx or a redirect). "Order 1042 was shown" → `page_text` contains `1042`, or a response containing `1042`.
+**Each claim becomes predicates.** "Placed an order" → `{kind: request, method: POST, url_contains: [order]}` (status defaults to `ok`: 2xx, or a redirect to a page that loaded and does not mark a failure). "Order 1042 was shown" → `page_text` contains `1042`, or a response containing `1042`.
 </li>
 <li markdown="block">
 **Code checks them against the recording.** The trace captured 5 requests. None is a successful `POST` to an order URL; the closest is `POST /api/cart → 200`. Because the network channel **was captured**, that absence is a confident contradiction.
