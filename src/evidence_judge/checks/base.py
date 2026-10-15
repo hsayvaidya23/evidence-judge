@@ -9,7 +9,7 @@ from typing import Protocol
 
 import regex
 
-from evidence_judge.core.evidence import NetworkEvent, is_web_page_url
+from evidence_judge.core.evidence import NetworkEvent, is_web_page_url, trace_witnessed
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import Predicate, compile_pattern
 from evidence_judge.core.provenance import untampered
@@ -96,6 +96,17 @@ def _untampered_index(index: EvidenceIndex) -> EvidenceIndex:
     return cached
 
 
+_TRACED: weakref.WeakKeyDictionary[EvidenceIndex, EvidenceIndex] = weakref.WeakKeyDictionary()
+
+
+def _traced_index(index: EvidenceIndex) -> EvidenceIndex:
+    cached = _TRACED.get(index)
+    if cached is None:
+        run = trace_witnessed(index.run)
+        cached = _TRACED[index] = index if run is index.run else EvidenceIndex(run)
+    return cached
+
+
 @dataclass(slots=True)
 class CheckContext:
     index: EvidenceIndex
@@ -116,6 +127,12 @@ class CheckContext:
         """The same context over the evidence the site alone made (core.provenance.untampered),
         without an LLM; itself when the agent injected and mocked nothing."""
         index = _untampered_index(self.index)
+        return self if index is self.index else dataclasses.replace(self, index=index, llm=None)
+
+    def traced(self) -> CheckContext:
+        """The same context over what the trace alone recorded (core.evidence.trace_witnessed),
+        without an LLM; itself when no merged HAR contributed anything."""
+        index = _traced_index(self.index)
         return self if index is self.index else dataclasses.replace(self, index=index, llm=None)
 
     def without_agent_input(self, *, short_words: bool = False) -> CheckContext:

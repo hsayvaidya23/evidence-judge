@@ -98,6 +98,7 @@ it is not `full`:
 
 | Source | `tamper_detection` | Can reveal | Cannot reveal |
 | --- | --- | --- | --- |
+| Playwright trace with a HAR that added requests or filled fields | `partial` | As for a trace; what only the HAR holds still contradicts claims and shows side effects | Whether what only the HAR holds happened: it never proves a claim, an `expect` entry or a constraint |
 | Playwright trace | `full` | Every call made through Playwright: injected scripts (`evaluate`, `add_init_script`, `set_content`, ...), route handlers that answer or rewrite requests, storage and cookie writes, CDP sessions (deny by default) | What a CDP session then sent; anything done outside Playwright (another process driving the browser, a proxy, OS-level input); state from before tracing started |
 | browser-use history | `partial` | The model's actions, including its `evaluate` | Scripts, CDP calls and request changes beneath those actions; network evidence unless a HAR is added |
 | HAR alone | `none` | Nothing about the agent's calls | Whether the HAR was recorded at all |
@@ -107,7 +108,9 @@ For gating CI on verdicts:
 - Record a **Playwright trace from the harness**, not from inside the agent, and keep the agent
   from writing the trace file.
 - Pass **`--require-tamper-evidence`** (or set `require_tamper_evidence: true` in the task
-  spec): a run whose `tamper_detection` is not `full` is then `NEEDS_REVIEW` at best.
+  spec): a run whose `tamper_detection` is not `full` is then `NEEDS_REVIEW` at best. That
+  excludes a trace merged with a HAR that added requests or filled in fields the trace recorded
+  empty; judge such a trace without its HAR.
 - Start each run from a fresh browser context, without a persistent profile; pass any login
   state with `storage_state=` when the context is created.
 - Treat a `PASS` on a HAR-only or browser-use run as "the recording is consistent with the
@@ -140,7 +143,10 @@ compromised agent:
   trace's; when fewer than half of the HAR's entries pair with a trace request or, if both
   recordings carry wall-clock times, start within 2 seconds of the trace's time window; or when
   the two time windows do not overlap at all. Requests only the HAR saw are listed in
-  `metadata["har_only_requests"]`. HAR-only `POST`/`PUT`/`PATCH`/`DELETE` requests are dropped,
+  `metadata["har_only_requests"]` and marked `har_only`; fields of a trace request the trace
+  recorded empty and the HAR filled in are named in its `har_filled`. Neither proves a claim, an
+  `expect` entry or a constraint (the predicate must hold on the trace alone), though both can
+  contradict one and show a side effect. HAR-only `POST`/`PUT`/`PATCH`/`DELETE` requests are dropped,
   so a side effect the trace never recorded cannot satisfy an expectation on the HAR's word
   alone, and HAR-only requests starting more than 10 minutes outside the trace's time window are
   dropped too; both are noted in `metadata["merge_warnings"]`. `allow_mismatch=True` (CLI

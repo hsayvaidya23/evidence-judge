@@ -31,7 +31,7 @@ At least one of `--trace`, `--har` or `--browser-use` is required.
 | Option | Description |
 | --- | --- |
 | `--trace FILE` | Playwright trace `.zip` (format v7 to v10) |
-| `--har FILE` | HAR 1.2 file. With `--trace`, fills in bodies and statuses the trace missed |
+| `--har FILE` | HAR 1.2 file. With `--trace`, fills in bodies and statuses the trace missed and adds requests it did not see; what only the HAR holds can contradict but never prove, and makes `tamper_detection` `partial` |
 | `--browser-use PATH` | browser-use `AgentHistoryList` JSON, or a run directory containing `history.json` |
 | `--allow-mismatch` | Merge a HAR even when it does not look like a recording of the trace's run. By default the load fails (exit 3) when a HAR shares none of the trace's requests, or under half of them for traces with 5 or more requests, and HAR-only requests more than 10 minutes outside the trace are dropped |
 | `--screenshot-root PATH` | Directory browser-use screenshots may be read from. Default: the history file's directory. Paths resolving outside it (symlinks included) are skipped |
@@ -52,7 +52,7 @@ At least one of `--trace`, `--har` or `--browser-use` is required.
 | Option | Description |
 | --- | --- |
 | `--spec FILE` | Task spec YAML ([reference](task-specs.md)). Without a spec, any state-changing request is a side effect that sends the run to review, so a write task (ordering, booking, submitting) can only PASS with a spec that expects or allows its requests |
-| `--require-tamper-evidence` | Cap the run at `NEEDS_REVIEW` unless its evidence can fully show tampering (`tamper_detection.level` is `full`: a Playwright trace, with its call log). HAR-only and browser-use runs then cannot pass. The spec's `require_tamper_evidence: true` does the same. Use it when the verdict gates CI and the trace is recorded by the harness, not the agent |
+| `--require-tamper-evidence` | Cap the run at `NEEDS_REVIEW` unless its evidence can fully show tampering (`tamper_detection.level` is `full`: a Playwright trace, with its call log). HAR-only and browser-use runs then cannot pass, and neither can a trace whose `--har` added requests or filled fields. The spec's `require_tamper_evidence: true` does the same. Use it when the verdict gates CI and the trace is recorded by the harness, not the agent |
 | `--site URL` | The site the task is on, as a URL or host name with an optional port (`https://shop.example.com`, `shop.example.com`, `127.0.0.1:8000`); overrides the spec's `site`. A site is a host and a port (80 and 443 are the default): only evidence from this host, with or without `www.`, on this port, and from the spec's `allowed_hosts` can prove a claim or an `expect` entry; subdomains count only when `allowed_hosts` lists them. With a site named, a request to another host or port proves nothing. Public suffixes (`com`, `co.uk`, `myshopify.com`), single-label names other than `localhost`, wildcards, user info and a path, query or fragment (`github.com/myorg`: a site is a whole host) are refused (exit code 3). A run can `PASS` only with a named site: `--site`, or the spec's `site` or `allowed_hosts`. Without any of them, the site is inferred from the run's first page, which the agent may have chosen, so no run passes: it gets `NEEDS_REVIEW` instead, with a spec or without one |
 
 ### Output and behaviour

@@ -3,12 +3,13 @@
 A predicate that is supported on the run can still prove nothing about what the agent did: it
 only holds on evidence from after the agent ran its own code in the page or mocked a response
 (core.provenance), the run already met it before the agent acted (the baseline), it only
-holds where a page, a URL or a response echoes the agent's own input, or it is a screenshot in a
-run where the agent typed or injected anything and nothing deterministic backs it up (an image
-shows the typed field and the site's echo of it, and no mask can be applied to pixels). Claims
-and `expect` entries share these guards;
-`forbid` entries and constraints do not use them, since masking or a baseline could hide a real
-violation.
+holds where a page, a URL or a response echoes the agent's own input, it only holds on what a
+HAR merged into the trace recorded and the trace did not (`har_sourced`), or it is a screenshot
+in a run where the agent typed or injected anything and nothing deterministic backs it up (an
+image shows the typed field and the site's echo of it, and no mask can be applied to pixels).
+Claims and `expect` entries share these guards; constraints share `har_sourced` only.
+`forbid` entries and constraint violations read the evidence as recorded, since masking, a
+baseline or dropping the HAR could hide a real violation.
 """
 
 from __future__ import annotations
@@ -151,6 +152,29 @@ async def tampered(
     return f"it holds only on evidence the agent made itself ({why}), so it proves nothing"
 
 
+HAR_SOURCED: Final = (
+    "only the HAR recorded it; the trace never saw this request or body, and a HAR is a file "
+    "anyone can write, so it proves nothing"
+)
+
+
+async def har_sourced(
+    predicate: Predicate, ctx: CheckContext, registry: CheckerRegistry
+) -> str | None:
+    """Why `predicate`, supported on the evidence, only holds on what a HAR merged into the
+    trace contributed: a request the trace never saw, or a body, status or header the trace
+    recorded empty (core.evidence.trace_witnessed), or None.
+    A deterministic predicate is evaluated again on what the trace alone recorded; if it no
+    longer holds, the HAR's word was all that supported it. A model-judged predicate reads no
+    network and is left alone."""
+    traced = ctx.traced()
+    if traced is ctx or not registry.is_deterministic(predicate):
+        return None
+    if (await registry.evaluate(predicate, traced)).status is Support.SUPPORTED:
+        return None
+    return HAR_SOURCED
+
+
 def _anywhere(predicate: Predicate) -> Predicate:
     """`predicate` read on every page before the agent acted, not only the last one: a page the
     agent opened first and comes back to at the end was on screen before it did anything."""
@@ -173,11 +197,14 @@ async def unproving(
     co_witnessed: bool = False,
 ) -> str | None:
     """Why `predicate`, `supported` on the evidence, still proves nothing in this run, or None:
-    a predicate that only holds on evidence the agent made (`tampered`); with `check_start`, a
-    deterministic predicate the run met before the agent acted; a
-    predicate that only holds on an echo of the agent's own input; and, unless `co_witnessed`
-    (a deterministic predicate of the same claim or `expect` entry is supported), a screenshot
-    in a run with agent input (`unwitnessed_screenshot`)."""
+    a predicate only a merged HAR's contribution supports (`har_sourced`); a predicate that only
+    holds on evidence the agent made (`tampered`); with `check_start`, a deterministic predicate
+    the run met before the agent acted; a predicate that only holds on an echo of the agent's
+    own input; and, unless `co_witnessed` (a deterministic predicate of the same claim or
+    `expect` entry is supported), a screenshot in a run with agent input
+    (`unwitnessed_screenshot`)."""
+    if (reason := await har_sourced(predicate, ctx, registry)) is not None:
+        return reason
     if (reason := await tampered(predicate, ctx, registry)) is not None:
         return reason
     if check_start and registry.is_deterministic(predicate):

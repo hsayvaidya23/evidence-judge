@@ -25,7 +25,9 @@ the **channels** the source actually recorded.
 | browser-use history | `--browser-use` | `actions`, plus `screenshots` when the history has them |
 
 Sources merge. A HAR recorded with a trace fills in bodies and statuses the trace missed and adds
-requests it did not see. A HAR next to a browser-use history adds the `network` channel the
+requests it did not see; those requests are marked `har_only` and the filled fields `har_filled`.
+What only the HAR holds can contradict a claim and show a side effect but never prove anything:
+a HAR is a file anyone can write. A HAR next to a browser-use history adds the `network` channel the
 history lacks.
 
 Check what a recording holds with `evidence-judge inspect` before judging it.
@@ -42,7 +44,8 @@ warning when the level is not `full`:
 
 | Level | Source | What it can show |
 | --- | --- | --- |
-| `full` | A Playwright trace (with or without a HAR or history) | Every call the agent made through Playwright: scripts, route handlers, storage and cookie writes, CDP sessions |
+| `full` | A Playwright trace (with or without a history, or a HAR that adds nothing to it) | Every call the agent made through Playwright: scripts, route handlers, storage and cookie writes, CDP sessions |
+| `partial` | A Playwright trace merged with a HAR that added requests or filled fields | As for `full`; the reason counts what the HAR added, which proves nothing |
 | `partial` | A browser-use history (without a trace) | The model's actions, including its `evaluate`; not what ran beneath them (CDP calls, request changes) |
 | `none` | A HAR alone, or any source without a call log | Nothing: a forged HAR looks the same as a recorded one |
 
@@ -50,7 +53,7 @@ No source shows state that existed before recording started (a persistent profil
 storage, service workers), and each is only as honest as whatever produced it. For CI gating,
 record a Playwright trace from the harness, not the agent, and pass
 `--require-tamper-evidence` (or set `require_tamper_evidence` in the spec) so only a `full`
-run can pass. See [trust assumptions](../../SECURITY.md#trust-assumptions).
+run can pass: a trace whose HAR added anything is `partial`, so judge it without the HAR. See [trust assumptions](../../SECURITY.md#trust-assumptions).
 
 ### Page text and the final page
 

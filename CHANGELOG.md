@@ -147,6 +147,11 @@ the names exported from `evidence_judge`) is defined under
   uploaded from disk or a stream, page text, screenshots, URLs and response bodies cannot prove
   anything (the page may be showing the file); requests and their statuses still can.
 - Committed trace fixtures no longer carry the recording machine's paths.
+- **A HAR merged into a trace cannot prove anything on its own.** Requests only the HAR has
+  (`har_only`) and fields it filled in that the trace recorded empty (`har_filled`) no longer
+  prove a claim, an `expect` entry or a constraint; they still contradict and still count as side
+  effects. Such a run's `tamper_detection` is `partial`, so `--require-tamper-evidence` no longer
+  passes a trace with a forged HAR that adds the answer.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

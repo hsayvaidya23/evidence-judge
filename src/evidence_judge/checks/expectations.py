@@ -14,7 +14,8 @@ An `expect` entry is proven like a claim (`checks.proof`): a predicate the run m
 agent acted, or one that only holds on an echo of the agent's own input, leaves it unknown, and
 so does a screenshot in a run with agent input unless a deterministic predicate of the same
 entry is supported too.
-`forbid` entries and constraints read the evidence as recorded.
+`forbid` entries and constraints read the evidence as recorded, except that a constraint only
+what a HAR merged into the trace contributed shows to hold is unknown (`checks.proof.har_sourced`).
 
 An `expect` entry with an explicit `max_count` is broken when more mutations that took effect
 match its request predicates than that: "exactly once" is part of the expectation.
@@ -36,7 +37,7 @@ from evidence_judge.checks._common import (
 from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.errors import RegexTimeoutError
 from evidence_judge.checks.matching import as_text
-from evidence_judge.checks.proof import guarded
+from evidence_judge.checks.proof import guarded, har_sourced
 from evidence_judge.checks.registry import CheckerRegistry
 from evidence_judge.checks.request import RequestMatcher
 from evidence_judge.core.evidence import NetworkEvent
@@ -241,6 +242,13 @@ async def evaluate_constraint(
     constraint: ValuePredicate, ctx: CheckContext, registry: CheckerRegistry
 ) -> ExpectationResult:
     res = await registry.evaluate(constraint, ctx)
+    if res.status is Support.SUPPORTED and (why := await har_sourced(constraint, ctx, registry)):
+        res = res.model_copy(
+            update={
+                "status": Support.NO_EVIDENCE,
+                "reason": f"Constraint cannot be shown to hold: {why}",
+            }
+        )
     return ExpectationResult(
         expectation_id=constraint_id(constraint),
         kind=CONSTRAINT,
