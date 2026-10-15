@@ -7,6 +7,7 @@ import secrets
 import sys
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 REDACTION_KEY_FILE = "redaction.key"
 _REDACTION_KEY_BYTES = 32
 APP_DIR_NAME = "evidence-judge"
+
+LLMBackend = Literal["anthropic", "claude-code", "codex", "gemini"]
+LLM_BACKENDS: tuple[LLMBackend, ...] = ("anthropic", "claude-code", "codex", "gemini")
 
 
 def default_cache_dir() -> Path:
@@ -39,9 +43,35 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="EVJ_", env_file=".env", extra="ignore")
 
+    llm_backend: LLMBackend = Field(
+        default="anthropic",
+        description=(
+            "Where LLM calls go: the Anthropic API (needs ANTHROPIC_API_KEY) or a coding-agent CLI "
+            "you are logged into (claude-code, codex, gemini), run headless with its tools off"
+        ),
+    )
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     model_fast: str = "claude-haiku-5-5"
     model_strong: str = "claude-sonnet-5-5"
+    cli_model_fast: str | None = Field(
+        default=None,
+        description=(
+            "Model for claim extraction on a CLI backend. Unset: claude-code uses model_fast, "
+            "codex and gemini use the CLI's own default model"
+        ),
+    )
+    cli_model_strong: str | None = Field(
+        default=None,
+        description=(
+            "Model for screenshot checks on a CLI backend. Unset: claude-code uses model_strong, "
+            "codex and gemini use the CLI's own default model"
+        ),
+    )
+    cli_timeout_s: float = Field(
+        default=180.0,
+        gt=0,
+        description="Wall-clock limit for one CLI-backend call, including the CLI's start-up",
+    )
     max_cost_usd: float = Field(default=0.25, gt=0, description="Hard per-run LLM budget")
     request_timeout_s: float = 60.0
     max_retries: int = Field(
@@ -74,10 +104,12 @@ class Settings(BaseSettings):
     max_body_chars: int = 20_000
     review_coverage_threshold: float = Field(default=0.6, ge=0, le=1)
 
-    @field_validator("anthropic_api_key", "redaction_key", mode="before")
+    @field_validator(
+        "anthropic_api_key", "redaction_key", "cli_model_fast", "cli_model_strong", mode="before"
+    )
     @classmethod
-    def _blank_secret_is_unset(cls, value: object) -> object:
-        """`KEY=` in a .env file means "not set", not an empty secret."""
+    def _blank_is_unset(cls, value: object) -> object:
+        """`KEY=` in a .env file means "not set", not an empty value."""
         if isinstance(value, str) and not value.strip():
             return None
         return value

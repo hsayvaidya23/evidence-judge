@@ -5,14 +5,19 @@ description: Every Evidence Judge setting - EVJ_* environment variables and ANTH
 # Configuration
 
 Settings come from environment variables or a `.env` file in the working directory (see
-`.env.example` in the repository), never from code or command-line flags. Every variable except
+`.env.example` in the repository), never from code. The one command-line override is `--llm`
+on `judge` and `bench`, which picks `EVJ_LLM_BACKEND` for that run. Every variable except
 `ANTHROPIC_API_KEY` has the `EVJ_` prefix. An invalid value exits with code `3`.
 
 | Variable | Type | Default | Purpose |
 | --- | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | secret | – | Enables LLM claim extraction (and screenshot checks, if allowed). Without it, judging is offline |
+| `EVJ_LLM_BACKEND` | `anthropic`, `claude-code`, `codex`, `gemini` | `anthropic` | Where LLM calls go. `anthropic` calls the API with `ANTHROPIC_API_KEY`; the others run that CLI headless on your existing login, with its tools off. The `--llm` option of `judge` and `bench` overrides it |
+| `ANTHROPIC_API_KEY` | secret | – | Enables LLM claim extraction (and screenshot checks, if allowed) on the `anthropic` backend. Without it, that backend judges offline |
 | `EVJ_MODEL_FAST` | string | `claude-haiku-5-5` | Model for claim extraction |
 | `EVJ_MODEL_STRONG` | string | `claude-sonnet-5-5` | Model for screenshot checks and the benchmark's transcript baseline |
+| `EVJ_CLI_MODEL_FAST` | string | – | Model for claim extraction on a CLI backend. Unset: `claude-code` uses `EVJ_MODEL_FAST`; `codex` and `gemini` use the CLI's default |
+| `EVJ_CLI_MODEL_STRONG` | string | – | Model for screenshot checks on a CLI backend. Unset: `claude-code` uses `EVJ_MODEL_STRONG`; `codex` and `gemini` use the CLI's default |
+| `EVJ_CLI_TIMEOUT_S` | float > 0 | `180.0` | Time limit of one CLI-backend call, including the CLI's start-up, in seconds. A CLI still running then is killed with everything it started |
 | `EVJ_MAX_COST_USD` | float > 0 | `0.25` | Hard LLM budget per run |
 | `EVJ_REQUEST_TIMEOUT_S` | float | `60.0` | Timeout of one LLM request, in seconds |
 | `EVJ_MAX_RETRIES` | int ≥ 0 | `3` | Retries for 408/409/429/5xx and connection errors, with backoff and `retry-after` |

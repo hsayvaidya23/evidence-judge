@@ -245,8 +245,11 @@ Environment variables (or `.env`, see [.env.example](.env.example)):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | – | Enables LLM claim extraction (and screenshot checks, if allowed) |
+| `EVJ_LLM_BACKEND` | `anthropic` | Where LLM calls go: `anthropic` (needs `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to use the CLI you are logged into, run with its tools off; `--llm` overrides it |
+| `ANTHROPIC_API_KEY` | – | Enables LLM claim extraction (and screenshot checks, if allowed) on the `anthropic` backend |
 | `EVJ_MODEL_FAST` / `EVJ_MODEL_STRONG` | `claude-haiku-5-5` / `claude-sonnet-5-5` | Models per tier |
+| `EVJ_CLI_MODEL_FAST` / `EVJ_CLI_MODEL_STRONG` | – | Models per tier on a CLI backend. Unset: `claude-code` uses `EVJ_MODEL_FAST` / `EVJ_MODEL_STRONG`, `codex` and `gemini` their own default |
+| `EVJ_CLI_TIMEOUT_S` | `180.0` | Time limit of one CLI-backend call, start-up included, in seconds |
 | `EVJ_MAX_COST_USD` | `0.25` | Hard LLM budget per run |
 | `EVJ_REQUEST_TIMEOUT_S` | `60.0` | Timeout of one LLM request, in seconds |
 | `EVJ_MAX_RETRIES` | `3` | Retries for 408/409/429/5xx and connection errors, with backoff |
