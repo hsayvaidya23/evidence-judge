@@ -116,6 +116,12 @@ jobs:
           har: tests/fixtures/runs/honest_success/run.har
           answer-file: tests/fixtures/runs/honest_success/answer.txt
           spec: tests/fixtures/runs/honest_success/spec.yaml
+      - name: Judge a missing trace with the action (bad input must fail, not reuse a verdict)
+        id: broken
+        continue-on-error: true
+        uses: ./
+        with:
+          trace: tests/fixtures/runs/does-not-exist/trace.zip
       - name: Judge a forged run with the action (expected to fail the step)
         id: forged
         continue-on-error: true
@@ -130,7 +136,11 @@ jobs:
           HONEST: ${{ steps.honest.outputs.outcome }}
           FORGED: ${{ steps.forged.outputs.outcome }}
           FORGED_STEP: ${{ steps.forged.outcome }}
+          BROKEN: ${{ steps.broken.outputs.outcome }}
+          BROKEN_STEP: ${{ steps.broken.outcome }}
         run: |
           test "$HONEST" = pass
           test "$FORGED" = fail
           test "$FORGED_STEP" = failure
+          test -z "$BROKEN"
+          test "$BROKEN_STEP" = failure
