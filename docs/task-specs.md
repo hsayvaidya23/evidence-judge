@@ -240,6 +240,33 @@ response) are never counted.
 `allow` entries explain any number of matching mutations (an agent may add to the cart several
 times) unless the entry sets `max_count`; past it, the extra ones are duplicates too.
 
+### Settings and other edits
+
+A task such as "change my display name to Jane Doe" cannot be proven by the page: the agent
+typed `Jane Doe`, so a settings page shows it as an echo of the agent's own input whether or
+not the change was saved, and a `page_text` for the new value never proves anything (see
+[echoes](concepts/claims-and-predicates.md)). What proves it is the write that carried the new
+value to the site. Expect that request, with the value in its body:
+
+```yaml
+id: rename
+task: Change my display name to Jane Doe
+site: shop.example.com
+expect:
+  - id: saved
+    all:
+      - {kind: request, method: POST, url_contains: [/api/profile], body_contains: [Jane Doe]}
+```
+
+Offline, the heuristic claim extractor reads "changed / updated / set / renamed the X to Y" in
+the agent's answer the same way: the claim `The agent set the display name to Jane Doe` is
+proven by a `POST`, `PUT` or `PATCH` whose body contains every word of the value (`Jane` and
+`Doe`, so a JSON body and a form-encoded `name=Jane+Doe` both match). An agent that typed the
+name and never saved gets the claim contradicted. Vague values (`to the new one`), secrets
+that ingest redacts (passwords, card numbers) and values without a word of three or more
+letters (`to 2`) make no such claim. Use `PUT` or `PATCH` in the spec when that is what the
+site sends.
+
 ## Predicates
 
 Every predicate has a `kind`.

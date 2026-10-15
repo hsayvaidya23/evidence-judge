@@ -147,6 +147,7 @@ def _settings_run(*, after: str | None, before: str = "Display name: Alice") -> 
         method="POST",
         url=f"{HOST}/settings",
         status=302,
+        request_body="display_name=Bob",
         response_headers={"Location": "/settings"},
     )
     return make_run(

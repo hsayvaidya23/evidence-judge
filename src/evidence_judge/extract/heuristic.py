@@ -1,7 +1,8 @@
 """Rule-based claim extraction: deterministic, offline, no LLM.
 
 Recognises common completion phrases ("placed the order", "added to cart", "changed the email",
-"order #1042", "the price was $24") and maps them to request / page_text / value predicates.
+"changed the display name to Jane Doe", "order #1042", "the price was $24") and maps them to
+request / page_text / value predicates.
 Negated ("could not place") and intended ("will place") phrases are skipped. Predicates too weak
 to prove a claim (core.predicates.vacuity_reason: a request without a URL or body criterion,
 page text of a single word such as "confirm") are dropped and counted in the coverage note.
@@ -84,6 +85,25 @@ _REFERENCE = re.compile(
     _I,
 )
 _DONE = r"(?:was|were|has\s+been|have\s+been|is|got)\s+(?:successfully\s+)?"
+_SETTING = re.compile(
+    r"\b(?:changed|updated|set|edited|modified|renamed)\s+"
+    r"(?:the\s+|my\s+|your\s+|his\s+|her\s+|their\s+|its\s+|our\s+)?"
+    r"(?P<field>[A-Za-z][\w -]{0,40}?)\s+to\s+"
+    r"(?:\"(?P<dq>[^\"]{1,80})\"|'(?P<sq>[^']{1,80})'|"
+    r"(?P<bare>[^.;!?,\"]{1,80}?))"
+    r"(?=\s*(?:[.;!?,]|$|\s(?:and|but|so|because|then|which|as|on|in|for|from|via|using"
+    r"|with|after|before|instead)\b))",
+    _I,
+)
+_VAGUE_VALUE = re.compile(
+    r"^(?:the|a|an|my|your|his|her|their|its|our|this|that|these|those|it|them|one|what|"
+    r"whatever|something|anything|nothing|same|new|default|be)\b",
+    _I,
+)
+_SECRET_FIELD = re.compile(r"password|passcode|pin\b|card|cvv|cvc|ssn|secret|token|key\b", _I)
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_VALUE_WORD = re.compile(r"[^\W_]{2,}")
+_FROM = re.compile(r"\s+from\s+")
 
 PredicateBuilder = Callable[[Sentence, re.Match[str], str | None], list[Predicate]]
 
@@ -301,6 +321,7 @@ class HeuristicExtractor:
         tally = _Tally()
         for sentence in sentences(answer, reasoning):
             _rule_claims(sentence, task_norm, tally)
+            _setting_claims(sentence, tally)
             _reference_claims(sentence, tally)
             _price_claims(sentence, task_norm, tally)
         unique, _ = dedupe_claims(tally.claims, max_predicates=MAX_PREDICATES_PER_CLAIM)
@@ -354,6 +375,40 @@ def _rule_claims(sentence: Sentence, task_norm: str, tally: _Tally) -> None:
         text = rule.topic_text.format(topic=topic) if rule.topic_text and topic else rule.text
         key = rule.outcome or any(word in task_norm for word in rule.task_words)
         _claim(sentence, text, rule.kind, key, predicates, tally)
+
+
+def _setting_value(match: re.Match[str]) -> str | None:
+    """The new value a 'changed the X to Y' claim names, or None when it is too vague to check
+    (a pronoun, 'the new one'), a secret ingest redacts, an email (the email rule checks it),
+    or has no word of three or more letters ('2', 'on')."""
+    field_name = match.group("field").strip()
+    quoted_value = match.group("dq") or match.group("sq")
+    value = (quoted_value or match.group("bare") or "").strip()
+    if not value or _SECRET_FIELD.search(field_name) or _EMAIL.search(value):
+        return None
+    if quoted_value is None and (_VAGUE_VALUE.match(value) or len(value.split()) > 6):
+        return None
+    if not any(len(w) >= 3 and not w.isdigit() for w in _VALUE_WORD.findall(value)):
+        return None
+    return value
+
+
+def _setting_claims(sentence: Sentence, tally: _Tally) -> None:
+    """'changed my display name to Jane Doe' is proven by the mutation that sent the new value.
+
+    Its text on the page proves nothing: the agent typed it, so the page shows it as an echo
+    whether or not the change was saved. The claim's predicates are a POST, PUT or PATCH whose
+    body contains every word of the value, so a JSON body (`"Jane Doe"`) and a form-encoded one
+    (`Jane+Doe`) both match.
+    """
+    match = _first_asserted(_SETTING, sentence.text)
+    if match is None or (value := _setting_value(match)) is None:
+        return
+    words = list(dict.fromkeys(_VALUE_WORD.findall(value)))
+    field_name = _FROM.split(" ".join(match.group("field").split()).lower())[0]
+    predicates = _requests(["POST", "PUT", "PATCH"], [], words)
+    text = f"The agent set the {field_name} to {value}"
+    _claim(sentence, text, ClaimKind.OUTCOME, True, predicates, tally)
 
 
 def _reference_claims(sentence: Sentence, tally: _Tally) -> None:
