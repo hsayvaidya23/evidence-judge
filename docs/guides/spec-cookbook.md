@@ -212,7 +212,7 @@ constraints:
     field: check_in
     json_path: check_in
     in_request: {kind: request, method: POST, url_contains: [/api/bookings]}
-    op: "=="
+    op: contains
     value: "2026-11-03"
   - kind: value
     field: nights
@@ -236,8 +236,10 @@ on every recorded page, and every value must satisfy the comparison, so an unanc
 `EUR\s*([0-9.]+)` would also read nightly rates, taxes and other offers listed on the way.
 
 Values compare numerically when both sides parse as numbers, and as normalised strings
-otherwise, so ISO dates order correctly with `<`, `<=`, `>` and `>=`. Use `contains` for a time
-inside a timestamp (`value: "10:00"`).
+otherwise, so ISO dates order correctly with `<`, `<=`, `>` and `>=`. The check-in date uses
+`contains`, not `==`: the constraint reads `check_in` in both the request and the response, and
+a server that answers with a full timestamp (`2026-11-03T15:00:00Z`) would otherwise contradict
+an honest booking. Use `contains` for a time inside a timestamp too (`value: "10:00"`).
 
 ## File upload
 
