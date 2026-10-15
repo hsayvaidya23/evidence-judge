@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from evidence_judge.checks.errors import InvalidPredicateError
+from evidence_judge.checks.matching import MAX_REGEX_INPUT, MAX_REGEX_MATCHES
 from evidence_judge.checks.value import ValueChecker, format_value
 from evidence_judge.core.predicates import RequestPredicate, ValuePredicate
 from evidence_judge.core.verdict import Support
@@ -110,6 +111,40 @@ async def test_page_regex_anchored_on_a_label_reads_only_that_value() -> None:
     res = await ValueChecker().evaluate(pred, ctx(run))
     assert res.status is Support.SUPPORTED
     assert "25.00" in res.reason
+
+
+PRICE_LABEL = ValuePredicate(field="price", page_regex=r"Price:\s*\$([\d.]+)", op="<=", value=30)
+
+
+async def test_page_regex_past_the_match_cap_is_no_evidence_not_supported() -> None:
+    cheap = " ".join(f"Price: $10.00 item{i}" for i in range(MAX_REGEX_MATCHES + 10))
+    run = make_run(final_state=final("/order/A1", f"{cheap} Price: $999.00"))
+    res = await ValueChecker().evaluate(PRICE_LABEL, ctx(run))
+    assert res.status is Support.NO_EVIDENCE
+    assert "1 page state (final) had more text or matches than page_regex reads" in res.reason
+
+
+async def test_page_regex_on_text_with_an_unread_middle_is_no_evidence() -> None:
+    middle = "x " * MAX_REGEX_INPUT + "Price: $999.00 " + "y " * MAX_REGEX_INPUT
+    run = make_run(final_state=final("/order/A1", f"Price: $10.00 {middle} Price: $10.00"))
+    res = await ValueChecker().evaluate(PRICE_LABEL, ctx(run))
+    assert res.status is Support.NO_EVIDENCE
+    assert "page_regex reads" in res.reason
+
+
+async def test_page_regex_violation_in_the_read_part_of_a_long_page_still_contradicts() -> None:
+    padding = "x " * (2 * MAX_REGEX_INPUT)
+    run = make_run(final_state=final("/order/A1", f"Price: $999.00 {padding}"))
+    res = await ValueChecker().evaluate(PRICE_LABEL, ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert "999.00" in res.reason
+
+
+async def test_page_regex_with_no_match_on_a_long_page_is_no_evidence() -> None:
+    run = make_run(final_state=final("/order/A1", "x " * (2 * MAX_REGEX_INPUT)))
+    res = await ValueChecker().evaluate(PRICE_LABEL, ctx(run))
+    assert res.status is Support.NO_EVIDENCE
+    assert "page_regex reads" in res.reason
 
 
 async def test_differing_page_values_are_noted() -> None:

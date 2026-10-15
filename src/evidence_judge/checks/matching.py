@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from dataclasses import dataclass
 from enum import Enum
 from typing import Final, Literal, cast
 from urllib.parse import parse_qsl, unquote, unquote_plus, urlsplit
@@ -329,21 +330,34 @@ def regex_search(compiled: regex.Pattern[str], text: str) -> regex.Match[str] | 
         raise RegexTimeoutError(f"regex timed out after {budget} ms: /{compiled.pattern}/") from exc
 
 
-def regex_findall(compiled: regex.Pattern[str], text: str) -> list[regex.Match[str]]:
-    """Up to MAX_REGEX_MATCHES matches in the same windows and time budget as regex_search."""
+@dataclass(frozen=True, slots=True)
+class RegexMatches:
+    """The matches regex_findall read, and whether they are every match in the text."""
+
+    matches: list[regex.Match[str]]
+    complete: bool
+
+
+def regex_findall(compiled: regex.Pattern[str], text: str) -> RegexMatches:
+    """Up to MAX_REGEX_MATCHES matches in the same windows and time budget as regex_search.
+
+    The result is incomplete when the text had more matches than that, or was longer than the
+    two windows, so its middle was never searched.
+    """
+    windowed = len(text) > 2 * MAX_REGEX_INPUT
     windows = (
-        [(0, len(text))]
-        if len(text) <= 2 * MAX_REGEX_INPUT
-        else [(0, MAX_REGEX_INPUT), (len(text) - MAX_REGEX_INPUT, len(text))]
+        [(0, MAX_REGEX_INPUT), (len(text) - MAX_REGEX_INPUT, len(text))]
+        if windowed
+        else [(0, len(text))]
     )
     found: list[regex.Match[str]] = []
     try:
         for start, end in windows:
             for match in compiled.finditer(text, start, end, timeout=REGEX_TIMEOUT_SECONDS):
-                found.append(match)
                 if len(found) >= MAX_REGEX_MATCHES:
-                    return found
+                    return RegexMatches(found, complete=False)
+                found.append(match)
     except TimeoutError as exc:
         budget = round(REGEX_TIMEOUT_SECONDS * 1000)
         raise RegexTimeoutError(f"regex timed out after {budget} ms: /{compiled.pattern}/") from exc
-    return found
+    return RegexMatches(found, complete=not windowed)

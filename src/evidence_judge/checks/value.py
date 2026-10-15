@@ -3,14 +3,16 @@
 Values are read from JSON (or form-encoded) bodies via `json_path` - from the requests matching
 `in_request`, or from every mutation that took effect (2xx or 3xx, not failed) when it is
 unset, so a rejected attempt cannot break a constraint - and/or from page text via `page_regex`:
-every match on every recorded page state (snapshots and the final page). Every observation must
+the matches on every recorded page state (snapshots and the final page). Every observation must
 satisfy the comparison: one violating observation makes the predicate CONTRADICTED, which is
 what a guardrail needs, and satisfying observations that differ are noted. A page_regex should
 therefore anchor on a label ('Total:\\s*\\$([\\d.,]+)'): a bare price pattern also reads
 shipping fees, coupons and other products. A candidate whose body ingest truncated before the
 path keeps the predicate from being SUPPORTED: the unread part could hold a violating value, so
-the result is NO_EVIDENCE. So is an ordering
-comparison (<, <=, >, >=) on a value that does not parse as a number: text is never ordered.
+the result is NO_EVIDENCE. So does a page state that page_regex could not read in full (over
+MAX_REGEX_MATCHES matches, or text longer than the head and tail it searches): a violating value
+found in the read part still contradicts. So is an ordering comparison (<, <=, >, >=) on a
+value that does not parse as a number: text is never ordered.
 """
 
 from __future__ import annotations
@@ -105,19 +107,31 @@ def _missing_json_reason(
     return "No mutating request that took effect (2xx or 3xx) was captured"
 
 
-def _from_pages(regex_source: str, index: EvidenceIndex) -> list[Observation]:
+def _from_pages(regex_source: str, index: EvidenceIndex) -> tuple[list[Observation], list[str]]:
+    """Every match on every page state, and the ids of states whose text was not fully read."""
     regex = compile_regex(regex_source)
     if regex.groups != 1:
         raise InvalidPredicateError(f"page_regex /{regex_source}/ needs exactly one group")
-    return [
-        Observation(
-            match.group(1),
-            state_id(state, index),
-            f"the page {url_path(state.url)}",
+    observations: list[Observation] = []
+    partial: list[str] = []
+    for state in index.page_states():
+        evidence_id = state_id(state, index)
+        found = regex_findall(regex, state.text)
+        if not found.complete:
+            partial.append(evidence_id)
+        observations.extend(
+            Observation(match.group(1), evidence_id, f"the page {url_path(state.url)}")
+            for match in found.matches
         )
-        for state in index.page_states()
-        for match in regex_findall(regex, state.text)
-    ]
+    return observations, partial
+
+
+def _partial_reason(state_ids: list[str]) -> str:
+    ids = ", ".join(state_ids[-MAX_CITATIONS:])
+    return (
+        f"{plural(len(state_ids), 'page state')} ({ids}) had more text or matches than "
+        f"page_regex reads"
+    )
 
 
 def _observe(
@@ -139,9 +153,13 @@ def _observe(
         elif not found:
             gaps.append(_missing_json_reason(predicate, predicate.json_path, candidates, index))
     if predicate.page_regex is not None:
-        pages = _from_pages(predicate.page_regex, index)
+        pages, partial = _from_pages(predicate.page_regex, index)
         observations.extend(pages)
-        if not pages:
+        if partial:
+            reason = _partial_reason(partial)
+            unread = reason if unread is None else f"{unread}; {reason}"
+            gaps.append(reason)
+        elif not pages:
             gaps.append(f"No recorded page text matches /{predicate.page_regex}/")
     return observations, "; ".join(gaps), unread
 
