@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import struct
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -79,21 +80,35 @@ def test_animation_within_budget(name: str) -> None:
 ROOT = Path(__file__).parents[2]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 RAW = "https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/"
-BLOB = "https://github.com/hsayvaidya23/evidence-judge/blob/main/"
+GITHUB = "https://github.com/hsayvaidya23/evidence-judge/"
 
 
-def test_readme_images_are_absolute_and_exist() -> None:
+def pypi_readme() -> str:
+    hooks = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["hatch"]
+    text = README
+    for sub in hooks["metadata"]["hooks"]["fancy-pypi-readme"]["substitutions"]:
+        text = re.sub(sub["pattern"], sub["replacement"], text)
+    return text
+
+
+def test_readme_images_are_relative_and_exist() -> None:
     urls = re.findall(r'(?:src|srcset)="([^"]+)"', README)
     local = [u for u in urls if not u.startswith("https://img.shields.io/")]
     assert local
     for url in local:
-        assert url.startswith(RAW), url
-        assert (ROOT / url.removeprefix(RAW)).is_file(), url
+        assert not url.startswith("http"), url
+        assert (ROOT / url).is_file(), url
 
 
-def test_readme_links_work_off_github() -> None:
-    hrefs = re.findall(r'href="([^"]+)"', README) + re.findall(r"\]\(([^)\s]+)\)", README)
+def test_pypi_description_uses_absolute_urls() -> None:
+    text = pypi_readme()
+    for url in re.findall(r'(?:src|srcset)="([^"]+)"', text):
+        assert url.startswith(("https://img.shields.io/", RAW)), url
+        if url.startswith(RAW):
+            assert (ROOT / url.removeprefix(RAW)).is_file(), url
+    hrefs = re.findall(r'href="([^"]+)"', text) + re.findall(r"\]\(([^)\s]+)\)", text)
     for href in hrefs:
         assert href.startswith(("https://", "#")), href
-        if href.startswith(BLOB):
-            assert (ROOT / href.removeprefix(BLOB).split("#")[0]).exists(), href
+        for kind in ("blob/main/", "tree/main/"):
+            if href.startswith(GITHUB + kind):
+                assert (ROOT / href.removeprefix(GITHUB + kind).split("#")[0]).exists(), href
