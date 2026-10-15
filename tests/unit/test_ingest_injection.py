@@ -18,6 +18,7 @@ from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.ingest import load_playwright_trace, load_run
+from evidence_judge.ingest._calls import resolved_text
 from evidence_judge.ingest.playwright_trace import TraceLimits
 
 from .test_ingest_playwright_trace import rewrite_trace
@@ -179,6 +180,7 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("markup_note", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("fragment", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("query_key", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
+        ("keypad", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
     ],
 )
 async def test_agent_made_evidence_never_passes(
@@ -194,6 +196,26 @@ async def test_agent_made_evidence_never_passes(
     assert got.value == outcome
     assert [m for _, m in results] == met
     assert why in text
+
+
+def test_a_click_records_the_text_of_the_element_it_resolved_to() -> None:
+    run = load_playwright_trace(FIXTURES / "keypad.zip")
+
+    assert [a.target_text for a in run.actions if a.name == "click"] == list("In stock")
+
+
+@pytest.mark.parametrize(
+    ("message", "text"),
+    [
+        ('  locator resolved to <button class="k">I</button>', "I"),
+        ("  locator resolved to visible <h1>Red <b>Kettle</b> &amp; co</h1>", "Red Kettle & co"),
+        ('  locator resolved to <input type="submit" value="Go">', "Go"),
+        ("  locator resolved to <img src=x>", None),
+        ("  waiting for element to be visible", None),
+    ],
+)
+def test_resolved_text(message: str, text: str | None) -> None:
+    assert resolved_text(message) == text
 
 
 async def test_playwright_mcp_settle_waits_are_not_injections() -> None:

@@ -217,6 +217,12 @@ the names exported from `evidence_judge`) is defined under
   script showed as "Showing: In stock" passed. The fragment of every URL the agent opens (whole
   and split on `/`, `?`, `&`, `=`) and every query key of an opened URL or `GET` request are
   now inputs; the fragment counts even on a page the site had already served.
+- **Text clicked out on a page's own keyboard is input.** Clicks typed nothing, so clicking
+  "I", "n", " ", "s", "t", "o", "c", "k" on an on-screen keyboard that shows what it typed
+  made "In stock" and passed. A click now records the text of the element it resolved to
+  (`ActionEvent.target_text`, from the trace's action log, else the text its selector names),
+  and the labels of two or more clicks in a row on controls of at most five characters are
+  joined into one input, like keys.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

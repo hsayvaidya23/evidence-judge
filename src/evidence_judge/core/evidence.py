@@ -144,6 +144,11 @@ class ActionEvent(_Frozen):
         description="For an upload: the text of the files it sent, as far as the trace holds "
         "it (the first 64 KB of each text file; binary files are left out)",
     )
+    target_text: str | None = Field(
+        default=None,
+        description="The text of the element the action resolved to, as the recording shows "
+        "it (a Playwright trace logs a preview of it, cut short when long)",
+    )
 
 
 class NetworkEvent(_Frozen):

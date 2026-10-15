@@ -15,6 +15,7 @@ from typing import Final
 from urllib.parse import parse_qsl, unquote, urljoin, urlsplit, urlunsplit
 
 from evidence_judge.core.actions import (
+    CLICK,
     FILL,
     GOTO,
     KEY_DOWN,
@@ -54,6 +55,14 @@ _SHORTCUTS: Final = frozenset("acxvzy")
 """Keys that, with Control or Meta, are editing shortcuts."""
 _TYPED_KEY = re.compile(r"key([a-z])|digit(\d)|numpad(\d)")
 _FRAGMENT_PARTS = re.compile(r"[/?&=]")
+_SELECTOR_TEXT = re.compile(
+    r"""(?:\btext=|:has-text\(|:text(?:-is)?\(|\[name=)\s*"""
+    r"""(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(?<=text=)([^"'\s>][^>]*?)\s*(?=>>|$))"""
+)
+_SELECTOR_ESCAPE = re.compile(r"\\(.)")
+CLICKED_KEY_CHARS: Final = 5
+"""Longest label of a control whose clicks in a row join into one input, like keys: the keys
+of a page's own keyboard, or a pad of short words ("In", "stock")."""
 _LINE_BREAK = re.compile(r"\n|(?<=[.!?])\s+")
 COPIED_WORDS: Final = 32
 """Longest run of words a copied page contributes as one input."""
@@ -73,10 +82,12 @@ def raw_inputs(run: Run) -> Iterator[tuple[str, Site | None]]:
 
 
 def _action_inputs(run: Run, typing: _Typing) -> Iterator[tuple[str, Site | None]]:
-    """Chosen options, uploaded file names and text, and the URL values of pages the agent
-    opened itself, as `typing` replays every action."""
+    """Chosen options, uploaded file names and text, the URL values of pages the agent opened
+    itself, and the labels of short-label controls it clicked in a row, joined
+    (`_clicked_keys`), as `typing` replays every action."""
     served = _site_served(run)
     last = -math.inf
+    yield from ((text, None) for text in _clicked_keys(run.actions))
     for action in run.actions:
         before, last = last, action.ts
         name = canonical_action(action.name)
@@ -89,6 +100,40 @@ def _action_inputs(run: Run, typing: _Typing) -> Iterator[tuple[str, Site | None
             opened = _agent_opened(url, served, before)
             values = _url_inputs(url, with_path=True) if opened else _fragment_inputs(url)
             yield from ((v, Site.of_url(url)) for v in values)
+
+
+def _clicked_keys(actions: list[ActionEvent]) -> Iterator[str]:
+    """The labels of each run of two or more clicks in a row on controls with a short label
+    (at most CLICKED_KEY_CHARS characters, `_clicked_label`), joined: a page's own keyboard or
+    word pad types like keys, and repeats what the agent clicked ("I", "n", " ", "s", ...
+    clicked, "In stock" shown)."""
+    keys: list[str] = []
+    for action in [*actions, None]:
+        label = None if action is None else _clicked_label(action)
+        if label is not None and 0 < len(label) <= CLICKED_KEY_CHARS:
+            keys.append(label)
+            continue
+        if len(keys) > 1:
+            yield "".join(keys)
+        keys.clear()
+
+
+def _clicked_label(action: ActionEvent) -> str | None:
+    """The label of the control a click acted on: the text of the element it resolved to,
+    else the text its selector names (``text=I``, ``:has-text("I")``, a role's ``name``),
+    stripped; a label of only spaces, or "Space", types a space. None for any other action."""
+    if canonical_action(action.name) != CLICK:
+        return None
+    label = action.target_text
+    if label is None and action.selector is not None:
+        named = [
+            m.group(1) or m.group(2) or m.group(3) for m in _SELECTOR_TEXT.finditer(action.selector)
+        ]
+        label = _SELECTOR_ESCAPE.sub(r"\1", named[-1]) if named else None
+    if label is None:
+        return None
+    stripped = label.strip()
+    return " " if (label and not stripped) or stripped.lower() == "space" else stripped
 
 
 def _uploaded(action: ActionEvent) -> Iterator[str]:

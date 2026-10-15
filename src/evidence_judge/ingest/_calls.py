@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import binascii
 import codecs
+import html
 import json
 import math
 import re
@@ -218,6 +219,8 @@ class RawAction:
     owner: str | None = None
     """The class whose method it is (Frame, Page, BrowserContext, ...)."""
     taints: bool = False
+    target: str | None = None
+    """The text of the element it resolved to (`resolved_text`)."""
 
 
 @dataclass(slots=True)
@@ -231,6 +234,27 @@ class RawRoute:
 
 def _entry_url(entry: JsonObject) -> str:
     return as_str(as_object(entry.get("request")).get("url")) or ""
+
+
+_RESOLVED = re.compile(r"\s*locator resolved to (?:visible |hidden )?(<.*>)\s*", re.DOTALL)
+_PREVIEW = re.compile(r"<([\w-]+)([^<>]*)>(.*)</\1>", re.DOTALL)
+_VALUE_ATTR = re.compile(r"""\bvalue=(?:"([^"]*)"|'([^']*)')""")
+_INNER_TAG = re.compile(r"<[^<>]*>")
+
+
+def resolved_text(message: str) -> str | None:
+    """The text of the element an action log line says its locator resolved to ("locator
+    resolved to <button class="k">I</button>"), or None if the line is not one: the element's
+    text with inner tags dropped and character references decoded, or the ``value`` of an
+    ``<input>`` button."""
+    resolved = _RESOLVED.fullmatch(message)
+    if resolved is None:
+        return None
+    preview = resolved.group(1)
+    if (element := _PREVIEW.fullmatch(preview)) is not None:
+        return html.unescape(_INNER_TAG.sub("", element.group(3)))
+    value = _VALUE_ATTR.search(preview)
+    return html.unescape(value.group(1) or value.group(2) or "") if value else None
 
 
 def action_name(method: str) -> str | None:

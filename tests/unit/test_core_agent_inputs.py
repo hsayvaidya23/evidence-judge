@@ -14,6 +14,39 @@ def _inputs(
     return EvidenceIndex(make_run(actions=actions, network=network)).agent_inputs()
 
 
+def _clicks(*labels: str | None, start: int = 1) -> list[ActionEvent]:
+    return [
+        act(start + i, "click", f"#k{i}").model_copy(update={"target_text": label})
+        for i, label in enumerate(labels)
+    ]
+
+
+def test_clicks_in_a_row_on_short_label_controls_form_one_input() -> None:
+    assert _inputs(_clicks("I", "n", " ", "s", "t", "o", "c", "k")) == ("in stock",)
+    assert _inputs(_clicks("In", "stock")) == ("instock",)
+    assert _inputs(_clicks("In", "Space", "stock ")) == ("in stock",)
+    assert _inputs(_clicks("I", "n", "Add to cart", "o", "k")) == ()
+    split = [*_clicks("I", "n"), act(3, "press", "#q", value="Enter"), *_clicks("s", start=4)]
+    assert _inputs(split) == ()
+
+
+def test_a_clicked_label_falls_back_to_the_text_its_selector_names() -> None:
+    clicks = [
+        act(1, "click", "text=I"),
+        act(2, "click", 'button:has-text("n")'),
+        act(3, "click", 'internal:role=button[name=" "i]'),
+        act(4, "click", "#pad >> text='st' >> nth=0"),
+        act(5, "click", 'internal:text="ock"i'),
+    ]
+    assert _inputs(clicks) == ("in stock",)
+    assert _inputs([act(1, "click", "#a"), act(2, "click", "xpath=//b")]) == ()
+
+
+def test_a_single_click_or_long_labels_are_not_input() -> None:
+    assert _inputs(_clicks("Buy")) == ()
+    assert _inputs(_clicks("Red Kettle", "Add to cart", "Checkout", None)) == ()
+
+
 def test_typing_actions_are_inputs_under_any_alias() -> None:
     actions = [
         act(1, "fill", "#q", value="Order  A77"),

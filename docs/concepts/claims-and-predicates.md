@@ -116,7 +116,11 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   opening `/search?q=Order+%231042+confirmed` directly, shows the phrase without any order
   existing. The agent's input is every typed value (`fill`, `type`, `insert_text`), each run of
   single-key `press` actions on one target (keys held with `keyboard.down` count as pressed;
-  their `keyboard.up` does nothing), every value a field took as the agent edited it, every
+  their `keyboard.up` does nothing), the labels of each run of two or more clicks in a row on
+  controls labelled with at most five characters, joined like keys (a page's own keyboard or
+  word pad: "I", "n", " ", "s", ... clicked and "In stock" shown; the label is the text of the
+  element the click resolved to, as a Playwright trace logs it, else the text its selector
+  names, such as `text=I` or a role's `name`), every value a field took as the agent edited it, every
   option it chose (`select_option`, browser-use `select_dropdown_option`; the label or value
   as the action recorded it, and each of several), the path segments, query keys and values
   and fragment (whole, and each part between `/`, `?`, `&` and `=`) of every URL it opened
