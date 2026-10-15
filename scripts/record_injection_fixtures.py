@@ -12,7 +12,8 @@ places an order; an honest agent that picks a quantity in a drop-down and orders
 agent that screenshots the product page with a stylesheet that shows "In stock" (and an honest
 one that screenshots it as it is); an agent that opens a product page's `view-source:`; and
 agents on pages whose markup says "In stock" where CSS or a closed `<details>` hides it (and
-honest ones on a page that shows it and that open the `<details>`).
+honest ones on a page that shows it and that open the `<details>`); and an agent that types
+"In" and "stock" into two fields a page previews side by side.
 
 Serves a one-product kettle shop on a free port and writes, into tests/fixtures/injection/, one
 Playwright trace per mode (snapshots, no screenshots, to stay small) and the specs they are
@@ -197,6 +198,18 @@ HIDDEN_STYLES: Final = {
     "/kettle.css": ".badge{display:none}.badge.show{display:inline}"
     "@media (min-width:600px){.wide-hidden{display:none}}"
 }
+ENGRAVE: Final = """<title>Engraving</title><h1>Red Kettle engraving</h1>
+<p id="stock">Out of stock</p>
+<input id="l1" placeholder="line 1"><input id="l2" placeholder="line 2"><p id="preview"></p>
+<script>
+const preview = () => {
+  document.getElementById('preview').textContent =
+    document.getElementById('l1').value + ' ' + document.getElementById('l2').value;
+};
+document.getElementById('l1').addEventListener('input', preview);
+document.getElementById('l2').addEventListener('input', preview);
+</script>"""
+"""A page that previews two short fields side by side."""
 STOCK: Final = {"sku": "K-1", "stock": "Out of stock"}
 INVOICE_TEXT: Final = "Invoice accepted - payment received"
 
@@ -325,6 +338,7 @@ class _Shop(BaseHTTPRequestHandler):
             "/sizes": SIZES,
             "/folder": FOLDER,
             "/order": ORDER,
+            "/engrave": ENGRAVE,
             **PAGE_SOURCE_PAGES,
             **HIDDEN_PAGES,
         }
@@ -640,6 +654,13 @@ def data_link(page: Page, base: str) -> None:
     page.wait_for_url("**/orders/A77")
 
 
+def two_fields(page: Page, base: str) -> None:
+    page.goto(f"{base}/engrave")
+    page.fill("#l1", "In")
+    page.fill("#l2", "stock")
+    page.click("h1")
+
+
 MODES: Final[dict[str, Callable[[Page, str], None]]] = {
     "evaluate": evaluate,
     "init_script": init_script,
@@ -703,6 +724,7 @@ MODES.update(
         "details_open": details_open,
     }
 )
+MODES.update({"two_fields": two_fields})
 
 SCREENCAST: Final = frozenset({"shot_style", "shot_plain"})
 """Modes recorded with screenshots: what the screencast showed is their point."""

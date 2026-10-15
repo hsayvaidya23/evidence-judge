@@ -126,7 +126,8 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   the site chose that URL. URL inputs only count as echoed on pages and URLs of the site they
   came from: typing `https://en.wikipedia.org/wiki/Kettle` does not make the shop's own
   `/products/red-kettle` an echo;
-  inputs shorter than three characters or without a letter or digit are ignored. Edits are
+  inputs without a letter or digit are ignored, and those shorter than three characters are
+  only used to find composed needles (below). Edits are
   replayed per field, so typing "In stocX", pressing Backspace and typing "k" makes "In stock"
   an input: Backspace and Delete (a character, a word with Control or Alt, the line with Meta),
   arrows, Home and End (Shift selects), Control or Meta with A, X, C and V (also when the
@@ -187,6 +188,16 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   are matched anywhere in the evidence, not only on its word boundaries: page text joins
   inline elements without a space (`for <b>Paid</b>Now` reads "for PaidNow"), so a
   word-boundary rule there would let a glued echo pass.
+- **Needles composed from several inputs.** Inputs too short to be masked alone can make a
+  needle between them: "In" typed in one engraving line and "stock" in the other, previewed
+  side by side as "In stock". So a `page_text` needle, and each `response_contains` of a
+  `request` (or of a `value`'s `in_request`), is also checked with every occurrence masked
+  whose words all lie in echoes of the agent's inputs: the echoes above of inputs of any length,
+  single short words included, plus every occurrence (folded) of an input of one or two
+  characters. One word of the occurrence the agent did not put in leaves it as evidence:
+  "Red Kettle" searched for and "1" typed as a quantity do not cover "Thank you for your
+  order". The price is that once the agent has typed every word of a needle somewhere in the
+  run, the site's own occurrence of it is covered too and cannot prove the claim alone.
 - **Screenshots cannot be masked.** A screenshot shows the field the agent typed into and any
   page that repeats its input back, and masking only works on text. So in a run with any agent
   input (anything typed, pressed, pasted, uploaded or put in a URL) or any injected code, a

@@ -9,7 +9,13 @@ from typing import Final
 
 from evidence_judge.core.actions import GOTO, canonical_action
 from evidence_judge.core.agent_input import raw_inputs, rendered
-from evidence_judge.core.echo import masked_page, masked_request, masked_url
+from evidence_judge.core.echo import (
+    covered_page,
+    covered_request,
+    masked_page,
+    masked_request,
+    masked_url,
+)
 from evidence_judge.core.evidence import (
     ActionEvent,
     Channel,
@@ -38,6 +44,7 @@ class EvidenceIndex:
         self.run = run
         self._normalized: dict[str, str] = {}
         self._inputs_by_site: dict[tuple[Site | None, bool], tuple[str, ...]] = {}
+        self._covered: dict[tuple[str, ...], EvidenceIndex] = {}
 
     def has(self, channel: Channel) -> bool:
         return channel in self.run.captured
@@ -202,13 +209,28 @@ class EvidenceIndex:
     @cached_property
     def _scoped_inputs(self) -> tuple[tuple[str, Site | None], ...]:
         """Each input with the site it can be echoed on (None: any site)."""
+        return tuple(i for i in self._every_input if len(i[0]) >= MIN_PAGE_TEXT)
+
+    @cached_property
+    def _every_input(self) -> tuple[tuple[str, Site | None], ...]:
+        """`_scoped_inputs` with those shorter than MIN_PAGE_TEXT too."""
         found = {
             (normalize(form), site)
             for text, site in raw_inputs(self.run)
             for form in rendered(text)
         }
-        kept = [(t, site) for t, site in found if len(t) >= MIN_PAGE_TEXT and WORD.search(t)]
+        kept = [(t, site) for t, site in found if WORD.search(t)]
         return tuple(sorted(kept, key=lambda i: (-len(i[0]), i[0], str(i[1] or ""))))
+
+    def _scoped(
+        self, inputs: tuple[tuple[str, Site | None], ...], url: str | None
+    ) -> Iterable[str]:
+        site = Site.of_url(url)
+        return (
+            text
+            for text, origin in inputs
+            if origin is None or (site is not None and origin.covers(site))
+        )
 
     def _inputs_for(self, url: str | None, *, short_words: bool) -> tuple[str, ...]:
         """The inputs that can be echoed on `url`: typed ones, and URL ones from its site;
@@ -219,9 +241,8 @@ class EvidenceIndex:
             cached = tuple(
                 dict.fromkeys(
                     text
-                    for text, origin in self._scoped_inputs
-                    if (origin is None or (site is not None and origin.covers(site)))
-                    and (short_words or not is_short_word(text))
+                    for text in self._scoped(self._scoped_inputs, url)
+                    if short_words or not is_short_word(text)
                 )
             )
             self._inputs_by_site[site, short_words] = cached
@@ -253,6 +274,43 @@ class EvidenceIndex:
     def without_short_word_input(self) -> EvidenceIndex:
         """`without_agent_input` that also masks inputs that are a single short word."""
         return self._masked(short_words=True)
+
+    def without_covered(self, needles: tuple[str, ...]) -> EvidenceIndex:
+        """This evidence with every occurrence of each of `needles` (normalised) that the agent's
+        inputs make word by word masked, in page text and response bodies: inputs of any length,
+        single short words and those under MIN_PAGE_TEXT characters included, each where it can
+        be echoed (core.echo.mask_covered). The text a predicate looks for, made from several
+        inputs none of which is masked alone ("In" and "stock" typed into two fields of a
+        preview), is the agent's own text; an occurrence with one word the agent did not put in
+        is left alone."""
+        key = tuple(sorted({normalize(n) for n in needles}))
+        cached = self._covered.get(key)
+        if cached is None:
+            cached = self._covered[key] = self._covering(key)
+        return cached
+
+    def _covering(self, needles: tuple[str, ...]) -> EvidenceIndex:
+        if not needles or not self._every_input:
+            return self
+        run = self.run
+        inputs = self._every_input
+
+        def page[S: (PageSnapshot, PageState)](state: S) -> S:
+            return covered_page(state, needles, tuple(self._scoped(inputs, state.url)))
+
+        return EvidenceIndex(
+            run.model_copy(
+                update={
+                    "network": [
+                        covered_request(n, needles, tuple(self._scoped(inputs, n.url)))
+                        for n in run.network
+                    ],
+                    "snapshots": [page(s) for s in run.snapshots],
+                    "initial_state": None if run.initial_state is None else page(run.initial_state),
+                    "final_state": None if run.final_state is None else page(run.final_state),
+                }
+            )
+        )
 
     def _masked(self, *, short_words: bool) -> EvidenceIndex:
         if not any(short_words or not is_short_word(text) for text, _ in self._scoped_inputs):

@@ -83,14 +83,13 @@ async def echoed(
 
     The predicate is evaluated again with every input (EvidenceIndex.agent_inputs) masked out of
     everything the site can echo it in (EvidenceIndex.without_agent_input): page text, URLs and
-    response bodies. If it no longer holds, what supported it was the agent's input.
+    response bodies; and again with every occurrence of the text it looks for that the inputs
+    make word by word masked (`covered_text`). If it no longer holds, what supported it was the
+    agent's input.
     """
     if not reads_agent_reachable_text(predicate):
         return None
-    masked = ctx.without_agent_input(short_words=reads_short_word(predicate))
-    if masked.index is ctx.index:
-        return None
-    if (await registry.evaluate(predicate, masked)).status is Support.SUPPORTED:
+    if await _holds_without_input(predicate, ctx, registry):
         return None
     inputs = _cited_inputs(ctx.index.agent_inputs(), supported)
     shown = ", ".join(quoted(i) for i in inputs[:MAX_SHOWN_INPUTS])
@@ -99,6 +98,37 @@ async def echoed(
         "it holds only where a page, URL or response echoes the agent's own input (text it typed, "
         f"pasted or put in a URL: {shown}{more}), so it proves nothing"
     )
+
+
+async def _holds_without_input(
+    predicate: Predicate, ctx: CheckContext, registry: CheckerRegistry
+) -> bool:
+    """`predicate` still holds with the agent's inputs masked out, and with every occurrence of
+    the text it looks for that the inputs make word by word masked (`covered_text`)."""
+    masked = ctx.without_agent_input(short_words=reads_short_word(predicate))
+    if masked.index is not ctx.index and not await _supported(predicate, masked, registry):
+        return False
+    covered = ctx.without_covered(covered_text(predicate))
+    return covered is ctx or await _supported(predicate, covered, registry)
+
+
+async def _supported(predicate: Predicate, ctx: CheckContext, registry: CheckerRegistry) -> bool:
+    return (await registry.evaluate(predicate, ctx)).status is Support.SUPPORTED
+
+
+def covered_text(predicate: Predicate) -> tuple[str, ...]:
+    """The literal texts `predicate` looks for in page text or a response body: masked where the
+    agent's inputs make them word by word (EvidenceIndex.without_covered), since several inputs
+    too short to be masked alone ("In", "stock") can make a multi-word text between them."""
+    match predicate:
+        case PageTextPredicate():
+            return (predicate.contains,)
+        case RequestPredicate():
+            return tuple(predicate.response_contains)
+        case ValuePredicate(in_request=RequestPredicate() as request):
+            return tuple(request.response_contains)
+        case _:
+            return ()
 
 
 def unwitnessed_screenshot(predicate: Predicate, ctx: CheckContext) -> str | None:

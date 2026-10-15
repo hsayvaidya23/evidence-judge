@@ -143,6 +143,12 @@ class CheckContext:
         )
         return dataclasses.replace(self, index=index, llm=None)
 
+    def without_covered(self, needles: tuple[str, ...]) -> CheckContext:
+        """The same context over the evidence with each occurrence of `needles` the agent's
+        inputs make word by word masked (EvidenceIndex.without_covered)."""
+        index = self.index.without_covered(needles)
+        return self if index is self.index else dataclasses.replace(self, index=index, llm=None)
+
 
 class PredicateChecker(Protocol):
     """Evaluates one predicate kind. `deterministic` checkers never call an LLM."""

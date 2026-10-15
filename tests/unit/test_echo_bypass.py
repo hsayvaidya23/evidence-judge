@@ -19,6 +19,7 @@ from evidence_judge.core.index import EvidenceIndex, is_short_word
 from evidence_judge.core.predicates import (
     PageTextPredicate,
     Predicate,
+    RequestPredicate,
     UrlPredicate,
     ValuePredicate,
 )
@@ -371,3 +372,77 @@ async def test_a_corrected_typo_does_not_mask_a_confirmation_proven_by_other_evi
     verdict = await JUDGE.judge(run, JudgeOptions(offline=True, spec=SHORT_SPEC))
     assert verdict.outcome is Outcome.PASS, verdict.summary
     assert EvidenceIndex(run).agent_inputs()[:2] == ("red kettel", "red kettle")
+
+
+def _fields(*values: str, text: str, response: object | None = None) -> Run:
+    """Fills one field per value on the product page, which then shows `text`."""
+    fills = [act(3 + i, "fill", f"#f{i}", value=v) for i, v in enumerate(values)]
+    return make_run(
+        actions=[act(1, "goto", url=f"{HOST}/"), act(2, "click", "#red"), *fills],
+        network=[
+            net(1, "GET", "/"),
+            net(2, "GET", "/p/red"),
+            net(9, "GET", "/api/preview", response=response),
+        ],
+        snapshots=PRODUCT_PAGES,
+        final_state=final("/p/red", text),
+    )
+
+
+@pytest.mark.parametrize(
+    ("values", "text"),
+    [
+        (("In", "stock"), "Red Kettle Out of stock. Engraving: In stock"),
+        (("in", "STOCK!"), "Red Kettle Out of stock. Engraving: In stock"),
+        (("stock", "In"), "Red Kettle Out of stock. Engraving: In stock"),
+        (("I", "n stock"), "Red Kettle Out of stock. Engraving: In stock"),
+        (("I", "n", "st", "ock"), "Red Kettle Out of stock. Engraving: In stock"),
+    ],
+    ids=["two-fields", "folded", "reversed", "split-word", "letters"],
+)
+async def test_a_needle_composed_from_short_inputs_goes_to_review(
+    values: tuple[str, ...], text: str
+) -> None:
+    assert await _judged(_fields(*values, text=text), STOCK_SPEC) is Outcome.NEEDS_REVIEW
+
+
+@pytest.mark.parametrize(
+    ("values", "text"),
+    [
+        (("In",), "Red Kettle In stock. Engraving: In"),
+        (("tin", "stock"), "Red Kettle In stock. Engraving: tin stock"),
+        (("Red Kettle", "1"), "Red Kettle In stock"),
+    ],
+    ids=["one-word-typed", "inside-a-word", "unrelated"],
+)
+async def test_a_needle_with_a_word_the_agent_did_not_type_is_evidence(
+    values: tuple[str, ...], text: str
+) -> None:
+    assert await _judged(_fields(*values, text=text), STOCK_SPEC) is Outcome.PASS
+
+
+async def test_short_inputs_do_not_cover_the_sites_sentence() -> None:
+    run = _fields("Your", "order", "A1", text="Thank you for your order")
+    res = await guarded(
+        PageTextPredicate(contains="Thank you for your order"), ctx(run), default_registry(), "it"
+    )
+    assert res.status is Support.SUPPORTED, res.reason
+
+
+async def test_a_response_composed_from_short_inputs_proves_nothing() -> None:
+    run = _fields("In", "stock", text="Red Kettle", response={"preview": "In stock"})
+    predicate = RequestPredicate(url_contains=["/api/preview"], response_contains=["In stock"])
+    res = await guarded(predicate, ctx(run), default_registry(), "it")
+    assert res.status is Support.NO_EVIDENCE
+    assert ECHO_REASON in res.reason
+
+
+def test_the_covered_mask_masks_only_covered_occurrences() -> None:
+    index = EvidenceIndex(_fields("In", "stock", text="In stock now"))
+    assert index.without_covered(()) is index
+    masked = index.without_covered(("In stock",)).final
+    assert masked is not None
+    assert masked.text == f"{MASK} now"
+    partial = EvidenceIndex(_fields("In", text="In stock now")).without_covered(("In stock",))
+    assert partial.final is not None
+    assert partial.final.text == "In stock now"

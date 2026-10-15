@@ -201,6 +201,11 @@ the names exported from `evidence_judge`) is defined under
   `Playwright` object can open a second context or an `APIRequestContext` and send requests the
   trace never shows (a `forbid` on them cannot fire). The harness guide now says to give the
   agent only the traced context or its page.
+- **A needle composed from several short inputs proves nothing.** Inputs too short to be masked
+  alone ("In" and "stock" typed into two fields a page previews side by side) made "In stock"
+  between them, and the page passed. A `page_text` needle or `response_contains` text whose
+  every word lies in echoes of the agent's inputs (any length, one-character inputs included)
+  is now masked; an occurrence with a word the agent did not put in still proves.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
