@@ -309,6 +309,20 @@ the names exported from `evidence_judge`) is defined under
   checked and the user was not told. Claude Code, Codex and Gemini CLI hooks now judge it too.
   They never block a second time, to avoid a loop. If the answer still fails, the stop goes
   through with a warning to the user that names what the evidence does not back up.
+- **Stop hooks judge every trace of the turn and stop failing open on bad evidence.** Before,
+  the hook judged only the trace with the newest mtime. That let three things through: a junk
+  trace the judge refused (exit 3) passed the stop, an older clean trace with a fresh mtime
+  replaced the real one, and deleting the traces after using Playwright gave an empty reply.
+  Now:
+  - When `browser_stop_tracing` reported trace files in the transcript (Claude Code, Codex),
+    only those count, and each must exist and pass.
+  - Otherwise, every trace modified during the turn is judged (up to 10).
+  - A trace whose own recorded events (`wallTime`) end before the turn started is rejected,
+    whatever its mtime says.
+  - If Playwright was used and a trace is missing, unreadable, rejected by the judge or older
+    than the turn, the agent is sent back with instructions. Set `EVJ_HOOK_ON_BAD_EVIDENCE` to
+    `notice` to only tell the user instead.
+  - The hook still fails open, with a notice, only for its own errors and timeouts.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

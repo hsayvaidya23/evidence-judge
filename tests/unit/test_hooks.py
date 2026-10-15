@@ -117,22 +117,43 @@ def test_no_trace_and_no_playwright_is_silent(tmp_path: Path) -> None:
     assert _hook("claude-code-stop", json.dumps(data)) == {}
 
 
-def test_playwright_without_a_trace_is_a_notice(tmp_path: Path) -> None:
+def test_playwright_without_a_trace_blocks(tmp_path: Path) -> None:
     project = tmp_path / "plain"
     project.mkdir()
     out = _claude_stop(tmp_path, project)
-    assert "no trace was recorded" in str(out["systemMessage"])
+    assert out["decision"] == "block"
+    assert "no trace was recorded this turn" in str(out["reason"])
+    assert "browser_start_tracing" in str(out["reason"])
+
+
+def test_playwright_without_a_trace_is_a_notice_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "plain"
+    project.mkdir()
+    monkeypatch.setenv("EVJ_HOOK_ON_BAD_EVIDENCE", "notice")
+    out = _claude_stop(tmp_path, project)
     assert "decision" not in out
+    assert "no trace was recorded" in str(out["systemMessage"])
 
 
-def test_a_trace_from_before_the_turn_is_ignored(tmp_path: Path) -> None:
+def test_deleted_traces_block(tmp_path: Path) -> None:
+    project = tmp_path / "shop"
+    trace = make_project(project)
+    trace.unlink()
+    out = _claude_stop(tmp_path, project)
+    assert out["decision"] == "block"
+    assert "no trace was recorded this turn" in str(out["reason"])
+
+
+def test_a_trace_modified_before_the_turn_is_not_used(tmp_path: Path) -> None:
     project = tmp_path / "shop"
     trace = make_project(project)
     old = time.time() - 3600
     os.utime(trace, (old, old))
     out = _claude_stop(tmp_path, project)
-    assert "decision" not in out
-    assert "no trace was recorded" in str(out["systemMessage"])
+    assert out["decision"] == "block"
+    assert "no trace was recorded this turn" in str(out["reason"])
 
 
 def test_an_empty_answer_is_not_judged(tmp_path: Path) -> None:
@@ -205,9 +226,7 @@ def test_an_unexpected_error_fails_open(tmp_path: Path, monkeypatch: pytest.Monk
     assert "internal error (RuntimeError: kaboom); not blocking" in str(out["systemMessage"])
 
 
-def test_an_unreadable_raw_trace_fails_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_an_unreadable_raw_trace_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project = tmp_path / "shop"
     make_project(project)
 
@@ -216,8 +235,9 @@ def test_an_unreadable_raw_trace_fails_open(
 
     monkeypatch.setattr(core, "pack_raw_trace", refuse)
     out = _claude_stop(tmp_path, project)
-    assert "could not read .playwright-mcp/traces/trace-1792007306000.trace" in str(
-        out["systemMessage"]
+    assert out["decision"] == "block"
+    assert ".playwright-mcp/traces/trace-1792007306000.trace: could not read it" in str(
+        out["reason"]
     )
 
 

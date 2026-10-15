@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +18,11 @@ class HookSettings(BaseSettings):
     )
     block_on_needs_review: bool = Field(
         default=False, description="Also keep the agent working when the verdict is needs review"
+    )
+    on_bad_evidence: Literal["block", "notice"] = Field(
+        default="block",
+        description="When Playwright was used but its traces are missing, unreadable, from "
+        "before the turn or rejected by the judge: keep the agent working, or only tell the user",
     )
     llm: bool = Field(
         default=False,

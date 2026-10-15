@@ -18,6 +18,8 @@ _MAX_TASK_CHARS: Final = 2_000
 _MAX_ITEMS: Final = 5
 _MAX_FIELD_CHARS: Final = 240
 _JUDGED_EXIT_CODES: Final = frozenset({0, 1, 2})
+_BAD_INPUT_EXIT: Final = 3
+_BAD_EVIDENCE: Final = "could not load evidence"
 _KEYS_FOR_ONLINE: Final = ("ANTHROPIC_API_KEY",)
 
 type JsonObject = Mapping[str, object]
@@ -43,6 +45,9 @@ class Judged:
 @dataclass(frozen=True, slots=True)
 class JudgeFailed:
     reason: str
+    invalid: bool = False
+    """The judge refused the evidence itself (unreadable or not a trace), rather than failing
+    on its own."""
 
 
 def _argv(request: JudgeRequest, answer_file: Path, out: Path) -> list[str]:
@@ -107,7 +112,10 @@ def run_judge(request: JudgeRequest) -> Judged | JudgeFailed:
             except subprocess.TimeoutExpired:
                 return JudgeFailed(f"the judge timed out after {request.timeout_s:g}s")
             if done.returncode not in _JUDGED_EXIT_CODES:
-                return JudgeFailed(f"the judge exited {done.returncode}: {_last_line(done.stderr)}")
+                return JudgeFailed(
+                    f"the judge exited {done.returncode}: {_last_line(done.stderr)}",
+                    invalid=done.returncode == _BAD_INPUT_EXIT and _BAD_EVIDENCE in done.stderr,
+                )
             loaded: object = json.loads(out.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return JudgeFailed(f"could not run the judge: {type(exc).__name__}: {exc}")
