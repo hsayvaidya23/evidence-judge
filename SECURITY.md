@@ -8,7 +8,7 @@ not as public issues. Include the version (`evidence-judge version`), a descript
 minimal reproduction **with all real data removed**. You can expect an acknowledgement within
 five working days.
 
-Supported versions: the latest release on PyPI.
+Supported versions: the latest release. Until v0.1.0 is on PyPI, that is the `main` branch.
 
 ## What Evidence Judge handles
 
@@ -100,8 +100,11 @@ itself, so a verdict is only as trustworthy as whatever made the evidence:
   [harness setup](docs/task-specs.md#harness-setup-give-the-agent-only-the-traced-context)).
 
 What each source can and cannot reveal about the agent tampering with the page or its requests
-is reported in every verdict as `tamper_detection` (`level` and `reason`), with a warning when
-it is not `full`:
+is reported in every browser-run verdict as `tamper_detection` (`level` and `reason`), with a
+warning when it is not `full`. A `session judge` verdict carries `tamper_detection` for the
+session record plus `verification` (where its test results come from); a `session rerun`
+verdict has no session record, so its `tamper_detection` is `null` and only `verification` is
+set.
 
 | Source | `tamper_detection` | Can reveal | Cannot reveal |
 | --- | --- | --- | --- |
@@ -143,7 +146,7 @@ weakening the check of its own answer.
 | Switch the hooks off: `{"disableAllHooks": true}` in `.claude/settings.local.json`, an edited `hooks.json`, `hooksConfig.enabled: false` | The guard hook (`PreToolUse` / `BeforeTool`) denies writes to agent configuration, hook files and evidence logs; a session that gets one through anyway goes to review as harness tampering |
 | Delete, uninstall or shim the `evidence-judge` CLI so the hook shim finds nothing | The guard denies it; the shim pins the CLI's path and checksum on first use and the Stop hook fails closed when either changes; the session judge reports it as harness tampering |
 
-Two limits remain, and the verdicts say so:
+Three limits remain, and the verdicts say so:
 
 - **The key and the state directory are only private if the agent cannot reach them.** An
   unsandboxed agent running as your user can read the key, sign a forged log and update the
@@ -233,6 +236,13 @@ run the project's test suite. What they execute, and what they protect against:
 - **Bounded.** The copy is limited to 200,000 files and 2 GiB, the run to the spec's timeout
   (its whole process group is killed), and the report to 64 MB; a report that declares a DTD or
   entities is refused.
+
+For gating on coding-agent sessions, trust a "tests pass" only when the verdict's
+`verification.method` is `rerun`: the judge ran the suite and read the runner's report. With
+`transcript`, the result is what the session record says the agent's own test run printed.
+Pass `--require-rerun` so that a session without a re-run cannot pass, and when the agent is
+adversarial, run the suite under `rerun.sandbox` (or in a container or VM) so that the code
+under test cannot reach your files or the hooks' state.
 
 The MCP server applies the same rule to what it returns. Page- and agent-derived text is
 fenced in `<untrusted_data>` tags. `judge_run` never replaces a file that is not an earlier
