@@ -1,0 +1,22 @@
+ua_hiding.css holds excerpts of the user-agent rules of three specifications, selected and
+arranged by scripts/vendor_ua_hiding.py. The rest of evidence-judge is under the MIT License
+(LICENSE); these excerpts remain under their own licences.
+
+HTML Standard, section "Rendering" (user-agent stylesheet rules that hide elements)
+  https://html.spec.whatwg.org/multipage/rendering.html
+  Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+  Licensed under the Creative Commons Attribution 4.0 International License:
+  https://creativecommons.org/licenses/by/4.0/
+  Changes: only the rules that hide an element are kept, each on one line; the judge's own
+  adjustments follow them, marked "evidence-judge".
+
+MathML Core, section "User Agent Stylesheet" (rules that hide elements)
+  https://w3c.github.io/mathml-core/
+  Copyright © World Wide Web Consortium. W3C® liability, trademark and document use rules
+  apply. Used under the W3C Software and Document License:
+  https://www.w3.org/copyright/software-license/
+
+SVG 2, definition of "never-rendered element" (the element list, written as a CSS rule)
+  https://svgwg.org/svg2-draft/render.html
+  Copyright © World Wide Web Consortium. Used under the W3C Software and Document License:
+  https://www.w3.org/copyright/software-license/

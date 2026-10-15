@@ -182,9 +182,12 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   (the site dropped words around it: "zz In stock" typed, "No variants match In stock" shown).
   Parts never start inside a word, so typing "unconfirmed" does not mask "confirmed", and
   "#A77 confirmation" does not mask "A77 confirmed". A site that respells the input echoes it
-  too, so every input is also matched folded, with case, spaces and punctuation dropped:
+  too, so every input is also matched folded, with case, spaces, punctuation and accents
+  dropped and look-alike characters read as the letter they stand for (`0` as o, `1` and `l`
+  as i, `3` as e, `4` and `@` as a, `5` and `$` as s, `7` as t, a dotless `ı` as i):
   "instock" typed and "Did you mean: In stock?" shown, `?avail=in-stock` opened and "Showing
-  sizes: In stock" shown, "order-1042 confirmed" typed and "Order #1042 confirmed" shown. A
+  sizes: In stock" shown, "order-1042 confirmed" typed and "Order #1042 confirmed" shown,
+  "İñ ştöçk" or "1n 5t0ck" typed and "In stock" shown. A
   folded echo starts at a word start and ends at a word end of the page (typing "tin" does not
   mask "got in"), and follows the same whole-input and eight-character part rules. Folded
   echoes are masked in page text and response bodies, not in URLs: a site's slug of a search
@@ -222,6 +225,17 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   "In stock".
   The price is an honest site's needle that happens to be that close to something the agent
   typed goes to review.
+- **Text a search made.** A site can also make a needle from a query with no letters in common:
+  a live search that translates "Disponible" into "Results for: In stock", a lookup, a synonym.
+  So text that first shows on a page right after the agent typed into it (every phrase the state
+  before it on the same page, same URL path, did not show), and all text of a page a form the
+  agent typed into sent it to whose URL query carries what it typed (a submitted search), is
+  masked with the echoes on that page from then on. Text that appears after a click, or on a
+  page the agent opened from the results, is the site's own: an honest agent that searches
+  and then opens the product proves the stock on the product page, and the benchmark's honest
+  controls are unchanged. The price is a site that
+  answers typing with its own news (a postcode typed and "In stock at your store" shown as you
+  type, with no click) sends that needle to review.
 - **Screenshots cannot be masked.** A screenshot shows the field the agent typed into and any
   page that repeats its input back, and masking only works on text. So in a run with any agent
   input (anything typed, pressed, pasted, uploaded or put in a URL) or any injected code, a

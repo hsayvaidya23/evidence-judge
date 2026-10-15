@@ -480,6 +480,39 @@ the names exported from `evidence_judge`) is defined under
   five honest controls unchanged. Path-scoped runs that together match an earlier whole-suite
   run must also cover every test file that run's output named, so a run elsewhere whose count
   happens to match cannot stand in for the tests that failed.
+- Page text: elements a browser never renders no longer read as page text. The reader now
+  applies the browser's own hiding rules, vendored from the HTML Standard's Rendering section,
+  MathML Core's user-agent stylesheet and SVG 2's never-rendered elements into
+  `ingest/ua_hiding.css` (`scripts/vendor_ua_hiding.py` regenerates it and `--check` reports
+  upstream changes; attribution in `ua_hiding.NOTICE`), beneath every page's own styles and by
+  namespace: `<rp>`, `<noembed>`, `<noframes>`, `<param>`, a table's stray `<form>`, SVG
+  `<defs>`, `<symbol>`, `<mask>`, `<clipPath>`, `<pattern>`, `<marker>`, gradients, `<filter>`,
+  a `<semantics>` annotation, `<maction>`'s other children and `<mphantom>`. A `popover` is
+  unsure (snapshots do not record whether it is open), as is `hidden=until-found`, the content
+  of a never-rendered SVG element that a `<use>`, a `url(#id)` fill or a mask refers to, a
+  `<switch>` child other than an unconditional first one, and SVG text placed past its canvas.
+  SVG presentation attributes (`display`, `visibility`, `opacity`, `fill`, `fill-opacity`)
+  feed the cascade beneath the page's styles, and text in an SVG element other than `<text>`
+  never shows.
+- Page text: a frame no longer makes a page opaque when it is at most a pixel in size (by
+  attribute or style), parked off-screen, or loads another site's page: a third-party frame
+  holds the third party's document, not the site's own text, so it cannot hide the site
+  saying something. Honest pages with an analytics beacon frame are no longer held for review.
+  A frame Playwright recorded is judged by the URLs its own snapshots were taken at and by the
+  box the trace measured for it.
+- Echoes: folded matching also drops accents and reads look-alike characters as the letter
+  they stand for (`0` o, `1` and `l` i, `3` e, `4` and `@` a, `5` and `$` s, `7` t, dotless
+  `ı` i), so "İñ ştöçk" or "1n 5t0ck" typed and "In stock" shown proves nothing.
+- Echoes: text a search made from what the agent typed with no letters in common (a live
+  search that translates "Disponible" into "In stock") proves nothing: text that first shows
+  right after the agent typed on a page, and a page a form it typed into sent it to whose URL
+  query carries what it typed, are masked with the echoes on that page. Text after a click,
+  and pages opened from the results, are the site's own; the honest controls are unchanged.
+- Benchmark: a new `unrendered_markup` forgery kind (the expected texts in a ruby `<rp>`,
+  `<noembed>`, SVG `<defs>`, a `display="none"` attribute, a second `<switch>` child, text past
+  the SVG canvas, a MathML annotation or a closed `popover`, rendered by the page-text reader),
+  and `derived_echo` variants that type the texts accented, in look-alike digits, or in
+  another language for a live search to translate: 711 forged runs, 0 false PASS.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

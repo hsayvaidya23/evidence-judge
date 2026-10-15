@@ -30,9 +30,11 @@ unsure, not hidden: the site may not load the framework that defines them.
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
+from importlib import resources
 from typing import Final
 from urllib.parse import urljoin
 
@@ -46,6 +48,17 @@ SHOWN: Final = 0
 UNSURE: Final = 1
 HIDDEN: Final = 2
 """Whether text shows: for certain, maybe, or certainly not."""
+
+HTML: Final = "html"
+SVG: Final = "svg"
+MATHML: Final = "math"
+"""Element namespaces."""
+_NAMESPACES: Final = {
+    "http://www.w3.org/1999/xhtml": HTML,
+    "http://www.w3.org/2000/svg": SVG,
+    "http://www.w3.org/1998/Math/MathML": MATHML,
+}
+_UA_SECTION = re.compile(r'@namespace\s+"([^"]+)"\s*;')
 
 UTILITY_CSS: Final = (
     ".hidden,.d-none,.sr-only,.visually-hidden{display:none}.invisible{visibility:hidden}"
@@ -80,9 +93,11 @@ _TRACKED: Final = _words(
     "margin-inline-start margin-block-start height max-height width max-width block-size "
     "max-block-size inline-size max-inline-size overflow-x overflow-y font-size color "
     "-webkit-text-fill-color text-indent background-color background-clip "
-    "-webkit-background-clip"
+    "-webkit-background-clip fill fill-opacity"
 )
 """The properties the reader applies: what removes an element, and what can hide its text."""
+_PRESENTATION: Final = _words("display visibility opacity fill fill-opacity")
+"""SVG presentation attributes the reader applies: author-level, beneath every rule."""
 _SHORTHANDS: Final = frozenset({"all", "font", "background", "inset", "margin", "overflow"})
 _OBSCURERS: Final = _words("opacity filter transform scale translate zoom clip-path")
 _SIZES: Final = _words(
@@ -273,6 +288,8 @@ class Element:
     host: Element | None = None
     """Set on the stand-in for a shadow host inside its shadow tree: the host it stands for.
     Only ``:host`` matches it."""
+    namespace: str = "html"
+    """HTML, SVG or MATHML: which of the browser's own stylesheets (`ua_hiding.css`) apply."""
     classes: frozenset[str] = field(init=False)
     keys: frozenset[str] = field(init=False)
     """What a rule is indexed by: its tag, ``.class`` for each class and ``#id``."""
@@ -327,15 +344,22 @@ class Computed:
     clip_text: bool = False
     """A background shows through its text (``background-clip: text``)."""
     indent_far: bool = False
+    fill_none: bool = False
+    """Its SVG ``fill`` may paint nothing (``none``, a transparent colour)."""
+    fill_faint: bool = False
+    """Its SVG ``fill-opacity`` may be near 0."""
+    svg: bool = False
+    """It is an SVG element, whose text its ``fill`` paints."""
 
     @property
     def text(self) -> int:
         """Whether this element's own text shows: SHOWN, UNSURE or HIDDEN."""
         if self.visibility == HIDDEN:
             return HIDDEN
-        faded = not self.clip_text and (
-            self.clear or (self.color is not None and self.color == self.background)
-        )
+        faded = (
+            not self.clip_text
+            and (self.clear or (self.color is not None and self.color == self.background))
+        ) or (self.svg and (self.fill_none or self.fill_faint))
         if self.unsure or self.visibility == UNSURE or self.font_tiny or self.indent_far or faded:
             return UNSURE
         return SHOWN
@@ -374,8 +398,10 @@ class StyleSheets:
         *,
         source: StylesheetSource | None = None,
         document: bool = True,
+        user_agent: bool = False,
     ) -> None:
         self._viewport = viewport
+        self._user_agent = user_agent
         self._source = source
         self._by_key: dict[str, _Bucket] = {}
         self._order = 0
@@ -408,15 +434,24 @@ class StyleSheets:
         element: Element,
         parent: Computed,
         *,
-        ua_hide: str | None = None,
+        ua: bool = True,
         host: StyleSheets | None = None,
         proxy: Element | None = None,
     ) -> Computed:
-        """The cascade for `element` under `parent`. `ua_hide` is a property the browser's own
-        styles set to hide it (``hidden``, a closed ``<dialog>``); `host` and `proxy` are the
-        shadow scope `element` hosts and its stand-in there, for ``:host`` rules."""
+        """The cascade for `element` under `parent`: the browser's own hiding rules for its
+        namespace (`ua_hiding.css`) unless `ua` is False, SVG presentation attributes, and this
+        scope's rules. `host` and `proxy` are the shadow scope `element` hosts and its stand-in
+        there, for ``:host`` rules."""
         best: dict[str, _Rule] = {}
         maybe: dict[str, list[_Rule]] = {}
+        if ua and (own := user_agent_sheets().get(element.namespace)) is not None:
+            for rule in own._candidates(element):
+                _offer(rule, _matches(rule.selector, element), best, maybe)
+        if element.namespace == SVG:
+            for prop in _PRESENTATION.intersection(element.attrs):
+                rank: _Rank = (1, 1, 0, (-2,), (0, 0, 0), 0)
+                value = element.attrs[prop].strip().lower()
+                _offer(_Rule(_UNIVERSAL, prop, value, rank, False), YES, best, maybe)
         for rule in self._candidates(element):
             _offer(rule, _matches(rule.selector, element), best, maybe)
         if host is not None and proxy is not None:
@@ -425,17 +460,37 @@ class StyleSheets:
                 context = 2 if inner[0] >= 2 else 0
                 moved = replace(rule, rank=(inner[0], context, *inner[2:]))
                 _offer(moved, _matches(rule.selector, proxy), best, maybe)
-        if ua_hide is not None:
-            rank: _Rank = (0, 1, 0, (_TOP,), (0, 1, 0), 0)
-            value = "hidden" if ua_hide == "content-visibility" else "none"
-            _offer(_Rule(_UNIVERSAL, ua_hide, value, rank, False), YES, best, maybe)
         for prop, value, important in _declarations(element.attrs.get("style") or ""):
             rank = (2 if important else 1, 1, 1, (_TOP,), (0, 0, 0), 0)
             _offer(_Rule(_UNIVERSAL, prop, value, rank, False), YES, best, maybe)
+        svg = element.namespace == SVG
         if not best and not maybe:
-            return parent
+            return parent if parent.svg == svg else replace(parent, svg=svg)
         present = frozenset(best).union(maybe)
-        return _compute(_Cascade(best, maybe, present), parent, self._viewport)
+        computed = _compute(_Cascade(best, maybe, present), parent, self._viewport)
+        return computed if computed.svg == svg or computed.removed else replace(computed, svg=svg)
+
+    def collapsed(self, element: Element) -> bool:
+        """The page's styles certainly give `element` a box at most a pixel wide or high, or
+        place it far off-screen (a 0x0 analytics frame, one parked at ``left: -9999px``)."""
+        best: dict[str, _Rule] = {}
+        for rule in self._candidates(element):
+            if _matches(rule.selector, element) == YES and not rule.maybe:
+                _offer(rule, YES, best, {})
+        for prop, value, important in _declarations(element.attrs.get("style") or ""):
+            rank: _Rank = (2 if important else 1, 1, 1, (_TOP,), (0, 0, 0), 0)
+            _offer(_Rule(_UNIVERSAL, prop, value, rank, False), YES, best, {})
+        values = {prop: rule.value for prop, rule in best.items() if rule.value is not None}
+        for prop in ("width", "height"):
+            px = _px(values.get(prop, ""), self._viewport)
+            if px is not None and px <= 1:
+                return True
+        if values.get("position") not in ("absolute", "fixed"):
+            return False
+        return any(
+            _far(values.get(prop), self._viewport, sign)
+            for prop, sign in (("left", 0), ("right", 0), ("top", -1), ("bottom", 1))
+        )
 
     def _candidates(self, element: Element) -> Iterator[_Rule]:
         for key in ("*", *element.keys):
@@ -607,10 +662,13 @@ class StyleSheets:
 
     def _declare(self, selectors: list[_Selector], text: str, context: _Context) -> None:
         layer = self._layer_key(context.layer)
+        normal, important_level = (0, 3) if self._user_agent else (1, 2)
         for prop, value, important in _declaration(text):
             for selector in selectors:
                 self._order += 1
-                level, key = (2, tuple(-k for k in layer)) if important else (1, layer)
+                level, key = (
+                    (important_level, tuple(-k for k in layer)) if important else (normal, layer)
+                )
                 rank: _Rank = (level, 1, 0, key, selector.specificity, self._order)
                 self._index(_Rule(selector, prop, value, rank, context.maybe))
 
@@ -634,6 +692,22 @@ class StyleSheets:
 
 
 _UNIVERSAL: Final = _Selector((_Compound(),), ())
+
+
+@functools.cache
+def user_agent_sheets() -> dict[str, StyleSheets]:
+    """The browser's own hiding rules (`ua_hiding.css`, vendored from the HTML, SVG and MathML
+    specifications by scripts/vendor_ua_hiding.py), by the namespace they apply to."""
+    text = (
+        resources.files("evidence_judge.ingest")
+        .joinpath("ua_hiding.css")
+        .read_text(encoding="utf-8")
+    )
+    parts = _UA_SECTION.split(_COMMENT.sub(" ", text))
+    return {
+        _NAMESPACES[uri]: StyleSheets([Sheet(body)], None, document=False, user_agent=True)
+        for uri, body in zip(parts[1::2], parts[2::2], strict=True)
+    }
 
 
 def _offer(
@@ -693,18 +767,7 @@ def _compute(cascade: _Cascade, parent: Computed, viewport: Viewport | None) -> 
     if present.isdisjoint(_TEXT):
         if unsure == parent.unsure and visibility == parent.visibility:
             return parent
-        return Computed(
-            False,
-            unsure,
-            visibility,
-            parent.font_px,
-            parent.font_tiny,
-            parent.color,
-            parent.clear,
-            parent.background,
-            parent.clip_text,
-            parent.indent_far,
-        )
+        return replace(parent, removed=False, unsure=unsure, visibility=visibility)
     font_px, font_tiny = parent.font_px, parent.font_tiny
     if cascade.sets("font-size"):
         sizes = [_font_px(v, parent.font_px, viewport) for v in cascade.values("font-size")]
@@ -743,7 +806,31 @@ def _compute(cascade: _Cascade, parent: Computed, viewport: Viewport | None) -> 
         background,
         clip_text,
         indent_far,
+        _inherits(cascade, "fill", parent.fill_none, _fill_none),
+        _inherits(cascade, "fill-opacity", parent.fill_faint, _faint),
     )
+
+
+def _inherits(cascade: _Cascade, prop: str, inherited: bool, test: Callable[[str], bool]) -> bool:
+    """Whether an inherited property may take a value `test` holds for."""
+    if not cascade.sets(prop):
+        return inherited
+    return any(
+        inherited if v in (_UNSET, "inherit", "unset") else v is None or test(v)
+        for v in cascade.values(prop)
+    )
+
+
+def _fill_none(value: str) -> bool:
+    if value in ("none", "transparent"):
+        return True
+    rgba = _color(value)
+    return rgba is not None and rgba[3] <= _FAINT
+
+
+def _faint(value: str) -> bool:
+    amount = _amount(value)
+    return amount is not None and amount <= _FAINT
 
 
 def _display_hides(value: str | None) -> int:

@@ -474,10 +474,10 @@ class _TraceReader:
         frame_id = as_str(snapshot.get("frameId"))
         if frame_id is None:
             return
-        index = self.store.add(frame_id, snapshot.get("html"))
+        url = as_str(snapshot.get("frameUrl")) or ""
+        index = self.store.add(frame_id, snapshot.get("html"), url=url)
         if snapshot.get("isMainFrame") is not True:
             return
-        url = as_str(snapshot.get("frameUrl")) or ""
         call_id = as_str(snapshot.get("callId"))
         page_id = as_str(snapshot.get("pageId")) or frame_id
         if call_id is not None:

@@ -59,21 +59,39 @@ run can pass: a trace whose HAR added anything is `partial`, so judge it without
 ### Page text and the final page
 
 Snapshot and final-state text (`text`) is the text the page shows. Text the snapshot shows
-hidden is left out: the `hidden` attribute and a closed `<dialog>` unless the page's styles
-show them, a closed `<details>` body (its `<summary>` stays), an SVG `<title>` or `<desc>`,
-light-DOM children no `<slot>` shows, and what the cascade certainly sets to `display: none`,
-`visibility: hidden` or `content-visibility: hidden` (inline styles, `<style>` elements,
-constructed stylesheets, and the linked and `@import`ed stylesheets the trace holds; each shadow
-root is its own scope). Text whose visibility depends on something the judge does not fully
+hidden is left out: what the browser's own stylesheets hide unless the page's styles show it, a
+closed `<details>` body (its `<summary>` stays), light-DOM children no `<slot>` shows, text in an
+SVG element other than `<text>` (and `<foreignObject>`), and what the cascade certainly sets to
+`display: none`, `visibility: hidden` or `content-visibility: hidden` (inline styles, SVG
+presentation attributes beneath every rule, `<style>` elements, constructed stylesheets, and the
+linked and `@import`ed stylesheets the trace holds; each shadow root is its own scope). The
+browser's own rules are not a hand list: `ingest/ua_hiding.css` holds the hiding rules of the
+HTML Standard's Rendering section, MathML Core's user-agent stylesheet and SVG 2's
+never-rendered elements, applied by namespace (an `<mphantom>` outside `<math>` is an unknown
+HTML element and shows), and `scripts/vendor_ua_hiding.py --check` reports when the
+specifications change them. So the `hidden` attribute, a closed `<dialog>`, `<rp>`,
+`<noembed>`, `<noframes>`, `<param>`, `<area>`, a table's stray `<form>`, SVG `<defs>`,
+`<symbol>`, `<mask>`, `<clipPath>`, `<pattern>`, `<marker>`, gradients, `<filter>`, `<title>`
+and `<desc>`, a `<semantics>` annotation, `<maction>`'s other children and `<mphantom>` never
+read as page text. Text whose visibility depends on something the judge does not fully
 model (a condition or selector it cannot evaluate, `var()`, near-zero opacity or font size, a
-transparent colour, clipping, off-screen offsets, a utility class no recorded sheet defines, or
-a stylesheet the trace does not hold; one the trace records as failed, with an error status or
-without a response, applied nothing and counts as empty) goes to `unsure_text` instead: it never proves a
-predicate and keeps its absence from contradicting one. `opaque` marks a page with an empty
-custom element, which may render a closed shadow root no snapshot holds, or with a shown element
-a `::before` or `::after` rule gives text (`content` with a letter or digit, `attr()` or a
-counter), or with a shown `<iframe>` or `<frame>` that loads a document (`src` or `srcdoc`):
-the reader does not read frames, so their text never proves anything either way. See
+transparent colour or SVG `fill`, clipping, off-screen offsets, a utility class no recorded
+sheet defines, or a stylesheet the trace does not hold; one the trace records as failed, with
+an error status or without a response, applied nothing and counts as empty) goes to
+`unsure_text` instead: it never proves a predicate and keeps its absence from contradicting one.
+So do a `popover` (a snapshot does not record whether it is open), `hidden=until-found` content
+(find-in-page reveals it), the content of a never-rendered SVG element that a `<use>`, a
+`url(#id)` fill or a mask refers to (it is copied onto the page), a `<switch>` child other than
+an unconditional first one, and SVG `<text>` placed past the right or bottom of its canvas. `inert`
+content, an open `<dialog>` and `content-visibility: auto` show. `opaque` marks a page with an
+empty custom element, which may render a closed shadow root no snapshot holds, or with a shown
+element a `::before` or `::after` rule gives text (`content` with a letter or digit, `attr()` or
+a counter), or with a shown `<iframe>` or `<frame>` that loads a document of the page's own site
+(`srcdoc`, or a `src` of the same registrable domain): the reader does not read frames, so their
+text never proves anything either way. A frame at most a pixel wide or high (by attribute, style
+or the box the trace measured) or placed off-screen does not count, nor does a frame of another
+site: a payment field, a video or an analytics beacon holds the third party's page, not the
+site's own text, so it cannot hide the site saying something. See
 [`page_text`](../task-specs.md#page_text-the-pages-text-contains-a-phrase).
 Text typed into `<input>` and
 `<textarea>` fields (and their default values) is left out, because the agent controls it: a
