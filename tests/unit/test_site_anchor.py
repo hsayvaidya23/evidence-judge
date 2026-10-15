@@ -29,6 +29,7 @@ from tests.unit.conftest import (
     honest_run,
     make_run,
     net,
+    off_site_hint,
     shop_spec,
     snap,
 )
@@ -206,8 +207,9 @@ async def test_port_mirror_of_the_site_cannot_pass() -> None:
     assert verdict.outcome is Outcome.NEEDS_REVIEW
     assert verdict.summary == (
         "NEEDS_REVIEW: side effect: net#6: POST /api/orders → 201 went to shop.test:8443, "
-        "outside the site (shop.test), so no expectation can explain it; if shop.test:8443 is "
-        "part of the site, list it in the spec's allowed_hosts."
+        "outside the site (shop.test), so no expectation can explain it; "
+        + off_site_hint("shop.test:8443", "shop.test:8443/api")
+        + "."
     )
     met = {e.expectation_id: e.met for e in verdict.expectations}
     assert met["order_submitted"] is None
@@ -400,9 +402,7 @@ async def test_a_sibling_order_host_needs_allowed_hosts_and_keeps_the_site() -> 
     run = run.model_copy(update={"network": [order if e.id == "net#6" else e for e in run.network]})
     off = await _judge(run, shop_spec())
     assert off.outcome is Outcome.NEEDS_REVIEW
-    assert "if api.shop.test is part of the site, list it in the spec's allowed_hosts" in (
-        off.summary
-    )
+    assert off_site_hint("api.shop.test", "api.shop.test/api") in off.summary
     allowed = await _judge(run, shop_spec(allowed_hosts=["api.shop.test"]))
     assert allowed.outcome is Outcome.PASS, allowed.summary
 

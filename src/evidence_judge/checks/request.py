@@ -249,8 +249,8 @@ def _off_site_result(matcher: RequestMatcher, scored: Scored) -> PredicateResult
     return result(
         Support.NO_EVIDENCE,
         f"{describe_request(event)} is a {matcher.describe()}{but}, but it went to {host}, "
-        f"outside {where}, so it cannot prove anything; if {host} is part of the site, "
-        "list it in the spec's allowed_hosts",
+        f"outside {where}, so it cannot prove anything; if the site owns {host} (an api. or "
+        "static. subdomain), list it in the spec's allowed_hosts",
         RequestChecker.kind,
         [cite_request(event)],
     )

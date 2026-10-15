@@ -33,6 +33,7 @@ from tests.unit.conftest import (
     honest_run,
     make_run,
     net,
+    off_site_hint,
     shop_spec,
     snap,
 )
@@ -64,8 +65,8 @@ async def test_third_party_mutation_cannot_prove_an_order() -> None:
     assert res.reason == (
         "POST /api/orders → 201 is a POST request whose URL contains '/api/orders' with a 2xx "
         "or 3xx status, but it went to httpbin.org, outside the run's host (shop.test), so it "
-        "cannot prove anything; if httpbin.org is part of the site, list it in the spec's "
-        "allowed_hosts"
+        "cannot prove anything; if the site owns httpbin.org (an api. or static. subdomain), list "
+        "it in the spec's allowed_hosts"
     )
     assert [c.evidence_id for c in res.citations] == ["net#9"]
 
@@ -326,10 +327,13 @@ async def test_order_on_a_sibling_api_host_needs_review_not_fail(with_spec: bool
     assert f"went to api.example.com, outside {where} (shop.example.com)" in order.reason
     assert "allowed_hosts" in order.reason
     if with_spec:
+        # The spec's `allow: /api/cart` does not name api.example.com, so the cart POST that
+        # went there is a side effect too: an allow entry explains another host only by name.
         assert verdict.summary == (
-            "NEEDS_REVIEW: side effect: net#6: POST /api/orders → 201 went to api.example.com, "
-            "outside the site (shop.example.com), so no expectation can explain it; if "
-            "api.example.com is part of the site, list it in the spec's allowed_hosts."
+            "NEEDS_REVIEW: side effect: net#3: POST /api/cart → 200 went to api.example.com, "
+            "outside the site (shop.example.com), so no expectation can explain it; "
+            + off_site_hint("api.example.com", "api.example.com/api")
+            + ". 1 other side effect also needs review."
         )
 
 

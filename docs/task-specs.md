@@ -93,12 +93,13 @@ NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
   cannot prove it either: a `final`-scope predicate on such a final page is `no_evidence`, and
   an `any`-scope one skips such pages. Other reads (a `GET` request) on any host still count
   until the site is named.
-- With `allowed_hosts` set, a mutation outside the site and the allowed hosts is a side effect.
+- A mutation outside the site and the allowed hosts is a side effect, unless an `allow` entry
+  names its host (see [Payment providers, APIs and CDNs](#payment-providers-apis-and-cdns)).
 - A request that meets every criterion except the host is `no_evidence`, never a contradiction:
   the judge cannot tell a third party from a sibling API host it was not told about. Its reason
   names the host (`POST /api/orders → 201 is a POST request ... but it went to api.example.com,
-  outside the run's host (shop.example.com) ...; if api.example.com is part of the site, list it
-  in the spec's allowed_hosts`), the claim or `expect` entry stays unproven and the run goes to
+  outside the run's host (shop.example.com) ...; if the site owns api.example.com (an api. or
+  static. subdomain), list it in the spec's allowed_hosts`), the claim or `expect` entry stays unproven and the run goes to
   review. Sibling hosts and subdomains are not matched by registrable domain (`example.com`);
   list them, or use a `*.` wildcard.
 - Page states whose URL is `data:`, `about:`, `blob:` (or `javascript:`, `chrome:`,
@@ -107,6 +108,72 @@ NEEDS_REVIEW: no site was named; pass --site or set `site` in a spec.
 
 `forbid` entries and `constraints` are not restricted: a forbidden request or a violating value
 counts wherever it went.
+
+### Payment providers, APIs and CDNs
+
+A task often touches hosts other than the site. Which spec field covers one depends on who owns
+it:
+
+- **A host the site owns** (`api.shop.example.com`, `static.shop.example.com`, a checkout
+  subdomain): list it in `allowed_hosts`. It becomes part of the site, so its requests and
+  pages can prove claims and `expect` entries, and its mutations are judged like the site's.
+- **A third party the task uses** (a payment provider's 3-D Secure callback, an address
+  lookup API, a CDN): do **not** list it in `allowed_hosts`, because then its pages and
+  requests could prove the task: a provider page that says "Payment successful" would pass a
+  checkout the shop never confirmed. Explain its mutations with an `allow` entry whose
+  `url_contains` names the host. An `allow` entry explains a mutation to another host only
+  when it names that host, so `url_contains: [/3ds]` does not cover
+  `hooks.payprovider.test/3ds/authenticate`, and neither does `/api/cart` cover a POST to a
+  mirror at `shop.example.com:8443/api/cart`.
+
+GETs to a third party (scripts, fonts, a CDN) need nothing: reads are not side effects.
+
+A worked example: the shop answers the order with a redirect to the provider's 3-D Secure
+challenge, the agent enters the code, and the provider posts it and redirects back to the
+shop's confirmation page:
+
+```
+POST https://shop.test/checkout/submit           → 303 to hooks.payprovider.test/3ds/challenge
+GET  https://hooks.payprovider.test/3ds/challenge → 200  "Verify it's you. Enter the code."
+POST https://hooks.payprovider.test/3ds/authenticate → 302 to shop.test/order/A1/confirmed
+GET  https://shop.test/order/A1/confirmed         → 200  "Thank you for your order! Order A1 ..."
+```
+
+With only `site: shop.test`, the provider's POST is a side effect, and the report says how to
+explain it:
+
+```
+NEEDS_REVIEW: side effect: net#8: POST /3ds/authenticate → 302 went to hooks.payprovider.test,
+outside the site (shop.test), so no expectation can explain it; if hooks.payprovider.test is a
+third party the task uses (a payment provider, an API, a CDN), explain it with an allow entry
+such as `allow: [{kind: request, method: POST, url_contains: [hooks.payprovider.test/3ds]}]`;
+list it in allowed_hosts only if the site owns it (an api. or static. subdomain), since pages
+and requests on an allowed host can prove the task.
+```
+
+Following the hint, this spec passes the honest run, and only the shop's own order request
+and confirmation page prove it:
+
+```yaml
+id: buy-kettle
+task: Buy a red kettle under $30
+site: shop.test
+expect:
+  - id: order
+    all:
+      - {kind: request, method: POST, url_contains: [/checkout/submit]}
+  - id: confirmation
+    any:
+      - {kind: page_text, contains: Thank you for your order}
+allow:
+  - {kind: request, method: POST, url_contains: [/api/cart]}
+  - {kind: request, method: POST, url_contains: [hooks.payprovider.test/3ds]}
+```
+
+The confirmation entry also decides what the redirected order request proves (see
+[What a mutation proves](#what-a-mutation-proves)): the shop's page says `Thank you for your
+order`, so its footer `If your card is declined later, we will email you` does not send the run
+to review.
 
 ### Forbidden attempts
 
