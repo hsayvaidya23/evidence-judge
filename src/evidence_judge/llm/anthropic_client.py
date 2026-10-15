@@ -42,7 +42,7 @@ from evidence_judge.llm.budget import Budget, current_budget
 from evidence_judge.llm.pricing import DEFAULT_PRICES, ModelPrice, PriceTable, price_for
 
 if TYPE_CHECKING:
-    from anthropic import AsyncAnthropic
+    from anthropic import AnthropicError, AsyncAnthropic
     from anthropic.types import (
         ContentBlockParam,
         ImageBlockParam,
@@ -174,75 +174,16 @@ class AnthropicClient:
         *,
         structured: bool,
     ) -> tuple[Message, Usage]:
-        from anthropic import (
-            AnthropicError,
-            APIConnectionError,
-            APIStatusError,
-            APITimeoutError,
-            AuthenticationError,
-            NotFoundError,
-            PermissionDeniedError,
-            RateLimitError,
-            omit,
-        )
-
         prompt = (
             request.prompt
             if previous_error is None
             else _with_error(request.prompt, previous_error)
         )
         reservations = self._reserve(self._estimate(price, request, prompt, json_schema))
-        output_config: OutputConfigParam = {}
-        if structured:
-            output_config["format"] = {"type": "json_schema", "schema": json_schema}
-        if request.effort is not None and model in _EFFORT_MODELS:
-            output_config["effort"] = request.effort
         started = time.perf_counter()
         settled = False
         try:
-            try:
-                message = await self._client.messages.create(
-                    model=model,
-                    max_tokens=request.max_output_tokens,
-                    system=self._system(request.system, structured=structured),
-                    messages=[{"role": "user", "content": self._content(prompt, request.images)}],
-                    output_config=output_config or omit,
-                    tools=omit if structured else [self._tool(json_schema)],
-                    tool_choice=(
-                        omit
-                        if structured
-                        else {"type": "tool", "name": TOOL_NAME, "disable_parallel_tool_use": True}
-                    ),
-                )
-            except APITimeoutError as exc:
-                raise LLMError(
-                    f"Anthropic request timed out after {self._settings.request_timeout_s}s"
-                ) from exc
-            except APIConnectionError as exc:
-                raise LLMError("Could not connect to the Anthropic API") from exc
-            except RateLimitError as exc:
-                raise LLMError(f"Anthropic rate limit hit (request_id={exc.request_id})") from exc
-            except AuthenticationError as exc:
-                raise LLMAuthError(
-                    "ANTHROPIC_API_KEY rejected by the Anthropic API "
-                    f"(401, request_id={exc.request_id}); check the key"
-                ) from exc
-            except PermissionDeniedError as exc:
-                raise LLMAuthError(
-                    f"ANTHROPIC_API_KEY is not allowed to use {model!r} "
-                    f"(403, request_id={exc.request_id})"
-                ) from exc
-            except NotFoundError as exc:
-                raise LLMConfigError(
-                    f"model {model!r} not found (404, request_id={exc.request_id}); "
-                    "check EVJ_MODEL_FAST / EVJ_MODEL_STRONG"
-                ) from exc
-            except APIStatusError as exc:
-                raise LLMError(
-                    f"Anthropic API error {exc.status_code} (request_id={exc.request_id})"
-                ) from exc
-            except AnthropicError as exc:
-                raise LLMError(f"Anthropic SDK error: {type(exc).__name__}") from exc
+            message = await self._send(model, request, prompt, json_schema, structured=structured)
             latency_ms = (time.perf_counter() - started) * 1000
             usage = self._record(message, price, latency_ms)
             for budget, reserved in reservations:
@@ -261,6 +202,74 @@ class AnthropicClient:
             latency_ms,
         )
         return message, usage
+
+    async def _send(
+        self,
+        model: str,
+        request: LLMRequest,
+        prompt: str,
+        json_schema: dict[str, Any],
+        *,
+        structured: bool,
+    ) -> Message:
+        """One Messages API request; SDK errors become LLMError subclasses with a clear cause."""
+        from anthropic import AnthropicError, omit
+
+        output_config = _output_config(model, request, json_schema, structured=structured)
+        try:
+            return await self._client.messages.create(
+                model=model,
+                max_tokens=request.max_output_tokens,
+                system=self._system(request.system, structured=structured),
+                messages=[{"role": "user", "content": self._content(prompt, request.images)}],
+                output_config=output_config or omit,
+                tools=omit if structured else [self._tool(json_schema)],
+                tool_choice=(
+                    omit
+                    if structured
+                    else {"type": "tool", "name": TOOL_NAME, "disable_parallel_tool_use": True}
+                ),
+            )
+        except AnthropicError as exc:
+            raise self._api_error(exc, model) from exc
+
+    def _api_error(self, exc: AnthropicError, model: str) -> LLMError:
+        from anthropic import (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            AuthenticationError,
+            NotFoundError,
+            PermissionDeniedError,
+            RateLimitError,
+        )
+
+        if isinstance(exc, APITimeoutError):
+            return LLMError(
+                f"Anthropic request timed out after {self._settings.request_timeout_s}s"
+            )
+        if isinstance(exc, APIConnectionError):
+            return LLMError("Could not connect to the Anthropic API")
+        if isinstance(exc, RateLimitError):
+            return LLMError(f"Anthropic rate limit hit (request_id={exc.request_id})")
+        if isinstance(exc, AuthenticationError):
+            return LLMAuthError(
+                "ANTHROPIC_API_KEY rejected by the Anthropic API "
+                f"(401, request_id={exc.request_id}); check the key"
+            )
+        if isinstance(exc, PermissionDeniedError):
+            return LLMAuthError(
+                f"ANTHROPIC_API_KEY is not allowed to use {model!r} "
+                f"(403, request_id={exc.request_id})"
+            )
+        if isinstance(exc, NotFoundError):
+            return LLMConfigError(
+                f"model {model!r} not found (404, request_id={exc.request_id}); "
+                "check EVJ_MODEL_FAST / EVJ_MODEL_STRONG"
+            )
+        if isinstance(exc, APIStatusError):
+            return LLMError(f"Anthropic API error {exc.status_code} (request_id={exc.request_id})")
+        return LLMError(f"Anthropic SDK error: {type(exc).__name__}")
 
     def _budgets(self) -> list[Budget]:
         """The run's budget (see `run_budget`) and this client's own, if set. With neither, each
@@ -423,6 +432,17 @@ def _with_error(prompt: str, error: str) -> str:
         "Your previous attempt was rejected for the reason above. "
         "Answer again with corrected output."
     )
+
+
+def _output_config(
+    model: str, request: LLMRequest, json_schema: dict[str, Any], *, structured: bool
+) -> OutputConfigParam:
+    output_config: OutputConfigParam = {}
+    if structured:
+        output_config["format"] = {"type": "json_schema", "schema": json_schema}
+    if request.effort is not None and model in _EFFORT_MODELS:
+        output_config["effort"] = request.effort
+    return output_config
 
 
 def _parse_json(message: Message, schema: type[T]) -> T:
