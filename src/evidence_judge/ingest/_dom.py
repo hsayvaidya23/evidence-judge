@@ -93,6 +93,8 @@ class RenderedPage:
     form_values: int = 0
     """Non-empty text-field, textarea, editable-element and selected-option values left out of
     ``text``."""
+    field_values: tuple[str, ...] = ()
+    """Those values, whitespace-normalised, in document order."""
 
 
 _BLOCK_END = object()
@@ -158,7 +160,7 @@ class _Renderer:
         self._store = store
         self._frame_id = frame_id
         self._visits = 0
-        self._form_values = 0
+        self._field_values: list[str] = []
 
     def render(self, index: int) -> RenderedPage:
         title: str | None = None
@@ -194,7 +196,8 @@ class _Renderer:
         return RenderedPage(
             title=_normalise(title) or None,
             text=_normalise("".join(out)),
-            form_values=self._form_values,
+            form_values=len(self._field_values),
+            field_values=tuple(self._field_values),
         )
 
     def _tick(self) -> None:
@@ -278,8 +281,8 @@ class _Renderer:
         return None
 
     def _excluded_value(self, value: str | None) -> str:
-        if value and value.strip():
-            self._form_values += 1
+        if value := _normalise(value):
+            self._field_values.append(value)
         return ""
 
     def _selected_option_text(self, select: list[Any], snapshot_index: int) -> str:

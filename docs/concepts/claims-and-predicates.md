@@ -136,7 +136,13 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   Copying from the page (Control+C with no selection in a field the agent typed into) makes
   every line and sentence of the page on screen an input, since the agent could have selected
   any of it; a paste with no copy recorded does the same for every page seen before it. Undo,
-  redo and a paste of page text start the field's replay over. Every
+  redo and a paste of page text start the field's replay over. A replay cannot see what the
+  mouse does (a click that moves the caret before a Delete, a word dragged into a field, a
+  datalist or autofill choice), so the snapshots count too: every value a text field, text
+  area, editable element or `<select>` holds in any snapshot of a Playwright trace is input,
+  however it got there ("XIn stock" filled, a click before the "X", Delete: the field shows
+  "In stock", so "No reviews mention In stock" proves nothing). A value the site prefilled is
+  input as well; that can only send a run to review, never pass one. Every
   `page_text`, `url`, `request` and `value` predicate is evaluated again with every occurrence
   of every input masked out of everything the site can repeat it in: page text, page URLs, the
   URLs of requests that are not mutations, and every response body (JSON keeps its structure,
@@ -165,9 +171,10 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   needle that the site completes around a typed short word ("Order" typed, "Order Paid" shown)
   is not caught. A part cannot be told apart from site text that shares it: a gift note "Thank
   you for being awesome" masks "Thank you for" in the shop's "Thank you for your order", so
-  that needle sends the run to review. And the replay only sees what the recording shows: a
-  field's initial value, text the agent put on the clipboard by script, a copy of fewer than
-  eight characters from inside a sentence, and an undo's restored value are not inputs. Echoes
+  that needle sends the run to review. And the replay only sees what the recording shows: in
+  a run without snapshots (a HAR, a browser-use history), a field's initial value, text the
+  agent put on the clipboard by script, a copy of fewer than eight characters from inside a
+  sentence, and an undo's restored value are not inputs. Echoes
   are matched anywhere in the evidence, not only on its word boundaries: page text joins
   inline elements without a space (`for <b>Paid</b>Now` reads "for PaidNow"), so a
   word-boundary rule there would let a glued echo pass.
@@ -250,7 +257,8 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   page text, whether or not the agent changed it, and the option a select action chose is
   agent input, so a page that repeats it elsewhere ("Showing: In stock") proves nothing by doing
   so. A drop-down the site set is not page evidence either; prove its state through the request
-  that loaded or submitted it. An option chosen by its `value` attribute is input as that value:
+  that loaded or submitted it. An option chosen by its `value` attribute is input as that value,
+  and its label is input too wherever a snapshot shows it selected; in a run without snapshots,
   an echo of its label elsewhere on the page is not masked.
 - **Links on a page the agent wrote.** A page no site served (`data:`, `blob:`, `about:`,
   `file:`) shows what the agent put in it, so following one of its links is the agent choosing

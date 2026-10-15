@@ -236,6 +236,7 @@ class _RawSnapshot:
     title: str | None
     text: str
     call_id: str | None
+    field_values: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -460,7 +461,9 @@ class _TraceReader:
             self.warnings.append(f"snapshot of {url} skipped: {exc}")
             return
         self.form_values += page.form_values
-        self.snapshots.append(_RawSnapshot(time, page_id, url, page.title, page.text, call_id))
+        self.snapshots.append(
+            _RawSnapshot(time, page_id, url, page.title, page.text, call_id, page.field_values)
+        )
 
     def _on_image(self, event: JsonObject, time: float | None) -> None:
         file = as_str(event.get("file"))
@@ -635,11 +638,16 @@ class _TraceReader:
         out: list[PageSnapshot] = []
         pages: list[str] = []
         last_by_page: dict[str, tuple[str, str | None, str]] = {}
+        kept: dict[str, int] = {}
         for raw in sorted(self.snapshots, key=lambda s: s.time):
             key = (raw.url, raw.title, raw.text)
             if last_by_page.get(raw.page_id) == key:
+                same = out[kept[raw.page_id]]
+                values = tuple(dict.fromkeys([*same.field_values, *raw.field_values]))
+                out[kept[raw.page_id]] = same.model_copy(update={"field_values": values})
                 continue
             last_by_page[raw.page_id] = key
+            kept[raw.page_id] = len(out)
             pages.append(raw.page_id)
             out.append(
                 PageSnapshot(
@@ -649,6 +657,7 @@ class _TraceReader:
                     title=raw.title,
                     text=raw.text,
                     call_id=raw.call_id,
+                    field_values=raw.field_values,
                 )
             )
         return out, pages

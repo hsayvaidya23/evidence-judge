@@ -170,6 +170,11 @@ the names exported from `evidence_judge`) is defined under
   context calls that make a run the agent's own when the trace records them.
 - The benchmark forges four more ways: `option_select`, `directory_upload`, `styled_screenshot`
   and `custom_tool`.
+- **A value made in a field without typing it whole is input.** Every value a text field, text
+  area, editable element or `<select>` holds in a trace snapshot (`PageSnapshot.field_values`)
+  is agent input, so text composed with the mouse (a click that moves the caret before a
+  Delete, words copied from the page and pasted together, a drag and drop, a datalist or
+  autofill choice) cannot prove itself when the page repeats it.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

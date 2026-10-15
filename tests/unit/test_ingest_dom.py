@@ -111,6 +111,12 @@ def test_typed_form_values_are_not_page_text() -> None:
 
     assert page.text == "Search orders Find"
     assert page.form_values == 4
+    assert page.field_values == (
+        "Order #1042 confirmed",
+        "default typed",
+        "Thank you for your order",
+        "prefilled",
+    )
 
 
 def test_selected_option_text_is_not_page_text() -> None:
@@ -145,6 +151,7 @@ def test_selected_option_text_is_not_page_text() -> None:
 
     assert page.text == "Out of stock Show:"
     assert page.form_values == 2
+    assert page.field_values == ("In stock", "Newest first")
 
 
 def test_editable_element_text_is_not_page_text() -> None:
@@ -171,6 +178,7 @@ def test_editable_element_text_is_not_page_text() -> None:
 
     assert page.text == "Out of stock Read only"
     assert page.form_values == 3
+    assert page.field_values == ("In stock", "Order confirmed", "Paid")
 
 
 def test_inline_elements_do_not_split_words() -> None:

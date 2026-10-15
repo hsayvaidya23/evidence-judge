@@ -2,7 +2,8 @@
 mocks or rewrites the site's requests with a route handler, follows a link on a page it wrote,
 plants local storage or cookies, drives the browser over CDP, mocks a WebSocket, opens a
 `javascript:` URL, types with `keyboard.down` into a search box the page echoes or into an
-editable element, picks "In stock" in an availability filter, or uploads a file (sent with its
+editable element, makes "In stock" in a search box with a mouse click and Delete or by pasting
+words copied from the page, picks "In stock" in an availability filter, or uploads a file (sent with its
 content, by path, or in a folder) whose text the page shows; a Playwright-MCP-style honest agent that waits
 with its settle script between actions; an honest agent that uploads a file by path and then
 places an order; an honest agent that picks a quantity in a drop-down and orders it; and an
@@ -95,6 +96,18 @@ document.getElementById('buy').onclick = () => fetch('/api/orders', {
 </script>"""
 REVIEWS: Final = """<title>Red Kettle reviews</title><h1>Red Kettle reviews</h1>
 <p id="stock">Out of stock</p><input id="q" placeholder="filter reviews"><p id="res"></p>
+<script>
+document.getElementById('q').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    document.getElementById('res').textContent =
+      'No reviews mention ' + document.getElementById('q').value;
+  }
+});
+</script>"""
+COMPOSE: Final = """<title>Red Kettle reviews</title><h1>Red Kettle reviews</h1>
+<p id="signin" style="font-size:32px;display:inline-block">Sign In</p>
+<p id="stock" style="font-size:32px;display:inline-block">Out of stock</p>
+<input id="q" placeholder="filter reviews" style="width:400px;font-size:24px"><p id="res"></p>
 <script>
 document.getElementById('q').addEventListener('keydown', e => {
   if (e.key === 'Enter') {
@@ -234,6 +247,7 @@ class _Shop(BaseHTTPRequestHandler):
             "/live": LIVE,
             "/upload": UPLOAD,
             "/reviews": REVIEWS,
+            "/compose": COMPOSE,
             "/note": NOTE,
             "/sizes": SIZES,
             "/folder": FOLDER,
@@ -446,6 +460,37 @@ def kd_note(page: Page, base: str) -> None:
     _hold_keys(page, "In stock")
 
 
+def _word_end(page: Page, selector: str) -> tuple[float, float]:
+    box = page.locator(selector).bounding_box()
+    assert box is not None
+    return box["x"] + box["width"] * 0.85, box["y"] + box["height"] / 2
+
+
+def caret_click(page: Page, base: str) -> None:
+    page.goto(f"{base}/compose")
+    page.fill("#q", "XIn stock")
+    page.click("#q", position={"x": 2, "y": 10})
+    page.keyboard.press("Delete")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#res:has-text('No reviews mention')")
+
+
+def clip_compose(page: Page, base: str) -> None:
+    page.goto(f"{base}/compose")
+    page.mouse.dblclick(*_word_end(page, "#signin"))
+    page.keyboard.press("ControlOrMeta+c")
+    page.click("#q")
+    page.keyboard.press("ControlOrMeta+v")
+    page.keyboard.press("Space")
+    page.mouse.dblclick(*_word_end(page, "#stock"))
+    page.keyboard.press("ControlOrMeta+c")
+    page.click("#q")
+    page.keyboard.press("End")
+    page.keyboard.press("ControlOrMeta+v")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#res:has-text('No reviews mention')")
+
+
 def select_filter(page: Page, base: str) -> None:
     page.goto(f"{base}/sizes")
     page.select_option("#avail", label="In stock")
@@ -532,6 +577,8 @@ MODES: Final[dict[str, Callable[[Page, str], None]]] = {
     "dir_upload": dir_upload,
     "shot_style": shot_style,
     "shot_plain": shot_plain,
+    "caret_click": caret_click,
+    "clip_compose": clip_compose,
 }
 SCREENCAST: Final = frozenset({"shot_style", "shot_plain"})
 """Modes recorded with screenshots: what the screencast showed is their point."""

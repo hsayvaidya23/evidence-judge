@@ -159,6 +159,8 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("upload_path", "invoice", "Done.", "needs_review", [None], UNSEEN),
         ("kd_echo", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("kd_note", "stock", "Yes, In stock.", "fail", [False, True], "does not contain"),
+        ("caret_click", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
+        ("clip_compose", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("goto_js", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
         ("dir_upload", "invoice", "The invoice was accepted.", "needs_review", [None], FOLDER),
         ("shot_style", "out_of_stock", "No, Out of stock.", "needs_review", [None, True], MADE),
@@ -483,6 +485,22 @@ def test_text_typed_into_an_editable_element_is_not_page_text() -> None:
     assert run.final_state is not None
     assert run.final_state.text == "Note to the shop Out of stock"
     assert run.metadata["form_values_excluded"] > 0
+
+
+@pytest.mark.parametrize("mode", ["caret_click", "clip_compose"])
+def test_a_value_made_in_a_field_without_typing_it_is_input(mode: str) -> None:
+    run = load_playwright_trace(FIXTURES / f"{mode}.zip")
+
+    assert run.final_state is not None
+    assert run.final_state.text.endswith("No reviews mention In stock")
+    assert "In stock" in run.snapshots[-1].field_values
+    assert "in stock" in EvidenceIndex(run).agent_inputs()
+
+
+def test_snapshots_that_only_change_a_field_add_its_value_to_the_last_one() -> None:
+    run = load_playwright_trace(FIXTURES / "caret_click.zip")
+
+    assert [s.field_values for s in run.snapshots] == [(), ("XIn stock", "In stock"), ("In stock",)]
 
 
 def test_goto_of_a_javascript_url_is_an_inject_action_its_hash_trusts() -> None:

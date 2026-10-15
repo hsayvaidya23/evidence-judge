@@ -151,6 +151,20 @@ def test_a_page_repeating_the_chosen_option_is_masked() -> None:
     assert masked.text == f"out of stock showing: {MASK}"
 
 
+def test_values_fields_held_in_snapshots_are_inputs() -> None:
+    page = snap(2, "/reviews", "Out of stock No reviews mention In stock")
+    run = make_run(
+        actions=[act(1, "click", "#q")],
+        snapshots=[page.model_copy(update={"field_values": ("In stock", "1")})],
+        final_state=final("/reviews", "Out of stock No reviews mention In stock"),
+    )
+    index = EvidenceIndex(run)
+    assert index.agent_inputs() == ("in stock",)
+    masked = index.without_agent_input.final
+    assert masked is not None
+    assert masked.text == f"out of stock no reviews mention {MASK}"
+
+
 def test_short_or_symbol_only_inputs_are_ignored() -> None:
     assert _inputs(actions=[act(1, "fill", value="ab"), act(2, "fill", value="--- ")]) == ()
 

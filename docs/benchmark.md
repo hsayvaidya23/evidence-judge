@@ -452,8 +452,9 @@ scenario's spec, with a generic spec and with no spec.
   name (a `click` that also sets a cookie) reads as that built-in; record a Playwright trace
   underneath for `full` tamper detection.
 - An option chosen by its `value` attribute (`select_option(value="instock")`) is agent input
-  as that value, so a page repeating its label ("Showing: In stock") elsewhere is not masked;
-  the option itself is never page text.
+  as that value; its label is input only where a snapshot shows it selected, so in a run
+  without snapshots a page repeating the label ("Showing: In stock") elsewhere is not masked.
+  The option itself is never page text.
 - State from before the recording is the agent's too, and is not seen. A persistent browser
   profile (`launch_persistent_context`, a browser-use `user_data_dir`) or a context created
   with `storage_state` carries cookies, local storage and service workers the trace never shows
