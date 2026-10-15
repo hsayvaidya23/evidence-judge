@@ -98,6 +98,26 @@ def test_a_work_tree_pointed_elsewhere_copies_the_whole_directory(tmp_path: Path
     assert any("points the work tree away" in p for p in result.problems)
 
 
+def test_include_copies_an_ignored_generated_file(tmp_path: Path) -> None:
+    root = with_gitignore(tmp_path, "_version.py\n")
+    (root / "_version.py").write_text("VERSION = '1.0'\n")
+    (root / "tests" / "test_version.py").write_text(
+        "from _version import VERSION\n\ndef test_version():\n    assert VERSION == '1.0'\n"
+    )
+    without = execute(RerunSpec(command=PYTEST), root)
+    assert without.status is RerunStatus.FAIL
+    result = execute(RerunSpec(command=PYTEST, include=["_version.py"]), root)
+    assert result.status is RerunStatus.PASS, result.reason
+    assert result.passed == 4
+    assert any("rerun.include" in note for note in result.notes)
+
+
+@pytest.mark.parametrize("pattern", ["/etc/passwd", "../outside.py", "a/../../b", ""])
+def test_include_stays_inside_the_project(pattern: str) -> None:
+    with pytest.raises(ValueError, match="include"):
+        RerunSpec(command=PYTEST, include=[pattern])
+
+
 @pytest.mark.parametrize(
     ("path", "flagged"),
     [

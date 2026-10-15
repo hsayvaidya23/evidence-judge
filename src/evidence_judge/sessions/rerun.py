@@ -81,12 +81,26 @@ class RerunSpec(BaseModel):
         description="Git revision the runner configuration is compared with (default: HEAD, or "
         "the revision the hooks saw when the turn started)",
     )
+    include: list[str] = Field(
+        default_factory=list[str],
+        description="Paths or glob patterns, relative to the project, copied even when "
+        "`.gitignore` ignores them (a generated `_version.py`)",
+    )
 
     @field_validator("command")
     @classmethod
     def _argv(cls, value: list[str]) -> list[str]:
         if any(not part or "\0" in part for part in value):
             raise ValueError("command arguments must be non-empty and contain no NUL")
+        return value
+
+    @field_validator("include")
+    @classmethod
+    def _relative(cls, value: list[str]) -> list[str]:
+        for pattern in value:
+            pure = PurePosixPath(pattern)
+            if not pattern or "\0" in pattern or pure.is_absolute() or ".." in pure.parts:
+                raise ValueError(f"include pattern {pattern!r} must stay inside the project")
         return value
 
     @field_validator("env")
@@ -805,18 +819,30 @@ def _skipped(rel: str) -> bool:
     return any(part in _SKIPPED_DIRS for part in PurePosixPath(rel).parts)
 
 
+def _included(root: Path, patterns: list[str]) -> list[str]:
+    found: set[str] = set()
+    for pattern in patterns:
+        for match in root.glob(pattern):
+            rel = match.relative_to(root).as_posix()
+            if not _skipped(rel):
+                found.add(rel)
+    return sorted(found)
+
+
 def copy_tree(
     root: Path,
     dest: Path,
     env: dict[str, str],
     base: Base | None = None,
+    include: list[str] | None = None,
 ) -> Copied:
     """Copy the working tree into `dest`. In a git tree: every tracked file still present and
     every untracked file the project's `.gitignore` files do not ignore (so the agent's new
     files come along, caches and build output do not), plus what `base` tracked and what
     `.gitignore` rules added since `base` hide, so changing the index or the ignore rules
     cannot keep a file out of the run. Elsewhere: everything but VCS metadata, caches and
-    dependency directories. Dependency directories (`.venv`, `venv`, `node_modules`) are linked, not copied."""
+    dependency directories. Paths matching `include` are copied either way. Dependency
+    directories (`.venv`, `venv`, `node_modules`) are linked, not copied."""
     budget = _Budget()
     listed = git_files(root, env)
     if listed is not None and not _work_tree_holds(root, env):
@@ -849,6 +875,13 @@ def copy_tree(
             if (src.is_symlink() or src.exists()) and not (dest / rel).exists():
                 _copy_one(src, dest / rel, budget)
                 result.paths.extend(_files_under(dest, rel))
+    extra = _included(root, include or [])
+    for rel in extra:
+        if not (dest / rel).exists() and not (dest / rel).is_symlink():
+            _copy_one(root / rel, dest / rel, budget)
+            result.paths.extend(_files_under(dest, rel))
+    if extra:
+        result.notes.append(f"copied {len(extra)} path(s) the spec's rerun.include names")
     for name in _DEPENDENCY_DIRS:
         source = root / name
         if source.is_dir() and not (dest / name).exists() and not (dest / name).is_symlink():
@@ -1002,7 +1035,7 @@ def execute(
         env = environment(spec, runner, scratch)
         resolved = resolve_base(root, base or "HEAD", env)
         try:
-            copied = copy_tree(root, copy, env, resolved)
+            copied = copy_tree(root, copy, env, resolved, spec.include)
         except (CopyError, OSError) as exc:
             return done(RerunStatus.UNKNOWN, f"the re-run could not copy the working tree: {exc}")
         problems.extend(copied.problems)
