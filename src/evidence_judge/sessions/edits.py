@@ -23,7 +23,8 @@ from typing import Final
 from evidence_judge.ingest._json import as_list, as_object
 
 _TEST_PATH: Final = re.compile(
-    r"(?:^|/)(?:tests?|__tests__|specs?|testing|e2e|integration_tests|testdata|fixtures)/|"
+    r"(?:^|/)(?:tests?|__tests__|specs?|testing|e2e|integration_tests|test[_-]?data|fixtures|"
+    r"goldens?|__snapshots__|snapshots|expected|cassettes|baselines?)/|"
     r"(?:^|/)test[^/]*\.py$|_tests?\.[^/.]+$|(?:^|/)conftest\.py$|_spec\.[^/.]+$|"
     r"\.(?:test|spec)\.[^/]+$|Tests?\.(?:java|kt|cs|swift|php|scala|groovy)$|"
     r"(?:^|/)tests?\.[^/.]+$|(?:^|/)test_[^/]+$",
@@ -442,3 +443,72 @@ def _new_rebindings(name: str, added: list[str] | None, texts: tuple[str, str] |
     if added is None:
         return []
     return rebinding_findings("\n".join(added), name)
+
+
+_OPENERS: Final = re.compile(
+    r"^(?:open|read_text|read_bytes|load|loadtxt|genfromtxt|fromfile|joinpath|files|"
+    r"Path|PurePath|PosixPath|read_\w+|open_text|open_binary|path|imread|safe_load)$"
+)
+_DATA_LITERAL: Final = re.compile(r"^[\w./@+-]*(?:/|\.[A-Za-z0-9]{1,8})$")
+_CODE_SUFFIX: Final = re.compile(
+    r"\.(?:py|pyi|js|jsx|ts|tsx|mjs|cjs|go|rs|rb|java|kt|cs|swift|php|c|h|cc|cpp|hpp|scala)$"
+)
+
+
+def _literals(tree: ast.AST) -> set[str]:
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if not _OPENERS.match(name):
+            continue
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                value = sub.value.strip()
+                if 0 < len(value) < 200 and _DATA_LITERAL.match(value):
+                    found.add(value)
+    return found
+
+
+def opened_paths(source: str) -> set[str]:
+    """Path literals a test module reads: arguments of `open()`, `Path(...)`,
+    `.read_text()`/`.read_bytes()`/`.open()`, `json.load`, `np.load`, `pd.read_*` and
+    `importlib.resources`. A source that does not parse as a whole (several files `cat` together)
+    is read line by line."""
+    try:
+        return _literals(ast.parse(source))
+    except (SyntaxError, ValueError):
+        pass
+    found: set[str] = set()
+    for line in source.splitlines():
+        try:
+            found |= _literals(ast.parse(line.strip()))
+        except (SyntaxError, ValueError):
+            continue
+    return found
+
+
+def _strip_up(literal: str) -> str:
+    while literal.startswith(("./", "../")):
+        literal = literal.split("/", 1)[1]
+    return literal
+
+
+def data_reader(path: str, opened: dict[str, set[str]]) -> str | None:
+    """The test module that reads `path` as data (expected values, cases, recorded answers),
+    or None. Code files are left to the other checks."""
+    if is_test_path(path) or _CODE_SUFFIX.search(path):
+        return None
+    for module, literals in opened.items():
+        for literal in literals:
+            lit = _strip_up(literal).rstrip("/")
+            if not lit:
+                continue
+            if literal.endswith("/"):
+                if path.startswith(lit + "/") or f"/{lit}/" in path:
+                    return module
+            elif path == lit or path.endswith("/" + lit):
+                return module
+    return None

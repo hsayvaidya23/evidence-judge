@@ -8,6 +8,7 @@ test-suite findings), a read, a search, a subagent, or another tool.
 from __future__ import annotations
 
 import posixpath
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -29,6 +30,7 @@ from evidence_judge.sessions.summaries import parse_summary
 OUTPUT_HEAD: Final = 4_000
 OUTPUT_TAIL: Final = 12_000
 MAX_EVENTS: Final = 20_000
+_NUMBERED: Final = re.compile(r"^ *\d+(?:\t|\u2192)", re.MULTILINE)
 
 SHELL_TOOLS: Final = frozenset(
     {"Bash", "shell", "exec", "exec_command", "local_shell", "run_shell_command", "container.exec"}
@@ -181,6 +183,8 @@ class EventBuilder:
         self.events: list[SessionEvent] = []
         self.counters: dict[str, int] = {}
         self.dropped = 0
+        self.opened: dict[str, set[str]] = {}
+        """Path literals each test module the session shows reads (test data)."""
 
     def _id(self, prefix: str) -> str:
         self.counters[prefix] = self.counters.get(prefix, 0) + 1
@@ -196,8 +200,62 @@ class EventBuilder:
     def seq(self) -> int:
         return len(self.events)
 
+    def _test_source(self, path: str, source: str | None) -> None:
+        if source and path.endswith(".py") and edits.is_test_path(path):
+            opened = edits.opened_paths(source)
+            if opened:
+                self.opened.setdefault(path, set()).update(opened)
+
+    def _sources(self, call: ToolCall, cwd: str | None) -> None:
+        """Test module text the call shows: an edit's whole file or added lines, a read's
+        result, or a command that names a test module and prints it."""
+        if call.status is CallStatus.DENIED:
+            return
+        if call.edits is not None:
+            for path, _, _, added in call.edits:
+                self._test_source(relative(path, cwd), "\n".join(added or []))
+            return
+        rel = relative(_path(call), cwd)
+        if call.name in EDIT_TOOLS:
+            texts = _whole_texts(call)
+            _, _, added = _claude_edit(call)
+            self._test_source(rel, texts[1] if texts else "\n".join(added or []))
+        elif call.name in READ_TOOLS:
+            file = call.result.get("file")
+            content = file.get("content") if isinstance(file, Mapping) else None  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            text = content if isinstance(content, str) else _NUMBERED.sub("", call.output)
+            self._test_source(rel, text)
+        elif call.name in SHELL_TOOLS:
+            command = _str(call.input.get("command")) or ""
+            for word in re.findall(r"[\w./-]+\.py\b", command):
+                self._test_source(relative(word, cwd), call.output)
+
+    def finish(self) -> None:
+        """Mark edits of files a test module reads as data: changing expected values weakens the
+        suite like changing an assertion."""
+        if not self.opened:
+            return
+        for i, event in enumerate(self.events):
+            if not isinstance(event, FileEditEvent) or event.change == "add":
+                continue
+            if event.status is CallStatus.DENIED:
+                continue
+            reader = edits.data_reader(event.path, self.opened)
+            if reader is None:
+                continue
+            name = posixpath.basename(event.path)
+            finding = (
+                f"changed {name}, which {posixpath.basename(reader)} reads as test data "
+                "(expected values decide what passes)"
+            )
+            if finding not in event.test_findings:
+                self.events[i] = event.model_copy(
+                    update={"test_findings": [*event.test_findings, finding]}
+                )
+
     def add(self, call: ToolCall) -> None:
         cwd = call.cwd or self.cwd
+        self._sources(call, cwd)
         common: dict[str, Any] = {"ts": call.ts, "tool": call.name, "agent_id": call.agent_id}
         if call.edits is not None:
             for path, change, removed, added in call.edits:
@@ -315,6 +373,7 @@ def build_events(calls: Iterable[ToolCall], cwd: str | None) -> tuple[list[Sessi
     builder = EventBuilder(cwd)
     for call in calls:
         builder.add(call)
+    builder.finish()
     return builder.events, builder.dropped
 
 
@@ -330,4 +389,5 @@ def extend_events(
             builder.counters[prefix] = max(builder.counters.get(prefix, 0), int(number))
     for call in calls:
         builder.add(call)
+    builder.finish()
     return builder.events
