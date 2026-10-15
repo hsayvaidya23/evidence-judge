@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import struct
 from pathlib import Path
 
@@ -20,6 +21,11 @@ PNGS = {
     "social-card.png": (1280, 640),
 }
 ANIMATIONS = ("demo-agent-run.webp", "demo-verdict.webp")
+
+pytestmark = pytest.mark.skipif(
+    not (ASSETS / "social-card.png").exists() and not (ASSETS.parents[1] / ".git").exists(),
+    reason="the sdist leaves out the README media binaries",
+)
 
 
 def png_size(data: bytes) -> tuple[int, int]:
@@ -68,3 +74,26 @@ def test_animation_within_budget(name: str) -> None:
     assert 400 <= height <= 900
     assert frames > 10
     assert 15_000 <= total_ms <= 25_000
+
+
+ROOT = Path(__file__).parents[2]
+README = (ROOT / "README.md").read_text(encoding="utf-8")
+RAW = "https://raw.githubusercontent.com/hsayvaidya23/evidence-judge/main/"
+BLOB = "https://github.com/hsayvaidya23/evidence-judge/blob/main/"
+
+
+def test_readme_images_are_absolute_and_exist() -> None:
+    urls = re.findall(r'(?:src|srcset)="([^"]+)"', README)
+    local = [u for u in urls if not u.startswith("https://img.shields.io/")]
+    assert local
+    for url in local:
+        assert url.startswith(RAW), url
+        assert (ROOT / url.removeprefix(RAW)).is_file(), url
+
+
+def test_readme_links_work_off_github() -> None:
+    hrefs = re.findall(r'href="([^"]+)"', README) + re.findall(r"\]\(([^)\s]+)\)", README)
+    for href in hrefs:
+        assert href.startswith(("https://", "#")), href
+        if href.startswith(BLOB):
+            assert (ROOT / href.removeprefix(BLOB).split("#")[0]).exists(), href

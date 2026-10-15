@@ -86,7 +86,12 @@ include = [
   "SECURITY.md",
   "CONTRIBUTING.md",
   "pyproject.toml",
+  "action.yml",
+  "mkdocs.yml",
+  "Dockerfile",
+  ".github",
 ]
+exclude = ["docs/assets/*.png", "docs/assets/*.webp"]
 
 [tool.ruff]
 line-length = 100
