@@ -168,75 +168,101 @@ def matching_requests(
     return [e for e in index.requests() if matcher.matches(e)]
 
 
+Scored = list[tuple[NetworkEvent, list[Miss]]]
+
+
 def check_request(
     predicate: RequestPredicate, index: EvidenceIndex, scope: EvidenceScope | None = None
 ) -> PredicateResult:
     matcher = RequestMatcher(predicate, scope)
-    requests = index.requests()
-    scored = [(event, matcher.misses(event)) for event in requests]
+    scored = [(event, matcher.misses(event)) for event in index.requests()]
+    return (
+        _hit_result(matcher, scored, index)
+        or _unverifiable_result(matcher, scored)
+        or _off_site_result(matcher, scored)
+        or _absent_result(matcher, scored, index)
+    )
+
+
+def _hit_result(
+    matcher: RequestMatcher, scored: Scored, index: EvidenceIndex
+) -> PredicateResult | None:
+    """SUPPORTED by the matching requests, NO_EVIDENCE if every one was a redirect that cannot be
+    shown to have worked, or None if no request matched."""
     hits = [event for event, misses in scored if not misses]
-    doubts = {e.id: d for e in hits if scope is not None and (d := redirect_doubt(e, index))}
+    if not hits:
+        return None
+    doubts = _redirect_doubts(hits, index) if matcher.scope is not None else {}
     proven = [e for e in hits if e.id not in doubts]
-    if hits and not proven:
+    if not proven:
         event = hits[-1]
-        return result(
-            Support.NO_EVIDENCE,
-            f"{describe_request(event)} meets every other criterion of a {matcher.describe()}, "
-            f"but {doubts[event.id]}",
-            RequestChecker.kind,
-            [cite_request(event)],
-        )
-    hits = proven
-    if hits:
-        latest = hits[-1]
-        extra = f" ({len(hits)} matching requests)" if len(hits) > 1 else ""
-        return result(
-            Support.SUPPORTED,
-            f"{describe_request(latest)} matched: {matcher.describe()}{extra}",
-            RequestChecker.kind,
-            [cite_request(e) for e in reversed(hits[-MAX_CITATIONS:])],
-        )
+        return _no_evidence(matcher, event, doubts[event.id])
+    latest = proven[-1]
+    extra = f" ({len(proven)} matching requests)" if len(proven) > 1 else ""
+    return result(
+        Support.SUPPORTED,
+        f"{describe_request(latest)} matched: {matcher.describe()}{extra}",
+        RequestChecker.kind,
+        [cite_request(e) for e in reversed(proven[-MAX_CITATIONS:])],
+    )
 
-    unverifiable = [
-        (event, misses) for event, misses in scored if all(m.unrecorded for m in misses)
-    ]
-    if unverifiable:
-        event, misses = unverifiable[-1]
-        missing = " and ".join(m.reason for m in misses)
-        return result(
-            Support.NO_EVIDENCE,
-            f"{describe_request(event)} meets every other criterion of a {matcher.describe()}, "
-            f"but {missing}",
-            RequestChecker.kind,
-            [cite_request(event)],
-        )
 
-    off_site = [(event, misses) for event, misses in scored if _only_off_site(misses)]
-    if off_site:
-        event, misses = off_site[-1]
-        host = url_host(event.url)
-        unread = [m.reason for m in misses if not m.off_site]
-        but = f" (and {' and '.join(unread)})" if unread else ""
-        where = matcher.scope.describe() if matcher.scope else "the site"
-        return result(
-            Support.NO_EVIDENCE,
-            f"{describe_request(event)} is a {matcher.describe()}{but}, but it went to {host}, "
-            f"outside {where}, so it cannot prove anything; if {host} is part of the site, "
-            "list it in the spec's allowed_hosts",
-            RequestChecker.kind,
-            [cite_request(event)],
-        )
+def _redirect_doubts(hits: list[NetworkEvent], index: EvidenceIndex) -> dict[str, str]:
+    return {e.id: d for e in hits if (d := redirect_doubt(e, index))}
 
+
+def _no_evidence(matcher: RequestMatcher, event: NetworkEvent, but: str) -> PredicateResult:
+    return result(
+        Support.NO_EVIDENCE,
+        f"{describe_request(event)} meets every other criterion of a {matcher.describe()}, "
+        f"but {but}",
+        RequestChecker.kind,
+        [cite_request(event)],
+    )
+
+
+def _unverifiable_result(matcher: RequestMatcher, scored: Scored) -> PredicateResult | None:
+    """NO_EVIDENCE for the latest request whose only misses are criteria that were not recorded."""
+    unverifiable = [(e, m) for e, m in scored if all(miss.unrecorded for miss in m)]
+    if not unverifiable:
+        return None
+    event, misses = unverifiable[-1]
+    return _no_evidence(matcher, event, " and ".join(m.reason for m in misses))
+
+
+def _off_site_result(matcher: RequestMatcher, scored: Scored) -> PredicateResult | None:
+    """NO_EVIDENCE for the latest request that would match if it had gone to the site."""
+    off_site = [(e, m) for e, m in scored if _only_off_site(m)]
+    if not off_site:
+        return None
+    event, misses = off_site[-1]
+    host = url_host(event.url)
+    unread = [m.reason for m in misses if not m.off_site]
+    but = f" (and {' and '.join(unread)})" if unread else ""
+    where = matcher.scope.describe() if matcher.scope else "the site"
+    return result(
+        Support.NO_EVIDENCE,
+        f"{describe_request(event)} is a {matcher.describe()}{but}, but it went to {host}, "
+        f"outside {where}, so it cannot prove anything; if {host} is part of the site, "
+        "list it in the spec's allowed_hosts",
+        RequestChecker.kind,
+        [cite_request(event)],
+    )
+
+
+def _absent_result(
+    matcher: RequestMatcher, scored: Scored, index: EvidenceIndex
+) -> PredicateResult:
+    """CONTRADICTED when traffic was captured and nothing matched, citing the nearest miss."""
     if not index.has(Channel.NETWORK):
         return result(
             Support.NO_EVIDENCE,
             f"Network traffic was not captured, so a {matcher.describe()} cannot be checked",
             RequestChecker.kind,
         )
-
-    mutations = sum(1 for e in requests if e.is_mutation)
+    mutations = sum(1 for e, _ in scored if e.is_mutation)
     reason = (
-        f"No {matcher.describe()} among {plural(len(requests), 'captured request')} "
+        f"No {matcher.describe()} among {plural(len(scored), 'captured request')} "
         f"({plural(mutations, 'mutation')})"
     )
     nearest = _nearest_miss(scored, matcher.criteria_count)
@@ -309,9 +335,7 @@ def _only_off_site(misses: list[Miss]) -> bool:
     return any(m.off_site for m in misses) and all(m.off_site or m.unrecorded for m in misses)
 
 
-def _nearest_miss(
-    scored: list[tuple[NetworkEvent, list[Miss]]], criteria: int
-) -> tuple[NetworkEvent, list[Miss]] | None:
+def _nearest_miss(scored: Scored, criteria: int) -> tuple[NetworkEvent, list[Miss]] | None:
     candidates = [(e, m) for e, m in scored if len(m) < criteria]
     if not candidates:
         return None
