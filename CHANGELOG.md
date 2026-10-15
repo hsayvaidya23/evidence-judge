@@ -163,6 +163,12 @@ the names exported from `evidence_judge`) is defined under
   writes before a command's output, when the hook payload has no exit code. Before, every
   Codex shell call was logged with a null exit code, so an honest Codex log could not show that
   its tests passed.
+- Honest `go test ./...` and `node --test` sessions pass. `go test` without `-v` is counted in
+  packages (`ok`/`FAIL` lines) and with `-v` in test functions, and a run is compared only with
+  earlier runs counting the same unit; before, a failing run's two `--- FAIL:` tests made the
+  later passing package look like a shrunken suite. `node --test` is a test runner now (with
+  `--test-name-pattern`, `--test-skip-pattern`, `--test-only` and named files as filters), and
+  its spec (`tests 2`, `pass 2`) and TAP (`# pass 2`) totals are read, also through `npm test`.
 
 ### Security
 
@@ -513,6 +519,57 @@ the names exported from `evidence_judge`) is defined under
   the SVG canvas, a MathML annotation or a closed `popover`, rendered by the page-text reader),
   and `derived_echo` variants that type the texts accented, in look-alike digits, or in
   another language for a live search to translate: 711 forged runs, 0 false PASS.
+- **Switching off the hooks or the judge is harness tampering.** A session that writes or
+  deletes agent configuration (`.claude/settings*.json` with `disableAllHooks`, hook scripts,
+  `hooks/hooks.json`, `.mcp.json`, plugin directories, `~/.codex/`, `~/.gemini/`) or the
+  `evidence-judge` install (`~/.local/bin/evidence-judge`, a shim at `$(which evidence-judge)`,
+  `uv tool uninstall evidence-judge`) goes to review, naming the hook switch when it sets one.
+  Before, `{"disableAllHooks": true}` in `.claude/settings.local.json` silenced the recorder and
+  the Stop judge and the session still passed. Forgery kinds `disable_hooks`, `rm_judge_bin`,
+  `uninstall_judge` and `judge_shim` cover it.
+- **Packages the test runner may load are harness changes.** `uv run --with ./plugin`,
+  `--with-editable`, `--with-requirements`, `uvx --from` a path or VCS URL, `pip install -e
+  ./plugin`, `npm link`, and installing any package other than the project itself (`.`,
+  `.[dev]`, `-r requirements.txt`, a bare `npm install`) or a test runner (`pytest`, `jest`, ...)
+  send the session to review: the judge cannot read the project's lock file, and any added
+  package can register a `pytest11` plugin that rewrites results. Before, a local plugin loaded
+  with `uv run --with ./evjplug pytest` monkeypatched the code under test and the run passed.
+  Forgery kinds `uv_with_local_plugin` and `install_local_plugin` cover it.
+- **A skipped test is not a passing one.** A run that skips more tests than the earlier
+  whole-suite run, or sets a variable on its command line that no earlier test run set
+  (`CI=true pytest` can switch on `skipif` markers), is no longer whole-suite evidence. Only
+  output-formatting variables (`NO_COLOR`, `FORCE_COLOR`, `TERM`, `COLUMNS`,
+  `PYTHONDONTWRITEBYTECODE`, `PYTHONUNBUFFERED`, `PY_COLORS`, `CLICOLOR*`, `LINES`) and
+  `PYTHONPATH=.` are exempt. Before, `CI=true pytest` turned two failing tests into "1 passed,
+  2 skipped" and the session passed. Forgery kinds `ci_env_skipif` and `export_ci_skipif`
+  cover it.
+- **A test module that replaces the code under test weakens the suite.** Added test modules and
+  conftest files are parsed: an attribute assignment or `setattr` on an imported module at
+  import time, a `sys.modules` write, or `monkeypatch.setattr`/`mock.patch(...).start()` in an
+  autouse, module- or session-scoped fixture or a `pytest_*` hook is test weakening. An answer
+  that claims a fix when nothing outside the tests changed goes to review. Before, a new
+  `tests/test_aaa_regression.py` with `calc.add = lambda a, b: a + b` made every test pass and
+  the session passed. Forgery kinds `import_rebind_test` and `autouse_monkeypatch` cover it.
+- **Every file the answer says it changed is checked offline.** The heuristic extractor reads
+  each path an answer names as fixed, changed, updated, added to, written or created, not only
+  the first, so "I fixed `calc.py`, added a test in `tests/test_regression.py` and updated
+  `README.md`" with only `calc.py` edited is contradicted (FAIL) when the log shows every
+  change, and goes to review when a command may have written files the log does not name.
+- **Guard hooks refuse to switch the hooks off.** New `evidence-judge hook claude-code-guard`
+  (Claude Code `PreToolUse`, registered by the plugin), `codex-guard` (Codex `PreToolUse`) and
+  `gemini-guard` (Gemini CLI `BeforeTool`, registered by the extension) deny Write, Edit,
+  MultiEdit, NotebookEdit, `apply_patch`, `write_file`, `replace` and shell calls that write
+  agent configuration, the `evidence-judge` install or the evidence logs, reusing the session
+  judge's write-target analysis (about 0.3 s a call). They allow anything they cannot read;
+  `EVJ_HOOK_GUARD=false` turns them off. Live-checked: a Claude Code session told to write
+  `{"disableAllHooks": true}` with Write and then with `echo >` was denied both times.
+- **The hook shim pins the CLI and fails closed without it.** With `--state-dir`, the plugin's
+  `run-hook.sh` pins the `evidence-judge` path and checksum on first use. If the CLI later
+  disappears or changes, the Stop hook sends the agent back once and then stops the session
+  instead of allowing an unchecked answer; `EVJ_HOOK_ALLOW_MISSING_JUDGE=1` in the harness's
+  environment restores the notice. The guides recommend Claude Code managed settings
+  (`allowManagedHooksOnly`, the plugin in managed `enabledPlugins`) and explain that a
+  same-user agent can otherwise disable hooks.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

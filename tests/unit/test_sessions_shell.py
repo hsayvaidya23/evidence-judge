@@ -520,3 +520,86 @@ def test_more_filters(command: str, fragment: str | None) -> None:
         assert analysis.collect_only
     else:
         assert any(fragment in f for f in analysis.test_filters), analysis.test_filters
+
+
+@pytest.mark.parametrize(
+    ("command", "fragment"),
+    [
+        ("echo '{\"disableAllHooks\": true}' > .claude/settings.local.json", "disableAllHooks"),
+        ("cp /tmp/s.json ~/.claude/settings.json", "agent configuration ~/.claude/settings.json"),
+        ("rm .claude/hooks/stop.sh", "agent configuration .claude/hooks/stop.sh"),
+        ("printf x > ~/.codex/config.toml", "agent configuration ~/.codex/config.toml"),
+        ("sed -i 's/x/y/' .gemini/settings.json", "agent configuration .gemini/settings.json"),
+        ("echo {} > .mcp.json", "agent configuration .mcp.json"),
+        ("echo {} > plugins/x/hooks/hooks.json", "plugins/x/hooks/hooks.json"),
+        ("rm -f ~/.local/bin/evidence-judge", "evidence-judge install at ~/.local/bin"),
+        ("printf '#!/bin/sh\\n' > ~/.local/bin/evidence-judge", "evidence-judge install"),
+        ("uv tool uninstall evidence-judge", "uv changes the evidence-judge install"),
+        ("pipx uninstall evidence-judge", "pipx changes the evidence-judge install"),
+        ("pip install --force-reinstall ./evidence_judge", "pip changes the evidence-judge"),
+        ('echo x > "$(which evidence-judge)"', "can resolve to the evidence-judge executable"),
+        ("rm -rf ~/.local/share/uv/tools/evidence-judge", "evidence-judge install"),
+        ("bash -c 'rm .claude/settings.json'", "agent configuration .claude/settings.json"),
+        ("python3 tools/x.py ~/.claude/settings.json", "names agent configuration"),
+    ],
+)
+def test_guard_tamper(command: str, fragment: str) -> None:
+    why = analyse(command).guard_tamper
+    assert why is not None and fragment in why, why
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat .claude/settings.json",
+        "evidence-judge session judge --claude-code s.jsonl",
+        "jq . ~/.codex/config.toml",
+        "echo x > notes/hooks.md",
+        "pytest -q tests/test_hooks.py",
+        "uv tool list",
+    ],
+)
+def test_no_guard_tamper(command: str) -> None:
+    assert analyse(command).guard_tamper is None
+
+
+@pytest.mark.parametrize(
+    ("command", "fragment"),
+    [
+        ("uv run --no-project --with pytest --with ./evjplug pytest -q", "--with ./evjplug"),
+        ("timeout 60 uv run --with=./x pytest", "--with ./x"),
+        ("uv run --with-editable ../p pytest", "--with-editable ../p"),
+        ("uv run --with-requirements req.txt pytest", "--with-requirements req.txt"),
+        ("uvx --from git+https://example.com/p pytest", "--from git+https://example.com/p"),
+        ("pip install -e ./plug", "pip install -e ./plug"),
+        ("python -m pip install pytest-randomly", "pip install installs pytest-randomly"),
+        ("uv pip install requests", "pip install installs requests"),
+        ("uv add pytest-xdist", "uv add installs pytest-xdist"),
+        ("npm i @scope/pkg", "npm i installs @scope/pkg"),
+        ("npm link ../plug", "npm link links ../plug"),
+        ("yarn add file:../x", "yarn add installs file:../x, a local or VCS package"),
+        ("pip install dist/plug-1.0-py3-none-any.whl", "a local or VCS package"),
+    ],
+)
+def test_packages_the_runner_may_load_change_the_harness(command: str, fragment: str) -> None:
+    why = analyse(command).harness_change
+    assert why is not None and fragment in why, why
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run --with pytest pytest -q",
+        "uvx --from ruff ruff check",
+        "pip install -e .",
+        "pip install .[dev]",
+        "pip install -r requirements.txt",
+        "pip install 'pytest>=8'",
+        "npm install",
+        "npm ci",
+        "npm install -D jest",
+        "uv sync",
+    ],
+)
+def test_project_and_runner_installs_keep_the_harness(command: str) -> None:
+    assert analyse(command).harness_change is None

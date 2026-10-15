@@ -49,6 +49,9 @@ from evidence_judge.sessions.shell import READ_ONLY_PROGRAMS
 CHECKER: Final = "session"
 _EXCERPT: Final = 160
 _TAIL_ONLY: Final = "its output is piped into tail"
+_PER_TEST: Final = frozenset({"go test -v"})
+"""Summaries that count test functions where the same runner otherwise counts packages: a run
+is compared only with earlier runs counting the same unit."""
 
 
 class Result(StrEnum):
@@ -210,6 +213,26 @@ class SessionIndex:
                 out.append((command, f"changed how later commands run: {analysis.harness_change}"))
         return out
 
+    @property
+    def source_changed(self) -> bool:
+        """Something outside the tests and their configuration may have changed: an edit of a
+        non-test file, a command that names one or writes files it does not name, or an
+        action the log does not show."""
+
+        def outside(path: str) -> bool:
+            return not (is_test_path(path) or is_test_config(path) or is_harness_path(path))
+
+        if self.unseen_actors or any(outside(e.path) for e in self.edits):
+            return True
+        for command in self.commands:
+            analysis = command.analysis
+            if command.status is CallStatus.DENIED or analysis.mutation is None:
+                continue
+            paths = [*analysis.touched_paths, *analysis.deleted_paths]
+            if analysis.opaque_write or any(outside(p) for p in paths):
+                return True
+        return False
+
     @cached_property
     def unseen_actors(self) -> list[SessionEvent]:
         return [
@@ -268,7 +291,8 @@ class SessionIndex:
         largest: dict[tuple[str, ...], tuple[int, CommandEvent]] = {}
         out: dict[str, tuple[int, CommandEvent]] = {}
         for event in self.test_runs(None):
-            key = tuple(sorted(set(event.analysis.runners)))
+            per_test = event.summary is not None and event.summary.framework in _PER_TEST
+            key = (*sorted(set(event.analysis.runners)), *(["per test"] if per_test else []))
             if key in largest:
                 out[event.id] = largest[key]
             total = suite_size(event)
@@ -281,20 +305,57 @@ class SessionIndex:
         """`judge_test_run`, with a run outside the session directory, or one that ran fewer
         tests than an earlier whole-suite run (or than `minimum`), counted as partial."""
         judged = self._scoped(event)
+        if not judged.whole:
+            return judged
+        if new_env := self._new_env(event):
+            why = f"runs with {', '.join(new_env)} set, which no earlier test run had"
+            return RunOutcome(event, judged.result, judged.reason, why)
         total = suite_size(event)
-        if not judged.whole or total is None:
+        if total is None:
             return judged
         earlier = self._largest_earlier.get(event.id)
+        skipped = event.summary.skipped if event.summary else 0
+        before = earlier[1].summary.skipped if earlier and earlier[1].summary else 0
         if earlier is not None and total < earlier[0]:
             why = (
                 f"ran {total} tests, fewer than the {earlier[0]} of the earlier whole-suite run "
                 f"{earlier[1].id}"
+            )
+        elif earlier is not None and skipped > before:
+            why = (
+                f"skipped {skipped} tests, more than the {before} of the earlier whole-suite run "
+                f"{earlier[1].id}; a skipped test is not a passing one"
             )
         elif minimum is not None and total < minimum:
             why = f"ran {total} tests, fewer than the {minimum} the suite has"
         else:
             return judged
         return RunOutcome(event, judged.result, judged.reason, why)
+
+    @cached_property
+    def _run_envs(self) -> dict[str, set[str]]:
+        """The variables each test run sets on its command line or inherits from an earlier
+        `export` in the session."""
+        exported: set[str] = set()
+        out: dict[str, set[str]] = {}
+        for command in self.commands:
+            if command.status is CallStatus.DENIED:
+                continue
+            if command.analysis.is_test:
+                out[command.id] = exported | set(command.analysis.run_env)
+            exported |= set(command.analysis.exports)
+        return out
+
+    def _new_env(self, event: CommandEvent) -> list[str]:
+        """Variables the run sets or inherits that no earlier test run had (`CI=true` can
+        switch on `skipif` markers)."""
+        seen = {
+            name
+            for earlier in self.test_runs(None)
+            if earlier.seq < event.seq
+            for name in self._run_envs.get(earlier.id, set())
+        }
+        return sorted(self._run_envs.get(event.id, set()) - seen)
 
     def scopes(self, event: CommandEvent) -> list[str] | None:
         """The parts of the session directory a run selected only by plain paths and its
@@ -331,6 +392,7 @@ class SessionIndex:
             (o, scopes, total)
             for o in reversed(outcomes)
             if o.result is Result.PASS
+            and not self._new_env(o.event)
             and (scopes := self.scopes(o.event)) is not None
             and (total := suite_size(o.event)) is not None
         ]
@@ -360,6 +422,9 @@ class SessionIndex:
             chosen.append((outcome, scopes, total))
             taken.extend(scopes)
         if sum(total for _, _, total in chosen) != size:
+            return None
+        skipped = sum(o.event.summary.skipped for o, _, _ in chosen if o.event.summary)
+        if baseline.summary is not None and skipped > baseline.summary.skipped:
             return None
         named = [relative(path, self.run.cwd) for path in _NAMED_TEST_FILE.findall(baseline.output)]
         if not all(any(_inside(path, scope) for scope in taken) for path in named):

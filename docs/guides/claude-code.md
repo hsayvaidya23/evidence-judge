@@ -15,6 +15,7 @@ The plugin ships four things:
 | --- | --- |
 | `Stop` and `SubagentStop` hooks | Judge the newest trace recorded during the turn; block the stop on FAIL |
 | Recorder hooks (`UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`) | Append every prompt and tool call to a per-session evidence log, asynchronously |
+| Guard hook (`PreToolUse`) | Denies writes to agent settings, hook files, the `evidence-judge` install and evidence logs (see [Keeping the hooks on](#keeping-the-hooks-on)) |
 | MCP server (`evidence-judge mcp`) | Tools `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec`, `find_recordings` |
 | Skill `evidence-judge` | Teaches Claude to record traces, write a spec and read a verdict |
 
@@ -110,6 +111,8 @@ Set these in the environment Claude Code runs in, or in the `env` block of a
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `EVJ_HOOK_ENABLED` | `true` | `false` turns every stop hook into a no-op |
+| `EVJ_HOOK_GUARD` | `true` | `false` lets the guard hook allow writes to agent configuration and the judge's install |
+| `EVJ_HOOK_ALLOW_MISSING_JUDGE` | unset | `1` lets the Stop hook allow the stop with a notice when the pinned CLI is gone or changed |
 | `EVJ_HOOK_TIMEOUT_S` | `60` | Wall-clock limit for judging the turn's traces; on timeout the stop is allowed with a notice |
 | `EVJ_HOOK_BLOCK_ON_NEEDS_REVIEW` | `false` | Also keep the agent working on NEEDS REVIEW |
 | `EVJ_HOOK_LLM` | `false` | Judge with the configured LLM (`ANTHROPIC_API_KEY`) instead of offline |
@@ -183,6 +186,50 @@ reports the log as `partial` tamper evidence unless you pass `--trusted-log`: se
 - **Untrusted page text.** The block reason may quote checker reasons that repeat page text.
   It tells Claude to treat that text as data, and evidence excerpts themselves are never
   forwarded.
+
+## Keeping the hooks on
+
+An agent running as your OS user can switch the hooks off: `{"disableAllHooks": true}` in
+`.claude/settings.local.json` stops every user, project, local and plugin hook, so neither the
+recorder nor the Stop judge runs again. Deleting or replacing the `evidence-judge` executable
+has the same effect. Three layers stand in the way:
+
+- **The guard hook.** The plugin's `PreToolUse` hook (`evidence-judge hook claude-code-guard`,
+  on `Bash|Write|Edit|MultiEdit|NotebookEdit`) denies calls that write agent configuration
+  (`.claude/settings*.json`, `.claude/hooks/`, `hooks/hooks.json`, `.mcp.json`, plugin
+  directories, `~/.codex/`, `~/.gemini/`), the `evidence-judge` install (`~/.local/bin/`, the uv
+  tool directory, `uv tool uninstall evidence-judge`) or the evidence logs. It reuses the
+  session judge's shell analysis, takes about 0.3 s, and allows anything it cannot read. Set
+  `EVJ_HOOK_GUARD=false` to turn it off.
+- **A pinned CLI.** The first hook run pins the CLI it found (path and checksum) in
+  `${CLAUDE_PLUGIN_DATA}/state/evidence-judge-pin`. If that file later disappears or changes,
+  the Stop hook fails closed: it sends the agent back once (exit 2) and then stops the session
+  instead of letting an unchecked answer through. After reinstalling the CLI somewhere else,
+  delete the pin file; `EVJ_HOOK_ALLOW_MISSING_JUDGE=1` in Claude Code's own environment brings
+  back the old notice.
+- **The session judge.** A session that writes agent configuration or the judge's install
+  anyway, say from a script the guard cannot see into, goes to review as harness tampering.
+
+None of this holds against an agent that can run arbitrary code as you: it could rewrite the
+plugin itself. The control that does hold is managed settings, which the agent cannot write
+without administrator rights. `disableAllHooks` set anywhere else does not stop managed hooks
+or hooks of plugins force-enabled in managed `enabledPlugins`, and `allowManagedHooksOnly`
+(managed settings only) drops every user, project and other plugin hook
+([settings reference](https://code.claude.com/docs/en/settings-reference#disableallhooks),
+[managed settings](https://code.claude.com/docs/en/managed-settings)). In
+`managed-settings.json`:
+
+```json
+{
+  "enabledPlugins": { "evidence-judge@evidence-judge": true },
+  "allowManagedHooksOnly": true,
+  "permissions": {
+    "deny": [
+      "Edit(~/.claude/settings*.json)", "Edit(./.claude/**)", "Edit(~/.local/bin/evidence-judge)"
+    ]
+  }
+}
+```
 
 ## What the hooks can and cannot guarantee
 

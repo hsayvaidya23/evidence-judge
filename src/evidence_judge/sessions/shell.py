@@ -62,6 +62,52 @@ SESSION_STORE: Final = re.compile(
 )
 """Where harnesses and the evidence recorder keep session records (and the project's
 `.evidence-judge/` spec): a command that writes there can rewrite the evidence."""
+AGENT_CONFIG: Final = re.compile(
+    r"(?:^|/)\.claude/(?:[^/]*settings[^/]*\.json|(?:[^/]+/)*[^/]*hooks[^/]*)$|"
+    r"(?:^|/)\.claude/(?:hooks|plugins)(?:/|$)|(?:^|/)\.claude-plugin(?:/|$)|"
+    r"(?:^|/)\.codex(?:/|$)|(?:^|/)\.gemini(?:/|$)|(?:^|/)hooks/hooks\.json$|"
+    r"(?:^|/)\.mcp\.json$|(?:^|/)managed-settings\.json$|"
+    r"(?:^|/)(?:ClaudeCode|claude-code|codex|gemini-cli)/(?:[^/]+/)*[^/]*settings[^/]*$",
+    re.IGNORECASE,
+)
+"""Coding-agent configuration: settings that can turn hooks off (`disableAllHooks`), hook and
+plugin definitions, MCP server lists, and the Codex and Gemini CLI homes. An agent that writes
+one can switch off the hooks that record and judge it."""
+JUDGE_INSTALL: Final = re.compile(
+    r"(?:^|/)(?:bin|Scripts)/evidence-judge(?:\.exe|\.cmd)?$|"
+    r"(?:^|/)(?:uv/tools|pipx/venvs|tools)/evidence-judge(?:/|$)",
+    re.IGNORECASE,
+)
+"""The installed `evidence-judge` executable or tool environment the hooks run."""
+_JUDGE_NAME: Final = re.compile(r"evidence[-_]judge", re.IGNORECASE)
+_PACKAGE_VERBS: Final = frozenset({"install", "uninstall", "remove", "rm", "upgrade", "reinstall"})
+
+
+def guard_path_reason(path: str, shown: str | None = None) -> str | None:
+    """Why writing `path` (named `shown` in the reason) can disable the evidence hooks or the
+    judge, or None."""
+    shown = shown or path
+    if JUDGE_INSTALL.search(path):
+        return f"replaced or removed the evidence-judge install at {shown}"
+    if AGENT_CONFIG.search(path):
+        return f"changed agent configuration {shown}, which can disable the evidence hooks"
+    return None
+
+
+_HOOK_SWITCH: Final = re.compile(
+    r"disableAllHooks|allowManagedHooksOnly|\"?hooks\"?\s*[:=]\s*(?:\{\s*\}|\[\s*\]|null|false)",
+    re.IGNORECASE,
+)
+
+
+def hook_switch_reason(why: str, text: str) -> str:
+    """`why`, saying so when `text` (a command line or written content) switches hooks off."""
+    found = _HOOK_SWITCH.search(text)
+    if found is None:
+        return why
+    return f"{why}; it sets {found.group(0)}, which turns the hooks (the evidence recorder and judge) off"
+
+
 _AGENT_SUMMARY_TEXT: Final = re.compile(
     r"\b\d+\s+(?:passed|passing|failed|failing|failures?|errors?)\b|"
     r"\btest result:\s*(?:ok|FAILED)|\bTests?:?\s+\d+|\bOK\s*\(\d+\s+tests?|"
@@ -689,6 +735,8 @@ class _Classified:
     paths: list[str] | None = None
     """The paths a test run selects when plain paths are its only filters."""
     nested: CommandAnalysis | None = None
+    run_env: list[str] = field(default_factory=list[str])
+    """Variables set for a test run on its own command line (`CI=true pytest`)."""
 
 
 def _split_operators(token: str) -> Iterator[str]:
@@ -1311,6 +1359,11 @@ def _classify_program(
             )
         )
         return _Classified(Category.TEST, prog, prog, filters)
+    if prog in ("node", "nodejs") and "--test" in args:
+        flags = ("--test-name-pattern", "--test-skip-pattern", "--test-only", "--test-shard")
+        filters = [f"only {a}" for a in args if not a.startswith("-")]
+        filters.extend(a.partition("=")[0] for a in args if a.partition("=")[0] in flags)
+        return _Classified(Category.TEST, prog, "node --test", filters)
     if prog in ("tox", "nox"):
         filters = [
             a.partition("=")[0]
@@ -1613,6 +1666,11 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
         result.filters.extend(f"runs with {name} changed" for name in changed)
         if changed:
             result.paths = None
+        result.run_env = [
+            name
+            for name, value in _command_env(simple).items()
+            if name not in RUN_ENV_ALLOWED and not _harmless_env(name, value)
+        ]
     named = result.touched
     if named is None:
         mutating = result.category is Category.MUTATING and not read_only
@@ -1624,6 +1682,29 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
         elif built := next((p for p in result.touched if _unspelled(p)), None):
             result.opaque = f"writes {built}, a path the shell builds at run time"
     return result
+
+
+RUN_ENV_ALLOWED: Final = frozenset(
+    {"PYTHONPATH", "NO_COLOR", "FORCE_COLOR", "TERM", "PYTHONDONTWRITEBYTECODE", "COLUMNS",
+     "PYTHONUNBUFFERED", "PY_COLORS", "CLICOLOR", "CLICOLOR_FORCE", "LINES"}
+)  # fmt: skip
+"""Variables a test command may set without changing which tests run or how they decide."""
+
+
+def _command_env(simple: _Simple) -> dict[str, str]:
+    """The variables a simple command sets for its program: leading assignments and those
+    passed through `env`."""
+    env = dict(simple.env)
+    words = simple.words
+    if words and program_name(words[0]) == "env":
+        for word in words[1:]:
+            if word.startswith("-"):
+                continue
+            if not _ASSIGNMENT.match(word):
+                break
+            name, _, value = word.partition("=")
+            env[name] = value
+    return env
 
 
 HARNESS_ENV: Final = frozenset(
@@ -1678,13 +1759,152 @@ _FUNCTION_DEF: Final = re.compile(
 )
 
 
+_RUNNER_PACKAGES: Final = frozenset(
+    {"pytest", "jest", "vitest", "mocha", "nose2", "tox", "nox", "pytest-asyncio", "pytest-cov"}
+)
+"""Packages an honest session installs to run the tests at all; anything else it installs can
+register a test-runner plugin (a `pytest11` entry point, a jest preset)."""
+_LAUNCH_WRAPPERS: Final = frozenset(
+    {"time", "timeout", "nice", "env", "sudo", "doas", "command", "exec", "nohup", "caffeinate"}
+)
+_PACKAGE_SOURCE: Final = re.compile(
+    r"^(?:\.{1,2}(?:/|$)|/|~|file:|git\+|(?:git|hg|svn|bzr)[+:]|https?://|github:|link:|"
+    r"workspace:|portal:)|\.(?:whl|tar\.gz|tgz|zip)$|\s@\s",
+    re.IGNORECASE,
+)
+_PROJECT_ITSELF: Final = re.compile(r"^\.(?:/)?(?:\[[\w,.-]+\])?$")
+_INSTALL_VALUE_FLAGS: Final = frozenset(
+    {"-r", "--requirement", "-c", "--constraint", "-i", "--index-url", "--extra-index-url",
+     "-f", "--find-links", "--target", "-t", "--prefix", "--root", "--python", "-p",
+     "--group", "--optional", "--extra", "--tag", "--registry", "--save-prefix", "-w",
+     "--workspace", "--filter", "--dev-dep"}
+)  # fmt: skip
+
+
+def _foreign_source(value: str) -> bool:
+    """A package spec naming a path, an archive, a URL or a VCS repository, not a registry name
+    (`@scope/name` is a registry name)."""
+    return _PACKAGE_SOURCE.search(value) is not None or ("/" in value and not value.startswith("@"))
+
+
+def _package_word(value: str, why: str) -> str | None:
+    """Why installing `value` changes the test harness, or None for the project itself and a
+    test runner from the registry."""
+    if _PROJECT_ITSELF.match(value):
+        return None
+    if _foreign_source(value):
+        return f"{why} {value}, a local or VCS package that can hook into the test runner"
+    name = re.split(r"[\[<>=!~;@ ]", value, maxsplit=1)[0].casefold()
+    if name in _RUNNER_PACKAGES:
+        return None
+    return f"{why} {value}, a package the session adds, which can register a test-runner plugin"
+
+
+def _install_targets(args: list[str]) -> list[tuple[str, bool]]:
+    """The packages an install names, each with whether it is editable (`-e path`)."""
+    out: list[tuple[str, bool]] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-e", "--editable") and i + 1 < len(args):
+            out.append((args[i + 1], True))
+            i += 2
+            continue
+        if arg.startswith("--editable="):
+            out.append((arg.partition("=")[2], True))
+        elif arg in _INSTALL_VALUE_FLAGS:
+            i += 1
+        elif not arg.startswith("-"):
+            out.append((arg, False))
+        i += 1
+    return out
+
+
+def _package_change(words: list[str]) -> str | None:
+    """Why a command adds code the test runner may load: `uv run --with ./plugin`, `uvx --from
+    git+...`, or installing a package other than the project itself and a test runner."""
+    start = 0
+    while start < len(words) and (
+        program_name(words[start]) in _LAUNCH_WRAPPERS
+        or words[start].startswith("-")
+        or _ASSIGNMENT.match(words[start])
+        or words[start].replace(".", "").isdigit()
+    ):
+        start += 1
+    words = words[start:]
+    if not words:
+        return None
+    prog, args = program_name(words[0]), words[1:]
+    if _PYTHON.match(prog) and args[:2] == ["-m", "pip"]:
+        prog, args = "pip", args[2:]
+    if prog in ("uv", "uvx", "pipx"):
+        for i, arg in enumerate(args):
+            flag, eq, inline = arg.partition("=")
+            if flag not in ("--with", "--with-editable", "--with-requirements", "--from"):
+                continue
+            value = inline if eq else (args[i + 1] if i + 1 < len(args) else "")
+            if flag in ("--with-editable", "--with-requirements"):
+                return f"{prog} {flag} {value} adds packages that can hook into the test runner"
+            if _foreign_source(value):
+                return f"{prog} {flag} {value}, a local or VCS package that can hook into the test runner"
+    if prog == "uv" and args[:2] == ["pip", "install"]:
+        prog, args = "pip", args[1:]
+    adds = {
+        "pip": ("install",),
+        "pip3": ("install",),
+        "uv": ("add",),
+        "poetry": ("add",),
+        "pdm": ("add",),
+        "rye": ("add",),
+        "npm": ("install", "i", "add", "link", "ln"),
+        "pnpm": ("add", "install", "i", "link"),
+        "yarn": ("add", "link"),
+        "bun": ("add", "install", "i", "link"),
+    }.get(prog)
+    if adds is None or not args or args[0] not in adds:
+        return None
+    verb = f"{prog} {args[0]}"
+    targets = _install_targets(args[1:])
+    if prog in _PM and args[0] in ("link", "ln"):
+        return f"{verb} links {targets[0][0] if targets else 'a local package'} into node_modules"
+    for value, editable in targets:
+        if editable and not _PROJECT_ITSELF.match(value):
+            return f"{verb} -e {value}, a local package that can hook into the test runner"
+        if why := _package_word(value, f"{verb} installs"):
+            return why
+    return None
+
+
+def _exports(pipelines: list[_Pipeline]) -> list[str]:
+    """Variables the command exports to later commands (`export CI=true`), beyond ones that only
+    change output formatting."""
+    names: list[str] = []
+    for pipeline in pipelines:
+        for simple in pipeline.commands:
+            words = simple.words
+            prog = program_name(words[0]) if words else ""
+            exporting = prog == "export" or (
+                prog in ("declare", "typeset") and any(re.fullmatch(r"-\w*x\w*", w) for w in words)
+            )
+            if not exporting:
+                continue
+            for word in words[1:]:
+                name, eq, value = word.partition("=")
+                if eq and name not in RUN_ENV_ALLOWED and not _harmless_env(name, value):
+                    names.append(name)
+    return names
+
+
 def _harness_change(pipelines: list[_Pipeline], command: str) -> str | None:
-    """Why a command changes how later commands run (aliases, functions, PATH), or None."""
+    """Why a command changes how later commands run (aliases, functions, PATH, packages the
+    runner may load), or None."""
     if _FUNCTION_DEF.search(command):
         return "defines a shell function"
     for pipeline in pipelines:
         for simple in pipeline.commands:
             words = simple.words
+            if why := _package_change(list(words)):
+                return why
             prog = program_name(words[0]) if words else ""
             if prog in ("alias", "unalias") and words[1:]:
                 return f"{prog} {words[1].partition('=')[0]}"
@@ -1725,6 +1945,37 @@ def _writes_session_store(
     return named and opaque is not None
 
 
+def _guard_tamper(
+    pipelines: list[_Pipeline],
+    command: str,
+    touched: list[str],
+    deleted: list[str],
+    opaque: str | None,
+) -> str | None:
+    """Why the command can switch off the evidence hooks or the judge they run: it writes or
+    deletes agent configuration or the judge's install, (un)installs the judge, or names one
+    of those places and may write files it does not name."""
+    for path in [*touched, *deleted]:
+        if why := guard_path_reason(path):
+            return hook_switch_reason(why, command)
+        if _JUDGE_NAME.search(path) and _unspelled(path):
+            return f"writes {path}, which can resolve to the evidence-judge executable"
+    for pipeline in pipelines:
+        for simple in pipeline.commands:
+            words = _unwrap(list(simple.words))
+            if (
+                words
+                and any(w in _PACKAGE_VERBS for w in words[1:])
+                and any(_JUDGE_NAME.search(w) for w in words[1:])
+            ):
+                return f"{program_name(words[0])} changes the evidence-judge install the hooks run"
+    if opaque is not None:
+        words = [w for p in pipelines for c in p.commands for w in [*c.words, *c.writes]]
+        if any(AGENT_CONFIG.search(w) or JUDGE_INSTALL.search(w) for w in words):
+            return f"names agent configuration or the judge's install and {opaque}"
+    return None
+
+
 def _empty(reason: str, command: str) -> CommandAnalysis:
     return CommandAnalysis(
         categories=[Category.UNKNOWN],
@@ -1733,6 +1984,11 @@ def _empty(reason: str, command: str) -> CommandAnalysis:
         parse_error=reason,
         opaque_write=f"the command could not be parsed ({reason})",
         session_store=SESSION_STORE.search(command) is not None,
+        guard_tamper=(
+            f"the command could not be parsed and names {m.group(0)}"
+            if (m := AGENT_CONFIG.search(command) or _JUDGE_NAME.search(command))
+            else None
+        ),
     )
 
 
@@ -1772,9 +2028,11 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
     opaque: str | None = None
     lasting: str | None = None
     nested_store = False
+    nested_guard: str | None = None
     cds: list[str] = []
     test_paths: list[str] | None = None
     run_cds: list[str] = []
+    run_env: list[str] = []
     persisting: list[str] = []
     mutating_at: list[tuple[int, int]] = []
     nested_after = False
@@ -1810,9 +2068,11 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 opaque = opaque or nested.opaque_write
                 lasting = lasting or nested.lasting_mutation
                 nested_store = nested_store or nested.session_store
+                nested_guard = nested_guard or nested.guard_tamper
                 if nested.runners:
                     run_cds = [*cds, *nested.run_cds]
                     test_paths = nested.test_paths
+                    run_env = list(nested.run_env)
                 if nested.runners or (classified.category in _CHECKS and not runners):
                     nested_after = nested.mutation_after_check
                     primary = (p_index, c_index)
@@ -1825,6 +2085,7 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
                 runners.append(classified.runner)
                 filters.extend(classified.filters)
                 run_cds = list(cds)
+                run_env = list(classified.run_env)
                 test_paths = (
                     classified.paths
                     if classified.paths is not None
@@ -1902,12 +2163,15 @@ def _analyse(command: str, cwd: str | None, depth: int) -> CommandAnalysis:
         opaque_write=opaque,
         lasting_mutation=lasting,
         run_cds=run_cds,
+        run_env=run_env,
+        exports=_exports(pipelines),
         test_paths=test_paths if len(runners) == 1 else None,
         cd_targets=persisting,
         mutation_after_check=mutation_after,
         session_store=nested_store
         or _writes_session_store(pipelines, command, touched, deleted, opaque),
         harness_change=_harness_change(pipelines, command),
+        guard_tamper=nested_guard or _guard_tamper(pipelines, command, touched, deleted, opaque),
     )
 
 

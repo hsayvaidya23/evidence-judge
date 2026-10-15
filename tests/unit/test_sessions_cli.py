@@ -143,8 +143,17 @@ def test_require_tamper_evidence_and_evidence_log(tmp_path: Path) -> None:
         "cwd": "/work/toy",
         "output_truncated": False,
     }
+    fix: dict[str, object] = {
+        **entry,
+        "tool": "Edit",
+        "input": {"file_path": "/work/toy/calc.py", "old_string": "a - b", "new_string": "a + b"},
+        "exit_code": None,
+        "stdout_excerpt": "",
+    }
+    append(tmp_path / "plain", fix)
     plain = append(tmp_path / "plain", entry)
     state = tmp_path / "state"
+    append(tmp_path / "keyed", fix, state)
     keyed = append(tmp_path / "keyed", entry, state)
     base = ["session", "judge", "--offline", "--claude-code", str(SUCCESS)]
     required = [*base, "--require-tamper-evidence"]

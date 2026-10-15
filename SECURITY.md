@@ -140,6 +140,8 @@ weakening the check of its own answer.
 | Delete the traces | Playwright use with no trace sends the agent back |
 | Write a `.env` in the project to change the judge's settings | The judge runs in a private temporary directory, with `EVJ_*` variables dropped unless the hook config passes them on |
 | Rewrite the evidence log and recompute its chain, or cut lines off its end | Lines are HMAC-chained under a per-installation key, mode `0600` in the hooks' state directory. A head anchor there records the line count and last MAC |
+| Switch the hooks off: `{"disableAllHooks": true}` in `.claude/settings.local.json`, an edited `hooks.json`, `hooksConfig.enabled: false` | The guard hook (`PreToolUse` / `BeforeTool`) denies writes to agent configuration, hook files and evidence logs; a session that gets one through anyway goes to review as harness tampering |
+| Delete, uninstall or shim the `evidence-judge` CLI so the hook shim finds nothing | The guard denies it; the shim pins the CLI's path and checksum on first use and the Stop hook fails closed when either changes; the session judge reports it as harness tampering |
 
 Two limits remain, and the verdicts say so:
 
@@ -157,6 +159,13 @@ Two limits remain, and the verdicts say so:
 
   The [Claude Code guide](docs/guides/claude-code.md#what-the-hooks-can-and-cannot-guarantee)
   has the settings.
+- **A same-user agent can still turn the hooks off.** The guard decides from each call's text,
+  so code it cannot see into (a compiled program, a script written earlier) can still edit
+  settings, the plugin or the shim itself. Only configuration the agent cannot write closes
+  this: Claude Code managed settings (`allowManagedHooksOnly`, the plugin force-enabled in
+  managed `enabledPlugins`; `disableAllHooks` outside managed settings does not stop those),
+  Codex's managed `requirements.toml`, or an agent sandboxed away from its own configuration.
+  The [Claude Code guide](docs/guides/claude-code.md#keeping-the-hooks-on) has the settings.
 - **Fail-open is limited to the hooks' own problems.** Bad hook input, invalid settings, a
   timeout or a judge crash let the stop through with a notice, so a broken install never traps
   the agent. Gemini CLI's hook input does not show which tools ran, so there missing or junk
