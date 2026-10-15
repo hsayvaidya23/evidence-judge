@@ -32,8 +32,6 @@ _OTHER_METHODS: Final = frozenset(
         "mouseDown",
         "mouseUp",
         "mouseWheel",
-        "keyboardDown",
-        "keyboardUp",
         "goBack",
         "goForward",
     }
@@ -363,7 +361,7 @@ def _recorded_value(method: str, params: JsonObject) -> str | None:
             return as_str(params.get("value"))
         case "type" | "keyboardType" | "keyboardInsertText":
             return as_str(params.get("text"))
-        case "press" | "keyboardPress":
+        case "press" | "keyboardPress" | "keyboardDown" | "keyboardUp":
             return as_str(params.get("key"))
         case "selectOption":
             return _joined(_option_label(as_object(o)) for o in as_list(params.get("options")))

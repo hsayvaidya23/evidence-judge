@@ -9,7 +9,9 @@ the only way to build a cycle.
 
 Text typed into ``<input>`` and ``<textarea>`` controls (and their default values) is never page
 text: the agent controls it, so a search box holding "Order #1042 confirmed" must not read as the
-page confirming the order. Button labels and the selected ``<option>`` text, which the page
+page confirming the order. Neither is the text of an editable element (``contenteditable``
+with any value but "false"), descendants included: the agent can type into it like a field.
+Button labels and the selected ``<option>`` text, which the page
 authors, are kept.
 """
 
@@ -88,7 +90,7 @@ class RenderedPage:
     title: str | None
     text: str
     form_values: int = 0
-    """Non-empty text-field and textarea values left out of ``text``."""
+    """Non-empty text-field, textarea and editable-element values left out of ``text``."""
 
 
 _BLOCK_END = object()
@@ -269,6 +271,8 @@ class _Renderer:
             return self._excluded_value(value)
         if tag == "SELECT":
             return self._selected_option_text(node, snapshot_index)
+        if _is_editable(attrs):
+            return self._excluded_value(self._text_content(node, snapshot_index))
         return None
 
     def _excluded_value(self, value: str | None) -> str:
@@ -319,6 +323,11 @@ def _is_hidden(tag: str, attrs: JsonObject) -> bool:
         return True
     style = "".join((as_str(attrs.get("style")) or "").split()).lower()
     return "display:none" in style or "visibility:hidden" in style
+
+
+def _is_editable(attrs: JsonObject) -> bool:
+    editable = next((v for k, v in attrs.items() if k.lower() == "contenteditable"), None)
+    return editable is not None and (as_str(editable) or "").strip().lower() != "false"
 
 
 def _is_selected(attrs: JsonObject) -> bool:
