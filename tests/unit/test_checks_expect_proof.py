@@ -132,7 +132,7 @@ async def test_expect_url_the_agent_opened_itself_is_unknown() -> None:
 
     assert verdict.outcome is Outcome.NEEDS_REVIEW
     assert verdict.expectations[0].met is None
-    assert BASELINE in verdict.expectations[0].reason
+    assert ECHO in verdict.expectations[0].reason
 
 
 def test_browser_use_agent_that_opens_the_expected_url_itself_needs_review(

@@ -107,9 +107,10 @@ class EvidenceIndex:
     def baseline(self) -> EvidenceIndex:
         """The evidence as it stood before the agent acted: what every run of the task has.
 
-        The cut is the agent's first action that is not a navigation (opening the start page is
-        set-up); a run whose actions are all navigations is all baseline. Without recorded actions
-        the cut is the first mutation or the second page load (no page load: empty baseline). The
+        The cut is the agent's first action, where a first action that opens a page is set-up
+        (the start page) and every later navigation is the agent's; a run whose only action opens
+        the start page is all baseline. Without recorded actions the cut is, the same way, the
+        first mutation or the second page load (no page load: empty baseline). The
         baseline keeps the actions, requests and snapshots before the cut; its final state is the
         last snapshot before the cut, else the initial state (the run's final state when the
         whole run is baseline).
@@ -136,7 +137,10 @@ class EvidenceIndex:
 
     def _baseline_cut(self) -> float:
         if self.run.actions:
-            acted = [a.ts for a in self.run.actions if canonical_action(a.name) != GOTO]
+            first, *rest = sorted(self.run.actions, key=lambda a: a.ts)
+            acted = [a.ts for a in rest]
+            if canonical_action(first.name) != GOTO:
+                acted.append(first.ts)
             return min(acted, default=math.inf)
         loads = [n.ts for n in self.run.network if is_document_navigation(n)]
         marks = [n.ts for n in self.run.network if n.is_mutation] + loads[1:2]

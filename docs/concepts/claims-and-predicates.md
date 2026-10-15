@@ -102,9 +102,12 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
 - **Already true before the agent acted.** Each request, `url` and `action` predicate (and, for
   action and outcome claims, each `page_text` and `value` predicate) is also checked against the
   run's *baseline*: the initial page, and the requests, snapshots and navigations before the
-  agent's first action that is not a navigation. A predicate the baseline meets, such as a URL
-  containing `://` or the shop's host, `GET` with `url_contains: ["//"]`, or a `goto` whose value
-  contains `http`, is met by an agent that did nothing. A `final`-scope predicate is checked
+  agent's first action. Opening the start page (a first action that navigates) is set-up; every
+  later navigation is the agent's, so a read done by typing the product page's URL can pass.
+  Without recorded actions the cut is the first mutation or the second page load. A predicate
+  the baseline meets, such as a URL containing `://` or the shop's host, `GET` with
+  `url_contains: ["//"]`, or a `goto` whose value contains `http`, is met by an agent that did
+  nothing. A `final`-scope predicate is checked
   against every page of the baseline, not only its last one, so a page the agent opened first,
   left and came back to at the end does not count. State and value claims may still cite text of
   the start page ("the kettle costs $24").

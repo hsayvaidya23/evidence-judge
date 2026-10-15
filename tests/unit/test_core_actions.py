@@ -39,7 +39,15 @@ def test_unknown_names_are_only_normalised() -> None:
     assert canonical_action(" Scroll Down ") == "scroll_down"
 
 
-def test_every_navigation_spelling_is_baseline_setup() -> None:
+@pytest.mark.parametrize("spelling", ["goto", "navigate", "visit", "open", "go_to_url", "open_tab"])
+def test_every_navigation_spelling_opening_the_start_page_is_baseline_setup(spelling: str) -> None:
+    run = make_run(
+        actions=[act(1, spelling, url=f"{HOST}/"), act(2, "send_keys", "#q", value="x")],
+    )
+    assert [a.name for a in EvidenceIndex(run).baseline.run.actions] == [spelling]
+
+
+def test_a_navigation_after_the_start_page_is_the_agents() -> None:
     run = make_run(
         actions=[
             act(1, "go_to_url", url=f"{HOST}/"),
@@ -47,5 +55,4 @@ def test_every_navigation_spelling_is_baseline_setup() -> None:
             act(3, "send_keys", "#q", value="x"),
         ],
     )
-    baseline = EvidenceIndex(run).baseline
-    assert [a.name for a in baseline.run.actions] == ["go_to_url", "open_tab"]
+    assert [a.name for a in EvidenceIndex(run).baseline.run.actions] == ["go_to_url"]
