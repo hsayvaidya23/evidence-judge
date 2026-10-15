@@ -11,7 +11,7 @@ on `judge` and `bench`, which picks `EVJ_LLM_BACKEND` for that run. Every variab
 
 | Variable | Type | Default | Purpose |
 | --- | --- | --- | --- |
-| `EVJ_LLM_BACKEND` | `anthropic`, `claude-code`, `codex`, `gemini` | `anthropic` | Where LLM calls go. `anthropic` calls the API with `ANTHROPIC_API_KEY`; the others run that CLI headless on your existing login, with its tools off. The `--llm` option of `judge` and `bench` overrides it |
+| `EVJ_LLM_BACKEND` | `anthropic`, `claude-code`, `codex`, `gemini` | `anthropic` | Where LLM calls go. `anthropic` calls the API with `ANTHROPIC_API_KEY`; the others run that CLI headless on your existing login, with its tools off. See [LLM backends](../guides/llm-backends.md). The `--llm` option of `judge` and `bench` overrides it |
 | `ANTHROPIC_API_KEY` | secret | – | Enables LLM claim extraction (and screenshot checks, if allowed) on the `anthropic` backend. Without it, that backend judges offline |
 | `EVJ_MODEL_FAST` | string | `claude-haiku-5-5` | Model for claim extraction |
 | `EVJ_MODEL_STRONG` | string | `claude-sonnet-5-5` | Model for screenshot checks and the benchmark's transcript baseline |

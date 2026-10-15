@@ -1,5 +1,5 @@
 ---
-description: Practical guides for Evidence Judge - spec recipes, CI, Docker, integrations, benchmarking and recording.
+description: Practical guides for Evidence Judge - spec recipes, CI, Docker, LLM backends, integrations, benchmarking and recording.
 ---
 
 # Guides
@@ -24,6 +24,12 @@ description: Practical guides for Evidence Judge - spec recipes, CI, Docker, int
     ---
 
     A non-root image with the CLI as its entrypoint.
+
+-   :material-console:{ .lg .middle } __[LLM backends](llm-backends.md)__
+
+    ---
+
+    Use the Claude Code, Codex or Gemini CLI you are logged into, with every tool off.
 
 -   :material-connection:{ .lg .middle } __[Integrations](../integrations.md)__
 

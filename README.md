@@ -245,7 +245,7 @@ Environment variables (or `.env`, see [.env.example](.env.example)):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `EVJ_LLM_BACKEND` | `anthropic` | Where LLM calls go: `anthropic` (needs `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to use the CLI you are logged into, run with its tools off; `--llm` overrides it |
+| `EVJ_LLM_BACKEND` | `anthropic` | Where LLM calls go: `anthropic` (needs `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to use the CLI you are logged into, run with its tools off (see [LLM backends](docs/guides/llm-backends.md)); `--llm` overrides it |
 | `ANTHROPIC_API_KEY` | – | Enables LLM claim extraction (and screenshot checks, if allowed) on the `anthropic` backend |
 | `EVJ_MODEL_FAST` / `EVJ_MODEL_STRONG` | `claude-haiku-5-5` / `claude-sonnet-5-5` | Models per tier |
 | `EVJ_CLI_MODEL_FAST` / `EVJ_CLI_MODEL_STRONG` | – | Models per tier on a CLI backend. Unset: `claude-code` uses `EVJ_MODEL_FAST` / `EVJ_MODEL_STRONG`, `codex` and `gemini` their own default |
