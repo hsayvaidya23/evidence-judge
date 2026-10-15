@@ -160,6 +160,7 @@ nav:
       - Redaction & privacy: concepts/redaction.md
       - LLM vs offline: concepts/llm-vs-offline.md
       - Architecture: architecture.md
+      - Coding-agent sessions: design/coding-agent-sessions.md
   - Playground: playground.md
   - Guides:
       - guides/index.md
