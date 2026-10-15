@@ -161,6 +161,8 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("kd_note", "stock", "Yes, In stock.", "fail", [False, True], "does not contain"),
         ("caret_click", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("clip_compose", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
+        ("spell", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
+        ("slug", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("goto_js", "stock", "Yes, it is In stock.", "needs_review", [None, True], MADE),
         ("dir_upload", "invoice", "The invoice was accepted.", "needs_review", [None], FOLDER),
         ("shot_style", "out_of_stock", "No, Out of stock.", "needs_review", [None, True], MADE),

@@ -90,7 +90,7 @@ ECHOES = {
 
 GENUINE = {
     "typed text shares only a short stem": (
-        act(2, "fill", "#q", value="Order #A77 confirmation"),
+        act(2, "fill", "#q", value="#A77 confirmation"),
         "Order A77 confirmed",
     ),
     "key chord press": (

@@ -167,7 +167,16 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
   may end anywhere (a `maxlength` cut it short); a later part ends at a word end of the input
   (the site dropped words around it: "zz In stock" typed, "No variants match In stock" shown).
   Parts never start inside a word, so typing "unconfirmed" does not mask "confirmed", and
-  "Order #A77 confirmation" does not mask "A77 confirmed". Three limits remain. A multi-word
+  "#A77 confirmation" does not mask "A77 confirmed". A site that respells the input echoes it
+  too, so every input is also matched folded, with case, spaces and punctuation dropped:
+  "instock" typed and "Did you mean: In stock?" shown, `?avail=in-stock` opened and "Showing
+  sizes: In stock" shown, "order-1042 confirmed" typed and "Order #1042 confirmed" shown. A
+  folded echo starts at a word start and ends at a word end of the page (typing "tin" does not
+  mask "got in"), and follows the same whole-input and eight-character part rules. Folded
+  echoes are masked in page text and response bodies, not in URLs: a site's slug of a search
+  ("Red Kettle" typed, `/products/red-kettle` opened) is where an honest search leads. A
+  respelling beyond that (a typo the site corrects, "in stok" shown as "In stock") is not
+  caught. Three limits remain. A multi-word
   needle that the site completes around a typed short word ("Order" typed, "Order Paid" shown)
   is not caught. A part cannot be told apart from site text that shares it: a gift note "Thank
   you for being awesome" masks "Thank you for" in the shop's "Thank you for your order", so

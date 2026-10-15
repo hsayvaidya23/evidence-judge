@@ -175,6 +175,10 @@ the names exported from `evidence_judge`) is defined under
   is agent input, so text composed with the mouse (a click that moves the caret before a
   Delete, words copied from the page and pasted together, a drag and drop, a datalist or
   autofill choice) cannot prove itself when the page repeats it.
+- **An echo the site respells is still an echo.** Agent input is also matched with case, spaces
+  and punctuation dropped, on word boundaries, in page text and response bodies: a search for
+  "instock" answered "Did you mean: In stock?", or a URL's `in-stock` shown as "In stock",
+  no longer proves the product is in stock.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
