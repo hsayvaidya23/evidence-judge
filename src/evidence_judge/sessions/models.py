@@ -164,6 +164,11 @@ class CommandAnalysis(BaseModel):
         default=None,
         description="How the command changes what later commands run (an alias, a function, PATH)",
     )
+    guard_tamper: str | None = Field(
+        default=None,
+        description="How the command can switch off the evidence hooks or the judge (agent "
+        "settings, hook definitions, the evidence-judge install)",
+    )
     parse_error: str | None = None
 
     @property
@@ -224,6 +229,11 @@ class FileEditEvent(_Event):
         "or its diff is unknown",
     )
     session_store: bool = False
+    guard_tamper: str | None = Field(
+        default=None,
+        description="How the edit can switch off the evidence hooks or the judge (agent settings, "
+        "hook definitions, the evidence-judge install)",
+    )
 
 
 class FileReadEvent(_Event):

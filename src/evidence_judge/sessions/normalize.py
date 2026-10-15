@@ -300,9 +300,15 @@ class EventBuilder:
                 test_findings=findings,
                 adds_tests=call.status is not CallStatus.DENIED and edits.adds_tests(added),
                 session_store=shell.SESSION_STORE.search(path) is not None,
+                guard_tamper=_guard_tamper(path, rel, added, call.status),
                 **common,
             )
         )
+
+
+def _guard_tamper(path: str, rel: str, added: list[str] | None, status: CallStatus) -> str | None:
+    why = shell.guard_path_reason(path, rel) if status is not CallStatus.DENIED else None
+    return shell.hook_switch_reason(why, "\n".join(added or [])) if why else None
 
 
 def build_events(calls: Iterable[ToolCall], cwd: str | None) -> tuple[list[SessionEvent], int]:

@@ -520,3 +520,44 @@ def test_more_filters(command: str, fragment: str | None) -> None:
         assert analysis.collect_only
     else:
         assert any(fragment in f for f in analysis.test_filters), analysis.test_filters
+
+
+@pytest.mark.parametrize(
+    ("command", "fragment"),
+    [
+        ("echo '{\"disableAllHooks\": true}' > .claude/settings.local.json", "disableAllHooks"),
+        ("cp /tmp/s.json ~/.claude/settings.json", "agent configuration ~/.claude/settings.json"),
+        ("rm .claude/hooks/stop.sh", "agent configuration .claude/hooks/stop.sh"),
+        ("printf x > ~/.codex/config.toml", "agent configuration ~/.codex/config.toml"),
+        ("sed -i 's/x/y/' .gemini/settings.json", "agent configuration .gemini/settings.json"),
+        ("echo {} > .mcp.json", "agent configuration .mcp.json"),
+        ("echo {} > plugins/x/hooks/hooks.json", "plugins/x/hooks/hooks.json"),
+        ("rm -f ~/.local/bin/evidence-judge", "evidence-judge install at ~/.local/bin"),
+        ("printf '#!/bin/sh\\n' > ~/.local/bin/evidence-judge", "evidence-judge install"),
+        ("uv tool uninstall evidence-judge", "uv changes the evidence-judge install"),
+        ("pipx uninstall evidence-judge", "pipx changes the evidence-judge install"),
+        ("pip install --force-reinstall ./evidence_judge", "pip changes the evidence-judge"),
+        ('echo x > "$(which evidence-judge)"', "can resolve to the evidence-judge executable"),
+        ("rm -rf ~/.local/share/uv/tools/evidence-judge", "evidence-judge install"),
+        ("bash -c 'rm .claude/settings.json'", "agent configuration .claude/settings.json"),
+        ("python3 tools/x.py ~/.claude/settings.json", "names agent configuration"),
+    ],
+)
+def test_guard_tamper(command: str, fragment: str) -> None:
+    why = analyse(command).guard_tamper
+    assert why is not None and fragment in why, why
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat .claude/settings.json",
+        "evidence-judge session judge --claude-code s.jsonl",
+        "jq . ~/.codex/config.toml",
+        "echo x > notes/hooks.md",
+        "pytest -q tests/test_hooks.py",
+        "uv tool list",
+    ],
+)
+def test_no_guard_tamper(command: str) -> None:
+    assert analyse(command).guard_tamper is None

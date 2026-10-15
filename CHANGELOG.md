@@ -480,6 +480,14 @@ the names exported from `evidence_judge`) is defined under
   five honest controls unchanged. Path-scoped runs that together match an earlier whole-suite
   run must also cover every test file that run's output named, so a run elsewhere whose count
   happens to match cannot stand in for the tests that failed.
+- **Switching off the hooks or the judge is harness tampering.** A session that writes or
+  deletes agent configuration (`.claude/settings*.json` with `disableAllHooks`, hook scripts,
+  `hooks/hooks.json`, `.mcp.json`, plugin directories, `~/.codex/`, `~/.gemini/`) or the
+  `evidence-judge` install (`~/.local/bin/evidence-judge`, a shim at `$(which evidence-judge)`,
+  `uv tool uninstall evidence-judge`) goes to review, naming the hook switch when it sets one.
+  Before, `{"disableAllHooks": true}` in `.claude/settings.local.json` silenced the recorder and
+  the Stop judge and the session still passed. Forgery kinds `disable_hooks`, `rm_judge_bin`,
+  `uninstall_judge` and `judge_shim` cover it.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 
