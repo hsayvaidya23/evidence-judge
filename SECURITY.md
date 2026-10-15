@@ -91,6 +91,13 @@ itself, so a verdict is only as trustworthy as whatever made the evidence:
 - **State from before recording started is invisible.** A persistent browser profile, cookies,
   local storage, IndexedDB, service workers, extensions or a proxy set up before tracing began
   can change what the site shows or what requests do, and no source records it.
+- **A trace covers one browser context.** An agent that holds the `Browser` or the
+  `Playwright` object can open a second context or an `APIRequestContext`
+  (`playwright.request.new_context()`) and send requests through it, such as the upgrade or
+  order a `forbid` entry rules out; nothing of that context is in the trace, and the traced
+  pages then show the result as if the site had done it unasked. Give the agent only the
+  context the harness created and traces (see
+  [harness setup](docs/task-specs.md#harness-setup-give-the-agent-only-the-traced-context)).
 
 What each source can and cannot reveal about the agent tampering with the page or its requests
 is reported in every verdict as `tamper_detection` (`level` and `reason`), with a warning when
@@ -99,14 +106,16 @@ it is not `full`:
 | Source | `tamper_detection` | Can reveal | Cannot reveal |
 | --- | --- | --- | --- |
 | Playwright trace with a HAR that added requests or filled fields | `partial` | As for a trace; what only the HAR holds still contradicts claims and shows side effects | Whether what only the HAR holds happened: it never proves a claim, an `expect` entry or a constraint |
-| Playwright trace | `full` | Every call made through Playwright: injected scripts (`evaluate`, `add_init_script`, `set_content`, ...), route handlers that answer or rewrite requests, storage and cookie writes, CDP sessions (deny by default) | What a CDP session then sent; anything done outside Playwright (another process driving the browser, a proxy, OS-level input); state from before tracing started |
+| Playwright trace | `full` | Every call made through Playwright on the traced browser context: injected scripts (`evaluate`, `add_init_script`, `set_content`, ...), route handlers that answer or rewrite requests, storage and cookie writes, CDP sessions (deny by default) | Calls on any other context: a second `browser.new_context()`, or `playwright.request` / an `APIRequestContext`, whose requests and pages are not in the trace; what a CDP session then sent; anything done outside Playwright (another process driving the browser, a proxy, OS-level input); state from before tracing started |
 | browser-use history | `partial` | The model's actions, including its `evaluate`; any action that is not a built-in tool, or that carries code, counts as running the agent's code | Scripts, CDP calls and request changes beneath those actions; network evidence unless a HAR is added |
 | HAR alone | `none` | Nothing about the agent's calls | Whether the HAR was recorded at all |
 
 For gating CI on verdicts:
 
 - Record a **Playwright trace from the harness**, not from inside the agent, and keep the agent
-  from writing the trace file.
+  from writing the trace file. Trace the context the agent works in and give the agent only
+  that context or its page, never the `Browser`, the `Playwright` object or
+  `playwright.request`.
 - Pass **`--require-tamper-evidence`** (or set `require_tamper_evidence: true` in the task
   spec): a run whose `tamper_detection` is not `full` is then `NEEDS_REVIEW` at best. That
   excludes a trace merged with a HAR that added requests or filled in fields the trace recorded

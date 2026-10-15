@@ -347,6 +347,25 @@ context.tracing.start(screenshots=True, snapshots=True)
 Whatever is set this way is the harness's responsibility: the judge cannot see it, so a
 header or a login state that makes the site lie is trusted like the site.
 
+### Harness setup: give the agent only the traced context
+
+A Playwright trace records the calls made on the browser context it traces, and nothing else.
+An agent that holds the `Browser` can open a second context (`browser.new_context()`), or
+hold the `Playwright` object and send requests with `playwright.request.new_context()` (an
+`APIRequestContext`): neither is in the trace. Through one it can `POST /upgrade` or place an
+order the trace never shows, so a `forbid` on that request cannot fire, and then read the
+result on a page of the traced context as if the site had done it unasked. The judge cannot
+tell, so the harness has to rule it out:
+
+- Create the browser, the context and the trace in the harness, and hand the agent only that
+  context or its page; never the `Browser`, the `Playwright` object, `playwright.request` or
+  an `APIRequestContext`.
+- If the agent's framework opens its own browser, connect it to a context the harness created
+  and traces (for example over CDP to a browser the harness launched, with tracing started on
+  the context the agent will use), and do not let it create others.
+- Trace the context the agent works in, from before its first page: tracing a context the
+  agent is not using records nothing it did.
+
 ### `require_tamper_evidence`: only a source that shows tampering can pass
 
 Every verdict says what its evidence can show of the agent tampering with the page or its

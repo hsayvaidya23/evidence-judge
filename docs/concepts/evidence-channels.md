@@ -45,7 +45,7 @@ warning when the level is not `full`:
 
 | Level | Source | What it can show |
 | --- | --- | --- |
-| `full` | A Playwright trace (with or without a history, or a HAR that adds nothing to it) | Every call the agent made through Playwright: scripts, route handlers, storage and cookie writes, CDP sessions |
+| `full` | A Playwright trace (with or without a history, or a HAR that adds nothing to it) | Every call the agent made through Playwright on the traced browser context: scripts, route handlers, storage and cookie writes, CDP sessions. Not a second context or an `APIRequestContext` it opened itself |
 | `partial` | A Playwright trace merged with a HAR that added requests or filled fields | As for `full`; the reason counts what the HAR added, which proves nothing |
 | `partial` | A browser-use history (without a trace) | The model's actions, including its `evaluate` and custom tools; not what ran beneath them (CDP calls, request changes) |
 | `none` | A HAR alone, or any source without a call log | Nothing: a forged HAR looks the same as a recorded one |
