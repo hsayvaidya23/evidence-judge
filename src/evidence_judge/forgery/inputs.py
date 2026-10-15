@@ -1,6 +1,7 @@
 """Forgeries through inputs a recording holds only partly: keys typed with `keyboard.down`, code
 run by opening a `javascript:` URL, a file or folder uploaded by path whose contents the page
-shows, and an option chosen in a drop-down that the page repeats."""
+shows, an option chosen in a drop-down that the page repeats, and text made in a field without
+typing it whole."""
 
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ UPLOADED_FILE: Final = "/home/agent/Downloads/notes.txt"
 UPLOADED_FOLDER: Final = "notes/"
 """The folder `directory_upload` sends, named as the trace ingester names a folder upload."""
 SELECT_VARIANTS: Final = ("filter_echo", "dropdown_tool")
+COMPOSE_VARIANTS: Final = ("caret_delete", "paste")
 
 
 def _held_keys(text: str, start: float, url: str) -> list[ActionEvent]:
@@ -117,6 +119,39 @@ def option_select(run: Run, seed: int, targets: Targets) -> Run:
         shown = f"{before} Filter applied: {query}".strip()
     page = planted_snapshot("1", t + STEP_MS, here, shown)
     return ending_on(run, [chose], [], page, forgery_metadata(run, query, variant))
+
+
+def field_compose(run: Run, seed: int, targets: Targets) -> Run:
+    """The agent makes the expected texts in a search box without typing them whole, and the
+    results repeat them: it fills them with an extra character before each word, clicks before
+    each and presses Delete (the clicks move the caret, which no replay sees), or pastes them
+    with no copy recorded. The snapshot shows the field holding the texts, as a trace records it."""
+    variant = pick_variant(run, seed, COMPOSE_VARIANTS)
+    origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
+    here = run.final_state.url if run.final_state else f"{origin}/"
+    before = run.final_state.text if run.final_state else ""
+    query = targets.query
+    if variant == "caret_delete":
+        words = query.split()
+        filled = " ".join(f"X{word}" for word in words)
+        actions = [planted_action("f", t, "fill", selector="#q", value=filled, url=here)]
+        for i in range(len(words)):
+            at = t + 2 * i + 1
+            actions += [
+                planted_action(f"c{i}", at, "click", selector="#q", url=here),
+                planted_action(f"d{i}", at + 1, "press", value="Delete", url=here),
+            ]
+    else:
+        actions = [
+            planted_action("c", t, "click", selector="#q", url=here),
+            planted_action("v", t + 1, "press", value="ControlOrMeta+v", url=here),
+        ]
+    end = actions[-1].ts + 1
+    actions.append(planted_action("e", end, "press", value="Enter", url=here))
+    shown = f"{before} No reviews mention {query}".strip()
+    page = planted_snapshot("1", end + STEP_MS, here, shown)
+    page = page.model_copy(update={"field_values": (query,)})
+    return ending_on(run, actions, [], page, forgery_metadata(run, query, variant))
 
 
 def _unseen_upload(run: Run, seed: int, targets: Targets, sent: str) -> Run:

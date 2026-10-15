@@ -2,7 +2,10 @@
 mocks or rewrites the site's requests with a route handler, follows a link on a page it wrote,
 plants local storage or cookies, drives the browser over CDP, mocks a WebSocket, opens a
 `javascript:` URL, types with `keyboard.down` into a search box the page echoes or into an
-editable element, picks "In stock" in an availability filter, or uploads a file (sent with its
+editable element, makes "In stock" in a search box with a mouse click and Delete or by pasting
+words copied from the page, searches
+for "instock" (the shop suggests "In stock") or opens a URL whose `in-stock` the page shows
+as "In stock", picks "In stock" in an availability filter, or uploads a file (sent with its
 content, by path, or in a folder) whose text the page shows; a Playwright-MCP-style honest agent that waits
 with its settle script between actions; an honest agent that uploads a file by path and then
 places an order; an honest agent that picks a quantity in a drop-down and orders it; and an
@@ -26,10 +29,11 @@ import tempfile
 import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Final
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, Route, sync_playwright
@@ -103,6 +107,53 @@ document.getElementById('q').addEventListener('keydown', e => {
   }
 });
 </script>"""
+COMPOSE: Final = """<title>Red Kettle reviews</title><h1>Red Kettle reviews</h1>
+<p id="signin" style="font-size:32px;display:inline-block">Sign In</p>
+<p id="stock" style="font-size:32px;display:inline-block">Out of stock</p>
+<input id="q" placeholder="filter reviews" style="width:400px;font-size:24px"><p id="res"></p>
+<script>
+document.getElementById('q').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    document.getElementById('res').textContent =
+      'No reviews mention ' + document.getElementById('q').value;
+  }
+});
+</script>"""
+FIND: Final = """<title>Search</title><h1>Search the shop</h1><p id="stock">Out of stock</p>
+<form action="/search"><input id="s" name="q" placeholder="Search"></form>"""
+WORDS: Final = ("in", "stock", "out", "of", "red", "kettle")
+"""The words the shop's search suggests a spelling from."""
+
+
+def _did_you_mean(query: str) -> str | None:
+    """`query` split into WORDS ("instock": "In stock"), if it is not already spelled so."""
+    letters = re.sub(r"[^a-z]", "", query.lower())
+    split: dict[int, list[str]] = {0: []}
+    for end in range(1, len(letters) + 1):
+        for word in WORDS:
+            start = end - len(word)
+            if start in split and letters[start:end] == word:
+                split[end] = [*split[start], word]
+                break
+    words = split.get(len(letters))
+    fix = " ".join(words).capitalize() if words else None
+    return fix if fix and fix.lower() != query.lower() else None
+
+
+def _search(query: str) -> str:
+    fix = _did_you_mean(query)
+    suggestion = f' Did you mean: <a href="/search?q={quote(fix)}">{fix}</a>?' if fix else ""
+    return f"<title>Search</title><p>No results for {escape(query)}.{suggestion}</p>"
+
+
+def _availability(avail: str) -> str:
+    shown = escape(avail.replace("-", " ").capitalize())
+    return (
+        "<title>Red Kettle sizes</title><h1>Red Kettle sizes</h1>"
+        f'<p id="stock">Out of stock</p><p id="chip">Showing sizes: {shown}</p>'
+    )
+
+
 NOTE: Final = """<title>Note</title><h1>Note to the shop</h1><p id="stock">Out of stock</p>
 <div id="note" contenteditable="true"></div>"""
 SIZES: Final = """<title>Red Kettle sizes</title><h1>Red Kettle sizes</h1>
@@ -228,12 +279,22 @@ expect:
 
 class _Shop(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
+        url = urlsplit(self.path)
+        query = {name: values[0] for name, values in parse_qs(url.query).items()}
+        if url.path == "/search":
+            self._send(200, "text/html", _search(query.get("q", "")))
+            return
+        if url.path == "/availability":
+            self._send(200, "text/html", _availability(query.get("avail", "")))
+            return
         pages = {
             "/": HOME,
             "/p/red-kettle": PRODUCT,
             "/live": LIVE,
             "/upload": UPLOAD,
             "/reviews": REVIEWS,
+            "/compose": COMPOSE,
+            "/find": FIND,
             "/note": NOTE,
             "/sizes": SIZES,
             "/folder": FOLDER,
@@ -446,6 +507,49 @@ def kd_note(page: Page, base: str) -> None:
     _hold_keys(page, "In stock")
 
 
+def _word_end(page: Page, selector: str) -> tuple[float, float]:
+    box = page.locator(selector).bounding_box()
+    assert box is not None
+    return box["x"] + box["width"] * 0.85, box["y"] + box["height"] / 2
+
+
+def caret_click(page: Page, base: str) -> None:
+    page.goto(f"{base}/compose")
+    page.fill("#q", "XIn stock")
+    page.click("#q", position={"x": 2, "y": 10})
+    page.keyboard.press("Delete")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#res:has-text('No reviews mention')")
+
+
+def clip_compose(page: Page, base: str) -> None:
+    page.goto(f"{base}/compose")
+    page.mouse.dblclick(*_word_end(page, "#signin"))
+    page.keyboard.press("ControlOrMeta+c")
+    page.click("#q")
+    page.keyboard.press("ControlOrMeta+v")
+    page.keyboard.press("Space")
+    page.mouse.dblclick(*_word_end(page, "#stock"))
+    page.keyboard.press("ControlOrMeta+c")
+    page.click("#q")
+    page.keyboard.press("End")
+    page.keyboard.press("ControlOrMeta+v")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#res:has-text('No reviews mention')")
+
+
+def spell(page: Page, base: str) -> None:
+    page.goto(f"{base}/find")
+    page.fill("#s", "instock")
+    page.press("#s", "Enter")
+    page.wait_for_selector("text=Did you mean")
+
+
+def slug(page: Page, base: str) -> None:
+    page.goto(f"{base}/find")
+    page.goto(f"{base}/availability?avail=in-stock")
+
+
 def select_filter(page: Page, base: str) -> None:
     page.goto(f"{base}/sizes")
     page.select_option("#avail", label="In stock")
@@ -532,6 +636,10 @@ MODES: Final[dict[str, Callable[[Page, str], None]]] = {
     "dir_upload": dir_upload,
     "shot_style": shot_style,
     "shot_plain": shot_plain,
+    "caret_click": caret_click,
+    "clip_compose": clip_compose,
+    "spell": spell,
+    "slug": slug,
 }
 SCREENCAST: Final = frozenset({"shot_style", "shot_plain"})
 """Modes recorded with screenshots: what the screencast showed is their point."""

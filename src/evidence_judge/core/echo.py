@@ -3,6 +3,7 @@ the evidence with every echo masked."""
 
 from __future__ import annotations
 
+import bisect
 import functools
 import json
 import re
@@ -11,7 +12,7 @@ from typing import Final, cast
 from urllib.parse import quote, quote_plus, unquote, unquote_plus, urlsplit, urlunsplit
 
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, PageSnapshot, PageState
-from evidence_judge.core.predicates import WORD
+from evidence_judge.core.predicates import MIN_PAGE_TEXT, WORD
 from evidence_judge.redact import TOKEN_RE
 from evidence_judge.textnorm import normalize
 
@@ -25,15 +26,17 @@ MASK: Final = "\x00"
 """Stands in for agent input in masked evidence; it is never part of a predicate."""
 
 
-def mask(text: str, inputs: tuple[str, ...]) -> str | None:
+def mask(text: str, inputs: tuple[str, ...], *, folded: bool = True) -> str | None:
     """`text` normalised with every echo of an input replaced by MASK, or None if it has none.
 
     An echo is an occurrence of the whole input or of a part of it at least MIN_ECHO_PART
     characters long that starts where a word of the input starts (the site dropped words, or a
-    field's maxlength cut the input short); overlapping echoes become one MASK.
+    field's maxlength cut the input short); overlapping echoes become one MASK. Each is also
+    matched folded (see _FoldedEchoes) unless `folded` is False: "instock" and "in-stock" echo
+    as "In stock".
     """
     norm = normalize(text)
-    spans = sorted(_echoes(norm, inputs))
+    spans = sorted(_echoes(norm, inputs, folded=folded))
     if not spans:
         return None
     parts: list[str] = []
@@ -103,6 +106,108 @@ class _Echoes:
         return [head for head in self.heads if head in text]
 
 
+class _Folded:
+    """Text with only its letters and digits kept (`text`), and where its words start and end
+    in it; `original` maps a span of it back to the text it came from."""
+
+    def __init__(self, text: str) -> None:
+        self._runs = [m.span() for m in WORD.finditer(text)]
+        self.text = "".join(text[s:e] for s, e in self._runs)
+        self.starts: list[int] = []
+        self.ends: set[int] = set()
+        at = 0
+        for s, e in self._runs:
+            self.starts.append(at)
+            at += e - s
+            self.ends.add(at)
+        self.start_set = frozenset(self.starts)
+
+    def original(self, lo: int, hi: int) -> tuple[int, int]:
+        first = bisect.bisect_right(self.starts, lo) - 1
+        last = bisect.bisect_right(self.starts, hi - 1) - 1
+        return (
+            self._runs[first][0] + lo - self.starts[first],
+            self._runs[last][0] + hi - self.starts[last],
+        )
+
+
+type _FoldedPart = tuple[str, bool, frozenset[int]]
+"""A folded input from one of its word starts on: the text, whether it is from the first word,
+and where its words end in it."""
+
+
+class _FoldedEchoes:
+    """Finds echoes of a set of inputs that differ from them only in case, spaces and
+    punctuation: "instock" typed and "Did you mean: In stock?" shown, "in-stock" in a URL and
+    "Showing: In stock" on its page.
+
+    Inputs and text are folded (letters and digits kept). A folded echo starts at a word start
+    and ends at a word end of the text, so typing "tin" does not mask "got in". Like an echo
+    (_Echoes), it is a whole input, or a part of at least MIN_ECHO_PART folded characters from
+    one of the input's word starts: a part from the first word may end anywhere in the input, a
+    later part ends at one of its word ends. Inputs with a redaction token, or that fold to
+    fewer than MIN_PAGE_TEXT characters, are matched exactly only.
+    """
+
+    def __init__(self, inputs: tuple[str, ...]) -> None:
+        whole: set[str] = set()
+        parts: dict[str, set[_FoldedPart]] = {}
+        for value in inputs:
+            if _REDACTION_TOKEN.search(value):
+                continue
+            folded = _Folded(value)
+            if len(folded.text) < MIN_PAGE_TEXT:
+                continue
+            if len(folded.text) < MIN_ECHO_PART:
+                whole.add(folded.text)
+                continue
+            for index, start in enumerate(folded.starts):
+                rest = folded.text[start:]
+                if len(rest) < MIN_ECHO_PART:
+                    break
+                ends = frozenset(e - start for e in folded.ends if e > start)
+                parts.setdefault(rest[:MIN_ECHO_PART], set()).add((rest, index == 0, ends))
+        self.whole = sorted(whole)
+        self.heads = {
+            head: sorted(found, key=lambda p: (-len(p[0]), p[0])) for head, found in parts.items()
+        }
+
+    def spans(self, text: str) -> list[tuple[int, int]]:
+        if not self.whole and not self.heads:
+            return []
+        folded = _Folded(text)
+        found = [
+            (at, at + len(value))
+            for at, value in _occurrences(folded.text, self.whole)
+            if at in folded.start_set and at + len(value) in folded.ends
+        ]
+        heads = [head for head in self.heads if head in folded.text]
+        covered = -1
+        for at, head in sorted(_occurrences(folded.text, heads)):
+            if at not in folded.start_set:
+                continue
+            for rest, first, ends in self.heads[head]:
+                if at + len(rest) <= covered:
+                    break
+                if (end := _folded_end(folded, at, rest, first, ends)) is not None:
+                    found.append((at, end))
+                    covered = max(covered, end)
+        return [folded.original(lo, hi) for lo, hi in found]
+
+
+def _folded_end(
+    folded: _Folded, at: int, rest: str, first: bool, ends: frozenset[int]
+) -> int | None:
+    """Where the folded echo of `rest` at `folded.text[at:]` ends, or None if it is too short:
+    the furthest word end of the text it matches to that is also a word end of `rest`, unless
+    `rest` is from the input's first word."""
+    length = _match_length(folded.text, at, rest, MIN_ECHO_PART)
+    for end in range(length, MIN_ECHO_PART - 1, -1):
+        if at + end in folded.ends and (first or end in ends):
+            return at + end
+    return None
+
+
 def _occurrences(text: str, heads: list[str]) -> Iterator[tuple[int, str]]:
     """Where each of `heads` occurs in `text`, overlapping occurrences included."""
     for head in heads:
@@ -146,13 +251,14 @@ def _inside_word(value: str, at: int) -> bool:
 
 
 @functools.lru_cache(maxsize=64)
-def _echo_index(inputs: tuple[str, ...]) -> _Echoes:
-    return _Echoes(inputs)
+def _echo_index(inputs: tuple[str, ...]) -> tuple[_Echoes, _FoldedEchoes]:
+    return _Echoes(inputs), _FoldedEchoes(inputs)
 
 
-def _echoes(text: str, inputs: tuple[str, ...]) -> list[tuple[int, int]]:
-    """The span of every echo of every input in `text`."""
-    return _echo_index(inputs).spans(text)
+def _echoes(text: str, inputs: tuple[str, ...], *, folded: bool) -> list[tuple[int, int]]:
+    """The span of every echo of every input in `text`, exact or (with `folded`) folded."""
+    exact, fold = _echo_index(inputs)
+    return exact.spans(text) + (fold.spans(text) if folded else [])
 
 
 def _match_length(text: str, at: int, value: str, known: int) -> int:
@@ -168,9 +274,12 @@ def _match_length(text: str, at: int, value: str, known: int) -> int:
 
 
 def _mask_url(url: str, inputs: tuple[str, ...]) -> str:
+    """`url` with every exact echo masked. Folded echoes are left: a site's slug of what the
+    agent searched for ("Red Kettle" typed, `/products/red-kettle` opened) is where an honest
+    search leads."""
     parts = urlsplit(url)
-    path = mask(unquote(parts.path), inputs)
-    query = mask(unquote_plus(parts.query), inputs)
+    path = mask(unquote(parts.path), inputs, folded=False)
+    query = mask(unquote_plus(parts.query), inputs, folded=False)
     if path is None and query is None:
         return url
     return urlunsplit(

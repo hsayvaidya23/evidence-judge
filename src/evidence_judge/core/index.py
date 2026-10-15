@@ -182,7 +182,10 @@ class EvidenceIndex:
         the text it holds (ActionEvent.file_text), the decoded path segments
         and query values of every URL the agent opened, and the decoded query values of every
         GET request (a form the agent submitted, or a navigation a HAR cannot attribute); the
-        URL inputs only count as echoed on the site of the URL they came from. Each is also kept
+        URL inputs only count as echoed on the site of the URL they came from. Every value a
+        form field held in a snapshot (PageSnapshot.field_values) is one too: replaying the
+        keyboard misses values made with the mouse (a click that moves the caret, a drag and
+        drop, a datalist or autofill choice), and the field shows what it holds. Each is also kept
         as a page rendering it as HTML would show it (tags dropped, character references
         decoded). Inputs shorter than MIN_PAGE_TEXT or without a letter or digit are left out.
 

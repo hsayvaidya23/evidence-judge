@@ -222,6 +222,12 @@ class PageSnapshot(_Frozen):
     text: str = Field(default="", description="Visible text, whitespace-normalised")
     html: str | None = None
     call_id: str | None = None
+    field_values: tuple[str, ...] = Field(
+        default=(),
+        description="Values form fields held (text inputs, text areas, editable elements, "
+        "selected options), which are not page text; a snapshot that only changed them adds "
+        "them to the last one",
+    )
 
 
 class Screenshot(_Frozen):

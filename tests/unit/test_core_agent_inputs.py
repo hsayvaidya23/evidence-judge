@@ -151,6 +151,20 @@ def test_a_page_repeating_the_chosen_option_is_masked() -> None:
     assert masked.text == f"out of stock showing: {MASK}"
 
 
+def test_values_fields_held_in_snapshots_are_inputs() -> None:
+    page = snap(2, "/reviews", "Out of stock No reviews mention In stock")
+    run = make_run(
+        actions=[act(1, "click", "#q")],
+        snapshots=[page.model_copy(update={"field_values": ("In stock", "1")})],
+        final_state=final("/reviews", "Out of stock No reviews mention In stock"),
+    )
+    index = EvidenceIndex(run)
+    assert index.agent_inputs() == ("in stock",)
+    masked = index.without_agent_input.final
+    assert masked is not None
+    assert masked.text == f"out of stock no reviews mention {MASK}"
+
+
 def test_short_or_symbol_only_inputs_are_ignored() -> None:
     assert _inputs(actions=[act(1, "fill", value="ab"), act(2, "fill", value="--- ")]) == ()
 
@@ -212,6 +226,38 @@ def test_masking_merges_overlapping_echoes() -> None:
 def test_masking_extends_each_occurrence_on_repetitive_text() -> None:
     text = "ab" * 6 + "x " + "ab" * 3
     assert _masked_final(["abababababab"], text) == f"{MASK}x ababab"
+
+
+def test_masking_covers_echoes_that_differ_in_case_spaces_and_punctuation() -> None:
+    text = "No results for instock. Did you mean: In stock?"
+    assert _masked_final(["instock"], text) == f"no results for {MASK}. did you mean: {MASK}?"
+    assert _masked_final(["In-stock"], "Showing: In stock") == f"showing: {MASK}"
+    assert _masked_final(["order-1042 confirmed"], "Order #1042 confirmed today") == (
+        f"{MASK} today"
+    )
+    assert _masked_final(["Order 1042 confirmedXYZ"], "Order #1042-confirmed") == MASK
+
+
+def test_folded_echoes_start_and_end_on_word_boundaries() -> None:
+    assert _masked_final(["nstock"], "In stock") == "In stock"
+    assert _masked_final(["tin"], "Got in stock") == "Got in stock"
+    assert _masked_final(["zz redkettles"], "Red kettle") == "Red kettle"
+    assert _masked_final(["zz red kettle"], "Red-kettle and Redkettles") == (
+        f"{MASK} and redkettles"
+    )
+
+
+def test_urls_are_not_masked_for_folded_echoes() -> None:
+    run = make_run(
+        actions=[act(1, "fill", "#q", value="Red Kettle")],
+        network=[net(2, "GET", "/products/red-kettle")],
+        final_state=final("/products/red-kettle", "Red-Kettle"),
+    )
+    masked = EvidenceIndex(run).without_agent_input
+    assert masked.final is not None
+    assert masked.final.url.endswith("/products/red-kettle")
+    assert masked.final.text == MASK
+    assert masked.run.network[0].url.endswith("/products/red-kettle")
 
 
 def test_masking_keeps_evidence_without_agent_input() -> None:
@@ -301,14 +347,12 @@ def test_a_copy_reads_the_page_on_screen_and_a_paste_without_a_copy_reads_every_
 def test_masking_covers_parts_of_an_input_from_any_word_start() -> None:
     assert _masked_final(["zz In stock"], "Showing In stock items") == f"showing {MASK} items"
     assert _masked_final(["Kettle In stock now"], "Kettle In stock") == MASK
-    assert _masked_final(["Order #A77 confirmed today"], "Order A77 confirmed") == (f"order {MASK}")
+    assert _masked_final(["#A77 confirmed today"], "Order A77 confirmed") == (f"order {MASK}")
 
 
 def test_parts_never_start_inside_a_word_and_later_parts_end_at_a_word_end() -> None:
     assert _masked_final(["unconfirmed booking"], "Booking confirmed") == "Booking confirmed"
-    assert _masked_final(["Order #A77 confirmation"], "Order A77 confirmed") == (
-        "Order A77 confirmed"
-    )
+    assert _masked_final(["#A77 confirmation"], "Order A77 confirmed") == ("Order A77 confirmed")
     assert _masked_final(["zz Order A77 confirmation"], "Order A77 confirmed") == (
         f"{MASK}confirmed"
     )

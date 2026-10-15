@@ -1,6 +1,7 @@
 """What the agent put into a run itself, replayed from its actions: typed text and the values
 fields took as it edited them, text it copied from pages, the options it chose in drop-downs,
-uploaded file names and file text, and the values of URLs it opened and GET requests it sent."""
+uploaded file names and file text, and the values of URLs it opened and GET requests it sent;
+and every value a form field held in a snapshot, however it got there."""
 
 from __future__ import annotations
 
@@ -59,6 +60,8 @@ def raw_inputs(run: Run) -> Iterator[tuple[str, Site | None]]:
     typing = _Typing(run)
     yield from _action_inputs(run, typing)
     yield from ((text, None) for text in typing.finish())
+    for snapshot in run.snapshots:
+        yield from ((value, None) for value in snapshot.field_values)
     for event in run.network:
         if event.method.upper() == "GET":
             yield from (
