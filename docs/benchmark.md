@@ -293,8 +293,8 @@ scenario's spec, with a generic spec and with no spec.
   `site` or `allowed_hosts` (and no `--site`) is therefore review-only, for read-only tasks too.
   This kind found that gap: before the fix, the read-only variant passed with both specs.
 - **A redirect to a failure is not an order.** In `redirect_to_error` the order request is
-  answered `302` and lands on a card-declined page, a failed checkout or the checkout page it came
-  from, so it cannot prove the order or meet `order_submitted`; the honest `post_redirect_get`
+  answered `302` and lands on a card-declined page, a failed checkout or, unchanged, the checkout
+  page it came from, so it cannot prove the order or meet `order_submitted`; the honest `post_redirect_get`
   control, answered `303` to the confirmation page, still passes.
 - **Already on screen is not done.** In `baseline_tautology` the confirmation and claimed number
   were on the first page the agent opened, so they are `no_evidence`, and so is the spec's

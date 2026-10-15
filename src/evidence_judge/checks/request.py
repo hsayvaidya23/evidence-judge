@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
-from urllib.parse import unquote_plus, urljoin, urlsplit
+from urllib.parse import parse_qsl, unquote_plus, urljoin, urlsplit
 
 from evidence_judge.checks._common import (
     MAX_CITATIONS,
@@ -22,7 +23,6 @@ from evidence_judge.checks.matching import (
     status_matches,
     url_host,
     url_location_contains,
-    url_path,
     url_path_contains,
     url_query_contains,
     validate_status_spec,
@@ -277,10 +277,50 @@ def _absent_result(
     )
 
 
-_FAILURE_MARK = re.compile(
-    r"(?<![a-z])(?:errors?|err|declined?|fail(?:s|ed|ure)?|invalid|denied|rejected)(?![a-z])",
+_URL_FAILURE = re.compile(
+    r"(?<![a-z])(?:errors?|err|fail(?:s|ed|ures?)?|declin(?:e|es|ed)|refus(?:e|ed|al)"
+    r"|reject(?:s|ed|ion)?|cancel(?:l?ed|lation)|invalid|denied|unauthori[sz]ed|expired"
+    r"|insufficient|try[\s_-]*again|problems?|unable"
+    r"|not[\s_-]+(?:be[\s_-]+)?(?:processed|completed|placed))(?![a-z])",
     re.IGNORECASE,
 )
+_TEXT_FAILURE = re.compile(
+    r"\b(?:errors?|failed|failure|declined|refused|rejected|invalid|denied|unauthori[sz]ed"
+    r"|expired|insufficient|try\s+again|unable\s+to|went\s+wrong"
+    r"|(?:was|were|been|is|are)\s+cancell?ed"
+    r"|(?:there\s+was|we\s+had|encountered)\s+an?\s+problem|a\s+problem\s+(?:occurred|with)"
+    r"|not\s+(?:be\s+)?(?:processed|completed|placed))\b(?!-free)",
+    re.IGNORECASE,
+)
+_NEGATED = re.compile(r"\b(?:no|not|zero|0|without|never)\s+(?:\w+\s+){0,2}$", re.IGNORECASE)
+_UNSET = frozenset({"", "0", "false", "no", "none", "null", "off"})
+_CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")
+
+
+def url_failure(url: str) -> str | None:
+    """The failure marker in a URL's decoded path or query (`/checkout/failed`,
+    `?payment=card_refused`, `paymentDeclined`), or None. A query field whose value is unset
+    (`?error=`, `?errors=0`) marks nothing."""
+    parts = urlsplit(url)
+    fields = [unquote_plus(parts.path)]
+    fields += [
+        f"{key} {value}"
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if value.strip().casefold() not in _UNSET
+    ]
+    for field in fields:
+        if found := _URL_FAILURE.search(_CAMEL.sub(" ", field)):
+            return found.group()
+    return None
+
+
+def text_failure(text: str) -> str | None:
+    """The first failure message in page text ('Your card was declined', 'Please try again'),
+    or None. A negated mention ('No errors', 'without errors', 'error-free') is not one."""
+    for found in _TEXT_FAILURE.finditer(text):
+        if not _NEGATED.search(text[max(0, found.start() - 40) : found.start()]):
+            return found.group()
+    return None
 
 
 def _page_load(event: NetworkEvent) -> bool:
@@ -297,36 +337,84 @@ def _same_page(a: str, b: str) -> bool:
     return (pa.hostname, pa.path.rstrip("/")) == (pb.hostname, pb.path.rstrip("/"))
 
 
+def _landing(event: NetworkEvent, index: EvidenceIndex) -> NetworkEvent | None:
+    """The page load matching the redirect's Location header, else the next page load."""
+    location = next((v for k, v in event.response_headers.items() if k.lower() == "location"), None)
+    target = urljoin(event.url, location) if location else None
+    loads = [n for n in index.requests("GET") if n.ts > event.ts and _page_load(n)]
+    landing = next((n for n in loads if target and _same_page(n.url, target)), None)
+    return landing or (loads[0] if loads else None)
+
+
+def _origin(event: NetworkEvent, index: EvidenceIndex) -> str | None:
+    """The page the request was sent from: the last page load before it, else the last action's."""
+    earlier = [n.url for n in index.requests("GET") if n.ts < event.ts and _page_load(n)]
+    earlier = earlier or [a.url for a in index.run.actions if a.url and a.ts < event.ts]
+    return earlier[-1] if earlier else None
+
+
+def _page_text(title: str | None, text: str) -> str:
+    return " ".join(f"{title or ''} {text}".split())
+
+
+def _landing_texts(landing: NetworkEvent, index: EvidenceIndex) -> list[str]:
+    """What the landing page showed: each snapshot of it taken after it loaded and before the
+    browser moved to another page, and the final state if the browser never moved on."""
+    moved = [
+        n.ts
+        for n in index.requests("GET")
+        if n.ts > landing.ts and _page_load(n) and not _same_page(n.url, landing.url)
+    ]
+    until = moved[0] if moved else math.inf
+    texts = [
+        _page_text(s.title, s.text)
+        for s in index.run.snapshots
+        if landing.ts <= s.ts < until and _same_page(s.url, landing.url)
+    ]
+    final = index.final
+    if not moved and final is not None and _same_page(final.url, landing.url):
+        texts.append(_page_text(final.title, final.text))
+    return texts
+
+
+def _text_before(origin: str, event: NetworkEvent, index: EvidenceIndex) -> str | None:
+    shown = [s for s in index.run.snapshots if s.ts < event.ts and _same_page(s.url, origin)]
+    return _page_text(shown[-1].title, shown[-1].text) if shown else None
+
+
 def redirect_doubt(event: NetworkEvent, index: EvidenceIndex) -> str | None:
     """Why a mutation answered with a redirect cannot be shown to have succeeded, or None.
 
     A 3xx answers a form that worked (POST/Redirect/GET) and one that failed (a redirect back to
     the cart with `?error=card_declined`) alike, so it proves the mutation took effect only when
     the page it led to (the page load matching its Location header, else the next page load)
-    loaded with a 2xx, carries no error marker in its URL and is not the page the request was
-    sent from (the last page load before it, else the last action's page). Any other status
-    returns None.
+    loaded with a 2xx and neither its URL nor what it showed before the browser moved on marks a
+    failure. A redirect back to the page the request was sent from (a settings form saving in
+    place) also needs what that page then showed recorded, and different from before. Any other
+    status returns None.
     """
     if event.status is None or not 300 <= event.status < 400:
         return None
-    location = next((v for k, v in event.response_headers.items() if k.lower() == "location"), None)
-    target = urljoin(event.url, location) if location else None
-    loads = [n for n in index.requests("GET") if n.ts > event.ts and _page_load(n)]
-    landing = next((n for n in loads if target and _same_page(n.url, target)), None)
-    landing = landing or (loads[0] if loads else None)
+    landing = _landing(event, index)
     answered = f"it was answered {event.status}"
     if landing is None:
         return f"{answered} and no page load after it was recorded, so where it led is unknown"
     led = f"{answered} and led to {describe_request(landing)}"
     if landing.status is None or not 200 <= landing.status < 300 or landing.failed:
         return f"{led}, which did not load"
-    if _FAILURE_MARK.search(unquote_plus(url_path(landing.url))):
-        return f"{led}, whose URL marks a failure"
-    earlier = [n.url for n in index.requests("GET") if n.ts < event.ts and _page_load(n)]
-    earlier = earlier or [a.url for a in index.run.actions if a.url and a.ts < event.ts]
-    origin = earlier[-1] if earlier else None
-    if origin is not None and _same_page(origin, landing.url):
-        return f"{led}, back to the page it was sent from"
+    if mark := url_failure(landing.url):
+        return f"{led}, whose URL marks a failure ({quoted(mark)})"
+    texts = _landing_texts(landing, index)
+    if mark := next(filter(None, map(text_failure, texts)), None):
+        return f"{led}, whose page reports a failure ({quoted(mark)})"
+    origin = _origin(event, index)
+    if origin is None or not _same_page(origin, landing.url):
+        return None
+    back = f"{led}, back to the page it was sent from"
+    if not texts:
+        return f"{back}, and what that page showed was not recorded"
+    if _text_before(origin, event, index) in texts:
+        return f"{back}, which showed the same as before"
     return None
 
 
