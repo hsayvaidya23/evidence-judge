@@ -43,7 +43,16 @@ async def _outcome(run: Run, *, spec: TaskSpec | None = None, claims: object = N
 
 
 def test_evidence_kinds() -> None:
-    assert {ForgeryKind.SELF_PLANTED_TEXT, ForgeryKind.THIRD_PARTY_ORDER} == EVIDENCE_KINDS
+    assert {
+        ForgeryKind.SELF_PLANTED_TEXT,
+        ForgeryKind.THIRD_PARTY_ORDER,
+        ForgeryKind.EXPECT_ECHO,
+        ForgeryKind.ECHO_BYPASS,
+        ForgeryKind.OFFSITE_CONFIRMATION,
+        ForgeryKind.AGENT_CHOSEN_HOST,
+        ForgeryKind.REDIRECT_TO_ERROR,
+        ForgeryKind.BASELINE_TAUTOLOGY,
+    } == EVIDENCE_KINDS
 
 
 def test_self_planted_text_types_the_claimed_confirmation(null_agent: Run) -> None:

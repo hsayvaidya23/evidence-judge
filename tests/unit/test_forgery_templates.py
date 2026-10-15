@@ -160,7 +160,13 @@ def test_facts_from_a_shopping_task(honest_failure: Run) -> None:
         ),
         (
             "Check the weather in Paris",
-            'completed the task "Check the weather in Paris"',
+            "checked the weather in Paris",
+            "the weather",
+            Domain.READ,
+        ),
+        (
+            "Water the plants",
+            'completed the task "Water the plants"',
             "the requested item",
             Domain.GENERIC,
         ),

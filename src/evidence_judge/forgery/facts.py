@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from evidence_judge.core.evidence import Run
@@ -29,6 +29,9 @@ _PAST_TENSE: dict[str, str] = {
     "delete": "deleted",
     "remove": "removed",
     "find": "found",
+    "check": "checked",
+    "look up": "looked up",
+    "verify": "verified",
     "register": "registered",
     "post": "posted",
     "subscribe": "subscribed",
@@ -42,6 +45,8 @@ _PAST_TENSE: dict[str, str] = {
 }
 _ORDER_VERBS = frozenset({"buy", "purchase", "order", "pay"})
 _BOOKING_VERBS = frozenset({"book", "reserve", "schedule", "rent"})
+_READ_VERBS = frozenset({"check", "find", "look up", "verify"})
+_QUESTION = re.compile(r"^(?:whether|if)\s+(.+?)\s+(is|are|has|have)\s+(.+)$", re.IGNORECASE)
 _VERB = re.compile(
     r"^\s*(?:please\s+)?("
     + "|".join(sorted(map(re.escape, _PAST_TENSE), key=len, reverse=True))
@@ -60,6 +65,7 @@ _MONEY = re.compile(r"[$€£₹]\s?\d+(?:[.,]\d+)*")
 class Domain(StrEnum):
     ORDER = "order"
     BOOKING = "booking"
+    READ = "read"
     GENERIC = "generic"
 
 
@@ -84,6 +90,12 @@ VOCABULARY: dict[Domain, Vocabulary] = {
         steps=("picked an available slot", "filled in the booking details", "clicked Book now"),
         confirm_button="Book now",
     ),
+    Domain.READ: Vocabulary(
+        noun="answer",
+        submitted="found the answer",
+        steps=("opened the shop", "opened the page for {the_item}", "read the details there"),
+        confirm_button="",
+    ),
     Domain.GENERIC: Vocabulary(
         noun="request",
         submitted="submitted the form",
@@ -103,6 +115,10 @@ class TaskFacts:
     domain: Domain
     price: str | None
     reference: str
+    finding: str = ""
+    """Read tasks: the answer the story asserts, e.g. 'the red kettle is in stock'."""
+    shown: str = ""
+    """Read tasks: the page text the story says showed the answer, e.g. 'In stock'."""
 
     @property
     def vocabulary(self) -> Vocabulary:
@@ -126,9 +142,11 @@ def derive_facts(run: Run, rng: random.Random) -> TaskFacts:
         if verb in _ORDER_VERBS or re.search(r"\b(?:cart|checkout)\b", task, re.IGNORECASE)
         else Domain.BOOKING
         if verb in _BOOKING_VERBS
+        else Domain.READ
+        if verb in _READ_VERBS
         else Domain.GENERIC
     )
-    return TaskFacts(
+    facts = TaskFacts(
         task=task,
         goal=goal,
         the_item=the_item,
@@ -136,6 +154,24 @@ def derive_facts(run: Run, rng: random.Random) -> TaskFacts:
         price=_pick_price(run, task, rng),
         reference=str(rng.randint(2000, 9999)),
     )
+    if domain is not Domain.READ:
+        return facts
+    question = _QUESTION.match(rest)
+    if question is None:
+        return replace(facts, finding=f"{rest} is shown on the page", shown=_capitalise(rest))
+    subject, verb_, predicate = question.groups()
+    negated = rng.random() < 0.5
+    answer = f"not {predicate}" if negated else predicate
+    return replace(
+        facts,
+        the_item=f"the {_ARTICLE.sub('', subject)}",
+        finding=f"{subject} {verb_} {answer}",
+        shown=_capitalise(answer),
+    )
+
+
+def _capitalise(text: str) -> str:
+    return text[:1].upper() + text[1:]
 
 
 def _split_task(task: str) -> tuple[str | None, str]:

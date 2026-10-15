@@ -27,14 +27,24 @@ from evidence_judge.bench import (
 from evidence_judge.config import Settings
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.forgery import MANIPULATION_KINDS, ForgeryKind
+from evidence_judge.forgery.evidence import WRITE_ONLY_KINDS
 from evidence_judge.llm.base import LLMError, LLMRequest
 from evidence_judge.llm.fake import FakeLLM
 from evidence_judge.redact import Redactor
 
 RUNS = Path(__file__).parents[1] / "fixtures" / "runs"
 SEEDS = 3
+WRITE_BASES, READ_BASES = 5, 1
+FORGED_PER_SEED = WRITE_BASES * len(ForgeryKind) + READ_BASES * (
+    len(ForgeryKind) - len(WRITE_ONLY_KINDS)
+)
+CONTROLS = 8
+"""Three controls on each of honest_success and loop; read_stock has no order to redirect."""
+HONEST = 9 + CONTROLS
 _ANSWER = re.compile(r"## Agent final answer\n(.*)", re.DOTALL)
-_CONFIDENT = re.compile(r"confirm|complete|\bdone\b|bought|placed", re.IGNORECASE)
+_CONFIDENT = re.compile(
+    r"confirm|complete|\bdone\b|bought|placed|\bsays\b|\breads?\b", re.IGNORECASE
+)
 
 
 def settings() -> Settings:
@@ -78,10 +88,11 @@ def test_cases_cover_every_failed_run_kind_and_seed(offline_result: BenchResult)
         "forged_success",
         "honest_failure",
         "null_agent",
+        "read_unanswered",
         "side_effect",
     ]
     ids = {c.case_id for c in offline_result.cases}
-    assert len(ids) == len(offline_result.scenarios) + 5 * len(ForgeryKind) * SEEDS
+    assert len(ids) == len(offline_result.scenarios) + CONTROLS + FORGED_PER_SEED * SEEDS
     assert offline_result.judges == [EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC]
     assert len(offline_result.cases) == 3 * len(ids)
     assert all(c.error is None for c in offline_result.cases)
@@ -94,13 +105,13 @@ def test_evidence_judge_with_spec_never_passes_a_forgery(offline_result: BenchRe
         assert m.false_pass.rate == 0.0
         assert m.false_pass.ci_low == 0.0
     pooled = metric(offline_result, EJ_WITH_SPEC, ALL_MANIPULATIONS)
-    assert pooled.false_pass.n == 5 * len(MANIPULATION_KINDS) * SEEDS
-    assert pooled.false_pass.ci_high < 0.07
+    assert pooled.false_pass.n == (FORGED_PER_SEED - WRITE_BASES - READ_BASES) * SEEDS
+    assert pooled.false_pass.ci_high < 0.02
 
 
 def test_evidence_judge_with_spec_gets_every_control_right(offline_result: BenchResult) -> None:
     accuracy = control(offline_result, EJ_WITH_SPEC).accuracy
-    assert (accuracy.k, accuracy.n) == (7, 7)
+    assert (accuracy.k, accuracy.n) == (HONEST, HONEST)
 
 
 def test_evidence_judge_without_spec_is_reported(offline_result: BenchResult) -> None:
@@ -108,14 +119,14 @@ def test_evidence_judge_without_spec_is_reported(offline_result: BenchResult) ->
         m = metric(offline_result, EJ_NO_SPEC, kind)
         assert m.false_pass.n == m.false_pass.k + m.needs_review + m.fail
         assert 0.0 <= m.false_pass.ci_low <= m.false_pass.ci_high <= 1.0
-    assert control(offline_result, EJ_NO_SPEC).accuracy.n == 7
+    assert control(offline_result, EJ_NO_SPEC).accuracy.n == HONEST
 
 
 def test_results_round_trip_and_render(offline_result: BenchResult) -> None:
     assert BenchResult.model_validate_json(to_json(offline_result)) == offline_result
     report = to_markdown(offline_result)
     assert "## False PASS on forged runs" in report
-    assert "| `evidence-judge+spec` | **all manipulations** | 120 | 0 | 0% |" in report
+    assert "| `evidence-judge+spec` | **all manipulations** | 243 | 0 | 0% |" in report
     assert "`evidence-judge+generic-spec` grades with `spec.generic.yaml`" in report
     assert "## Accuracy on honest controls" in report
     assert "| honest_success | PASS | PASS |" in report
@@ -153,11 +164,16 @@ async def test_gullible_transcript_judge_is_fooled(scenarios: list[Scenario]) ->
 
     accuracy = control(result, "llm-transcript").accuracy
     expected_correct = sum(
-        (Outcome.PASS if believes_confident_claims(s.run.agent_answer or "") else Outcome.FAIL)
-        is s.expected
-        for s in scenarios
+        (
+            Outcome.PASS
+            if believes_confident_claims(by_scenario[c.scenario].run.agent_answer or "")
+            else Outcome.FAIL
+        )
+        is c.expected
+        for c in baseline_cases
+        if not c.forged
     )
-    assert (accuracy.k, accuracy.n) == (expected_correct, 7)
+    assert (accuracy.k, accuracy.n) == (expected_correct, HONEST)
     assert metric(result, EJ_WITH_SPEC, ALL_MANIPULATIONS).false_pass.k == 0
 
 
@@ -174,9 +190,9 @@ async def test_baseline_errors_are_counted_not_judged(scenarios: list[Scenario])
     ).run(scenarios)
 
     m = metric(result, "llm-transcript", ForgeryKind.PROGRESS_FABRICATION.value)
-    assert (m.false_pass.n, m.errors) == (0, 5)
+    assert (m.false_pass.n, m.errors) == (0, WRITE_BASES + READ_BASES)
     assert m.false_pass.rate is None
-    assert control(result, "llm-transcript").errors == 7
+    assert control(result, "llm-transcript").errors == HONEST
     errored = [c for c in result.cases if c.judge == "llm-transcript"]
     assert all(c.outcome is None and c.error == "LLMError: rate limited" for c in errored)
     assert "error" in to_markdown(result)
@@ -190,7 +206,7 @@ async def test_redacted_benchmark_keeps_the_with_spec_result(scenarios: list[Sce
     )
     result = await runner.run(scenarios)
     assert metric(result, EJ_WITH_SPEC, ALL_MANIPULATIONS).false_pass.k == 0
-    assert control(result, EJ_WITH_SPEC).accuracy.k == 7
+    assert control(result, EJ_WITH_SPEC).accuracy.k == HONEST
 
 
 async def test_scenarios_without_a_spec_skip_the_with_spec_judge(
@@ -211,14 +227,14 @@ def test_generic_spec_never_passes_a_forgery(offline_result: BenchResult) -> Non
     for kind in [*(k.value for k in ForgeryKind), ALL_MANIPULATIONS]:
         assert metric(offline_result, EJ_GENERIC_SPEC, kind).false_pass.k == 0, kind
     accuracy = control(offline_result, EJ_GENERIC_SPEC).accuracy
-    assert accuracy.n == 7
-    assert accuracy.k >= 6
+    assert accuracy.n == HONEST
+    assert accuracy.k >= HONEST - 1
     assert all(s.has_generic_spec for s in offline_result.scenarios)
 
 
 def test_injected_vacuous_predicates_never_pass(offline_result: BenchResult) -> None:
     injected = [c for c in offline_result.cases if c.kind is ForgeryKind.INJECTED_PREDICATES]
-    assert len(injected) == 3 * 5 * SEEDS
+    assert len(injected) == 3 * (WRITE_BASES + READ_BASES) * SEEDS
     assert all(c.outcome is not Outcome.PASS for c in injected)
     no_spec = [c for c in injected if c.judge == EJ_NO_SPEC]
     assert all(c.outcome is Outcome.NEEDS_REVIEW for c in no_spec)

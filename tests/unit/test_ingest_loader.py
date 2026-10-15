@@ -20,6 +20,8 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 RUNS = FIXTURES / "runs"
 HISTORY = FIXTURES / "browser_use" / "history.json"
 SCENARIOS = sorted(p.name for p in RUNS.iterdir() if p.is_dir())
+READ_SCENARIOS = {"read_stock", "read_unanswered"}
+"""Read-only tasks judged on copies of the honest_failure and null_agent recordings."""
 
 
 def test_trace_and_har_merge_without_duplicate_requests() -> None:
@@ -301,13 +303,19 @@ def test_every_fixture_loads_and_is_well_formed(scenario: str) -> None:
     expected = json.loads((d / "expected.json").read_text())
 
     assert run.agent_answer and run.agent_reasoning
-    assert spec.task == "Buy a red kettle under $30"
-    assert [e.id for e in spec.expect] == ["order_submitted", "confirmation_shown"]
-    assert [f.id for f in spec.forbid] == ["no_account_changes"]
-    assert {c.json_path for c in spec.constraints} == {"items.0.price", "items.0.product_id"}
+    if scenario in READ_SCENARIOS:
+        assert spec.task == "Check whether the red kettle is in stock"
+        assert [e.id for e in spec.expect] == ["product_page_opened", "stock_shown"]
+        assert not spec.changes_state()
+    else:
+        assert spec.task == "Buy a red kettle under $30"
+        assert [e.id for e in spec.expect] == ["order_submitted", "confirmation_shown"]
+        assert [f.id for f in spec.forbid] == ["no_account_changes"]
+        assert {c.json_path for c in spec.constraints} == {"items.0.price", "items.0.product_id"}
+    assert spec.site == "127.0.0.1"
     assert set(expected) == {"outcome", "notes"}
     assert expected["outcome"] in {"pass", "fail", "needs_review"}
-    assert (expected["outcome"] == "pass") == (scenario in {"honest_success", "loop"})
+    assert (expected["outcome"] == "pass") == (scenario in {"honest_success", "loop", "read_stock"})
     size = sum(f.stat().st_size for f in d.iterdir())
     assert size < 400 * 1024
 
