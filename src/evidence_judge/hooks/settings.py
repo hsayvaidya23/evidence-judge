@@ -29,6 +29,10 @@ class HookSettings(BaseSettings):
     spec: Path | None = Field(
         default=None, description="Task spec to judge with, relative to the project root"
     )
+    pass_env: list[str] = Field(
+        default_factory=list[str],
+        description="EVJ_* variables the judge child may inherit; every other EVJ_* is dropped",
+    )
     max_trace_age_s: float = Field(
         default=1800.0,
         gt=0,

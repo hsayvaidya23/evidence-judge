@@ -113,7 +113,7 @@ def evaluate(context: HookContext, settings: HookSettings) -> Decision:
                 spec=spec,
                 llm=settings.llm,
                 timeout_s=settings.timeout_s,
-                cwd=root,
+                pass_env=tuple(settings.pass_env),
             )
         )
     if isinstance(result, JudgeFailed):

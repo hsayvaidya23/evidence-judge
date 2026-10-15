@@ -31,7 +31,7 @@ class JudgeRequest:
     spec: Path | None
     llm: bool
     timeout_s: float
-    cwd: Path
+    pass_env: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,8 +68,11 @@ def _argv(request: JudgeRequest, answer_file: Path, out: Path) -> list[str]:
     return argv
 
 
-def _env(llm: bool) -> dict[str, str]:
-    env = dict(os.environ)
+def _env(llm: bool, pass_env: tuple[str, ...]) -> dict[str, str]:
+    """The child's environment: ``EVJ_*`` settings only when the hook config names them, and the
+    API key only when the LLM is on."""
+    allowed = set(pass_env)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("EVJ_") or k in allowed}
     if not llm:
         for key in _KEYS_FOR_ONLINE:
             env.pop(key, None)
@@ -82,7 +85,9 @@ def _last_line(text: str) -> str:
 
 
 def run_judge(request: JudgeRequest) -> Judged | JudgeFailed:
-    """Judge one trace. Never raises: every failure becomes a :class:`JudgeFailed`."""
+    """Judge one trace in a private temporary directory, so no ``.env`` or other file in the
+    project can change the judge's settings. Never raises: every failure becomes a
+    :class:`JudgeFailed`."""
     try:
         with tempfile.TemporaryDirectory(prefix="evj-hook-") as tmp:
             answer_file = Path(tmp) / "answer.txt"
@@ -91,8 +96,8 @@ def run_judge(request: JudgeRequest) -> Judged | JudgeFailed:
             try:
                 done = subprocess.run(  # noqa: S603 - fixed argv, no shell
                     _argv(request, answer_file, out),
-                    cwd=request.cwd,
-                    env=_env(request.llm),
+                    cwd=tmp,
+                    env=_env(request.llm, request.pass_env),
                     stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True,

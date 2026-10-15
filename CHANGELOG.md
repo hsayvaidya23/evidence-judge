@@ -299,6 +299,11 @@ the names exported from `evidence_judge`) is defined under
   trailing slash): `contains: /p/red-kettle` is a substring and is also met by
   `/p/red-kettle-lid`. The task-spec guide steers exact pages to `path` or an anchored `regex`.
   Like `regex`, a `path` the agent typed into the address bar cannot prove itself, however short.
+- **Hook judges ignore the project's `.env` and the agent's `EVJ_*` settings.** The stop hook
+  ran the judge with the project as its working directory, so a `.env` the agent wrote there
+  could change the judge's settings (or break them, which let the stop through). The judge now
+  runs in a private temporary directory, and inherits only the `EVJ_*` variables listed in
+  `EVJ_HOOK_PASS_ENV`.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
 

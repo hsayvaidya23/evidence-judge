@@ -283,7 +283,6 @@ def test_the_judge_runs_offline_without_the_api_key(
         spec=None,
         llm=False,
         timeout_s=5,
-        cwd=tmp_path,
     )
     assert isinstance(run_judge(request), JudgeFailed)
     argv = seen["argv"]
@@ -305,7 +304,7 @@ def test_the_judge_can_use_the_llm_when_configured(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-synthetic")
     monkeypatch.setattr(judge.subprocess, "run", fake)
     spec = tmp_path / "spec.yaml"
-    request = JudgeRequest(tmp_path / "t.zip", "a", "task", spec, True, 5, tmp_path)
+    request = JudgeRequest(tmp_path / "t.zip", "a", "task", spec, True, 5)
     result = run_judge(request)
     assert isinstance(result, JudgeFailed)
     assert "could not run the judge" in result.reason
@@ -325,7 +324,7 @@ def test_an_unreadable_verdict_fails_open(
         return subprocess.CompletedProcess(argv, 1, "", "")
 
     monkeypatch.setattr(judge.subprocess, "run", fake)
-    request = JudgeRequest(tmp_path / "t.zip", "a", None, None, False, 5, tmp_path)
+    request = JudgeRequest(tmp_path / "t.zip", "a", None, None, False, 5)
     result = run_judge(request)
     assert isinstance(result, JudgeFailed)
     assert result.reason == "the judge wrote an unreadable verdict"
@@ -433,3 +432,25 @@ def test_a_failing_stop_log_does_not_change_the_decision(tmp_path: Path) -> None
     )
     assert json.loads(result.stdout)["decision"] == "deny"
     assert "could not record the stop" in result.stderr
+
+
+def test_a_project_env_file_cannot_change_the_judge(tmp_path: Path) -> None:
+    project = tmp_path / "shop"
+    make_project(project)
+    (project / ".env").write_text("EVJ_LLM_BACKEND=not-a-backend\nEVJ_MAX_COST_USD=-1\n")
+    out = _claude_stop(tmp_path, project)
+    assert out["decision"] == "block"
+    assert str(out["reason"]).startswith("Evidence Judge: FAIL")
+
+
+def test_inherited_evj_settings_are_dropped_unless_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "shop"
+    make_project(project)
+    monkeypatch.setenv("EVJ_LLM_BACKEND", "not-a-backend")
+    assert _claude_stop(tmp_path, project)["decision"] == "block"
+    monkeypatch.setenv("EVJ_HOOK_PASS_ENV", '["EVJ_LLM_BACKEND"]')
+    out = _claude_stop(tmp_path, project)
+    assert "decision" not in out
+    assert "the judge exited 3" in str(out["systemMessage"])
