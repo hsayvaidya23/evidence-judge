@@ -44,7 +44,7 @@ from evidence_judge.sessions.predicates import (
     SessionPredicate,
     TestResultPredicate,
 )
-from evidence_judge.sessions.shell import READ_ONLY_PROGRAMS
+from evidence_judge.sessions.shell import READ_ONLY_PROGRAMS, regenerates_env
 
 CHECKER: Final = "session"
 _EXCERPT: Final = 160
@@ -193,10 +193,15 @@ class SessionIndex:
         out: list[tuple[FileEditEvent | CommandEvent, str]] = []
         for edit in self.edits:
             out.extend((edit, finding) for finding in edit.test_findings)
+        exported: list[str] = []
         for command in self.commands:
             if command.status is CallStatus.DENIED:
                 continue
             analysis = command.analysis
+            if analysis.is_test and exported and analysis.opaque_write is None:
+                why = f"{exported[0]} set: the run rewrites expected outputs"
+                out.append((command, f"may have changed test files: {why}"))
+            exported.extend(n for n in analysis.exports if regenerates_env(n))
             for path in analysis.deleted_paths:
                 if is_test_path(path):
                     out.append((command, f"deleted or moved test file {path}"))

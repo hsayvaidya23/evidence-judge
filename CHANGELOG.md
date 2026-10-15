@@ -172,6 +172,14 @@ the names exported from `evidence_judge`) is defined under
 
 ### Security
 
+- **A run that rewrites its expected outputs changes the suite.** pytest
+  `--snapshot-update`, `--force-regen`, `--regen-all`, `--update-goldens`, `--accept`,
+  `--update-snapshots` and `--inline-snapshot=fix|create|update|review|trim`, `go test -update`
+  (also after `-args`), `cargo insta accept|review` and `cargo insta test --accept`, and any test
+  run whose environment sets a variable named like `UPDATE`, `REGEN`, `BLESS`, `ACCEPT`,
+  `OVERWRITE`, `SNAPSHOT`, `GOLDEN`, `INSTA_` or `TRYBUILD` (on the command line or exported
+  earlier, unless set to `0`/`false`/`no`) may have changed test files, like `jest -u`: a later
+  pass is a weakened suite.
 - **A needle the site derives from one input a few letters off proves nothing.** "instok"
   searched for and "Did you mean: In stock?" shown, a plural stemmed away, or the input turned
   round by the page: an occurrence within two letter edits of one input (a substitution counts

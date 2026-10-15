@@ -323,7 +323,10 @@ and the operators between segments (`&&`, `||`, `;`, `|`). The analysis records:
   passed"`, a heredoc, `printf`). Such output is the agent's words;
 - **mutation**: whether the command may change the workspace (redirections to files, `sed -i`,
   `rm`, `mv`, `cp`, `git checkout/restore/reset/apply/stash`, `patch`, formatters in write mode,
-  `--fix`, `--snapshot-update`, package installs, or any program the lexer cannot classify);
+  `--fix`, a test run that rewrites its expected outputs (`jest -u`, pytest `--snapshot-update`,
+  `--force-regen` or `--inline-snapshot=fix`, `go test -update`, `cargo insta accept`, or a run
+  with `UPDATE_GOLDEN`, `INSTA_UPDATE` or a similarly named variable set), package installs, or
+  any program the lexer cannot classify);
 - **targets**: the files the command writes when its command line names them all
   (`touched_paths`: `sed -i`'s files but not its script, `cp`'s destination but not its source,
   redirect and `tee` targets, `git checkout -- path`), or why it may write files it does not name

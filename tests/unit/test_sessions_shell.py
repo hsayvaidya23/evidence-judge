@@ -239,6 +239,23 @@ def test_named_write_targets(command: str, touched: list[str]) -> None:
         ("make", "make runs the default target"),
         ("npm run regen", "npm run regen runs a project script"),
         ("jest -u", "jest -u rewrites the expected snapshots"),
+        ("pytest --snapshot-update", "rewrites expected outputs"),
+        ("python3 -m pytest -q --force-regen", "rewrites expected outputs"),
+        ("pytest --regen-all", "rewrites expected outputs"),
+        ("pytest --inline-snapshot=fix,create", "rewrites expected outputs"),
+        ("pytest --inline-snapshot=review", "rewrites expected outputs"),
+        ("pytest --update-goldens", "rewrites expected outputs"),
+        ("pytest --accept", "rewrites expected outputs"),
+        ("pytest --update-snapshots", "rewrites expected outputs"),
+        ("go test ./... -update", "rewrites expected outputs"),
+        ("go test ./... -args -update", "rewrites expected outputs"),
+        ("cargo insta accept", "rewrites expected outputs"),
+        ("cargo insta review", "rewrites expected outputs"),
+        ("cargo insta test --accept", "rewrites expected outputs"),
+        ("INSTA_UPDATE=always cargo test", "INSTA_UPDATE set"),
+        ("TRYBUILD=overwrite cargo test", "TRYBUILD set"),
+        ("UPDATE_GOLDEN=1 python3 -m pytest -q", "UPDATE_GOLDEN set"),
+        ("env SNAPSHOT_UPDATE=1 pytest", "SNAPSHOT_UPDATE set"),
         ("bash -c 'python3 x.py'", "python3 is not a known read-only program"),
         ("echo 'unbalanced", "could not be parsed"),
     ],
@@ -603,3 +620,20 @@ def test_packages_the_runner_may_load_change_the_harness(command: str, fragment:
 )
 def test_project_and_runner_installs_keep_the_harness(command: str) -> None:
     assert analyse(command).harness_change is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pytest --inline-snapshot=disable",
+        "pytest --inline-snapshot=short-report",
+        "go test ./... -update=false",
+        "INSTA_UPDATE=no cargo test",
+        "UPDATE_GOLDEN=0 pytest",
+        "cargo insta test",
+        "pytest -q",
+    ],
+)
+def test_runs_that_compare_against_expected_outputs_write_nothing(command: str) -> None:
+    analysis = analyse(command)
+    assert analysis.is_test and analysis.opaque_write is None, analysis

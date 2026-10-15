@@ -165,6 +165,9 @@ def test_failure_after_a_pass_contradicts() -> None:
         bash("python3 scripts/rewrite_tests.py"),
         bash("echo 'addopts = \"-k mul\"' >> pyproject.toml"),
         bash("jest -u", "Tests: 3 passed, 3 total"),
+        bash("pytest --snapshot-update", GREEN),
+        bash("UPDATE_GOLDEN=1 pytest", GREEN),
+        bash("export UPDATE_GOLDEN=1 && pytest", GREEN),
     ],
 )
 def test_test_tampering_blocks_a_pass(tamper: object) -> None:
@@ -691,3 +694,10 @@ def test_shared_config_without_a_usable_diff_is_suspect(call: ToolCall) -> None:
     run = session(edit("calc.py"), call, bash("pytest", GREEN))
     status, reason = _check(ALL_PASS, run)
     assert status is Support.NO_EVIDENCE and "pyproject.toml" in reason
+
+
+def test_an_exported_update_variable_reaches_later_runs() -> None:
+    run = session(edit("calc.py"), bash("export UPDATE_GOLDEN=1"), bash("pytest", GREEN))
+    status, reason = _check(ALL_PASS, run)
+    assert status is Support.NO_EVIDENCE
+    assert "UPDATE_GOLDEN set" in reason

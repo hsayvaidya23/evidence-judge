@@ -1309,7 +1309,17 @@ def _classify_program(
         return _Classified(Category.UNKNOWN, prog, mutation=f"{prog} runs a script")
     if prog in ("pytest", "py.test"):
         filters, collect, paths = _pytest_filters(args, env)
-        return _Classified(Category.TEST, prog, "pytest", filters, collect, paths=paths)
+        regen = next((a for a in args if _pytest_regenerates(a)), None)
+        return _Classified(
+            Category.TEST,
+            prog,
+            "pytest",
+            filters,
+            collect,
+            paths=paths,
+            mutation=f"pytest {regen} rewrites expected outputs" if regen else None,
+            opaque=f"pytest {regen} rewrites expected outputs" if regen else None,
+        )
     if prog == "unittest":
         filters, collect = _unittest_filters(args)
         return _Classified(Category.TEST, prog, "unittest", filters, collect)
@@ -1377,7 +1387,11 @@ def _classify_program(
         sub = args[0] if args else ""
         if sub == "test":
             filters, collect = _go_filters(args[1:])
-            return _Classified(Category.TEST, prog, "go test", filters, collect)
+            regen = next((a for a in args[1:] if _GO_REGEN.fullmatch(a) and not _off(a)), None)
+            why = f"go test {regen} rewrites expected outputs" if regen else None
+            return _Classified(
+                Category.TEST, prog, "go test", filters, collect, mutation=why, opaque=why
+            )
         if sub in ("build", "install"):
             return _Classified(Category.BUILD, prog)
         if sub == "vet":
@@ -1392,6 +1406,16 @@ def _classify_program(
         if sub in ("test", "t"):
             filters, collect = _cargo_filters(args[1:])
             return _Classified(Category.TEST, prog, "cargo test", filters, collect)
+        if sub == "insta":
+            action = args[1] if len(args) > 1 else ""
+            if action in ("accept", "review", "reject") or (
+                action == "test" and any(a in ("--accept", "--review") for a in args)
+            ):
+                why = f"cargo insta {action} rewrites expected outputs"
+                return _Classified(Category.MUTATING, prog, mutation=why, opaque=why)
+            if action == "test":
+                filters, collect = _cargo_filters(args[2:])
+                return _Classified(Category.TEST, prog, "cargo insta test", filters, collect)
         if sub == "nextest":
             filters, collect = _cargo_filters(args[1:])
             return _Classified(Category.TEST, prog, "cargo nextest", filters, collect)
@@ -1666,11 +1690,17 @@ def _classify(simple: _Simple, depth: int, cwd: str | None) -> _Classified:
         result.filters.extend(f"runs with {name} changed" for name in changed)
         if changed:
             result.paths = None
+        run_env = _command_env(simple)
         result.run_env = [
             name
-            for name, value in _command_env(simple).items()
+            for name, value in run_env.items()
             if name not in RUN_ENV_ALLOWED and not _harmless_env(name, value)
         ]
+        regen = next(
+            (n for n, v in run_env.items() if regenerates_env(n) and not _off(f"={v}")), None
+        )
+        if regen is not None and result.mutation is None:
+            result.mutation = result.opaque = f"{regen} set: the run rewrites expected outputs"
     named = result.touched
     if named is None:
         mutating = result.category is Category.MUTATING and not read_only
@@ -1719,6 +1749,39 @@ HARNESS_ENV: Final = frozenset(
 _HARNESS_ENV_PREFIX: Final = re.compile(
     r"^(?:PYTEST_|_PYTEST|JEST_|VITEST_|MOCHA_|NODE_TEST|CARGO_TARGET_\w+_RUNNER$|NEXTEST_)"
 )
+
+
+_PYTEST_REGEN_FLAGS: Final = frozenset(
+    {"--snapshot-update", "--force-regen", "--regen-all", "--update-goldens", "--accept",
+     "--update-snapshots", "--update-golden"}
+)  # fmt: skip
+_INLINE_SNAPSHOT_WRITES: Final = frozenset({"fix", "create", "update", "review", "trim"})
+_GO_REGEN: Final = re.compile(r"--?(?:update|regen|golden|bless|accept|overwrite)[\w-]*(?:=.*)?")
+_REGEN_ENV: Final = re.compile(
+    r"UPDATE|REGEN|BLESS|ACCEPT|OVERWRITE|SNAPSHOT|GOLDEN|INSTA_|TRYBUILD", re.IGNORECASE
+)
+_OFF: Final = frozenset({"", "0", "false", "no", "never", "off", "n"})
+
+
+def _off(arg: str) -> bool:
+    """`-update=false`, `INSTA_UPDATE=no`: the switch is spelled but turned off."""
+    _, eq, value = arg.partition("=")
+    return bool(eq) and value.strip("'\"").lower() in _OFF
+
+
+def _pytest_regenerates(arg: str) -> bool:
+    """A pytest switch that writes the expected outputs instead of comparing against them
+    (pytest-regressions, syrupy, inline-snapshot, pytest-goldie and similar plugins)."""
+    name, eq, value = arg.partition("=")
+    if name == "--inline-snapshot":
+        return bool(eq) and not _INLINE_SNAPSHOT_WRITES.isdisjoint(value.split(","))
+    return name in _PYTEST_REGEN_FLAGS and not _off(arg)
+
+
+def regenerates_env(name: str) -> bool:
+    """A variable that, by the usual naming, tells a test run to rewrite its expected outputs
+    (`UPDATE_GOLDEN`, `INSTA_UPDATE`, `TRYBUILD=overwrite`, `SNAPSHOT_UPDATE`)."""
+    return _REGEN_ENV.search(name) is not None
 
 
 def is_harness_env(name: str) -> bool:
