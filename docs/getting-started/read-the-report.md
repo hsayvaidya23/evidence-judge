@@ -148,7 +148,7 @@ thumbnails.
 | `0` | PASS |
 | `1` | FAIL |
 | `2` | NEEDS_REVIEW |
-| `3` | Bad input: missing or unreadable evidence, an invalid spec, claims file or setting, a corrupt redaction key file |
+| `3` | Bad input: missing or unreadable evidence, an invalid spec, claims file or setting, a corrupt redaction key file, a session file with no record of the format it was given as |
 | `4` | Internal or LLM error |
 
 `inspect`, `schema` and `version` exit `0` on success.

@@ -16,9 +16,23 @@ MAX_LINE_BYTES: Final = 64 * 1024 * 1024
 SKIP_CHUNK_BYTES: Final = 1024 * 1024
 
 
+class UnrecognisedSessionError(ValueError):
+    """A session file in which the reader recognised no record of its format."""
+
+    def __init__(
+        self, path: Path, what: str, detail: str | None = None, hint: str | None = None
+    ) -> None:
+        message = f"{path} holds no {what} records" + (f" ({detail})" if detail else "")
+        super().__init__(message + (f"; {hint}" if hint else ""))
+        self.path = path
+        self.what = what
+        self.detail = detail
+
+
 @dataclass(slots=True)
 class LineStats:
     lines: int = 0
+    recognised: int = 0
     malformed: int = 0
     oversized: int = 0
     not_objects: int = 0
@@ -27,6 +41,11 @@ class LineStats:
 
     def skip(self, kind: str) -> None:
         self.skipped_types[kind] = self.skipped_types.get(kind, 0) + 1
+
+    def require_records(self, path: Path, what: str, detail: str | None = None) -> None:
+        """Raise UnrecognisedSessionError when no record of the reader's format was read."""
+        if not self.recognised:
+            raise UnrecognisedSessionError(path, what, detail)
 
     @property
     def damaged(self) -> bool:

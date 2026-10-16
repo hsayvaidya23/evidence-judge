@@ -148,6 +148,10 @@ The first release.
 - Session ingest no longer reads a single huge line whole before applying the 64 MiB line cap:
   lines are read at most that far, the rest of a longer line is skipped in 1 MiB chunks, and
   the line is reported as oversized, as before.
+- A session file given under the wrong option (`session judge --codex` with a Claude Code
+  transcript) or an empty one exits `3` (bad input), naming the format the file looks like.
+  Before, nothing was recognised, only a warning about skipped records was printed, and the run
+  got NEEDS_REVIEW (exit `2`).
 
 ### Security
 

@@ -190,6 +190,32 @@ def test_judge_usage_errors(
     assert message in result.output
 
 
+@pytest.mark.parametrize(
+    ("option", "source", "message"),
+    [
+        ("--codex", SUCCESS, "holds no Codex `exec --json` or rollout records; it looks like a "
+         "Claude Code transcript (--claude-code)"),
+        ("--claude-code", CODEX, "holds no Claude Code transcript records; it looks like a Codex "
+         "session (--codex)"),
+        ("--evidence-log", SUCCESS, "holds no evidence-recorder records (line 1: unsupported "
+         "version None); it looks like a Claude Code transcript"),
+        ("--claude-code", None, "holds no Claude Code transcript records; the file is empty"),
+        ("--codex", b"\x00\xff garbage\n", "it is not a session format evidence-judge reads"),
+    ],
+)  # fmt: skip
+def test_a_session_file_of_another_format_is_bad_input(
+    option: str, source: Path | bytes | None, message: str, tmp_path: Path
+) -> None:
+    if not isinstance(source, Path):
+        path = tmp_path / "session.jsonl"
+        path.write_bytes(source or b"")
+        source = path
+    for command in (["judge", "--offline"], ["inspect"]):
+        result = runner.invoke(app, ["session", *command, option, str(source)])
+        assert result.exit_code == 3, result.output
+        assert message in " ".join(result.output.split())
+
+
 def test_bad_spec_and_claims(tmp_path: Path) -> None:
     spec = tmp_path / "spec.yaml"
     spec.write_text("expect: [{id: a, kind: nope}]\n")

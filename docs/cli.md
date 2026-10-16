@@ -24,7 +24,7 @@ see the [configuration reference](reference/configuration.md).
 
 Exit codes are the same for every command: `0` pass, `1` fail, `2` needs review, `3` bad input
 (missing or unreadable evidence, an invalid spec, claims file or setting, a corrupt redaction key
-file), `4` internal or LLM error. `inspect`, `schema` and `version` exit `0` on success.
+file, a session file with no record of the format it was given as), `4` internal or LLM error. `inspect`, `schema` and `version` exit `0` on success.
 
 ## `evidence-judge judge`
 
@@ -171,7 +171,9 @@ evidence-judge session judge [--claude-code SESSION] [--codex FILE] [--evidence-
 
 At least one of `--claude-code`, `--codex` or `--evidence-log` is required. With an evidence
 log, tool calls come from the log, and a transcript given alongside supplies only the task and
-the final answer when the log lacks them.
+the final answer when the log lacks them. A file that is empty, or holds no record of the format
+its option names (a Claude Code transcript given as `--codex`), exits `3`, and the error says
+which format the file looks like.
 
 | Option | Description |
 | --- | --- |

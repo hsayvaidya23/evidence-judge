@@ -256,6 +256,9 @@ def load_evidence_log(
             calls.append(_call(record, agent))
         else:
             stats.skip(event)
+            continue
+        stats.recognised += 1
+    stats.require_records(path, "evidence-recorder", problems[0] if problems else None)
     session_id = next(iter(session_ids)) if len(session_ids) == 1 else None
     if anchor_file is None and session_id is not None:
         anchor_file = log_head_path(state, session_id)
