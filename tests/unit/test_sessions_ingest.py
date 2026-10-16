@@ -10,12 +10,14 @@ from typing import Any
 import pytest
 
 from evidence_judge.sessions.ingest import (
+    _lines,
     load_codex,
     load_evidence_log,
     load_session,
     load_transcript,
     locate,
 )
+from evidence_judge.sessions.ingest._lines import LineStats, iter_records
 from evidence_judge.sessions.ingest.claude_code import project_slug
 from evidence_judge.sessions.models import (
     CallStatus,
@@ -576,6 +578,55 @@ def test_evidence_log_without_chain_and_bad_records(tmp_path: Path) -> None:
     assert any("missing cwd" in n for n in run.notes)
     assert any("unsupported version 2" in n for n in run.notes)
     assert any("unknown agent 'mystery'" in n for n in run.notes)
+
+
+class _ReadSizes:
+    def __init__(self, handle: Any, sizes: list[int]) -> None:
+        self.handle = handle
+        self.sizes = sizes
+
+    def __enter__(self) -> _ReadSizes:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.handle.close()
+
+    def readline(self, size: int = -1) -> bytes:
+        self.sizes.append(size)
+        return self.handle.readline(size)
+
+
+def test_an_over_long_line_is_skipped_without_reading_it_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_lines, "MAX_LINE_BYTES", 64)
+    monkeypatch.setattr(_lines, "SKIP_CHUNK_BYTES", 8)
+    fits = json.dumps({"k": "x" * 55})
+    assert len(fits) == 64
+    path = tmp_path / "s.jsonl"
+    path.write_bytes(
+        b'{"a": 1}\n'
+        + b'{"big": "'
+        + b"y" * 10_000
+        + b'"}\n'
+        + fits.encode()
+        + b"\r\n"
+        + b'{"a": 2}\n'
+        + b"z" * 500
+    )
+    sizes: list[int] = []
+    real_open = Path.open
+    monkeypatch.setattr(Path, "open", lambda self, mode: _ReadSizes(real_open(self, mode), sizes))
+    stats = LineStats()
+    records = [value for _, value in iter_records(path, stats)]
+    assert records == [{"a": 1}, {"k": "x" * 55}, {"a": 2}]
+    assert (stats.lines, stats.oversized, stats.malformed) == (5, 2, 0)
+    assert "2 line(s) over 64 bytes were skipped" in stats.notes()
+    assert sizes and max(sizes) <= 66 and -1 not in sizes
+    monkeypatch.setattr(_lines, "MAX_FILE_BYTES", 1_000)
+    stats = LineStats()
+    assert [value for _, value in iter_records(path, stats)] == [{"a": 1}]
+    assert stats.capped and stats.oversized == 0
 
 
 def test_evidence_log_gemini_exit_code_and_mixed_sessions(tmp_path: Path) -> None:

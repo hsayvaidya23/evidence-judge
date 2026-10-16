@@ -145,6 +145,9 @@ The first release.
   preceded by `printf 'Exit Code: 0\n'` was logged with exit code 0, and "ruff check passes."
   PASSed. The Codex recorder reads `Process exited with code N` only from the header Codex
   writes before the command's `Output:`.
+- Session ingest no longer reads a single huge line whole before applying the 64 MiB line cap:
+  lines are read at most that far, the rest of a longer line is skipped in 1 MiB chunks, and
+  the line is reported as oversized, as before.
 
 ### Security
 
