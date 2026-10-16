@@ -6,27 +6,38 @@ import re
 from collections.abc import Iterator
 from typing import Final
 
+from evidence_judge.ingest.css.colors import parse_color
 from evidence_judge.ingest.css.model import words
-from evidence_judge.ingest.css.values import FONT_KEYWORDS, parse_color, parse_number
+from evidence_judge.ingest.css.values import FONT_KEYWORDS, parse_number, tokens
 
 TRACKED: Final = words(
-    "display visibility content-visibility opacity filter transform scale translate zoom "
-    "clip clip-path position left right top bottom margin-left margin-top "
-    "margin-inline-start margin-block-start height max-height width max-width block-size "
-    "max-block-size inline-size max-inline-size overflow-x overflow-y font-size color "
-    "-webkit-text-fill-color text-indent background-color background-clip "
-    "-webkit-background-clip fill fill-opacity"
+    "display visibility content-visibility opacity filter transform scale translate rotate zoom "
+    "clip clip-path position left right top bottom inset-inline-start inset-inline-end "
+    "inset-block-start inset-block-end margin-left margin-top margin-inline-start "
+    "margin-block-start height max-height width max-width block-size max-block-size "
+    "inline-size max-inline-size overflow-x overflow-y contain font-size color "
+    "-webkit-text-fill-color text-indent background-color background-image background-size "
+    "background-clip "
+    "-webkit-background-clip fill fill-opacity offset offset-path mask mask-image mask-border "
+    "mask-border-source -webkit-mask -webkit-mask-image -webkit-mask-box-image"
 )
 """The properties the reader applies: what removes an element, and what can hide its text."""
 
 
-_SHORTHANDS: Final = frozenset({"all", "font", "background", "inset", "margin", "overflow"})
+SHORTHANDS: Final = words(
+    "all font background inset inset-inline inset-block margin margin-inline margin-block overflow"
+)
+"""The shorthands whose tracked longhands the reader applies. One whose value holds a
+``var()`` is kept whole (as a declaration of the shorthand) until the cascade substitutes it."""
 
 
 _SPECIAL = re.compile(r"[{};\"'\\]")
 
 
 _ESCAPE = re.compile(r"\\([0-9a-fA-F]{1,6}[ \t\n]?|.)", re.DOTALL)
+
+
+_ESCAPED_NAME = re.compile(r"((?:[^:\\]|\\.)*):", re.DOTALL)
 
 
 def blocks(text: str) -> Iterator[tuple[str, str | None]]:
@@ -94,25 +105,55 @@ def declarations(text: str) -> Iterator[tuple[str, str | None, bool]]:
 
 
 def parse_declaration(text: str) -> Iterator[tuple[str, str | None, bool]]:
-    prop, colon, raw = text.partition(":")
-    prop = prop.strip().lower()
-    if not colon or (prop not in TRACKED and prop not in _SHORTHANDS):
+    if "\\" in text and (named := _ESCAPED_NAME.match(text)) is not None:
+        prop, colon, raw = unescape(named.group(1)).strip(), ":", text[named.end() :]
+    else:
+        prop, colon, raw = text.partition(":")
+        prop = prop.strip()
+    custom = prop.startswith("--")
+    if not custom:
+        prop = prop.lower()
+    if not colon or not (custom or prop in TRACKED or prop in SHORTHANDS):
         return
-    value = " ".join(raw.lower().split())
+    if "\\" in raw:
+        raw = unescape(raw)
+    value = _lowered(" ".join(raw.split()))
     important = re.search(r"!\s*important$", value)
     if important is not None:
         value = value[: important.start()].strip()
-    if "\\" in value:
-        value = " ".join(unescape(value).split())
+    flag = important is not None
+    if custom:
+        yield prop, (value or " ") if "attr(" not in value else None, flag
+        return
     if not value:
         return
-    readable = not any(f in value for f in ("var(", "env(", "attr("))
-    flag = important is not None
-    for name, found in _expand(prop, value):
-        yield name, (found if readable else None), flag
+    if "attr(" in value:
+        for name, _found in expand(prop, value):
+            yield name, None, flag
+        return
+    if prop in SHORTHANDS and ("var(" in value or "env(" in value):
+        yield prop, value, flag
+        return
+    yield from ((name, found, flag) for name, found in expand(prop, value))
 
 
-def _expand(prop: str, value: str) -> Iterator[tuple[str, str]]:
+_CUSTOM_NAME = re.compile(r"--[^\s,():;!]*")
+
+
+def _lowered(value: str) -> str:
+    """`value` in lower case, but for the custom property names it holds: those are
+    case-sensitive."""
+    out: list[str] = []
+    at = 0
+    for found in _CUSTOM_NAME.finditer(value):
+        out.append(value[at : found.start()].lower())
+        out.append(found.group())
+        at = found.end()
+    out.append(value[at:].lower())
+    return "".join(out)
+
+
+def expand(prop: str, value: str) -> Iterator[tuple[str, str]]:
     """The tracked longhands a declaration sets."""
     match prop:
         case "all":
@@ -125,21 +166,19 @@ def _expand(prop: str, value: str) -> Iterator[tuple[str, str]]:
         case "font":
             yield "font-size", _font_size(value)
         case "background":
-            if "url(" in value or "gradient(" in value or "image(" in value:
-                yield "background-color", "image"
-            else:
-                yield (
-                    "background-color",
-                    next((t for t in _tokens(value) if parse_color(t) is not None), "transparent"),
-                )
-            if "text" in value.split():
-                yield "background-clip", "text"
+            yield from _background(value)
         case "inset":
             top, right, bottom, left = _sides(value)
             yield from (("top", top), ("right", right), ("bottom", bottom), ("left", left))
         case "margin":
             top, _, _, left = _sides(value)
             yield from (("margin-top", top), ("margin-left", left))
+        case "inset-inline" | "inset-block" | "margin-inline" | "margin-block":
+            start, *rest = tokens(value) or ["0"]
+            if prop.startswith("margin"):
+                yield f"{prop}-start", start
+            else:
+                yield from ((f"{prop}-start", start), (f"{prop}-end", rest[0] if rest else start))
         case "overflow":
             first, *rest = value.split() or [""]
             yield from (("overflow-x", first), ("overflow-y", rest[0] if rest else first))
@@ -147,25 +186,46 @@ def _expand(prop: str, value: str) -> Iterator[tuple[str, str]]:
             yield prop, value
 
 
-def _tokens(value: str) -> list[str]:
-    """Space-separated tokens, keeping functions whole."""
-    out: list[str] = []
-    depth, start = 0, 0
-    for i, char in enumerate(value):
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-        elif char == " " and depth == 0:
-            out.append(value[start:i])
-            start = i + 1
-    out.append(value[start:])
-    return [t for t in out if t]
+def _background(value: str) -> Iterator[tuple[str, str]]:
+    """The ``background`` shorthand's colour (from its last layer), images and sizes."""
+    layers = split_commas(value) or ["none"]
+    images: list[str] = []
+    sizes: list[str] = []
+    colour = "transparent"
+    for at, layer in enumerate(layers):
+        found = [t for t in tokens(layer) if "(" in t and parse_color(t) is None]
+        images.append(found[0] if found else "none")
+        sizes.append(_layer_size(layer))
+        if at == len(layers) - 1:
+            colour = next((t for t in tokens(layer) if parse_color(t) is not None), colour)
+    yield "background-color", colour
+    yield "background-image", ", ".join(images)
+    yield "background-size", ", ".join(sizes)
+    if "text" in value.split():
+        yield "background-clip", "text"
+
+
+_SIZE_WORDS: Final = frozenset({"auto", "cover", "contain"})
+
+
+def _layer_size(layer: str) -> str:
+    """The size a ``background`` layer gives after ``/`` ("auto" when it gives none)."""
+    parts = tokens(layer)
+    for at, part in enumerate(parts):
+        if "/" in part and "(" not in part:
+            after = part.split("/", 1)[1]
+            following = ([after] if after else []) + parts[at + 1 : at + 3]
+            size: list[str] = []
+            for token in following[:2]:
+                if token not in _SIZE_WORDS and parse_number(token) is None and "(" not in token:
+                    break
+                size.append(token)
+            return " ".join(size) or "auto"
+    return "auto"
 
 
 def _sides(value: str) -> tuple[str, str, str, str]:
-    tokens = _tokens(value) or ["0"]
-    values = [*tokens[:4]]
+    values = (tokens(value) or ["0"])[:4]
     if len(values) == 1:
         return values[0], values[0], values[0], values[0]
     if len(values) == 2:
@@ -180,7 +240,7 @@ def _font_size(value: str) -> str:
     cannot be read)."""
     if value in ("inherit", "initial", "unset"):
         return value
-    for token in _tokens(value):
+    for token in tokens(value):
         size = token.split("/", 1)[0]
         if size in FONT_KEYWORDS or size in ("smaller", "larger"):
             return size
@@ -188,7 +248,7 @@ def _font_size(value: str) -> str:
             return size
         if size == "0":
             return size
-    return "medium" if len(_tokens(value)) == 1 else "unknown"
+    return "medium" if len(tokens(value)) == 1 else "unknown"
 
 
 def split_commas(text: str) -> list[str]:
@@ -204,18 +264,6 @@ def split_commas(text: str) -> list[str]:
             start = i + 1
     parts.append(text[start:].strip())
     return [p for p in parts if p]
-
-
-def closing_paren(text: str, at: int) -> int | None:
-    depth = 1
-    for i in range(at, len(text)):
-        if text[i] == "(":
-            depth += 1
-        elif text[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return i
-    return None
 
 
 def unescape(text: str) -> str:

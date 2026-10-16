@@ -59,7 +59,9 @@ HEADER = """\
 LOCAL: dict[str, str] = {
     HTML_NS: """\
 /* evidence-judge: hidden=until-found content is revealed by find-in-page and fragment links
-   without a script, so its visibility is unknown rather than hidden. */
+   without a script, so its visibility is unknown rather than hidden. A registered custom
+   property holds a value the reader cannot know. */
+@property --evidence-judge-unknown { syntax: "*"; inherits: false; }
 [hidden=until-found i]:not(embed) {
   content-visibility: var(--evidence-judge-unknown);
 }
@@ -72,6 +74,7 @@ filter {
 """,
     MATHML_NS: """\
 /* evidence-judge: an annotation outside <semantics> may or may not render. */
+@property --evidence-judge-unknown { syntax: "*"; inherits: false; }
 annotation, annotation-xml {
   display: var(--evidence-judge-unknown);
 }

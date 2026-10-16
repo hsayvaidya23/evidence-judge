@@ -169,6 +169,13 @@ def _undecided(outcomes: list[RunOutcome], predicate: TestResultPredicate) -> Pr
     if partial and predicate.whole_suite:
         o = partial[-1]
         why = o.partial
+        if o.event.analysis.wrapper_unseen is not None:
+            return result(
+                Support.NO_EVIDENCE,
+                f"the tests passed after the last change only through a wrapper ({o.event.id}: "
+                f"{why}); it cannot prove the whole suite passes",
+                o.event,
+            )
         return result(
             Support.NO_EVIDENCE,
             f"only a subset of the suite ran after the last change ({o.event.id}: {why}); a "

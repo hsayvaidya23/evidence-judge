@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from evidence_judge.ingest.css import (
@@ -11,9 +13,11 @@ from evidence_judge.ingest.css import (
     Element,
     Sheet,
     StyleSheets,
+    matching,
     media_holds,
     supports,
 )
+from evidence_judge.ingest.css.colors import parse_color
 
 VIEWPORT = (1000, 800)
 Spec = tuple[str, dict[str, str]]
@@ -106,7 +110,9 @@ BADGE: Spec = ("SPAN", {"class": "badge in"})
         ("p$x{display:none}", ("P", {}), UNSURE),
         (".a $x .in{display:none}", BADGE, UNSURE),
         (".bad{{display:none}}", ("P", {"class": "bad"}), SHOWN),
-        (".x{display: var(--d)}", ("P", {"class": "x"}), UNSURE),
+        (".x{display: var(--d)}", ("P", {"class": "x"}), SHOWN),
+        (":root{--d:none}.x{display: var(--d)}", ("P", {"class": "x"}), HIDDEN),
+        (".x:hover{--d:none}.x{display: var(--d)}", ("P", {"class": "x"}), UNSURE),
         (".x{display: flexx}", ("P", {"class": "x"}), UNSURE),
         (".x{display: inline flex}", ("P", {"class": "x"}), SHOWN),
         (".x{display: revert}", ("P", {"class": "x"}), UNSURE),
@@ -133,7 +139,8 @@ BADGE: Spec = ("SPAN", {"class": "badge in"})
         ("@media(min-width:768px){.x{display:none}}", ("P", {"class": "x"}), HIDDEN),
         ("@media print{.x{display:none}}", ("P", {"class": "x"}), SHOWN),
         ("@media (min-resolution:1dppx){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
-        ("@media (min-width:calc(1px)){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
+        ("@media (min-width:calc(1px)){.x{display:none}}", ("P", {"class": "x"}), HIDDEN),
+        ("@media (min-width:calc(1px + 1%)){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
         ("@container (min-width:1px){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
         ("@scope (.p){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
         ("@whatever{.x{display:none}}", ("P", {"class": "x"}), UNSURE),
@@ -210,7 +217,7 @@ def test_cascade_layers(css: str, state: int) -> None:
         (".in{opacity:.5}", SHOWN),
         (".in{opacity:var(--o)}", SHOWN),
         (".in{filter:opacity(0)}", UNSURE),
-        (".in{filter:blur(2px)}", SHOWN),
+        (".in{filter:blur(2px)}", UNSURE),
         (".in{font-size:0}", UNSURE),
         (".in{font-size:1px}", UNSURE),
         (".in{font-size:0.1em}", UNSURE),
@@ -277,6 +284,294 @@ def test_styles_that_may_hide_text_leave_it_unsure(css: str, state: int) -> None
 @pytest.mark.parametrize(
     ("css", "state"),
     [
+        (".in{--o:0;opacity:var(--o)}", UNSURE),
+        (".in{opacity:calc(0)}", UNSURE),
+        (".in{opacity:calc(1 - 0.98)}", UNSURE),
+        (".in{opacity:clamp(0, 0.5, 1)}", SHOWN),
+        (".in{opacity:foo(1)}", UNSURE),
+        (".in{opacity:attr(data-o type(<number>))}", UNSURE),
+        (".in{opacity:calc(1/0)}", UNSURE),
+        (".in{transform:scale(calc(0))}", UNSURE),
+        (".in{transform:scale(calc(1 / 2))}", SHOWN),
+        (".in{transform:translate(-50%, -50%)}", SHOWN),
+        (".in{transform:translateX(calc(-100% - 1px))}", UNSURE),
+        (".in{--c:transparent;color:var(--c)}", UNSURE),
+        (":root{--c:#333}.in{color:var(--c)}", SHOWN),
+        (".in{color:var(--c, transparent)}", UNSURE),
+        (".in{color:mystery(1 2 3)}", UNSURE),
+        (".in{color:oklch(0.21 0.034 264.665)}", SHOWN),
+        (".in{color:color-mix(in oklab, black 50%, transparent)}", SHOWN),
+        (".in{font-size:max(0px,0px)}", UNSURE),
+        (".in{font-size:clamp(1rem, 2vw, 2rem)}", SHOWN),
+        (".in{font-size:var(--fs)}", SHOWN),
+        (".in{font-size:larger(2)}", UNSURE),
+        (".in{position:absolute;left:calc(-10000px)}", UNSURE),
+        (".in{position:absolute;left:calc(50% - 20px)}", SHOWN),
+        (".in{position:absolute;left:anchor(--a right)}", UNSURE),
+        (".in{position:fixed;top:env(safe-area-inset-top, 0)}", SHOWN),
+        (".in{position:fixed;top:env(titlebar-area-y)}", UNSURE),
+        (".in{margin:var(--m)}", SHOWN),
+        (":root{--m:0 0 0 -9999px}.in{margin:var(--m)}", UNSURE),
+        (":root{--m:0}.x:hover{--m:-9999px}.in{margin-left:var(--m)}", SHOWN),
+        (":root{--m:0}.in:hover{--m:-9999px}.in{margin-left:var(--m)}", UNSURE),
+        (".in{--a:var(--b);--b:var(--a);opacity:var(--a, 0)}", UNSURE),
+        (".in{--a:var(--a, 0);opacity:var(--a, 1)}", SHOWN),
+        (".in{--a:var(--b) var(--b);--b:var(--c) var(--c);--c:x;opacity:var(--a)}", UNSURE),
+        (
+            "@property --o{syntax:'<number>';inherits:false;initial-value:0}.in{opacity:var(--o)}",
+            UNSURE,
+        ),
+        ("@property --o{syntax:'*';inherits:true}.in{opacity:var(--o, 1)}", SHOWN),
+        ("@property --o{syntax:'<number>';inherits:false}.in{opacity:var(--o, 0)}", UNSURE),
+        (
+            "@supports (gap:1px){@property --o{syntax:'*';inherits:true}}.in{opacity:var(--o,1)}",
+            UNSURE,
+        ),
+        (".in{text-indent:calc(-100vw - 10px)}", UNSURE),
+        (".in{text-indent:var(--i)}", SHOWN),
+        (".in{width:0;overflow:hidden;width:calc(1px - 1px)}", UNSURE),
+        (".in{height:calc(100vh - 60px);overflow:auto}", SHOWN),
+    ],
+)
+def test_values_the_reader_cannot_read_leave_text_unsure(css: str, state: int) -> None:
+    assert _state(css, BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{--\\64:none;display:var(--d)}", HIDDEN),
+        (":root{--\\63:transparent}.in{color:var(--c)}", UNSURE),
+        (":root{--\\63:transparent}.in{color:var(--\\63)}", UNSURE),
+        (":root{--c:transparent}.in{color:var(--\\63)}", UNSURE),
+        (":root{--\\000063 :transparent}.in{color:var(--c)}", UNSURE),
+        (":root{--a\\:b:transparent}.in{color:var(--a\\:b)}", UNSURE),
+        (":root{--\\63:#000}.in{color:var(--c)}", SHOWN),
+        (".in{co\\6cor:transparent}", UNSURE),
+        (".in{di\\73 play:none}", HIDDEN),
+        (".in{color:transparent!\\69mportant}.in{color:#000}", UNSURE),
+        (
+            "@property --\\63{syntax:'<color>';inherits:true;initial-value:transparent}"
+            ".in{color:var(--c)}",
+            UNSURE,
+        ),
+    ],
+)
+def test_escaped_property_names_read_as_the_browser_reads_them(css: str, state: int) -> None:
+    assert _state(css, BADGE) == state
+
+
+def _chain(depth: int, end: str) -> str:
+    links = "".join(f"--v{i}:var(--v{i + 1});" for i in range(depth))
+    return f":root{{{links}--v{depth}:{end}}}"
+
+
+def _nest(depth: int, head: str, inner: str, tail: str) -> str:
+    return head * depth + inner + tail * depth
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (_chain(20, "none") + ".in{display:var(--v0)}", HIDDEN),
+        (_chain(20, "#000") + ".in{color:var(--v0)}", SHOWN),
+        (_chain(400, "none") + ".in{display:var(--v0)}", UNSURE),
+        (_chain(400, "#000") + ".in{color:var(--v0)}", UNSURE),
+        (".in{color:" + _nest(20, "var(--n,", "transparent", ")") + "}", UNSURE),
+        (".in{color:" + _nest(3000, "var(--n,", "#000", ")") + "}", UNSURE),
+        (".in{opacity:" + _nest(20, "calc(", "1", ")") + "}", SHOWN),
+        (".in{opacity:" + _nest(3000, "calc(", "1", ")") + "}", UNSURE),
+        (".in{opacity:calc(" + "-" * 3000 + "1)}", SHOWN),
+        (".in{opacity:calc(" + "-" * 3001 + "1)}", UNSURE),
+        (".in{color:" + _nest(10, "color-mix(in srgb,", "#000", ",#000)") + "}", SHOWN),
+        (".in{color:" + _nest(500, "color-mix(in srgb,", "#000", ",#000)") + "}", UNSURE),
+        (".in{color:" + _nest(1000, "light-dark(", "#000", ",#fff)") + "}", UNSURE),
+        (_nest(2000, "@media all{", ".in{display:none}", "}"), SHOWN),
+        (_nest(1000, ":is(", ".in", ")") + "{display:none}", UNSURE),
+        ("@supports " + _nest(2000, "(", "display:none", ")") + "{.in{display:none}}", UNSURE),
+        ("@supports " + "not " * 2000 + "(display:none){.in{display:none}}", UNSURE),
+        (".in{color:lab(1e308 1e308 1e308)}", SHOWN),
+        (".in{color:oklab(-1e200 0 0)}", SHOWN),
+        (".in{color:hsl(1e999 50% 50%)}", UNSURE),
+        (".in{color:color-mix(in srgb, red 1e308%, blue 1e308%)}", UNSURE),
+        (".in{opacity:calc(1e308 * 1e308 * 0)}", UNSURE),
+        (".in{transform:rotate(1e999deg)}", UNSURE),
+        (".in{transform:scale(1e308) scale(1e308)}", UNSURE),
+        (".in{position:absolute;left:1e308in}", UNSURE),
+    ],
+)
+def test_deep_or_huge_values_never_crash_and_fail_closed(css: str, state: int) -> None:
+    assert _state(css, BADGE) == state
+
+
+def test_a_stylesheet_nested_past_the_cap_is_unknown() -> None:
+    assert _sheets(_nest(2000, "@media all{", ".in{display:none}", "}")).unknown
+    assert not _sheets(_nest(20, "@media all{", ".in{display:none}", "}")).unknown
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{mask-image:linear-gradient(transparent,transparent)}", UNSURE),
+        (".in{-webkit-mask-image:url(m.svg)}", UNSURE),
+        (".in{-webkit-mask:none;mask:none}", SHOWN),
+        (".in{filter:blur(60px)}", UNSURE),
+        (".in{filter:blur(0.3px) drop-shadow(0 1px 2px #000) grayscale(1)}", SHOWN),
+        (".in{filter:brightness(1.1) contrast(0.9)}", SHOWN),
+        (".in{filter:brightness(100)}", UNSURE),
+        (".in{filter:invert(1)}", UNSURE),
+        (".in{filter:url(#f)}", UNSURE),
+        (".in{filter:none}", SHOWN),
+        (".in{transform:rotate3d(0,1,0,90deg)}", UNSURE),
+        (".in{transform:rotate3d(0,0,1,90deg)}", SHOWN),
+        (".in{rotate:y 90deg}", UNSURE),
+        (".in{rotate:45deg}", SHOWN),
+        (".in{rotate:y 60deg;scale:0.08}", UNSURE),
+        (".in{transform:skewX(90deg)}", UNSURE),
+        (".in{transform:skew(10deg, 5deg)}", SHOWN),
+        (".in{transform:matrix3d(0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1)}", UNSURE),
+        (".in{transform:perspective(10px) translateZ(20px)}", UNSURE),
+        (".in{transform:perspective(800px) rotateY(20deg)}", SHOWN),
+        (".in{transform:wobble(1)}", UNSURE),
+        (".in{transform:none}", SHOWN),
+        (".in{offset-path:path('M0 0 L9999 0');offset-distance:100%}", UNSURE),
+        (".in{clip-path:path('M0 0')}", UNSURE),
+        (".in{clip-path:rect(0 0 0 0)}", UNSURE),
+        (".in{clip-path:url(#c)}", UNSURE),
+        (".in{clip-path:circle(5px)}", UNSURE),
+        (".in{clip-path:circle(50%)}", SHOWN),
+        (".in{clip-path:inset(10px)}", UNSURE),
+        (".in{clip-path:inset(0 round 8px)}", SHOWN),
+        (".in{clip-path:polygon(0 0, 100% 0, 100% calc(100% - 4px), 0 100%)}", SHOWN),
+        (".in{clip-path:polygon(0 0, 100% 0, 100% 0)}", UNSURE),
+        (".in{clip-path:border-box}", SHOWN),
+        (".in{height:0;contain:paint}", UNSURE),
+        (".in{height:0;contain:layout}", SHOWN),
+        (".in{height:0;overflow:auto}", UNSURE),
+        (".in{color:#fefefe}", UNSURE),
+        (".in{color:snow}", UNSURE),
+        (".in{color:#ccc}", SHOWN),
+        (".in{color:rgba(0,0,0,0.04)}", UNSURE),
+        (".in{color:#000;opacity:0.3}", SHOWN),
+        (".in{background:#000;color:#0a0a0a}", UNSURE),
+        (".in{background:rgba(0,0,0,0.5);color:#7f7f7f}", UNSURE),
+        (".in{-webkit-text-fill-color:#fff}", UNSURE),
+        (".in{color:#fff;-webkit-text-fill-color:#000}", SHOWN),
+        (".in{position:fixed;top:-100vh}", UNSURE),
+        (".in{position:fixed;top:100vh}", UNSURE),
+        (".in{position:fixed;top:-60px}", SHOWN),
+        (".in{position:absolute;inset-inline-start:-10000px}", UNSURE),
+        (".in{position:absolute;inset-block:-9999px auto}", UNSURE),
+        (".in{margin-inline:-9999px 0}", UNSURE),
+        (".in{text-indent:100%;white-space:nowrap;overflow:hidden}", UNSURE),
+        (".in{text-indent:5%}", SHOWN),
+    ],
+)
+def test_hiding_the_reader_did_not_model_leaves_text_unsure(css: str, state: int) -> None:
+    assert _state(css, BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".wrap{opacity:0.2}.in{opacity:0.2}", UNSURE),
+        (".wrap{opacity:0.5}.in{opacity:0.5}", SHOWN),
+        (".wrap{color:#000}.wrap:hover{color:#fefefe}", UNSURE),
+        (".wrap{color:#000}.x:hover{color:#fefefe}", SHOWN),
+        (".wrap{background-image:url(x.png)}.in{color:#fff}", SHOWN),
+    ],
+)
+def test_faint_text_through_its_ancestors(css: str, state: int) -> None:
+    assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{color:#fff;background-image:linear-gradient(transparent,transparent)}", UNSURE),
+        (".in{color:#fff;background-image:url(data:,)}", UNSURE),
+        (".in{color:#fff;background-image:url('')}", UNSURE),
+        (".in{color:#fff;background:linear-gradient(#000,#000) 0 0/0 0 no-repeat}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(#000,#000);background-size:0}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(#000,#fff)}", UNSURE),
+        (".in{color:#fff;background-image:radial-gradient(circle,#fefefe 0,#fff 90%)}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(currentcolor,currentcolor)}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(rgb(from red r g b),#000)}", UNSURE),
+        (
+            ".in{color:#fff;background-image:"
+            "-webkit-gradient(linear,left top,left bottom,from(#fff),to(#fff))}",
+            UNSURE,
+        ),
+        (".wrap{background:linear-gradient(#fff,#fff)}.in{color:#fff}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(#000,#333)}", SHOWN),
+        (".in{color:#fff;background:linear-gradient(to right,#1e3c72 0%,#2a5298 100%)}", SHOWN),
+        (
+            ".in{color:#fff;background:linear-gradient(#0008,#0008),url(hero.jpg) center/cover}",
+            SHOWN,
+        ),
+        (".in{color:#fff;background:url(hero.jpg) center/cover}", SHOWN),
+        (".in{color:#fff;background-image:image-set('x.png' 1x)}", SHOWN),
+        (".in{background:linear-gradient(#fff,#eee)}", SHOWN),
+        (".wrap{background:#000}.in{color:#fff;background-image:url(data:,)}", SHOWN),
+    ],
+)
+def test_background_images_the_text_sits_on(css: str, state: int) -> None:
+    assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("attrs", "state"),
+    [
+        ({}, SHOWN),
+        ({"font-size": "0"}, UNSURE),
+        ({"font-size": "12"}, SHOWN),
+        ({"transform": "scale(0)"}, UNSURE),
+        ({"transform": "translate(10 20) rotate(30 5 5)"}, SHOWN),
+        ({"transform": "translate(-20000, 0)"}, UNSURE),
+        ({"clip-path": "url(#c)"}, UNSURE),
+        ({"mask": "url(#m)"}, UNSURE),
+        ({"filter": "url(#f)"}, UNSURE),
+        ({"fill": "white"}, UNSURE),
+        ({"fill": "#333"}, SHOWN),
+        ({"fill": "url(#g)"}, UNSURE),
+        ({"fill": "currentColor", "color": "white"}, UNSURE),
+        ({"opacity": "0"}, UNSURE),
+    ],
+)
+def test_svg_presentation_attributes_read_like_css(attrs: dict[str, str], state: int) -> None:
+    svg: Spec = ("svg", {"width": "300", "height": "40"})
+    parent: Element | None = None
+    style: Computed = ROOT
+    sheets = _sheets("")
+    for tag, given, namespace in (
+        ("HTML", {}, "html"),
+        ("BODY", {}, "html"),
+        (*svg, "svg"),
+        ("text", {"x": "0", "y": "20", **attrs}, "svg"),
+    ):
+        element = Element(tag, given, parent, namespace=namespace)
+        style = sheets.style(element, style)
+        parent = element
+
+    assert style.text == state
+
+
+@pytest.mark.parametrize(
+    ("style", "state"),
+    [
+        ("opacity:1;opacity:0", UNSURE),
+        ("opacity:0;opacity:1", SHOWN),
+        ("margin:var(--m);margin-left:0", SHOWN),
+        ("margin-left:0;margin:var(--m)", UNSURE),
+    ],
+)
+def test_the_last_inline_declaration_wins(style: str, state: int) -> None:
+    assert _state(":root{--m:0 0 0 -9999px}", ("SPAN", {"style": style})) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
         (".wrap{opacity:0}", UNSURE),
         (".wrap{font-size:0}", UNSURE),
         (".wrap{font-size:0}.in{font-size:16px}", SHOWN),
@@ -291,7 +586,16 @@ def test_styles_that_may_hide_text_leave_it_unsure(css: str, state: int) -> None
         (".wrap{height:0;overflow:hidden}", UNSURE),
         (".wrap{visibility:hidden}", HIDDEN),
         (".wrap{visibility:hidden}.in{visibility:visible}", SHOWN),
-        (".wrap{visibility:hidden}.in{visibility:var(--v)}", UNSURE),
+        (".wrap{visibility:hidden}.in{visibility:var(--v)}", HIDDEN),
+        (".wrap{visibility:hidden}.wrap:hover{--v:visible}.in{visibility:var(--v,hidden)}", UNSURE),
+        (".wrap{--o:0}.in{opacity:var(--o)}", UNSURE),
+        (
+            "@property --o{syntax:'<number>';inherits:false;initial-value:1}"
+            ".wrap{--o:0}.in{opacity:var(--o)}",
+            SHOWN,
+        ),
+        (".wrap{--o:0}.in{--o:initial;opacity:var(--o, 1)}", SHOWN),
+        (".wrap{--o:0}.in{--o:inherit;opacity:var(--o, 1)}", UNSURE),
         (".wrap:hover{visibility:hidden}", UNSURE),
         (".wrap{visibility:hidden}.wrap:hover{visibility:visible}", UNSURE),
         (".wrap{display:none}.wrap:hover{display:block}", UNSURE),
@@ -339,6 +643,46 @@ def test_combinators_and_nesting(css: str, state: int) -> None:
     )
 
     assert _state(css, *price) == state
+
+
+def _deep(sheets: StyleSheets, depth: int, top: str) -> int:
+    specs: list[Spec] = [(top, {})] + [("DIV", {"class": "a"})] * depth + [("SPAN", {})]
+    return _state_in(sheets, *specs)
+
+
+@pytest.mark.parametrize(
+    ("css", "top", "state"),
+    [
+        ("section div div div div span{display:none}", "SECTION", HIDDEN),
+        ("section div div div div span{display:none}", "MAIN", SHOWN),
+        ("section > div div div > div span{display:none}", "SECTION", HIDDEN),
+        ("main > div div span{display:none}", "SECTION", SHOWN),
+        ("section div:hover div span{display:none}", "SECTION", UNSURE),
+        ("section div:hover div span{display:none}", "MAIN", SHOWN),
+    ],
+)
+def test_descendant_chains_on_a_deep_tree(css: str, top: str, state: int) -> None:
+    assert _deep(_sheets(css), 12, top) == state
+
+
+def test_a_match_past_its_step_budget_is_unsure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(matching, "MAX_MATCH_STEPS", 5)
+
+    assert _deep(_sheets("section div div div span{display:none}"), 20, "SECTION") == UNSURE
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("top", ["SECTION", "MAIN"])
+def test_descendant_chains_match_a_deep_tree_within_budget(top: str) -> None:
+    chain = " ".join(["div"] * 12)
+    sheets = _sheets(f"section {chain}{{display:none}} div > section {chain} span{{opacity:0}}")
+    start = time.perf_counter()
+
+    state = _deep(sheets, 1000, top)
+
+    elapsed = time.perf_counter() - start
+    assert elapsed < 2.0, f"took {elapsed:.2f}s"
+    assert state == (HIDDEN if top == "SECTION" else SHOWN)
 
 
 def test_nested_ampersand_joins_the_parent_compound() -> None:
@@ -546,7 +890,8 @@ def test_host_rules_reach_into_the_shadow_tree() -> None:
         ("", VIEWPORT, True),
         ("(min-width: 10px)", None, None),
         ("(orientation: portrait)", None, None),
-        ("(min-width: calc(10px))", VIEWPORT, None),
+        ("(min-width: calc(10px))", VIEWPORT, True),
+        ("(min-width: calc(10px + 1%))", VIEWPORT, None),
         ("(min-resolution: 2dppx)", VIEWPORT, None),
         ("not (min-resolution: 2dppx)", VIEWPORT, None),
         ("print and (min-resolution: 2dppx)", VIEWPORT, False),
@@ -587,3 +932,39 @@ def test_a_stylesheet_over_its_cap_leaves_the_scope_unknown() -> None:
 
     assert sheets.unknown
     assert _state_in(sheets, ("P", {"class": "x"})) == SHOWN
+
+
+@pytest.mark.parametrize(
+    ("text", "rgba"),
+    [
+        ("snow", (255, 250, 250, 1.0)),
+        ("#abc", (170, 187, 204, 1.0)),
+        ("rgb(10 20 30 / 50%)", (10, 20, 30, 0.5)),
+        ("rgba(0,0,0,0)", (0, 0, 0, 0.0)),
+        ("hsl(0 0% 100%)", (255, 255, 255, 1.0)),
+        ("hsla(120, 100%, 25%, .5)", (0, 128, 0, 0.5)),
+        ("hwb(0 100% 0%)", (255, 255, 255, 1.0)),
+        ("oklch(1 0 0)", (255, 255, 255, 1.0)),
+        ("oklab(0 0 0 / 0.2)", (0, 0, 0, 0.2)),
+        ("lab(100 0 0)", (255, 255, 255, 1.0)),
+        ("lch(0% 0 0)", (0, 0, 0, 1.0)),
+        ("color(srgb 1 1 1)", (255, 255, 255, 1.0)),
+        ("color-mix(in srgb, white 50%, black)", (128, 128, 128, 1.0)),
+        ("color-mix(in oklab, black 50%, transparent)", (0, 0, 0, 0.5)),
+        ("light-dark(white, black)", (255, 255, 255, 1.0)),
+        ("canvastext", (0, 0, 0, 1.0)),
+        ("currentcolor", (1, 2, 3, 1.0)),
+        ("rgb(from red r g b)", None),
+        ("color(rec2020 1 1 1)", None),
+        ("mystery", None),
+    ],
+)
+def test_colours(text: str, rgba: tuple[float, float, float, float] | None) -> None:
+    found = parse_color(text, (1, 2, 3, 1.0))
+
+    if rgba is None:
+        assert found is None
+    else:
+        assert found is not None
+        assert all(abs(a - b) <= 1 for a, b in zip(found[:3], rgba[:3], strict=True))
+        assert found[3] == pytest.approx(rgba[3])

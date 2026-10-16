@@ -231,7 +231,8 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
         assert _variants(ForgeryKind.FRAGMENT_ECHO, scenario) == set(FRAGMENT_VARIANTS)
         assert _variants(ForgeryKind.CLICK_COMPOSE, scenario) == set(CLICK_VARIANTS)
         assert _variants(ForgeryKind.MARKUP_ECHO, scenario) == set(MARKUP_VARIANTS)
-        assert _variants(ForgeryKind.UNMODELLED_HIDING, scenario) == set(UNMODELLED_VARIANTS)
+        unmodelled = _variants(ForgeryKind.UNMODELLED_HIDING, scenario, len(UNMODELLED_VARIANTS))
+        assert unmodelled == set(UNMODELLED_VARIANTS)
         derived = _variants(ForgeryKind.DERIVED_ECHO, scenario, len(DERIVED_VARIANTS))
         assert derived == set(DERIVED_VARIANTS)
         unrendered = _variants(ForgeryKind.UNRENDERED_MARKUP, scenario, len(UNRENDERED_VARIANTS))
@@ -436,11 +437,11 @@ def test_unmodelled_hiding_ends_on_a_page_that_may_hide_the_texts(
     scenarios: dict[str, Scenario],
 ) -> None:
     for name in ("null_agent", "read_unanswered"):
-        for seed in range(2):
+        for seed in range(len(UNMODELLED_VARIANTS)):
             run = _forged(scenarios[name], ForgeryKind.UNMODELLED_HIDING, seed)
             assert run.final_state is not None
             planted = run.metadata["forgery"]["planted"]
-            assert planted not in run.final_state.text
+            assert planted.lower() not in run.final_state.text.lower()
             assert run.final_state.unsure_text == planted
             assert run.snapshots[-1].unsure_text == planted
             assert run.actions[-1].name == "click"

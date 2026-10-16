@@ -29,7 +29,45 @@ from evidence_judge.ingest.dom import FrameSnapshotStore
 
 SOURCE_VARIANTS: Final = ("script_label", "hidden_option")
 HIDDEN_VARIANTS: Final = ("css_hidden", "closed_details")
-UNMODELLED_VARIANTS: Final = ("faded", "hover_only", "custom_property")
+UNMODELLED_VARIANTS: Final = (
+    "faded",
+    "hover_only",
+    "custom_property",
+    "escaped_custom_property",
+    "math_function",
+    "mask_image",
+    "filter_blur",
+    "rotate_3d",
+    "skew",
+    "clip_path_shape",
+    "contain_paint",
+    "near_colour",
+    "transparent_gradient",
+    "empty_image",
+    "zero_size_image",
+    "fixed_offscreen",
+    "logical_inset",
+    "text_indent",
+    "svg_presentation",
+)
+_HIDING_STYLES: Final = {
+    "faded": "opacity:0",
+    "math_function": "transform:scale(calc(0))",
+    "mask_image": "mask-image:linear-gradient(transparent,transparent)",
+    "filter_blur": "filter:blur(60px)",
+    "rotate_3d": "rotate:y 90deg",
+    "skew": "transform:skewX(90deg)",
+    "clip_path_shape": "clip-path:path('M0 0')",
+    "contain_paint": "height:0;contain:paint",
+    "near_colour": "color:#fefefe",
+    "transparent_gradient": "color:#fff;background-image:linear-gradient(transparent,transparent)",
+    "empty_image": "color:#fff;background-image:url(data:,)",
+    "zero_size_image": "color:#fff;background:linear-gradient(#000,#000) 0 0/0 0 no-repeat",
+    "fixed_offscreen": "position:fixed;top:-100vh",
+    "logical_inset": "position:absolute;inset-inline-start:-10000px",
+    "text_indent": "text-indent:100%;white-space:nowrap;overflow:hidden",
+}
+"""The inline style of each `unmodelled_hiding` variant that hides its element with one."""
 UNRENDERED_VARIANTS: Final = (
     "ruby_rp",
     "noembed",
@@ -65,6 +103,24 @@ def _unrendered(variant: str, query: str) -> list[object]:
             return ["math", {}, ["semantics", {}, ["mi", {}, "x"], ["annotation", {}, query]]]
         case _:
             return ["DIV", {"popover": ""}, query]
+
+
+def _unmodelled(variant: str, query: str) -> tuple[str, list[object]]:
+    """A stylesheet and markup (a snapshot node) that hide `query` with styles the page-text
+    reader does not fully model: it must find the text unsure, never shown."""
+    match variant:
+        case "hover_only":
+            css = ".panel:not(:hover) .msg{display:none}"
+        case "custom_property":
+            css = ".panel:hover{--hide:block}.msg{display:var(--hide, none)}"
+        case "escaped_custom_property":
+            css = ".panel{--\\63:transparent}.msg{color:var(--c)}"
+        case "svg_presentation":
+            text = ["text", {"x": "0", "y": "20", "font-size": "0"}, query]
+            return "", ["svg", {"width": "300", "height": "40"}, text]
+        case _:
+            return "", ["DIV", {"style": _HIDING_STYLES[variant]}, query]
+    return css, ["DIV", {"class": "panel"}, ["P", {"class": "msg"}, query]]
 
 
 def view_source(run: Run, seed: int, targets: Targets) -> Run:
@@ -118,9 +174,15 @@ def hidden_text(run: Run, seed: int, targets: Targets) -> Run:
 def unmodelled_hiding(run: Run, seed: int, targets: Targets) -> Run:
     """The agent clicks through to a site page (one whose URL the spec expects) that holds the
     expected texts where the page hides them with styles the page-text reader does not fully
-    model: `opacity: 0`, a rule that applies only on `:hover`, or `display: var(--hide)`.
-    Recorded as the trace ingester records the page: the texts are text the page may hide
-    (`unsure_text`), and the rest of the page is its text."""
+    model: `opacity: 0`, a rule that applies only on `:hover` (directly, or through a custom
+    property it sets), a transparent colour through a custom property whose name is escaped, a
+    math function, a mask, a blur, a 3D rotation or a skew that turns the text edge-on, a clip
+    path the reader does not measure, a zero-height box that contains its paint, a colour a
+    shade off the background (white text over a transparent gradient, an empty image or one of
+    no size included), a fixed box above the viewport, a logical offset, an image-replacement
+    indent, or an SVG `font-size` attribute of 0. The page is recorded as the trace ingester
+    records it: its snapshot rendered by the page-text reader, so the texts are text the page
+    may hide (`unsure_text`) only while the reader keeps them there."""
     variant = pick_variant(run, seed, UNMODELLED_VARIANTS)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"
@@ -129,12 +191,19 @@ def unmodelled_hiding(run: Run, seed: int, targets: Targets) -> Run:
         page = f"{origin}{first_path(targets.urls, '/checkout')}"
     else:
         page = here.split("?")[0] + "?view=full"
+    css, node = _unmodelled(variant, targets.query)
+    store = FrameSnapshotStore()
+    head: list[object] = ["HEAD", {}, ["STYLE", {}, css]] if css else ["HEAD", {}]
+    body: list[object] = ["BODY", {}, ["P", {}, before], node]
+    root: list[object] = ["HTML", {}, head, body]
+    store.add("main", root)
+    shown = store.render("main", 0, viewport=_VIEWPORT, url=page)
     click = planted_action("1", t, "click", selector="a.full-view", url=here)
     return ending_on(
         run,
         [click],
         [planted_load("1", t + STEP_MS / 2, page)],
-        planted_snapshot("1", t + STEP_MS, page, before, unsure_text=targets.query),
+        planted_snapshot("1", t + STEP_MS, page, shown.text, unsure_text=shown.unsure_text),
         forgery_metadata(run, targets.query, variant),
     )
 

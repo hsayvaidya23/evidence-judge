@@ -7,7 +7,7 @@ from typing import Final
 
 from evidence_judge.ingest._json import as_int, as_list
 from evidence_judge.ingest.css import Sheet, StyleSheets, StylesheetSource, Viewport
-from evidence_judge.ingest.dom.model import RenderedPage
+from evidence_judge.ingest.dom.model import RenderedPage, SnapshotDecodeError
 from evidence_judge.ingest.dom.nodes import as_element, child_nodes
 from evidence_judge.ingest.dom.render import Renderer
 
@@ -48,8 +48,15 @@ class FrameSnapshotStore:
         url: str | None = None,
     ) -> RenderedPage:
         """Page text of snapshot `index` of `frame_id`, at `url`; `viewport` evaluates
-        ``@media`` rules and `stylesheets` supplies linked and imported stylesheets."""
-        return Renderer(self, frame_id, viewport, stylesheets, url).render(index)
+        ``@media`` rules and `stylesheets` supplies linked and imported stylesheets. A snapshot
+        whose styles the reader fails on (input built to exhaust it) is read without them: all
+        its text unsure, and the page opaque."""
+        try:
+            return Renderer(self, frame_id, viewport, stylesheets, url).render(index)
+        except SnapshotDecodeError:
+            raise
+        except (RecursionError, ArithmeticError, ValueError):
+            return Renderer(self, frame_id, viewport, None, url).unstyled(index)
 
     def forget_styles(self) -> None:
         """Drop parsed stylesheets: the next renders read another context's stylesheets."""

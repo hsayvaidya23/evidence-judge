@@ -602,15 +602,34 @@ piece of text three ways:
   styles, `@media` rules read at the recorded viewport and simple `@supports` tests. Each shadow
   root is its own scope: its stylesheets style only its tree, and the page's do not reach in.
 - **Text the page may hide**, when visibility depends on something the judge does not fully
-  model: an `@media` query it cannot read (resolution, `calc()`), an `@supports` test it does not
-  know the answer to, `@container` or `@scope`; a selector it cannot evaluate (`:hover`,
-  `:focus`, `:checked`, `:has()`, or one it cannot parse); `var()` in `display` or
-  `visibility`; `opacity` near 0, a tiny `font-size`, a transparent text colour or one equal to
-  the background, `clip` or `clip-path` that cut it away, a `transform` that scales it to
-  nothing, far off-screen positions, margins or `text-indent`, a zero-size box that clips its
-  overflow; a hiding utility class (`hidden`, `d-none`, `sr-only`, `visually-hidden`,
+  model: an `@media` query it cannot read (resolution, a `calc()` with a percentage), an
+  `@supports` test it does not know the answer to, `@container` or `@scope`; a selector it
+  cannot evaluate (`:hover`, `:focus`, `:checked`, `:has()`, or one it cannot parse); a value
+  it cannot read in any property that can hide text (an unknown function, unit or keyword,
+  `attr()`, or a `var()` whose custom property it cannot tell, such as one a `:hover` rule may
+  set or one an `@property` rule outside the document registers); `opacity` near 0 (its own
+  and its ancestors' multiplied), a tiny `font-size`, a text colour, text fill or SVG `fill`
+  with a contrast ratio below 1.2 against the background (against any stop of a background
+  gradient; an empty or zero-size image paints nothing, and a gradient whose colours the judge
+  cannot tell counts as unreadable), any `mask`, a `filter` other than a
+  slight or luminance-keeping one, a motion path, `clip` or a `clip-path` that cuts most of a
+  line of text or the viewport away (or a `path()`, `url()` or other shape the judge does not
+  measure), a `transform`, `rotate` or `scale` that squashes, stretches or turns the text
+  edge-on (or uses a function the judge does not know), far off-screen positions (logical
+  offsets too, and a fixed box outside the viewport), margins or `text-indent`, a zero-size
+  box that clips, scrolls or contains the paint of its overflow; SVG presentation attributes
+  (`font-size`, `transform`, `clip-path`, `mask`, `filter`, `fill`, `opacity`, ...) count like
+  the properties they name; a hiding utility class (`hidden`, `d-none`, `sr-only`, `visually-hidden`,
   `invisible`) that no recorded stylesheet defines; and all text of a page whose stylesheets
-  the trace does not fully hold.
+  the trace does not fully hold. The judge substitutes `var()` from the custom properties the
+  cascade gives each element (with fallbacks, cycles, and `@property` initial values and
+  inheritance), reads `env()` safe-area insets as 0, and evaluates `calc()`, `min()`, `max()`,
+  `clamp()` and `abs()`; a percentage offset counts as a share of the viewport. It does not
+  model a box painted over the text, such as a full-page opaque overlay with a higher
+  `z-index`: that needs layout, so such text still reads as shown. Nor does it see images: a
+  background `url()` or `image-set()` is taken to give the text contrast, so white text over a
+  white picture reads as shown. Values, `var()` chains, selectors and blocks nested more than 32
+  deep count as unreadable.
 
 Text the page may hide never meets a `page_text` predicate, and it keeps its absence from
 contradicting one: when the phrase appears only there, the result is `no_evidence` ("text the

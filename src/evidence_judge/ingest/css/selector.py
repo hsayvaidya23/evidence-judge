@@ -7,7 +7,8 @@ from dataclasses import dataclass, field, replace
 from typing import Final
 
 from evidence_judge.ingest.css.model import Compound, Pseudo, Selector, words
-from evidence_judge.ingest.css.syntax import closing_paren, split_commas, unescape
+from evidence_judge.ingest.css.syntax import split_commas, unescape
+from evidence_judge.ingest.css.values import MAX_NESTING, closing_paren, too_deep
 
 _VALID, UNKNOWN, INVALID = 0, 1, 2
 
@@ -236,6 +237,12 @@ def _pseudo_class(name: str, args: str | None, found: _Builder) -> int:
             found.pseudos.append(Pseudo("maybe"))
             return UNKNOWN
         return _VALID
+    if too_deep(args, MAX_NESTING - 1):
+        if name == "host":
+            found.host, found.host_maybe = True, True
+            return _VALID
+        found.pseudos.append(Pseudo("maybe"))
+        return UNKNOWN
     if name in ("not", "is", "where", "matches", "-webkit-any"):
         forgiving = name != "not"
         selectors: list[Selector] = []
