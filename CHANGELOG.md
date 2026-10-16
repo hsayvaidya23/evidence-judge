@@ -131,6 +131,8 @@ The first release.
 
 ### Fixed
 
+- `bench --online` and `bench --with-llm-baseline` without `ANTHROPIC_API_KEY` now exit `4` and
+  name the missing key, like `judge --llm anthropic`, instead of exiting `3`.
 - `judge --llm anthropic` without `ANTHROPIC_API_KEY` now exits `4` and names the missing key,
   like the CLI backends do when their CLI is missing, instead of judging offline and exiting
   `0`. Without `--llm`, a missing key still judges offline.
@@ -533,5 +535,11 @@ The first release.
   extraction and any LLM call when `EVJ_REDACT` is on, as SECURITY.md says. The CLI, MCP server
   and Inspect scorer go through the same `Judge.redact`, so redaction happens once and the same
   way everywhere; `JudgeOptions(redact=False)` marks inputs that are already redacted.
+- Free-text redaction now covers a secret written after its name with no `:` or `=`
+  (`password hunter2`, `the api key is AB12cd34ef`, also `passwd`, `pwd`, `passcode`,
+  `passphrase`, `token`, `secret`) when the value has a digit, a symbol or mixed case, so prose
+  such as "the password field was empty" stays intact; `Cookie:` and `Set-Cookie:` lines inside
+  the answer, reasoning, page text or console messages, with the same tokens as the headers;
+  and mixed-case credentials after an explicit `Authorization` scheme (`Basic Zm9vYmFy`).
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main

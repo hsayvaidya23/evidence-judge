@@ -53,9 +53,9 @@ def test_quiet_prints_nothing() -> None:
     assert result.output == ""
 
 
-def test_baseline_without_an_llm_is_a_usage_error() -> None:
+def test_baseline_without_an_llm_exits_internal() -> None:
     result = runner.invoke(app, ["bench", str(RUNS), "--with-llm-baseline", "-q"])
-    assert result.exit_code == ExitCode.USAGE
+    assert result.exit_code == ExitCode.INTERNAL
     assert "ANTHROPIC_API_KEY" in result.output
 
 

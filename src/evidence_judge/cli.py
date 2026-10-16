@@ -527,8 +527,9 @@ def _bench_llm(settings: Settings, calls: int) -> LLMClient | None:
         raise CliError(f"could not initialise the LLM client: {e}", ExitCode.INTERNAL) from e
     if llm is None:
         raise CliError(
-            "--with-llm-baseline and --online need an LLM; set ANTHROPIC_API_KEY or pass --llm",
-            ExitCode.USAGE,
+            "--with-llm-baseline and --online need an LLM: the anthropic backend needs "
+            "ANTHROPIC_API_KEY, which is not set (set it, or pass --llm for a CLI backend)",
+            ExitCode.INTERNAL,
         )
     return llm
 

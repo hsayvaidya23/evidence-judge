@@ -169,3 +169,124 @@ def test_redaction_is_idempotent(r: Redactor) -> None:
     )
     once = red(r, text)
     assert red(r, once) == once
+
+
+@pytest.mark.parametrize(
+    ("text", "secret"),
+    [
+        ("Logged in with password hunter2 and it worked", "hunter2"),
+        ("Password hunter2.", "hunter2"),
+        ("the password is hunter2", "hunter2"),
+        ("passwd s3cr3t-pa55", "s3cr3t-pa55"),
+        ("pwd Tr0ub4dor", "Tr0ub4dor"),
+        ("passcode 482913", "482913"),
+        ("token 9f8e7d6c5b4a", "9f8e7d6c5b4a"),
+        ("api key AB12cd34ef", "AB12cd34ef"),
+        ("API_KEY was ab12cd34ef", "ab12cd34ef"),
+        ("client secret xYzAbCdEf", "xYzAbCdEf"),
+        ("my passphrase correcthorsebatterystaple", "correcthorsebatterystaple"),
+    ],
+)
+def test_labelled_secrets_without_a_separator(r: Redactor, text: str, secret: str) -> None:
+    out = red(r, text)
+    assert secret not in out
+    assert "[REDACTED:secret_param:" in out
+
+
+def test_a_labelled_secret_matches_the_same_secret_in_a_form(r: Redactor) -> None:
+    form = red(r, "password=hunter2")
+    assert red(r, "used password hunter2") == "used " + form.replace("=", " ", 1)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "the password field was empty",
+        "reset your password",
+        "Forgot your password? Reset password here.",
+        "Use a password manager; the token expired and the secret ingredient is love.",
+        "The token EXPIRED at noon.",
+        "This page is password-protected.",
+        "The secret (hidden) menu",
+        "password 1234",
+        "Ran pwd /home/agent/repo and pwd ~/work",
+        "Paste the token https://docs.test/tokens into the field",
+        "Password\n••••••••",
+        "Set-Cookie: banner dismissed",
+        "Cookie: accepted",
+        "Cookie preferences: necessary only",
+        "Authorization: Basic required",
+    ],
+)
+def test_prose_around_secret_words_is_left_alone(r: Redactor, text: str) -> None:
+    assert red(r, text) == text
+
+
+@pytest.mark.parametrize(
+    ("text", "secrets"),
+    [
+        ("The response had Cookie: sid=abc123; theme=dark, then", ("abc123", "dark")),
+        ("console: Set-Cookie: sid=abc123; Path=/; HttpOnly", ("abc123",)),
+        ('{"set-cookie": "sid=abc123; Path=/"}', ("abc123",)),
+        ("cookie2: token=zz99", ("zz99",)),
+    ],
+)
+def test_cookie_lines_in_free_text(r: Redactor, text: str, secrets: tuple[str, ...]) -> None:
+    out = red(r, text)
+    assert "[REDACTED:cookie:" in out
+    for secret in secrets:
+        assert secret not in out
+
+
+def test_cookie_lines_in_text_match_the_redacted_headers(r: Redactor) -> None:
+    headers = r.redact_headers(
+        {"Cookie": "sid=abc123; theme=dark", "Set-Cookie": "sid=abc123; Path=/; HttpOnly"}
+    )[0]
+    assert red(r, "Cookie: sid=abc123; theme=dark") == f"Cookie: {headers['Cookie']}"
+    set_cookie = red(r, "Set-Cookie: sid=abc123; Path=/; HttpOnly")
+    assert set_cookie == f"Set-Cookie: {headers['Set-Cookie']}"
+    assert set_cookie.endswith("; Path=/; HttpOnly")
+
+
+def test_authorization_with_a_scheme_redacts_mixed_case_credentials(r: Redactor) -> None:
+    out = red(r, "Authorization: Basic Zm9vYmFy")
+    assert "Zm9vYmFy" not in out
+    assert out.startswith("Authorization: Basic [REDACTED:auth:")
+
+
+def test_new_free_text_rules_cover_every_run_text(r: Redactor) -> None:
+    run = Run(
+        run_id="r",
+        source="test",
+        agent_answer="Signed in with password hunter2; server sent Cookie: sid=s3ss10n",
+        agent_reasoning=["The api key is AB12cd34ef"],
+        snapshots=[
+            PageSnapshot(id="snap#1", ts=0, url="https://shop.test/", text="token 9f8e7d6c5b4a")
+        ],
+        console=[ConsoleEvent(id="con#1", ts=0, level="log", text="Set-Cookie: auth=t0k3n42")],
+        captured={Channel.SNAPSHOTS, Channel.CONSOLE},
+    )
+
+    dumped = r.redact_run(run)[0].model_dump_json()
+
+    for secret in ("hunter2", "s3ss10n", "AB12cd34ef", "9f8e7d6c5b4a", "t0k3n42"):
+        assert secret not in dumped
+
+
+def test_new_free_text_rules_are_idempotent(r: Redactor) -> None:
+    once = red(r, "password hunter2, Cookie: sid=abc123; x=1 and token 9f8e7d6c5b4a")
+    assert red(r, once) == once
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "<INPUT TYPE=PASSWORD VALUE=x>",
+        '<input type=password name=pw value="">',
+        "token type=bearer",
+    ],
+)
+def test_attribute_syntax_after_a_secret_word_is_not_a_labelled_secret(
+    r: Redactor, text: str
+) -> None:
+    assert "[REDACTED:secret_param:" not in red(r, text)
