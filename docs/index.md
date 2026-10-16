@@ -192,7 +192,7 @@ The `anthropic` extra enables LLM claim extraction; without it, or with `--offli
   <img src="assets/benchmark.svg" alt="Benchmark chart: false PASS rate on forged runs" loading="lazy" onerror="this.parentElement.classList.add('is-missing')">
 </figure>
 
-Offline, on three local demo sites (a shop, a clinic's booking form and an admin console): fifteen recorded runs, judged against a purchase, a booking, a user change, a stock check and a balance lookup; the [full method, tables and limitations](benchmark.md) are on the benchmark page. Reproduce with `evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3`.
+Offline, on three local demo sites (a shop, a clinic's booking form and an admin console): seventeen scenarios from fifteen recordings (two shop recordings are judged again against the stock check), judged against a purchase, a booking, a user change, a stock check and a balance lookup; the [full method, tables and limitations](benchmark.md) are on the benchmark page. Reproduce with `evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3`.
 
 ## How a lie gets caught { .ej-section-title }
 

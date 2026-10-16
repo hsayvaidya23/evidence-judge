@@ -527,8 +527,10 @@ with up to 41 kinds x 3 seeds = 1326 forged runs (1293 attacks and 33 style-only
 ### Limitations
 
 - Three small demo sites and five tasks (a purchase, a booking and a user change; a stock check
-  and a balance lookup), from fifteen scripted recordings. Intervals are still wide (n = 24 to
-  33 per kind), and real sites have far more pages, scripts and third parties than these.
+  and a balance lookup): seventeen scenarios from fifteen scripted recordings, since the two
+  read-only shop scenarios judge copies of the `honest_failure` and `null_agent` recordings.
+  Intervals are still wide (n = 24 to 33 per kind), and real sites have far more pages,
+  scripts and third parties than these.
 - The forgeries are deterministic edits of the recordings, appended or prepended to what the
   agent really did, not recorded live; the pages they add (a search echo, a mirror, a failure
   page) are written to match the demo shop and keep its paths (`/search`, `/orders/...`) on the

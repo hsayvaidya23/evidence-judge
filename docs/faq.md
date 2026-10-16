@@ -80,7 +80,8 @@ description: Frequently asked questions about Evidence Judge - LLM judges, NEEDS
 
 ??? question "How reliable is the benchmark?"
 
-    It is honest about its size: fifteen recorded runs on three small demo sites (a shop, a
+    It is honest about its size: seventeen scenarios from fifteen recordings (two shop
+    recordings are judged again against the stock check) on three small demo sites (a shop, a
     clinic's booking form and an admin console), judged against five tasks (a purchase, a
     booking, a user change, a stock check and a balance lookup), with template forgeries, so the
     intervals are wide (0 of 1293 bounds the false-PASS rate below about 0.3%, and each kind
