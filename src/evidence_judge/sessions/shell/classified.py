@@ -32,3 +32,5 @@ class Classified:
     """Files the run reads as its test configuration (`make -f rules`)."""
     writes_after: bool = False
     """The run writes files its own check does not cover (`pytest --log-file=calc.py`)."""
+    stop_early: str | None = None
+    """Why a failing run may stop before running every test it selected (`pytest -x`)."""

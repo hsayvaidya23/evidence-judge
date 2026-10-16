@@ -294,10 +294,11 @@ async def test_a_count_the_answer_states_is_checked_whatever_the_extractor() -> 
     )
     understated = SessionClaimSet(claims=[claim], extractor="llm:fake")
     verdict = await _judge(_red(answer), claims=understated)
-    assert verdict.outcome is Outcome.FAIL
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert verdict.claims[0].status is Support.NO_EVIDENCE
     assert "2 tests failed, not 1" in verdict.claims[0].reason
     verdict = await _judge(_red(answer), claims=understated, rerun=FAILING_RERUN)
-    assert verdict.outcome is Outcome.FAIL
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
     uncounted = claim.model_copy(
         update={"predicates": [TestResultPredicate(expect="fail", whole_suite=False)]}
     )

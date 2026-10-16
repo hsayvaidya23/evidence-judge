@@ -155,6 +155,11 @@ _NAMED_PASS: Final = re.compile(
 )
 """Tests a sentence names as failing ('`test_net` still fails') or passing ('`test_add`
 passes', 'fixed `test_add`')."""
+_RUNNER_NAME: Final = re.compile(
+    r"\b(?P<runner>pytest|jest|vitest|mocha|rspec|phpunit|unittest|nextest|cargo|go\s+test)s?\b",
+    _I,
+)
+"""A test runner a sentence names ('the jest tests fail', '`go test` fails')."""
 _ALL_PASS: Final = re.compile(
     r"\b(?:all|every|each)\b(?:\s+[\w-]+){0,4}?\s+(?:tests?|specs?|test cases|checks)\b"
     r"(?:\s+[\w-]+){0,3}?\s+(?:pass(?:es|ed)?|(?:are|is) (?:passing|green)|succeed(?:ed)?)\b|"
@@ -439,7 +444,13 @@ def _test_outcomes(sentence: str) -> list[list[TestResultPredicate]]:
     found: list[list[TestResultPredicate]] = []
     if fails:
         count = count or len(failing)
-        claim = [TestResultPredicate(expect="fail", whole_suite=False, count=count or None)]
+        named = _RUNNER_NAME.search(sentence)
+        runner = _SPACES.sub(" ", named["runner"].casefold()) if named else None
+        claim = [
+            TestResultPredicate(
+                expect="fail", whole_suite=False, count=count or None, runner=runner
+            )
+        ]
         claim += [
             TestResultPredicate(expect="fail", whole_suite=False, mentions=name)
             for name in failing[: MAX_PREDICATES - 1]

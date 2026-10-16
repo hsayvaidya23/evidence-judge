@@ -111,6 +111,11 @@ class CommandAnalysis(BaseModel):
         default_factory=list[str],
         description="Why a test run is a subset of the suite (empty for a whole-suite run)",
     )
+    stop_early: str | None = Field(
+        default=None,
+        description="Why a failing test run may have stopped before running every test it "
+        "selected (`pytest -x`, `jest --bail`, `go test -failfast`); None when it runs them all",
+    )
     collect_only: bool = False
     exit_masked_by: str | None = Field(
         default=None,

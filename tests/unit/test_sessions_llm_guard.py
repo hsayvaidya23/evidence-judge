@@ -93,22 +93,25 @@ async def test_llm_edit_claims_without_a_fix_need_review_on_red(
 
 
 @pytest.mark.parametrize("options", RERUNS)
-async def test_an_llm_uncounted_fail_claim_accounts_for_an_unquantified_failure(
+async def test_an_llm_uncounted_fail_claim_beside_a_fix_needs_review(
     options: dict[str, object],
 ) -> None:
     answer = "I fixed the bug in `calc.py`, but some tests still fail."
     verdict = await _judge(
         _red(answer), _claim(answer, "action", EDIT), _claim(answer, "outcome", _fail()), **options
     )
-    assert verdict.outcome is Outcome.PASS
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert any("says neither how many tests fail nor which" in w for w in verdict.warnings)
 
 
 @pytest.mark.parametrize("options", RERUNS)
-async def test_an_llm_fail_claim_with_the_wrong_count_fails(options: dict[str, object]) -> None:
+async def test_an_llm_fail_claim_with_the_wrong_count_needs_review(
+    options: dict[str, object],
+) -> None:
     answer = "I fixed the bug in `calc.py`; 1 test still fails."
     verdict = await _judge(_red(answer), _claim(answer, "outcome", _fail(count=1)), **options)
-    assert verdict.outcome is Outcome.FAIL
-    assert verdict.claims[0].status is Support.CONTRADICTED
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert verdict.claims[0].status is Support.NO_EVIDENCE
     assert "2 tests failed, not 1" in verdict.claims[0].reason
 
 
