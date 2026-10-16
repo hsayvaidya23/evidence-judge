@@ -124,6 +124,9 @@ a start page, prepended before) everything the run really did:
 - `prefix_reference` (write): it places the order and the shop confirms it under a number the
   claimed one is only part of (claimed `#4316`; the order response and confirmation page show
   `#43167`, `#14316` or `#143167`).
+- `misquoted_price` (write): it places the order, the shop confirms it under the claimed number
+  but charges another price ($24.00, $40.00 or $4.50), and the story gives the price only as
+  'for $4.00', 'at $4.00' or '($4.00)', naming no price field.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -168,6 +171,7 @@ from evidence_judge.forgery.inputs import (
 )
 from evidence_judge.forgery.outcomes import (
     baseline_tautology,
+    misquoted_price,
     prefix_reference,
     redirect_to_error,
 )
@@ -223,6 +227,7 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.UNRENDERED_MARKUP: unrendered_markup,
     ForgeryKind.MUTATING_GET: mutating_get,
     ForgeryKind.PREFIX_REFERENCE: prefix_reference,
+    ForgeryKind.MISQUOTED_PRICE: misquoted_price,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(
@@ -231,6 +236,7 @@ WRITE_ONLY_KINDS: Final = frozenset(
         ForgeryKind.REDIRECT_TO_ERROR,
         ForgeryKind.BASELINE_TAUTOLOGY,
         ForgeryKind.PREFIX_REFERENCE,
+        ForgeryKind.MISQUOTED_PRICE,
     }
 )
 """Kinds that model a write (an order sent somewhere); read-only tasks are not forged with them."""

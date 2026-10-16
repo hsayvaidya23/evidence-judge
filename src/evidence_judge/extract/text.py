@@ -196,5 +196,68 @@ def asserted(sentence: str, start: int) -> bool:
     return not is_intention(clause_prefix(sentence, start).translate(PUNCT_MAP))
 
 
+CURRENCY = re.escape(chr(0x24) + chr(0x20AC) + chr(0xA3) + chr(0x20B9))
+PRICE = re.compile(
+    rf"(?:[{CURRENCY}]|\b(?:USD|EUR|GBP|INR)\s?)\s?"
+    r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)",
+    re.I,
+)
+PRICE_BOUND = re.compile(
+    r"\b(?:limit|budget|under|below|max(?:imum)?|up\s+to|at\s+most|less\s+than|over|above|"
+    r"shipping|delivery|postage|tax(?:es)?|vat|fees?|tip)\b(?:\W+\w+){0,2}\W*$",
+    re.I,
+)
+"""'under $30', '(shipping $0.00)', 'limit $30.00': a bound or a surcharge, not the price."""
+_DIFFERENCE = re.compile(
+    r"\W{0,3}(?:under|below|over|above|less|more|off|cheaper|short|left|remaining|saved|back|"
+    r"budget|limit)\b",
+    re.I,
+)
+"""'$6 under the budget', '$5 off', '$3 left': a difference or a bound, not a price."""
+_PAID_LEAD = re.compile(r"\b(?:for|at|paid|spent|costing)\s+(?:only\s+|just\s+)?$", re.I)
+_PURCHASE = re.compile(
+    r"\b(?:bought|purchased|ordered|orders?|paid|spent|booked|reserved|rented|checked\s+out|"
+    r"placed|got)\b",
+    re.I,
+)
+_EXTRAS = re.compile(
+    r"\W{0,3}(?:including|incl\.?|plus|with|after|before|excluding|excl\.?)\s+(?:the\s+)?"
+    r"(?:tax(?:es)?|vat|shipping|delivery|postage|fees?|tip)\b",
+    re.I,
+)
+
+
+def stated_amounts(sentence: str) -> list[re.Match[str]]:
+    """The currency amounts `sentence` states as what something cost: not in a negated or
+    planned clause, not a bound or surcharge ('under $30', 'shipping $5.00', but not the $4.00
+    of 'under $30 for $4.00') and not a difference ('$6 under the budget', '$5 off')."""
+    return [
+        m
+        for m in PRICE.finditer(sentence)
+        if asserted(sentence, m.start())
+        and not _bounded(clause_before(sentence, m.start()))
+        and _DIFFERENCE.match(sentence, m.end()) is None
+    ]
+
+
+def _bounded(before: str) -> bool:
+    """Whether a bound or surcharge word leads up to the amount after `before`, with no other
+    amount in between ('under $30 for $4.00' bounds $30, not $4.00)."""
+    bound = PRICE_BOUND.search(before)
+    return bound is not None and PRICE.search(before, bound.start()) is None
+
+
+def paid_amount(sentence: str, amount: re.Match[str]) -> bool:
+    """Whether `amount` is what a purchase cost though no price word names it: 'bought it for
+    $24.00', 'ordered at $24.00', or an amount in brackets of its own ('the kettle ($24.00)').
+    One with extras added ('for $26.40 including tax') is not the price."""
+    if _EXTRAS.match(sentence, amount.end()):
+        return False
+    before, after = sentence[: amount.start()].rstrip(), sentence[amount.end() :].lstrip()
+    if before.endswith("(") and after.startswith(")"):
+        return True
+    return _PAID_LEAD.search(before + " ") is not None and _PURCHASE.search(sentence) is not None
+
+
 def is_claim_like(sentence: str) -> bool:
     return any(asserted(sentence, m.start()) for m in COMPLETION_VERBS.finditer(sentence))

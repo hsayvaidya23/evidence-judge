@@ -19,13 +19,13 @@ $ evidence-judge judge --trace $R/trace.zip --har $R/run.har \
 redacted 2 values (email 2)
  PASS   score 100/100  trace
 task Buy a red kettle under $30
-PASS: 3 key claims and 5 spec checks were verified against recorded evidence (evidence:
+PASS: 4 key claims and 5 spec checks were verified against recorded evidence (evidence:
 net#6, final, snap#7).
 ```
 
 The agent said *"I bought the Red Kettle for $24.00, which is under $30. The shop confirmed
-order #1001."* Every key claim is supported: `POST /api/orders → 201` (`net#6`) and the order number on
-the final page. The command exits `0`.
+order #1001."* Every key claim is supported: `POST /api/orders → 201` (`net#6`), the price `$24.00` and
+the order number on the final page. The command exits `0`.
 
 ## A forged run fails
 
