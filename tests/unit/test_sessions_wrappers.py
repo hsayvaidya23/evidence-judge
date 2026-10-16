@@ -15,7 +15,7 @@ from evidence_judge.sessions.predicates import BuildPredicate, SessionSpec, Test
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import analyse
 from evidence_judge.sessions.shell.wrappers import defined, echoed, resolve, trust
-from tests.unit.sessions_helpers import CWD, GREEN, RED, bash, edit, session, tool, write
+from tests.unit.sessions_helpers import CWD, GREEN, RED, SETTINGS, bash, edit, session, tool, write
 
 ONE_RED = "F\nFAILED tests/test_calc.py::test_add - assert -1 == 5\n1 failed in 0.01s"
 NAMED_RED = (
@@ -401,7 +401,7 @@ async def test_an_llm_count_claim_through_an_unseen_wrapper_is_not_trusted() -> 
     }
     llm.queue(SessionClaimExtraction, {"claims": [claim]})
     run = session(edit("calc.py"), bash("make test", ONE_RED, 2), answer=UNDERCOUNT)
-    verdict = await SessionJudge(llm).judge(run, SessionJudgeOptions())
+    verdict = await SessionJudge(SETTINGS, llm).judge(run, SessionJudgeOptions())
     assert verdict.outcome is Outcome.NEEDS_REVIEW
     assert verdict.claims[0].status is Support.NO_EVIDENCE
 
@@ -557,7 +557,9 @@ async def test_an_llm_whole_suite_claim_through_a_silent_wrapper(
         "predicates": [{"kind": "test_result"}],
     }
     llm.queue(SessionClaimExtraction, {"claims": [claim]})
-    verdict = await SessionJudge(llm).judge(session(*calls, answer=ALL_PASS), SessionJudgeOptions())
+    verdict = await SessionJudge(SETTINGS, llm).judge(
+        session(*calls, answer=ALL_PASS), SessionJudgeOptions()
+    )
     assert verdict.outcome is outcome, verdict.summary
     status = Support.SUPPORTED if outcome is Outcome.PASS else Support.NO_EVIDENCE
     assert verdict.claims[0].status is status

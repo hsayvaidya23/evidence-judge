@@ -44,7 +44,7 @@ from evidence_judge.sessions.ingest import load_session, locate
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
 from evidence_judge.sessions.models import SessionRun
 from evidence_judge.sessions.predicates import SessionClaimSet, SessionSpec
-from evidence_judge.sessions.redaction import redact_claims, redact_session, redact_spec
+from evidence_judge.sessions.redaction import redact_session
 from evidence_judge.sessions.report import print_session, summarize
 from evidence_judge.sessions.rerun import RerunResult, RerunSpec, RerunStatus, execute
 
@@ -272,28 +272,31 @@ def judge_command(
             else None
         )
         llm = None if offline else build_llm(settings)
-        if settings.redact and not no_redact:
-            redactor = load_redactor(settings, persistent=llm is not None)
-            run, report = redact_session(redactor, run)
-            session_spec = redact_spec(redactor, session_spec) if session_spec else None
-            claim_set = redact_claims(redactor, claim_set) if claim_set else None
-            if not quiet:
+        if no_redact:
+            settings = settings.model_copy(update={"redact": False})
+        redactor = load_redactor(settings, persistent=llm is not None) if settings.redact else None
+        session_judge = SessionJudge(settings, llm, redactor=redactor)
+        run, options, report = session_judge.redact(
+            run,
+            SessionJudgeOptions(
+                offline=offline or llm is None,
+                spec=session_spec,
+                claims=claim_set,
+                require_tamper_evidence=require_tamper_evidence,
+                run_id=run_id,
+                trusted_log=trusted_log,
+                rerun=rerun_result,
+                require_rerun=require_rerun,
+            ),
+        )
+        if not quiet:
+            if report is None:
+                err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
+            else:
                 err.print(Text(report.describe(), style="dim"))
-        elif not quiet:
-            err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
         if llm is None and not offline and not quiet:
             err.print(Text("no LLM configured; judging offline", style="yellow"))
-        options = SessionJudgeOptions(
-            offline=offline or llm is None,
-            spec=session_spec,
-            claims=claim_set,
-            require_tamper_evidence=require_tamper_evidence,
-            run_id=run_id,
-            trusted_log=trusted_log,
-            rerun=rerun_result,
-            require_rerun=require_rerun,
-        )
-        verdict = _run(SessionJudge(llm, max_cost_usd=settings.max_cost_usd), run, options)
+        verdict = _run(session_judge, run, options)
         if out:
             write_output(out, lambda p: write_json(verdict, p))
     except CliError as e:

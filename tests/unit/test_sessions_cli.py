@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 import typer.main
@@ -10,6 +11,7 @@ from typer.core import TyperGroup
 from typer.testing import CliRunner
 
 import evidence_judge.llm.factory
+import evidence_judge.sessions.judge
 from evidence_judge.cli import app
 from evidence_judge.config import Settings
 from evidence_judge.hooks.record import append
@@ -263,6 +265,26 @@ def test_no_redact_and_no_llm_warnings() -> None:
     assert result.exit_code == 0
     assert "redaction disabled" in result.output
     assert "no LLM configured" in result.output
+
+
+def test_judge_redacts_once_through_the_session_judge(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    secret = "sk-ant-api03-" + "C" * 40
+    calls: list[object] = []
+    original = evidence_judge.sessions.judge.redact_session
+
+    def counted(*args: Any) -> Any:
+        calls.append(args)
+        return original(*args)
+
+    monkeypatch.setattr("evidence_judge.sessions.judge.redact_session", counted)
+    out = tmp_path / "verdict.json"
+    args = ["--claude-code", str(SUCCESS), "--answer", f"All tests pass with {secret}."]
+    result = runner.invoke(app, ["session", "judge", "--offline", *args, "--out", str(out)])
+    assert result.exit_code in (0, 2), result.output
+    assert len(calls) == 1
+    assert secret not in result.output and secret not in out.read_text(encoding="utf-8")
 
 
 def test_judge_with_an_llm(monkeypatch: pytest.MonkeyPatch) -> None:

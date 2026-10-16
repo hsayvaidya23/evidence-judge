@@ -6,9 +6,11 @@ and integrations apply unchanged.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 
 from evidence_judge._version import __version__
+from evidence_judge.config import Settings
 from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.verdict import (
     Citation,
@@ -28,6 +30,7 @@ from evidence_judge.core.verdict import (
 )
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget, run_budget
+from evidence_judge.redact import RedactionReport, Redactor, redactor_for
 from evidence_judge.sessions.checks import (
     CHECKER,
     SessionIndex,
@@ -62,6 +65,7 @@ from evidence_judge.sessions.predicates import (
     SpecItem,
     TestResultPredicate,
 )
+from evidence_judge.sessions.redaction import redact_claims, redact_session, redact_spec
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell.wrappers import trust
 
@@ -200,6 +204,10 @@ class SessionJudgeOptions:
     """The judge's own re-run of the suite (`rerun.execute`); it decides test results."""
     require_rerun: bool = False
     """Refuse a pass unless a re-run decided the suite's result."""
+    redact: bool = True
+    """Redact the session, spec and claims before judging when `settings.redact` is on.
+    `SessionJudge.redact` returns options with it off, so inputs it already redacted are not
+    redacted twice."""
 
 
 @dataclass(slots=True)
@@ -266,9 +274,35 @@ def _event_guard_tamper(event: SessionEvent) -> str | None:
 
 
 class SessionJudge:
-    def __init__(self, llm: LLMClient | None = None, *, max_cost_usd: float = 0.25) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        llm: LLMClient | None = None,
+        *,
+        redactor: Redactor | None = None,
+    ) -> None:
+        self._settings = settings if settings is not None else Settings()
         self._llm = llm
-        self._max_cost_usd = max_cost_usd
+        self._redactor = redactor
+
+    def redact(
+        self, run: SessionRun, options: SessionJudgeOptions | None = None
+    ) -> tuple[SessionRun, SessionJudgeOptions, RedactionReport | None]:
+        """The session, spec and claims as `judge` sees them: redacted when `settings.redact`
+        and `options.redact` are on, with the redactor given to the judge or else
+        `redactor_for` (persistent when the judge has an LLM). Returns the options with
+        `redact` off, and what was redacted (None when nothing was). A corrupt redaction key
+        file raises ValueError."""
+        opts = options or SessionJudgeOptions()
+        if not (opts.redact and self._settings.redact):
+            return run, opts, None
+        if self._redactor is None:
+            self._redactor = redactor_for(self._settings, persistent=self._llm is not None)
+        redactor = self._redactor
+        run, report = redact_session(redactor, run)
+        spec = None if opts.spec is None else redact_spec(redactor, opts.spec)
+        claims = None if opts.claims is None else redact_claims(redactor, opts.claims)
+        return run, dataclasses.replace(opts, spec=spec, claims=claims, redact=False), report
 
     async def _claims(
         self, run: SessionRun, options: SessionJudgeOptions, state: _State
@@ -293,10 +327,12 @@ class SessionJudge:
     async def judge(
         self, run: SessionRun, options: SessionJudgeOptions | None = None
     ) -> RunVerdict:
-        options = options or SessionJudgeOptions()
+        """Judge one session, redacted first (see `redact`), within one fresh
+        `settings.max_cost_usd` budget."""
+        run, options, _ = self.redact(run, options)
         state = _State()
         spec = options.spec
-        with run_budget(Budget(self._max_cost_usd)):
+        with run_budget(Budget(self._settings.max_cost_usd)):
             claim_set = await self._claims(run, options, state)
         if spec and spec.trusted_wrappers:
             events = trust(run.events, spec.trusted_wrappers, run.cwd)

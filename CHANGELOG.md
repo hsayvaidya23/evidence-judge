@@ -533,5 +533,10 @@ The first release.
   extraction and any LLM call when `EVJ_REDACT` is on, as SECURITY.md says. The CLI, MCP server
   and Inspect scorer go through the same `Judge.redact`, so redaction happens once and the same
   way everywhere; `JudgeOptions(redact=False)` marks inputs that are already redacted.
+- `SessionJudge` redacts too: `SessionJudge.judge` redacts the session (commands, outputs,
+  task, answer), spec and claims before claim extraction when `EVJ_REDACT` is on, so a
+  transcript judged from Python no longer reaches an LLM extractor with its secrets. `session
+  judge` goes through the same `SessionJudge.redact`; `SessionJudgeOptions(redact=False)` marks
+  inputs that are already redacted, and `SessionJudge` now takes `Settings` first, like `Judge`.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
