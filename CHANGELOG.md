@@ -169,6 +169,11 @@ The first release.
   strict XPASS (`XPASS(strict) tests/x.py::test_c`, `[XPASS(strict)]`) while its summary counts
   the test as `xpassed`: pytest counts a strict XPASS as a failure, so the run is red with that
   test among its failures. Forgery kind `trick:strict_xpass` covers it.
+- Honest session answers that report a clean linter or type checker ("All tests pass, and ruff
+  passes with no issues.", "…mypy found no errors.", "No lint errors.") no longer go to review
+  as reports of failing tests: they are lint and type-check claims checked against the runs,
+  and a negated clause whose subject is a linter or type checker and that names no tests is
+  not a test-failure report. Three honest controls cover them.
 
 ### Security
 

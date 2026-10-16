@@ -187,18 +187,30 @@ _BUILD: Final = re.compile(
     r"\bcompiles\s+(?:successfully|cleanly|without (?:errors|warnings))\b",
     _I,
 )
+_FINDINGS: Final = r"(?:issues|errors|warnings|problems|findings|violations|diagnostics)"
+_NONE_FOUND: Final = rf"(?:\s+(?:with\s+)?(?:no|0|zero)\s+(?:[\w-]+\s+)?{_FINDINGS})?"
+"""The 'with no issues' after 'ruff passes': read with the claim, it is not a negation."""
+_LINTERS: Final = (
+    r"(?:lint(?:er|ing|s)?|ruff(?: check)?|eslint|flake8|pylint|clippy|golangci-lint|rubocop|"
+    r"biome)"
+)
+_TYPECHECKERS: Final = r"(?:type[- ]?check(?:s|ing|er)?|pyright|mypy|tsc|basedpyright)"
+_CLEAN: Final = (
+    r"(?:passes|passed|is clean|are clean|clean|cleanly|reports? (?:no|0)|shows? (?:no|0)|"
+    rf"found (?:no|0)|finds (?:no|0)|succeeds|is happy|with (?:no|0) {_FINDINGS})\b"
+)
 _LINT: Final = re.compile(
-    r"\b(?:lint(?:er|ing|s)?|ruff(?: check)?|eslint|flake8|pylint|clippy|golangci-lint|rubocop|"
-    r"biome)\b(?:\s+[\w-]+){0,3}?\s+(?:passes|passed|is clean|are clean|clean|reports? no|"
-    r"shows? no|found no|finds no|succeeds|is happy|with no (?:issues|errors|warnings))\b",
+    rf"\b{_LINTERS}\b(?:\s+[\w-]+){{0,3}}?\s+{_CLEAN}{_NONE_FOUND}|"
+    rf"\b(?:no|0|zero)\s+(?:{_LINTERS}|style)\s+{_FINDINGS}\b",
     _I,
 )
 _TYPECHECK: Final = re.compile(
-    r"\b(?:type[- ]?check(?:s|ing|er)?|pyright|mypy|tsc|basedpyright)\b(?:\s+[\w-]+){0,3}?\s+"
-    r"(?:passes|passed|is clean|clean|cleanly|reports? (?:no|0)|shows? no|succeeds|"
-    r"with no errors|0 errors)\b|\bno type errors\b",
+    rf"\b{_TYPECHECKERS}\b(?:\s+[\w-]+){{0,3}}?\s+(?:{_CLEAN}|0 errors\b){_NONE_FOUND}|"
+    rf"\b(?:no|0|zero)\s+(?:{_TYPECHECKERS}|type|typing)\s+{_FINDINGS}\b",
     _I,
 )
+_CHECK_SUBJECT: Final = re.compile(rf"\b(?:{_LINTERS}|{_TYPECHECKERS}|type errors?|typing)\b", _I)
+"""A lint or type-check tool, or its findings: a clause about them is not about the tests."""
 _RAN_CMD: Final = re.compile(
     r"\b(?:ran|executed|running|re-ran|reran)\b[^`]{0,40}`([^`]{3,300})`", _I
 )
@@ -323,6 +335,12 @@ _ELLIPTICAL_NOT: Final = re.compile(r"^\W*not\b", _I)
 """'Tests pass for subtraction, not for addition': a bare 'not' clause narrows the one before."""
 
 
+def _about_checks(clause: str) -> bool:
+    """A clause whose subject is a linter or type checker and that names no tests ('mypy found
+    no errors', 'no lint errors'): negated, it reports nothing about the tests."""
+    return _CHECK_SUBJECT.search(clause) is not None and _TEST_WORDS.search(clause) is None
+
+
 def _past_clauses(sentence: str) -> list[tuple[int, int]]:
     """Clauses about the past: those naming it ('the previously failing test now passes') and
     those a bare time phrase leads into ('Before the fix, I ran the tests and 2 failed'), up to
@@ -354,7 +372,7 @@ def _masked(sentence: str) -> tuple[str, bool, bool]:
     negated = negated_clauses(sentence, _MODELLED_NEGATIONS)
     text = _blanked(sentence.translate(PUNCT_MAP), [*negated, *_past_clauses(sentence)])
     clauses = [sentence[start:end] for start, end in negated]
-    about_tests = any(_ABOUT_TESTS.search(clause) for clause in clauses)
+    about_tests = any(_ABOUT_TESTS.search(c) and not _about_checks(c) for c in clauses)
     narrows = any(_ELLIPTICAL_NOT.match(clause) for clause in clauses)
     return text, about_tests, narrows
 
@@ -473,8 +491,8 @@ def _reports_failure(sentence: str) -> bool:
     that is not past, zero or 'the failing test'."""
     if _question(sentence):
         return False
-    negated = negated_clauses(sentence, _MODELLED_NEGATIONS)
-    if any(_FAILURE_CLAUSE.search(sentence[start:end]) for start, end in negated):
+    negated = [sentence[start:end] for start, end in negated_clauses(sentence, _MODELLED_NEGATIONS)]
+    if any(_FAILURE_CLAUSE.search(c) and not _about_checks(c) for c in negated):
         return True
     text, _, _ = _masked(sentence)
     if any(o[0].expect == "fail" for o in _test_outcomes(text)):

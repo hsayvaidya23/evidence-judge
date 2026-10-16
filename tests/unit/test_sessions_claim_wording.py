@@ -171,3 +171,43 @@ def test_unread_negations_and_the_past_claim_no_test_result(answer: str) -> None
 @pytest.mark.parametrize("answer", MIXED)
 def test_separate_pass_and_fail_spans_are_both_claimed(answer: str) -> None:
     assert _directions(answer) == {"pass", "fail"}
+
+
+CLEAN_CHECKS = (
+    ("All tests pass, and ruff passes with no issues.", "lint"),
+    ("All tests pass; mypy found no errors.", "typecheck"),
+    ("No lint errors.", "lint"),
+    ("ruff check reports no issues.", "lint"),
+    ("No type errors.", "typecheck"),
+    ("pyright finds 0 errors.", "typecheck"),
+    ("eslint passed with zero warnings.", "lint"),
+)
+
+
+@pytest.mark.parametrize(("answer", "category"), CLEAN_CHECKS)
+def test_clean_lint_and_typecheck_wordings_are_check_claims(answer: str, category: str) -> None:
+    from evidence_judge.sessions.extract import reports_failure
+    from evidence_judge.sessions.predicates import BuildPredicate
+
+    claims = heuristic_claims(answer).claims
+    assert BuildPredicate(category=category) in [p for c in claims for p in c.predicates]  # type: ignore[arg-type]
+    assert not reports_failure(answer)
+    assert not any(
+        isinstance(p, TestResultPredicate) and p.expect == "fail"
+        for c in claims
+        for p in c.predicates
+    )
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "All tests pass; mypy doesn't complain about anything.",
+        "Tests pass and ruff has nothing to report.",
+    ],
+)
+def test_a_negated_check_clause_is_not_a_test_failure(answer: str) -> None:
+    from evidence_judge.sessions.extract import reports_failure
+
+    assert not reports_failure(answer)
+    assert reports_failure("Ruff is clean, but the mypy tests don't pass.")
