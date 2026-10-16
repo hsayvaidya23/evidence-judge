@@ -751,14 +751,14 @@ def _mentions(event: CommandEvent, name: str) -> bool:
     return needle in event.command.casefold() or needle in event.output.casefold()
 
 
-_FAILURE_WORD = re.compile(r"FAIL|failed|Error|\u2715|\u00d7")
+_FAILURE_WORD = re.compile(r"FAIL|failed|Error|XPASS\(strict\)|\u2715|\u00d7")
 _FAILING_TEST: Final = re.compile(
-    r"^(?:(?:FAILED|ERROR) (?P<pytest>\S+::\S+)|--- FAIL: (?P<go>[^\s/]+) \(|"
-    r"test (?P<cargo>\S+) \.\.\. FAILED$)",
+    r"^(?:(?:FAILED|ERROR) (?P<pytest>\S+::\S+)|XPASS\(strict\) (?P<xpass>\S+::\S+)|"
+    r"--- FAIL: (?P<go>[^\s/]+) \(|test (?P<cargo>\S+) \.\.\. FAILED$)",
     re.M,
 )
-"""A failing test a run's output names: pytest's short summary (`FAILED tests/x.py::test_a`),
-go's `--- FAIL: TestA (0.00s)` and cargo's `test a ... FAILED`."""
+"""A failing test a run's output names: pytest's short summary (`FAILED tests/x.py::test_a`,
+`XPASS(strict) tests/x.py::test_b`), go's `--- FAIL: TestA (0.00s)` and cargo's `test a ... FAILED`."""
 
 
 def names_test(name: str, text: str) -> bool:

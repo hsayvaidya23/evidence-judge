@@ -21,6 +21,11 @@ _PYTEST_LINE: Final = re.compile(
     r"warnings?|rerun)(?:, )?)+|no tests ran)(?: in [\d.]+s(?: \([\d:]+\))?)?\s*=*\s*$"
 )
 _COUNT: Final = re.compile(r"(\d+) ([a-z]+)")
+_STRICT_XPASS: Final = re.compile(
+    r"^(?:(?:FAILED|XPASS\(strict\)) (?P<test>\S+::\S+)|\[XPASS\(strict\)\])"
+)
+"""A test marked `xfail(strict=True)` that passed: pytest counts it as a failure, and a summary
+that does not is not the runner's."""
 _UNITTEST_RAN: Final = re.compile(r"^Ran (\d+) tests? in [\d.]+s$")
 _UNITTEST_RESULT: Final = re.compile(r"^(OK|FAILED)(?: \((?P<body>[^)]*)\))?\s*$")
 _JEST_TESTS: Final = re.compile(r"^Tests:\s+(?P<body>.*\d+ total)\s*$")
@@ -66,15 +71,32 @@ def _pytest(lines: list[str]) -> TestSummary | None:
         if body == "no tests ran":
             return TestSummary(framework="pytest", no_tests=True)
         counts = {word: int(n) for n, word in _COUNT.findall(body)}
+        strict = _strict_xpasses(lines)
+        moved = min(max(strict - counts.get("failed", 0), 0), counts.get("xpassed", 0))
         return TestSummary(
             framework="pytest",
-            passed=counts.get("passed", 0) + counts.get("xpassed", 0),
-            failed=counts.get("failed", 0),
+            passed=counts.get("passed", 0) + counts.get("xpassed", 0) - moved,
+            failed=max(counts.get("failed", 0), strict),
             errors=counts.get("error", 0) + counts.get("errors", 0),
             skipped=counts.get("skipped", 0) + counts.get("xfailed", 0),
             deselected=counts.get("deselected", 0),
         )
     return None
+
+
+def _strict_xpasses(lines: list[str]) -> int:
+    """How many strict XPASSes the output reports: the tests named with the marker, or its bare
+    lines in the failures section when they are more."""
+    named: set[str] = set()
+    bare = 0
+    for line in lines:
+        if "XPASS(strict)" not in line or (m := _STRICT_XPASS.match(line)) is None:
+            continue
+        if m["test"]:
+            named.add(m["test"])
+        else:
+            bare += 1
+    return max(len(named), bare)
 
 
 def _unittest(lines: list[str]) -> TestSummary | None:

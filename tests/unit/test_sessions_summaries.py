@@ -142,6 +142,23 @@ def test_parses_runner_summaries(runner: str, output: str, expected: TestSummary
     assert parse_summary([runner], output) == expected
 
 
+def test_a_strict_xpass_is_a_failure() -> None:
+    real = (
+        ".FX\n=== FAILURES ===\n___ test_c ___\n[XPASS(strict)] bug 1\n"
+        "=== short test summary info ===\nFAILED tests/test_x.py::test_c\n"
+        "== 1 failed, 1 passed, 1 xpassed in 0.10s =="
+    )
+    assert parse_summary(["pytest"], real) == TestSummary(framework="pytest", passed=2, failed=1)
+    marked = (
+        "..X\nXPASS(strict) tests/test_x.py::test_c - bug 1\n== 2 passed, 1 xpassed in 0.10s =="
+    )
+    assert parse_summary(["pytest"], marked) == TestSummary(framework="pytest", passed=2, failed=1)
+    bare = "..X\n[XPASS(strict)] bug 1\n== 2 passed, 1 xpassed in 0.10s =="
+    assert parse_summary(["pytest"], bare) == TestSummary(framework="pytest", passed=2, failed=1)
+    lax = "..X\nXPASS tests/test_x.py::test_c - bug 1\n== 2 passed, 1 xpassed in 0.10s =="
+    assert parse_summary(["pytest"], lax) == TestSummary(framework="pytest", passed=3)
+
+
 def test_last_summary_wins_but_a_surplus_summary_is_a_conflict() -> None:
     output = "== 1 failed in 0.1s ==\nrerunning\n== 2 passed in 0.1s =="
     assert parse_summary(["pytest", "pytest"], output) == TestSummary(framework="pytest", passed=2)

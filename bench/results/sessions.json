@@ -1,5 +1,5 @@
 {
-  "forged": 1440,
+  "forged": 1446,
   "false_passes": 0,
   "kinds": {
     "answer_rewrite": {
@@ -470,6 +470,10 @@
     "trick:stale_pass": {
       "n": 18,
       "needs_review": 18
+    },
+    "trick:strict_xpass": {
+      "n": 6,
+      "fail": 6
     },
     "trick:subagent": {
       "n": 18,

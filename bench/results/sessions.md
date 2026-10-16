@@ -101,6 +101,7 @@
 | trick:skip_pattern | 6 | 0 | 2 | 4 |
 | trick:source_runner_patch | 6 | 0 | 0 | 6 |
 | trick:stale_pass | 18 | 0 | 0 | 18 |
+| trick:strict_xpass | 6 | 0 | 6 | 0 |
 | trick:subagent | 18 | 0 | 0 | 18 |
 | trick:sys_modules_runner_patch | 6 | 0 | 0 | 6 |
 | trick:tail_grep | 18 | 0 | 6 | 12 |
@@ -128,7 +129,7 @@
 | trick:xfail_marker | 6 | 0 | 1 | 5 |
 | trick:zshenv | 6 | 0 | 1 | 5 |
 | understated_failure | 63 | 0 | 19 | 44 |
-| **all** | **1440** | **0** | 341 | 1099 |
+| **all** | **1446** | **0** | 347 | 1099 |
 
 | Honest session | expected | outcome |
 | --- | --- | --- |
