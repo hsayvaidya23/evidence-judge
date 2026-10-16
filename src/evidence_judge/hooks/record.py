@@ -18,9 +18,11 @@ Exit codes are never guessed:
 * Claude Code: ``PostToolUse`` of ``Bash`` without ``returnCodeInterpretation`` is 0; a
   ``PostToolUseFailure`` whose ``error`` starts ``Exit code N`` is N; anything else is null.
 * Codex: the hook payload's ``exit_code`` / ``exitCode`` when present, else the
-  first ``Process exited with code N`` line of the tool's text output (Codex writes it before
-  the command's own output), else null.
-* Gemini CLI: the ``Exit Code: N`` line of a ``run_shell_command`` result, else null.
+  ``Process exited with code N`` line of the header Codex writes before the command's own
+  ``Output:``, else null.
+* Gemini CLI: the ``Exit Code: N`` line of the trailer Gemini writes after a
+  ``run_shell_command``'s output in ``llmContent`` (the last such line, so output that prints
+  one cannot stand in for it), else null.
 """
 
 from __future__ import annotations
@@ -49,8 +51,10 @@ _MAX_DEPTH: Final = 6
 _MAX_ITEMS: Final = 50
 _TAIL_READ: Final = 1024 * 1024
 _CLAUDE_EXIT: Final = re.compile(r"\AExit code (-?\d+)\b")
-_GEMINI_EXIT: Final = re.compile(r"^Exit Code: (-?\d+)\b", re.M)
+_GEMINI_EXIT: Final = re.compile(r"^Exit Code: (.*?)\s*$", re.M)
+_EXIT_NUMBER: Final = re.compile(r"-?\d+")
 _CODEX_EXIT: Final = re.compile(r"^Process exited with code (-?\d+)\b", re.M)
+_CODEX_OUTPUT: Final = re.compile(r"^Output:", re.M)
 _SESSION_ID: Final = re.compile(r"\A[A-Za-z0-9_.-]{1,128}\Z")
 _CLAUDE_RESULT_KEYS: Final = ("structuredPatch", "type", "userModified")
 _CODEX_RESULT_KEYS: Final = ("changes",)
@@ -97,6 +101,14 @@ def redactor() -> Redactor:
         return Redactor(key) if key is not None else Redactor.from_settings(settings)
     except Exception:
         return Redactor(os.urandom(32))
+
+
+def gemini_exit_code(text: str) -> int | None:
+    """The exit code in the trailer of a Gemini ``run_shell_command`` result. The command's
+    output comes before the trailer, so only the last ``Exit Code:`` line counts; a
+    non-numeric value such as ``(none)`` is null."""
+    values = _GEMINI_EXIT.findall(text)
+    return int(values[-1]) if values and _EXIT_NUMBER.fullmatch(values[-1]) else None
 
 
 def _cut(text: str, limit: int) -> str:
@@ -185,7 +197,8 @@ def _codex(data: Payload) -> _Call:
         code = _int(fields.get("exitCode"))
     stdout = _as_text(fields.get("stdout")) if "stdout" in fields else _as_text(response)
     if code is None:
-        found = _CODEX_EXIT.search(_as_text(response) or "")
+        header = _CODEX_OUTPUT.split(_as_text(response) or "", maxsplit=1)[0]
+        found = _CODEX_EXIT.search(header)
         code = int(found.group(1)) if found else None
     status: Status | None = None if code is None else ("ok" if code == 0 else "error")
     result = _pick(fields, _CODEX_RESULT_KEYS) or _pick(
@@ -200,8 +213,8 @@ def _gemini(tool: str, data: Payload) -> _Call:
     stdout = _as_text(content if content is not None else fields.get("returnDisplay"))
     error = fields.get("error")
     stderr = _as_text(_fields(error).get("message") or error) if error else None
-    found = _GEMINI_EXIT.search(stdout or "") if tool == "run_shell_command" else None
-    code = int(found.group(1)) if found else None
+    shell = tool == "run_shell_command"
+    code = gemini_exit_code(content) if shell and isinstance(content, str) else None
     status: Status = "error" if error is not None or (code is not None and code != 0) else "ok"
     return _Call(status, code, stdout, stderr)
 

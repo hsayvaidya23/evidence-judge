@@ -95,6 +95,13 @@ The first release.
   `session judge|rerun|inspect`. Piping the output (`| head -1`) keeps the verdict's exit code.
 - A public Python API exported from `evidence_judge`, and a documentation site.
 
+### Changed
+
+- The package description and keywords cover coding-agent sessions as well as browser agents,
+  `session --help` names Gemini CLI (judged through the evidence log), and the Claude Code
+  plugin's `Stop` hook says it is checking the answer against the recorded evidence instead of
+  "the browser trace", since it also re-runs the session's tests.
+
 ### Fixed
 
 - The offline session judge no longer FAILs honest reports worded "No tests failed.", "None of
@@ -165,6 +172,19 @@ The first release.
   an irregular past verb after a negated auxiliary ("I didn't see errors and bought it"): with
   no spec these reached only NEEDS_REVIEW and now FAIL. "I never logged in, added it to the
   cart or placed an order" and "I didn't add it to the cart or place an order" still abstain.
+- A Gemini shell call whose output prints `Exit Code: 0` no longer records as a success: the
+  recorder and the log reader take the exit code from the last `Exit Code:` line, the trailer
+  Gemini writes after the output, and only from `llmContent`. Before, a failing `ruff check .`
+  preceded by `printf 'Exit Code: 0\n'` was logged with exit code 0, and "ruff check passes."
+  PASSed. The Codex recorder reads `Process exited with code N` only from the header Codex
+  writes before the command's `Output:`.
+- Session ingest no longer reads a single huge line whole before applying the 64 MiB line cap:
+  lines are read at most that far, the rest of a longer line is skipped in 1 MiB chunks, and
+  the line is reported as oversized, as before.
+- A session file given under the wrong option (`session judge --codex` with a Claude Code
+  transcript) or an empty one exits `3` (bad input), naming the format the file looks like.
+  Before, nothing was recognised, only a warning about skipped records was printed, and the run
+  got NEEDS_REVIEW (exit `2`).
 
 ### Security
 

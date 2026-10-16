@@ -1,12 +1,23 @@
 [project]
 name = "evidence-judge"
 version = "0.1.0.dev0"
-description = "Grade browser-agent runs by checking every claim against recorded evidence: network, page state, screenshots."
+description = "Grade browser-agent runs and coding-agent sessions by checking every claim against recorded evidence: network, page state, screenshots, commands and test runs."
 dynamic = ["readme"]
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Yash Vaidya" }]
-keywords = ["agents", "evals", "llm-as-judge", "playwright", "browser-agents", "computer-use"]
+keywords = [
+  "agents",
+  "evals",
+  "llm-as-judge",
+  "playwright",
+  "browser-agents",
+  "computer-use",
+  "coding-agents",
+  "claude-code",
+  "codex",
+  "gemini-cli",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",

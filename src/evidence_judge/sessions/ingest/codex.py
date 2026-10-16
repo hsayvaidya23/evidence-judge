@@ -27,11 +27,11 @@ from evidence_judge.sessions.normalize import ToolCall, build_events
 from evidence_judge.sessions.shell import tokenize, unwrap_shell
 
 _KINDS: Final = {"add": "add", "create": "add", "delete": "delete", "update": "modify"}
-_STREAM_TYPES: Final = frozenset(
+STREAM_TYPES: Final = frozenset(
     {"thread.started", "turn.started", "turn.completed", "turn.failed", "item.started",
      "item.updated", "item.completed", "error"}
 )  # fmt: skip
-_ROLLOUT_TYPES: Final = frozenset(
+ROLLOUT_TYPES: Final = frozenset(
     {"session_meta", "response_item", "event_msg", "turn_context", "compacted"}
 )
 
@@ -165,9 +165,10 @@ def load_exec_stream(path: Path, *, cwd: str | None = None) -> SessionRun:
     seen_items: set[str] = set()
     for _, record in iter_records(path, stats):
         kind = as_str(record.get("type")) or "<none>"
-        if kind not in _STREAM_TYPES:
+        if kind not in STREAM_TYPES:
             stats.skip(kind)
             continue
+        stats.recognised += 1
         if kind == "thread.started":
             thread = as_str(record.get("thread_id"))
         elif kind in ("turn.failed", "error"):
@@ -191,6 +192,7 @@ def load_exec_stream(path: Path, *, cwd: str | None = None) -> SessionRun:
                 calls.append(_other_call(f"mcp:{as_str(item.get('tool')) or '?'}", None))
             elif item_type == "web_search":
                 calls.append(_other_call("web_search", None))
+    stats.require_records(path, "Codex `exec --json` or rollout")
     events, dropped = build_events(calls, cwd)
     notes = stats.notes()
     notes.extend(
@@ -235,9 +237,10 @@ def load_rollout(path: Path) -> SessionRun:
     last_ts: datetime | None = None
     for _, record in iter_records(path, stats):
         kind = as_str(record.get("type")) or "<none>"
-        if kind not in _ROLLOUT_TYPES:
+        if kind not in ROLLOUT_TYPES:
             stats.skip(kind)
             continue
+        stats.recognised += 1
         ts = parse_ts(record.get("timestamp"))
         if ts is not None:
             first_ts = first_ts or ts
@@ -292,6 +295,7 @@ def load_rollout(path: Path) -> SessionRun:
             final = as_str(payload.get("last_agent_message")) or final
         elif event == "agent_message":
             final = as_str(payload.get("message")) or final
+    stats.require_records(path, "Codex rollout")
     events, dropped = build_events(calls, cwd)
     notes = stats.notes()
     notes.extend(
@@ -321,8 +325,8 @@ def sniff(path: Path) -> str:
     stats = LineStats()
     for _, record in iter_records(path, stats):
         kind = as_str(record.get("type"))
-        if kind in _ROLLOUT_TYPES:
+        if kind in ROLLOUT_TYPES:
             return "rollout"
-        if kind in _STREAM_TYPES:
+        if kind in STREAM_TYPES:
             return "stream"
     return "stream"
