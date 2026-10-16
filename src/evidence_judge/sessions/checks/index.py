@@ -13,6 +13,7 @@ from evidence_judge.sessions.checks.runs import (
     every_failing_test,
     incomplete,
     judge_test_run,
+    stopped_early,
     suite_size,
 )
 from evidence_judge.sessions.edits import (
@@ -273,8 +274,71 @@ class SessionIndex:
         return out
 
     def outcome(self, event: CommandEvent, minimum: int | None = None) -> RunOutcome:
-        """`judge_test_run`, with a run outside the session directory, or one that ran fewer
-        tests than an earlier whole-suite run (or than `minimum`), counted as partial."""
+        """`judge_test_run`, with a run outside the session directory, one that ran fewer tests
+        than an earlier whole-suite run (or than `minimum`), or a passing run through a wrapper
+        whose command the session does not show that no earlier count vouches for, counted as
+        partial."""
+        judged = self._counted(event, minimum)
+        if (
+            judged.whole
+            and judged.result is Result.PASS
+            and (why := self._unvouched(event)) is not None
+        ):
+            return RunOutcome(event, judged.result, judged.reason, why)
+        return judged
+
+    @cached_property
+    def _counts_before(self) -> dict[str, tuple[int, CommandEvent]]:
+        """For each test run through a wrapper whose command the session does not show, the most
+        tests an earlier run of the same framework ran when it ran the whole suite to the end
+        and the session showed its command, and that run."""
+        best: dict[str, tuple[int, CommandEvent]] = {}
+        out: dict[str, tuple[int, CommandEvent]] = {}
+        for event in self.test_runs(None):
+            summary = event.summary
+            if summary is None or summary.no_tests:
+                continue
+            per_test = summary.framework in _PER_TEST
+            key = f"{summary.framework}{' per test' if per_test else ''}"
+            if event.analysis.wrapper_unseen is not None:
+                if key in best:
+                    out[event.id] = best[key]
+                continue
+            ran = summary.passed + summary.failed + summary.errors
+            if (
+                self._counted(event).whole
+                and stopped_early(event) is None
+                and (key not in best or ran > best[key][0])
+            ):
+                best[key] = (ran, event)
+        return out
+
+    def _unvouched(self, event: CommandEvent) -> str | None:
+        """Why a passing run through a wrapper whose command the session does not show may be a
+        part of the suite (`@pytest -k sub` in a silent recipe), or None when it passed at least
+        as many tests as an earlier whole-suite run the session showed ran, plus the tests the
+        session added since."""
+        wrapper = event.analysis.wrapper
+        if wrapper is None or event.analysis.wrapper_unseen is None or event.summary is None:
+            return None
+        unseen = f"it ran through {wrapper}, whose command the session does not show"
+        earlier = self._counts_before.get(event.id)
+        if earlier is None:
+            return (
+                f"{unseen}, so it may have run only part of the suite, and no earlier "
+                "whole-suite run the session showed counted the tests to compare it with"
+            )
+        ran, baseline = earlier
+        added = self._tests_added(baseline.seq) or 0
+        if event.summary.passed >= ran + added:
+            return None
+        since = f" plus the {added} the session added since" if added else ""
+        return (
+            f"{unseen}, and it passed {event.summary.passed} tests, fewer than the {ran} the "
+            f"earlier whole-suite run {baseline.id} ran{since}"
+        )
+
+    def _counted(self, event: CommandEvent, minimum: int | None = None) -> RunOutcome:
         judged = self._scoped(event)
         if not judged.whole:
             return judged
@@ -304,24 +368,29 @@ class SessionIndex:
         return RunOutcome(event, judged.result, judged.reason, why)
 
     @cached_property
-    def _run_envs(self) -> dict[str, set[str]]:
-        """The variables each test run sets on its command line or inherits from an earlier
-        `export` in the session."""
+    def _inherited(self) -> dict[str, set[str]]:
+        """The variables each command inherits from an earlier `export` in the session."""
         exported: set[str] = set()
         out: dict[str, set[str]] = {}
         for command in self.commands:
             if command.status is CallStatus.DENIED:
                 continue
-            if command.analysis.is_test:
-                out[command.id] = exported | set(command.analysis.run_env)
+            out[command.id] = set(exported)
             exported |= set(command.analysis.exports)
         return out
+
+    def inherited(self, event: CommandEvent) -> list[str]:
+        """Variables the command inherits from an earlier `export` beyond the few known to
+        change only output or import paths."""
+        return sorted(self._inherited.get(event.id, set()))
 
     def run_env(self, event: CommandEvent) -> list[str]:
         """Variables the run sets or inherits beyond the few known to change only output or
         import paths (`CI=true` can switch on `skipif` markers, `RECORD_MODE=all` can rewrite
         recorded answers)."""
-        return sorted(self._run_envs.get(event.id, set()))
+        if not event.analysis.is_test:
+            return []
+        return sorted({*self.inherited(event), *event.analysis.run_env})
 
     def scopes(self, event: CommandEvent) -> list[str] | None:
         """The parts of the session directory a run selected only by plain paths and its
@@ -405,6 +474,7 @@ class SessionIndex:
             (o, scopes, total)
             for o in reversed(outcomes)
             if o.result is Result.PASS
+            and o.event.analysis.wrapper_unseen is None
             and not self.run_env(o.event)
             and (scopes := self.scopes(o.event)) is not None
             and (total := suite_size(o.event)) is not None
@@ -417,7 +487,10 @@ class SessionIndex:
         baselines = [
             (suite_size(e) or 0, e)
             for e in self.test_runs(None)
-            if e.seq < newest.seq and _runner_key(e) == key and self._scoped(e).whole
+            if e.seq < newest.seq
+            and _runner_key(e) == key
+            and e.analysis.wrapper_unseen is None
+            and self._scoped(e).whole
         ]
         if not baselines:
             return None
@@ -448,7 +521,7 @@ class SessionIndex:
         best: tuple[int, CommandEvent] | None = None
         for event in self.test_runs(None):
             total = suite_size(event)
-            outcome = self.outcome(event)
+            outcome = self._counted(event)
             if total is None or outcome.result is not Result.PASS or not outcome.whole:
                 continue
             if best is None or total > best[0]:

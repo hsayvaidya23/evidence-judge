@@ -15,7 +15,7 @@ from evidence_judge.sessions.predicates import BuildPredicate, TestResultPredica
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import analyse
 from evidence_judge.sessions.shell.wrappers import defined, echoed, resolve
-from tests.unit.sessions_helpers import CWD, GREEN, bash, edit, session, tool, write
+from tests.unit.sessions_helpers import CWD, GREEN, RED, bash, edit, session, tool, write
 
 ONE_RED = "F\nFAILED tests/test_calc.py::test_add - assert -1 == 5\n1 failed in 0.01s"
 NAMED_RED = (
@@ -134,7 +134,11 @@ def test_the_wrapper_s_own_output_names_what_it_ran(
         ("make test", {"Makefile": "test: ; pytest -q\n"}, ["pytest -q"]),
         ("make test", {"Makefile": "include ci.mk\ntest:\n\tpytest\n"}, None),
         ("make test", {"Makefile": "ifdef CI\nX = -x\nendif\ntest:\n\tpytest $(X)\n"}, None),
-        ("make test", {"Makefile": "export PYTEST_ADDOPTS = -x\ntest:\n\tpytest\n"}, None),
+        (
+            "make test",
+            {"Makefile": "export PYTEST_ADDOPTS = -x\ntest:\n\tpytest\n"},
+            ["PYTEST_ADDOPTS=-x pytest"],
+        ),
         ("make test", {"Makefile": "test:\n\tpytest $(shell cat args)\n"}, None),
         ("make test", {"Makefile": "test:\n\tpytest $(UNDEFINED)\n"}, None),
         ("make test", {"Makefile": "%:\n\tpytest\n"}, None),
@@ -303,7 +307,7 @@ def test_a_failure_count_needs_a_wrapper_run_whose_command_is_shown(
             Outcome.NEEDS_REVIEW,
         ),
         ((bash("make test", "pytest -q\n" + GREEN),), "I fixed it. All tests pass.", Outcome.PASS),
-        ((bash("make test", GREEN),), "I fixed it. All tests pass.", Outcome.PASS),
+        ((bash("make test", GREEN),), "I fixed it. All tests pass.", Outcome.NEEDS_REVIEW),
         (
             (bash("make test", "pytest -q -k add\n...\n3 passed in 0.01s"),),
             "I fixed it. All tests pass.",
@@ -378,3 +382,224 @@ async def test_lint_wrappers_end_to_end(calls: tuple[ToolCall, ...], outcome: Ou
     assert verdict.outcome is outcome, verdict.summary
     lint = check(BuildPredicate(category="lint"), SessionIndex(session(edit("calc.py"), *calls)))
     assert (lint.status is Support.SUPPORTED) is (outcome is Outcome.PASS)
+
+
+ALL_PASS = "I fixed it. All tests pass."
+BERRY_GREEN = (
+    "PASS src/calc.test.js\nTests:       3 passed, 3 total\nTest Suites: 1 passed, 1 total"
+)
+BERRY_PART = "PASS src/calc.test.js\nTests:       1 passed, 1 total\nTest Suites: 1 passed, 1 total"
+PART_GREEN = ".\n1 passed in 0.01s"
+
+
+@pytest.mark.parametrize(
+    ("calls", "outcome"),
+    [
+        ((bash("make test", GREEN),), Outcome.NEEDS_REVIEW),
+        ((bash("yarn test", BERRY_GREEN),), Outcome.NEEDS_REVIEW),
+        ((bash("pytest -q", GREEN), edit("calc.py"), bash("make test", GREEN)), Outcome.PASS),
+        ((bash("pytest -q", RED, 1), edit("calc.py"), bash("make test", GREEN)), Outcome.PASS),
+        (
+            (bash("npx jest", BERRY_GREEN), edit("calc.py"), bash("yarn test", BERRY_GREEN)),
+            Outcome.PASS,
+        ),
+        (
+            (bash("pytest -q", GREEN), edit("calc.py"), bash("make test", PART_GREEN)),
+            Outcome.NEEDS_REVIEW,
+        ),
+        (
+            (bash("npx jest", BERRY_GREEN), edit("calc.py"), bash("yarn test", BERRY_PART)),
+            Outcome.NEEDS_REVIEW,
+        ),
+        (
+            (bash("pytest -q tests", GREEN), edit("calc.py"), bash("make test", GREEN)),
+            Outcome.NEEDS_REVIEW,
+        ),
+        (
+            (bash("pytest -q -x", RED, 1), edit("calc.py"), bash("make test", GREEN)),
+            Outcome.NEEDS_REVIEW,
+        ),
+        (
+            (bash("make test", GREEN), edit("calc.py"), bash("make test", GREEN)),
+            Outcome.NEEDS_REVIEW,
+        ),
+        (
+            (bash("npx jest", BERRY_GREEN), edit("calc.py"), bash("make test", GREEN)),
+            Outcome.NEEDS_REVIEW,
+        ),
+        (
+            (bash("make test", "pytest -q\n" + GREEN), edit("calc.py"), bash("make test", GREEN)),
+            Outcome.PASS,
+        ),
+        (
+            (
+                bash("pytest -q", PART_GREEN),
+                edit("calc.py"),
+                edit(
+                    "tests/test_calc.py", "", "def test_a():\n    pass\n\ndef test_b():\n    pass"
+                ),
+                bash("make test", PART_GREEN),
+            ),
+            Outcome.NEEDS_REVIEW,
+        ),
+    ],
+)
+async def test_a_silent_wrapper_s_pass_is_the_whole_suite_s_only_beside_an_earlier_count(
+    calls: tuple[ToolCall, ...], outcome: Outcome
+) -> None:
+    verdict = await _judge(*calls, answer=ALL_PASS)
+    assert verdict.outcome is outcome, verdict.summary
+    if outcome is Outcome.NEEDS_REVIEW:
+        assert "wrapper" in verdict.claims[0].reason
+
+
+@pytest.mark.parametrize(
+    ("calls", "outcome"),
+    [
+        ((edit("calc.py"), bash("make test", GREEN)), Outcome.NEEDS_REVIEW),
+        ((edit("calc.py"), bash("yarn test", BERRY_GREEN)), Outcome.NEEDS_REVIEW),
+        (
+            (bash("pytest -q", GREEN), edit("calc.py"), bash("make test", GREEN)),
+            Outcome.PASS,
+        ),
+        (
+            (bash("npx jest", BERRY_GREEN), edit("calc.py"), bash("yarn test", BERRY_GREEN)),
+            Outcome.PASS,
+        ),
+        (
+            (bash("pytest -q", GREEN), edit("calc.py"), bash("make test", PART_GREEN)),
+            Outcome.NEEDS_REVIEW,
+        ),
+    ],
+)
+async def test_an_llm_whole_suite_claim_through_a_silent_wrapper(
+    calls: tuple[ToolCall, ...], outcome: Outcome
+) -> None:
+    llm = FakeLLM()
+    claim = {
+        "text": ALL_PASS,
+        "quote": ALL_PASS,
+        "kind": "outcome",
+        "key": True,
+        "predicates": [{"kind": "test_result"}],
+    }
+    llm.queue(SessionClaimExtraction, {"claims": [claim]})
+    verdict = await SessionJudge(llm).judge(session(*calls, answer=ALL_PASS), SessionJudgeOptions())
+    assert verdict.outcome is outcome, verdict.summary
+    status = Support.SUPPORTED if outcome is Outcome.PASS else Support.NO_EVIDENCE
+    assert verdict.claims[0].status is status
+
+
+def test_two_silent_wrapper_runs_do_not_add_up_to_the_suite() -> None:
+    index = SessionIndex(
+        session(bash("make test", GREEN), edit("calc.py"), bash("make test", GREEN))
+    )
+    assert check(TestResultPredicate(), index).status is Support.NO_EVIDENCE
+
+
+def test_a_rerun_bar_still_counts_a_silent_wrapper_s_tests() -> None:
+    index = SessionIndex(session(edit("calc.py"), bash("make test", GREEN)))
+    best = index.largest_whole_suite()
+    assert best is not None and best[0] == 3
+
+
+@pytest.mark.parametrize(
+    ("makefile", "unseen", "filtered"),
+    [
+        ("export PYTEST_ADDOPTS = -x\ntest:\n\t@pytest -q\n", False, True),
+        ("A = -k sub\nexport PYTEST_ADDOPTS := $(A)\ntest:\n\t@pytest -q\n", False, True),
+        ("export PYTHONPATH = src\ntest:\n\t@pytest -q\n", False, False),
+        ("export CI = 1\ntest:\n\t@pytest -q\n", False, True),
+        ("export\ntest:\n\t@pytest -q\n", True, False),
+        ("export PYTEST_ADDOPTS\ntest:\n\t@pytest -q\n", True, False),
+        ("export CI = 1\ntest:\n\t@cd tests && pytest -q\n", True, False),
+    ],
+)
+def test_a_makefile_s_exports_reach_its_recipe(makefile: str, unseen: bool, filtered: bool) -> None:
+    analysis = _analysis(read("Makefile", makefile), bash("make test", GREEN))
+    assert (analysis.wrapper_unseen is not None) is unseen
+    assert bool(analysis.test_filters) is filtered
+
+
+JUSTFILE = "default: test\n\n# the suite\ntest: lint\n    @pytest -q\n\nlint:\n    ruff check .\n"
+
+
+@pytest.mark.parametrize(
+    ("justfile", "command", "steps"),
+    [
+        (JUSTFILE, "just test", ["ruff check .", "pytest -q"]),
+        (JUSTFILE, "just", ["ruff check .", "pytest -q"]),
+        ("test:\n    -pytest -q -x\n", "just test", ["pytest -q -x"]),
+        (JUSTFILE, "just other", None),
+        (JUSTFILE, "just --set a b test", None),
+        ("set dotenv-load\ntest:\n    pytest -q\n", "just test", None),
+        ("test *ARGS:\n    pytest {{ARGS}}\n", "just test", None),
+        ("args := '-x'\ntest:\n    pytest -q\n", "just test", None),
+        ("test:\n    #!/usr/bin/env bash\n    pytest -q\n", "just test", None),
+        ("[private]\ntest:\n    pytest -q\n", "just test", None),
+    ],
+)
+def test_a_justfile_the_session_showed_names_what_just_runs(
+    justfile: str, command: str, steps: list[str] | None
+) -> None:
+    found = defined(command, {"justfile": justfile})
+    assert (None if found is None else [s.command for s in found]) == steps
+
+
+def test_a_silent_just_recipe_the_session_read_resolves_its_options() -> None:
+    analysis = _analysis(read("justfile", "test:\n    @pytest -q -x\n"), bash("just test", GREEN))
+    assert analysis.wrapper_unseen is None
+    assert analysis.stop_early is not None
+
+
+TOX = (
+    "[tox]\nenvlist = py\n\n[testenv]\ndeps = pytest\nsetenv =\n    PYTHONPATH = {toxinidir}/src\n"
+    "commands =\n    pytest -q {posargs}\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("tox_ini", "output", "unseen", "filtered"),
+    [
+        (TOX, GREEN, False, False),
+        (TOX.replace("src\n", "src\n    py: PYTEST_ADDOPTS = -k sub\n"), GREEN, False, True),
+        (
+            TOX.replace("setenv", "set_env").replace("src\n", "src\n    CI = 1\n"),
+            GREEN,
+            False,
+            True,
+        ),
+        (
+            TOX.replace("src\n", "src\n    PYTEST_ADDOPTS = -x\n"),
+            "py: commands[0]> pytest -q\n" + GREEN,
+            False,
+            True,
+        ),
+        (TOX.replace("{posargs}", "{envsitepackagesdir}"), GREEN, True, False),
+        (TOX.replace("src\n", "src\n    file|.env\n"), GREEN, True, False),
+        ("[testenv\n", GREEN, True, False),
+    ],
+)
+def test_a_tox_ini_the_session_showed_names_commands_and_variables(
+    tox_ini: str, output: str, unseen: bool, filtered: bool
+) -> None:
+    analysis = _analysis(read("tox.ini", tox_ini), bash("tox -e py", output))
+    assert (analysis.wrapper_unseen is not None) is unseen
+    assert bool(analysis.test_filters) is filtered
+
+
+@pytest.mark.parametrize(
+    ("before", "status"),
+    [
+        ((), Support.SUPPORTED),
+        ((bash("export SKIP=ruff"),), Support.NO_EVIDENCE),
+        ((bash("export SKIP=ruff", status=CallStatus.DENIED),), Support.SUPPORTED),
+    ],
+)
+def test_a_skip_an_earlier_command_exported_narrows_pre_commit(
+    before: tuple[ToolCall, ...], status: Support
+) -> None:
+    index = SessionIndex(
+        session(edit("calc.py"), *before, bash("pre-commit run --all-files", "ruff....Passed"))
+    )
+    assert check(BuildPredicate(category="lint"), index).status is status

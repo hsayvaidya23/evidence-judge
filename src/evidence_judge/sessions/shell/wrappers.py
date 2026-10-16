@@ -3,13 +3,16 @@
 A wrapper's definition can pass the runner options its command line does not show: `pytest
 -x`, `jest --bail`, a filter. The judge reads the command the wrapper ran from the wrapper's own
 output (npm's `> jest` header, tox's `commands[0]> pytest`, make's echo of a recipe line) or
-from a `package.json` or `Makefile` the session showed, and analyses it like a direct run. A
-wrapper neither shows stays unseen, and its run cannot back a failure count or an inference
-that a test is not among the failures.
+from a `package.json`, `Makefile`, justfile or `tox.ini` the session showed, with the variables
+a Makefile exports or a tox.ini sets, and analyses it like a direct run. A wrapper neither shows
+stays unseen: its run cannot back a failure count or an inference that a test is not among the
+failures, and its pass is the whole suite's only when it passed as many tests as an earlier
+whole-suite run the session showed.
 """
 
 from __future__ import annotations
 
+import configparser
 import json
 import re
 import shlex
@@ -23,11 +26,15 @@ from evidence_judge.sessions.shell.classify import analyse
 from evidence_judge.sessions.shell.lexer import program_name
 from evidence_judge.sessions.shell.runners.make import make_args
 
-DEFINITION_FILES: Final = frozenset({"Makefile", "makefile", "GNUmakefile", "package.json"})
+DEFINITION_FILES: Final = frozenset(
+    {"Makefile", "makefile", "GNUmakefile", "package.json", "justfile", "Justfile", ".justfile",
+     "tox.ini"}
+)  # fmt: skip
 """The files that define the wrappers the judge can read."""
 
 
 _MAKE_FILES: Final = ("GNUmakefile", "makefile", "Makefile")
+_JUST_FILES: Final = ("justfile", "Justfile", ".justfile")
 _MAKES: Final = frozenset({"make", "gmake"})
 _PMS: Final = frozenset({"npm", "pnpm", "yarn", "bun"})
 _PM_FLAGS: Final = frozenset({"--silent", "-s", "--if-present", "-w", "--workspaces"})
@@ -43,12 +50,17 @@ _NOX_ECHO: Final = re.compile(r"^nox > (?P<command>.+)$")
 _MAKE_NOISE: Final = re.compile(r"^g?make(?:\[\d+\])?: ")
 _MAKE_IGNORED: Final = re.compile(r"^g?make(?:\[\d+\])?: \[[^\]]*\] Error \d+ \(ignored\)", re.M)
 _MAKE_DIRECTIVE: Final = re.compile(
-    r"^\s*(?:-?include|sinclude|ifeq|ifneq|ifdef|ifndef|define|export|unexport|override|vpath|"
+    r"^\s*(?:-?include|sinclude|ifeq|ifneq|ifdef|ifndef|define|unexport|override|vpath|"
     r"\.RECIPEPREFIX|\.ONESHELL|\.SHELLFLAGS|SHELL\s*:?=|MAKEFLAGS)\b"
 )
-_MAKE_ASSIGN: Final = re.compile(r"^([A-Za-z_][\w.-]*)\s*(\?|::?|\+|!)?=\s*(.*)$")
+_MAKE_ASSIGN: Final = re.compile(r"^(export\s+)?([A-Za-z_][\w.-]*)\s*(\?|::?|\+|!)?=\s*(.*)$")
+_SHELL_OPERATOR: Final = re.compile(r"[;&|`$()<>\n]")
 _MAKE_RULE: Final = re.compile(r"^([^:=#]+?)\s*(::?)(?!=)\s*([^=]*)$")
 _MAKE_REF: Final = re.compile(r"\$(?:\(([^()]*)\)|\{([^{}]*)\}|(.))")
+_JUST_RECIPE: Final = re.compile(r"^@?([A-Za-z_][\w-]*)\s*:(?!=)\s*((?:[A-Za-z_][\w-]*\s*)*)$")
+_TOX_ENV_OPTIONS: Final = frozenset({"-e", "--env"})
+_TOX_POSARGS: Final = re.compile(r"\{posargs(?::([^{}]*))?\}")
+_TOX_FACTOR: Final = re.compile(r"^[\w,!.-]+:\s")
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +167,7 @@ def _package_script(text: str, words: list[str]) -> list[_Step] | None:
 class _Makefile:
     variables: dict[str, str]
     rules: dict[str, list[tuple[list[str], list[str]]]]
+    exported: list[str]
 
 
 def _logical_lines(text: str) -> list[str]:
@@ -162,10 +175,12 @@ def _logical_lines(text: str) -> list[str]:
 
 
 def _parse_makefile(text: str) -> _Makefile | None:
-    """Variables and rules of a Makefile in the plain subset the judge reads; None for one with
-    conditionals, includes, exports, pattern or double-colon rules, or anything else."""
+    """Variables, rules and the variables it exports (`export PYTEST_ADDOPTS = -x`) of a
+    Makefile in the plain subset the judge reads; None for one with conditionals, includes, a
+    bare `export`, pattern or double-colon rules, or anything else."""
     variables: dict[str, str] = {"MAKE": "make"}
     rules: dict[str, list[tuple[list[str], list[str]]]] = {}
+    exported: list[str] = []
     recipe: list[str] | None = None
     for raw in _logical_lines(text):
         if raw.startswith("\t"):
@@ -179,9 +194,11 @@ def _parse_makefile(text: str) -> _Makefile | None:
         if _MAKE_DIRECTIVE.match(line):
             return None
         if assign := _MAKE_ASSIGN.match(line):
-            name, kind, value = assign.groups()
+            export, name, kind, value = assign.groups()
             if kind == "!":
                 return None
+            if export:
+                exported.append(name)
             if kind == "?" and name in variables:
                 pass
             elif kind == "+":
@@ -197,7 +214,7 @@ def _parse_makefile(text: str) -> _Makefile | None:
         recipe = [inline.strip()] if inline.strip() else []
         for target in rule[1].split():
             rules.setdefault(target, []).append((prereqs.split(), recipe))
-    return _Makefile(variables, rules)
+    return _Makefile(variables, rules, list(dict.fromkeys(exported)))
 
 
 def _expand(text: str, makefile: _Makefile, target: str, depth: int = 0) -> str | None:
@@ -243,15 +260,33 @@ def _make_steps(
                 if inner is None:
                     return None
                 steps.extend(inner)
+    env = _exported_env(makefile, target)
+    if env is None:
+        return None
     for line in recipes[0] if recipes else []:
         prefix = re.match(r"^[@+\-\s]*", line)
         flags = prefix.group(0) if prefix else ""
         command = _expand(line[len(flags) :], makefile, target)
         if command is None:
             return None
-        if command.strip():
-            steps.append(_Step(command.strip(), "-" in flags))
+        if not command.strip():
+            continue
+        if env and _SHELL_OPERATOR.search(command):
+            return None
+        steps.append(_Step(f"{env}{command.strip()}", "-" in flags))
     return steps
+
+
+def _exported_env(makefile: _Makefile, target: str) -> str | None:
+    """The assignments a recipe line runs with for the variables the Makefile exports, as a
+    command-line prefix (`PYTEST_ADDOPTS=-x `); None for a value the judge cannot expand."""
+    parts: list[str] = []
+    for name in makefile.exported:
+        value = _expand(makefile.variables.get(name, ""), makefile, target)
+        if value is None:
+            return None
+        parts.append(f"{name}={shlex.quote(value.strip())} ")
+    return "".join(parts)
 
 
 def _make_recipe(prog: str, words: list[str], files: Mapping[str, str]) -> list[_Step] | None:
@@ -271,6 +306,149 @@ def _make_recipe(prog: str, words: list[str], files: Mapping[str, str]) -> list[
     return steps
 
 
+def _parse_justfile(text: str) -> dict[str, tuple[list[str], list[str]]] | None:
+    """The recipes of a justfile, their dependencies and lines, in the plain subset the judge
+    reads; None for one with settings, variables, parameters, attributes, imports, shebang
+    recipes or `{{...}}` interpolation."""
+    recipes: dict[str, tuple[list[str], list[str]]] = {}
+    lines: list[str] | None = None
+    for raw in _logical_lines(text):
+        if not raw.strip():
+            continue
+        if raw[0] in " \t":
+            body = raw.strip()
+            if lines is None or "{{" in body or (not lines and body.startswith("#!")):
+                return None
+            if not body.startswith("#"):
+                lines.append(body)
+            continue
+        if raw.startswith("#"):
+            continue
+        header = _JUST_RECIPE.match(raw.rstrip())
+        if header is None or header[1] in recipes:
+            return None
+        lines = []
+        recipes[header[1]] = (header[2].split(), lines)
+    return recipes
+
+
+def _just_steps(
+    recipes: dict[str, tuple[list[str], list[str]]], name: str, seen: set[str]
+) -> list[_Step] | None:
+    if name not in recipes:
+        return None
+    if name in seen:
+        return []
+    seen.add(name)
+    deps, lines = recipes[name]
+    steps: list[_Step] = []
+    for dep in deps:
+        inner = _just_steps(recipes, dep, seen)
+        if inner is None:
+            return None
+        steps.extend(inner)
+    for line in lines:
+        prefix = re.match(r"^[@\-]*", line)
+        flags = prefix.group(0) if prefix else ""
+        if command := line[len(flags) :].strip():
+            steps.append(_Step(command, "-" in flags))
+    return steps
+
+
+def _just_recipe(words: list[str], files: Mapping[str, str]) -> list[_Step] | None:
+    parsed = make_args("just", words[1:])
+    if parsed.files or parsed.dirs or parsed.assigns or parsed.unknown:
+        return None
+    text = next((files[name] for name in _JUST_FILES if name in files), None)
+    recipes = _parse_justfile(text) if text is not None else None
+    if not recipes:
+        return None
+    seen: set[str] = set()
+    steps: list[_Step] = []
+    for target in parsed.targets or [next(iter(recipes))]:
+        found = _just_steps(recipes, target, seen)
+        if found is None:
+            return None
+        steps.extend(found)
+    return steps
+
+
+def _tox_config(text: str) -> configparser.ConfigParser | None:
+    config = configparser.ConfigParser(interpolation=None, strict=True)
+    try:
+        config.read_string(text)
+    except configparser.Error:
+        return None
+    return config
+
+
+def _tox_envs(words: list[str]) -> list[str]:
+    envs: list[str] = []
+    for i, word in enumerate(words):
+        name, eq, value = word.partition("=")
+        if name in _TOX_ENV_OPTIONS:
+            value = value if eq else (words[i + 1] if i + 1 < len(words) else "")
+        elif word.startswith("-e") and len(word) > 2:
+            value = word[2:]
+        else:
+            continue
+        envs.extend(e for part in value.split(",") for e in part.split() if e)
+    return envs
+
+
+def _tox_setenv(config: configparser.ConfigParser) -> str | None:
+    """Every variable a `setenv` or `set_env` of the tox.ini's test environments sets (a factor-conditional
+    one too), as a command-line prefix; None for one the judge cannot read (a `file|` line)."""
+    parts: list[str] = []
+    for section in config.sections():
+        if section != "testenv" and not section.startswith("testenv:"):
+            continue
+        text = "\n".join(config.get(section, key, fallback="") for key in ("setenv", "set_env"))
+        for raw in text.splitlines():
+            line = _TOX_FACTOR.sub("", raw.strip(), count=1)
+            if not line or line.startswith("#"):
+                continue
+            name, eq, value = line.partition("=")
+            if not eq or not re.fullmatch(r"[A-Za-z_]\w*", name.strip()):
+                return None
+            value = value.strip().replace("{toxinidir}", ".")
+            parts.append(f"{name.strip()}={shlex.quote(value)} ")
+    return "".join(dict.fromkeys(parts))
+
+
+def _tox_commands(config: configparser.ConfigParser, words: list[str]) -> list[_Step] | None:
+    """The commands of the one environment `tox -e py` runs, from its section or `[testenv]`;
+    None for several environments, or for a substitution or factor condition other than
+    `{posargs}`."""
+    envs = _tox_envs(words)
+    if len(envs) != 1:
+        return None
+    section = f"testenv:{envs[0]}" if config.has_section(f"testenv:{envs[0]}") else "testenv"
+    text = config.get(section, "commands", fallback=None)
+    if text is None and section != "testenv":
+        text = config.get("testenv", "commands", fallback=None)
+    if not text:
+        return None
+    steps: list[_Step] = []
+    for raw in _logical_lines(text):
+        line = _TOX_POSARGS.sub(lambda m: m[1] or "", raw.strip())
+        if not line or line.startswith("#"):
+            continue
+        if "{" in line or _TOX_FACTOR.match(line) or line.startswith("!"):
+            return None
+        ignores = line.startswith("-")
+        steps.append(_Step(line.lstrip("- ").strip(), ignores))
+    return steps or None
+
+
+def _with_env(steps: list[_Step], env: str) -> list[_Step] | None:
+    if not env:
+        return steps
+    if any(_SHELL_OPERATOR.search(step.command) for step in steps):
+        return None
+    return [_Step(f"{env}{step.command}", step.ignores_errors) for step in steps]
+
+
 def defined(wrapper: str, files: Mapping[str, str]) -> list[_Step] | None:
     """The commands the wrapper's definition in `files` (by name, as the session last showed
     them) runs, or None."""
@@ -280,7 +458,23 @@ def defined(wrapper: str, files: Mapping[str, str]) -> list[_Step] | None:
         return _package_script(files["package.json"], words)
     if prog in _MAKES:
         return _make_recipe(prog, words, files)
+    if prog == "just":
+        return _just_recipe(words, files)
+    if prog == "tox" and "tox.ini" in files and (config := _tox_config(files["tox.ini"])):
+        commands = _tox_commands(config, words)
+        env = _tox_setenv(config)
+        return _with_env(commands, env) if commands and env is not None else None
     return None
+
+
+def _tox_echoed(words: list[str], output: str, files: Mapping[str, str]) -> list[_Step] | None:
+    """What tox's output says it ran, with the variables a tox.ini the session showed sets."""
+    steps = echoed(shlex.join(words), output)
+    config = _tox_config(files["tox.ini"]) if "tox.ini" in files else None
+    if steps is None or config is None:
+        return steps
+    env = _tox_setenv(config)
+    return None if env is None else _with_env(steps, env)
 
 
 def _merge(analysis: CommandAnalysis, steps: list[_Step], cwd: str | None) -> CommandAnalysis:
@@ -338,5 +532,8 @@ def resolve(
         )
     if analysis.wrapper_unseen is None:
         return analysis
-    steps = defined(wrapper, files) or echoed(wrapper, output)
+    if prog == "tox":
+        steps = defined(wrapper, files) or _tox_echoed(words, output, files)
+    else:
+        steps = defined(wrapper, files) or echoed(wrapper, output)
     return _merge(analysis, steps, cwd) if steps else analysis

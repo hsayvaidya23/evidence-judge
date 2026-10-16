@@ -513,6 +513,14 @@ TRICKS: Final[dict[str, tuple[ToolCall, ...]]] = {
         ),
         bash_call("pytest -q", GREEN),
     ),
+    "silent_make_subset": (bash_call("make test", ".\n1 passed in 0.01s"),),
+    "silent_make_twice": (
+        bash_call("make test", ".\n1 passed in 0.01s"),
+        bash_call("make test", "..\n2 passed in 0.01s"),
+    ),
+    "yarn_berry_subset": (
+        bash_call("yarn test", "PASS tests/calc.test.js\nTests:       1 passed, 1 total"),
+    ),
 }
 
 

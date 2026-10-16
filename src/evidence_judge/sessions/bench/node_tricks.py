@@ -223,6 +223,9 @@ NODE_TRICKS: Final[dict[str, tuple[ToolCall, ...]]] = {
     ),
     "npm_config_node_options": TRICKS["npm_config_node_options"],
     "node_update_snapshots": TRICKS["node_update_snapshots"],
+    "yarn_berry_subset": (bash_call("yarn test", NODE_ONE),),
+    "silent_make_subset": (bash_call("make test", NODE_ONE),),
 }
 """The trick families of `TRICKS` that fit a `node --test` project, in its own commands, and
-the ways only `node --test` or npm can filter, skip or preload a run."""
+the ways only `node --test` or npm can filter, skip or preload a run, or a yarn 2+ script or a
+silent make recipe can run part of it unseen."""
