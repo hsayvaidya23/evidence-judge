@@ -18,6 +18,7 @@ from evidence_judge.sessions import edits, shell
 from evidence_judge.sessions.models import (
     CallStatus,
     Category,
+    CommandAnalysis,
     CommandEvent,
     FileEditEvent,
     FileReadEvent,
@@ -26,6 +27,7 @@ from evidence_judge.sessions.models import (
     SessionEvent,
     SubagentEvent,
 )
+from evidence_judge.sessions.shell import wrappers
 from evidence_judge.sessions.summaries import check_errors, parse_summary
 
 OUTPUT_HEAD: Final = 4_000
@@ -190,6 +192,12 @@ class EventBuilder:
         """Modules each test module the session shows imports, and the names it takes."""
         self.constants: dict[str, set[str] | None] = {}
         """Module-level names each edit of a Python file outside the tests changed, by edit id."""
+        self.definitions: dict[str, str | None] = {}
+        """The text the session last showed of each wrapper definition (`Makefile`,
+        `package.json`), by path; None once it changed in a way the judge cannot follow."""
+        self.moved = False
+        """A command left the shell in another directory, so a wrapper may read another
+        definition than the one at its path."""
 
     def _id(self, prefix: str) -> str:
         self.counters[prefix] = self.counters.get(prefix, 0) + 1
@@ -239,6 +247,70 @@ class EventBuilder:
             for word in re.findall(r"[\w./-]+\.py\b", command):
                 self._test_source(relative(word, cwd), call.output)
 
+    def _key(self, path: str, cwd: str | None) -> str:
+        joined = posixpath.join(cwd, path) if cwd and not posixpath.isabs(path) else path
+        return relative(joined, self.cwd)
+
+    def _forget(self, paths: Iterable[str] | None, cwd: str | None) -> None:
+        """Mark the definitions among `paths` changed; every one for None."""
+        if paths is None:
+            self.definitions = dict.fromkeys(self.definitions)
+            return
+        for path in paths:
+            if posixpath.basename(path) in wrappers.DEFINITION_FILES:
+                self.definitions[self._key(path, cwd)] = None
+
+    def _shown(self, call: ToolCall, cwd: str | None) -> None:
+        """Record the definition text an edit, a whole-file read or a patch shows, and forget a
+        definition a call may have changed unseen."""
+        if call.status is CallStatus.DENIED or call.name in SHELL_TOOLS:
+            return
+        if call.edits is not None:
+            for path, change, _, added in call.edits:
+                self._forget([path], cwd)
+                if change == "add" and posixpath.basename(path) in wrappers.DEFINITION_FILES:
+                    self.definitions[self._key(path, cwd)] = "\n".join(added or [])
+            return
+        path = _path(call)
+        known = posixpath.basename(path) in wrappers.DEFINITION_FILES
+        if call.name in EDIT_TOOLS and known:
+            self.definitions[self._key(path, cwd)] = _edited_text(
+                call, self.definitions.get(self._key(path, cwd))
+            )
+        elif call.name in READ_TOOLS and known and (text := _whole_read(call)) is not None:
+            self.definitions[self._key(path, cwd)] = text
+        elif call.name in SUBAGENT_TOOLS or (
+            call.name not in (EDIT_TOOLS | READ_TOOLS | SEARCH_TOOLS | SAFE_TOOLS)
+        ):
+            self._forget(None, cwd)
+
+    def _after_command(self, call: ToolCall, event: CommandEvent, cwd: str | None) -> None:
+        if event.status is CallStatus.DENIED:
+            return
+        analysis = event.analysis
+        if analysis.cd_targets:
+            self.moved = True
+        if analysis.opaque_write or analysis.lasting_mutation or analysis.parse_error:
+            self._forget(None, cwd)
+        self._forget([*analysis.touched_paths, *analysis.deleted_paths], cwd)
+        shown = _CAT.fullmatch(event.command.strip())
+        if (
+            shown
+            and posixpath.basename(shown[1]) in wrappers.DEFINITION_FILES
+            and event.exit_code == 0
+            and not call.output_truncated
+        ):
+            self.definitions[self._key(shown[1], cwd)] = call.output
+
+    def _known_definitions(self, analysis: CommandAnalysis, cwd: str | None) -> dict[str, str]:
+        if self.moved or analysis.run_cds:
+            return {}
+        return {
+            name: text
+            for name in wrappers.DEFINITION_FILES
+            if isinstance(text := self.definitions.get(self._key(name, cwd)), str)
+        }
+
     def finish(self) -> None:
         """Mark edits of files a test module reads as data: changing expected values weakens the
         suite like changing an assertion."""
@@ -273,6 +345,7 @@ class EventBuilder:
     def add(self, call: ToolCall) -> None:
         cwd = call.cwd or self.cwd
         self._sources(call, cwd)
+        self._shown(call, cwd)
         common: dict[str, Any] = {"ts": call.ts, "tool": call.name, "agent_id": call.agent_id}
         if call.edits is not None:
             for path, change, removed, added in call.edits:
@@ -321,6 +394,9 @@ class EventBuilder:
             command = shell.unwrap_shell([str(a) for a in argv])  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
         command = command or ""
         analysis = shell.analyse(command, cwd)
+        if analysis.wrapper is not None and call.status is not CallStatus.DENIED:
+            known = self._known_definitions(analysis, cwd)
+            analysis = wrappers.resolve(analysis, call.output, known, cwd)
         output, _ = excerpt(call.output)
         summary = (
             parse_summary(analysis.runners, call.output)
@@ -334,24 +410,24 @@ class EventBuilder:
             and call.status is not CallStatus.DENIED
             else None
         )
-        self._append(
-            CommandEvent(
-                id=self._id("cmd"),
-                seq=self.seq,
-                command=command,
-                cwd=cwd,
-                status=call.status,
-                exit_code=call.exit_code,
-                output=output,
-                output_chars=len(call.output),
-                output_truncated=call.output_truncated,
-                background=call.background,
-                analysis=analysis,
-                summary=summary,
-                check_errors=errors,
-                **common,
-            )
+        event = CommandEvent(
+            id=self._id("cmd"),
+            seq=self.seq,
+            command=command,
+            cwd=cwd,
+            status=call.status,
+            exit_code=call.exit_code,
+            output=output,
+            output_chars=len(call.output),
+            output_truncated=call.output_truncated,
+            background=call.background,
+            analysis=analysis,
+            summary=summary,
+            check_errors=errors,
+            **common,
         )
+        self._append(event)
+        self._after_command(call, event, cwd)
 
     def _edit(
         self,
@@ -394,6 +470,40 @@ class EventBuilder:
                 **common,
             )
         )
+
+
+_CAT: Final = re.compile(r"cat\s+([\w./-]+)")
+
+
+def _whole_read(call: ToolCall) -> str | None:
+    """The whole file a read shows, or None for part of it."""
+    file = call.result.get("file")
+    if isinstance(file, Mapping):
+        content = file.get("content")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        start: object = file.get("startLine")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        lines = file.get("numLines")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        total = file.get("totalLines")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        partial = start not in (1, None) or (
+            isinstance(lines, int) and isinstance(total, int) and lines < total
+        )
+        return content if isinstance(content, str) and not partial else None
+    if any(key in call.input for key in ("offset", "limit", "start_line", "end_line")):
+        return None
+    return _NUMBERED.sub("", call.output) if call.output else None
+
+
+def _edited_text(call: ToolCall, known: str | None) -> str | None:
+    """A definition's text after an edit: the whole file when the source records it, or the
+    known text with the replacement applied."""
+    if (texts := _whole_texts(call)) is not None:
+        return texts[1]
+    if call.name in ("Write", "write_file"):
+        return _str(call.input.get("content"))
+    old, new = _str(call.input.get("old_string")), _str(call.input.get("new_string"))
+    if known is None or old is None or new is None or not old or old not in known:
+        return None
+    every = call.input.get("replace_all") is True
+    return known.replace(old, new) if every else known.replace(old, new, 1)
 
 
 def _guard_tamper(path: str, rel: str, added: list[str] | None, status: CallStatus) -> str | None:

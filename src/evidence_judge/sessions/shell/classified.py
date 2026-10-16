@@ -38,3 +38,5 @@ class Classified:
     """Why a lint or type-check run does not decide the whole project (`ruff check calc.py`)."""
     check_masked: str | None = None
     """Why a lint or type-check run's exit status does not report what it found."""
+    wrapper: str | None = None
+    """The project target or script a test, lint or type-check run goes through (`make test`)."""

@@ -312,6 +312,12 @@ def _printed(words: list[str]) -> str | None:
 
 def _sed_replacements(args: list[str]) -> str | None:
     """The text `sed` substitutions insert, when every command is `s/pattern/text/flags`."""
+    parts = _sed_substitutions(args)
+    return None if parts is None else "\n".join(text for _, text in parts)
+
+
+def _sed_substitutions(args: list[str]) -> list[tuple[str, str]] | None:
+    """The (pattern, text) of each `sed` substitution, when every command is one."""
     scripts: list[str] = []
     positional: list[str] = []
     i = 0
@@ -329,7 +335,20 @@ def _sed_replacements(args: list[str]) -> str | None:
         i += 1
     if not scripts:
         scripts = positional[:1]
-    inserted: list[str] = []
+    return _substitutions(scripts)
+
+
+def _perl_substitutions(args: list[str]) -> list[tuple[str, str]] | None:
+    """The (pattern, text) of each `perl -pi -e 's/.../.../'` substitution, when every script
+    is one."""
+    scripts = [
+        args[i + 1] for i, arg in enumerate(args[:-1]) if re.fullmatch(r"-[a-zA-Z0-9]*[eE]", arg)
+    ]
+    return _substitutions(scripts) if scripts else None
+
+
+def _substitutions(scripts: list[str]) -> list[tuple[str, str]] | None:
+    inserted: list[tuple[str, str]] = []
     for script in scripts:
         for part in re.split(r"[;\n]", script):
             part = part.strip()
@@ -340,8 +359,9 @@ def _sed_replacements(args: list[str]) -> str | None:
             pieces = re.split(rf"(?<!\\){re.escape(part[1])}", part[2:])
             if len(pieces) != 3 or not re.fullmatch(r"[gpiImMe0-9]*", pieces[2]):
                 return None
-            inserted.append(_unescape(pieces[1].replace("\\" + part[1], part[1])))
-    return "\n".join(inserted)
+            text = _unescape(pieces[1].replace("\\" + part[1], part[1]))
+            inserted.append((pieces[0], text))
+    return inserted
 
 
 def _code_findings(path: str, code: str | None) -> list[str]:
@@ -399,3 +419,63 @@ def written_code(pipelines: list[Pipeline], command: str) -> list[str]:
             for target in dict.fromkeys(targets):
                 found.extend(_code_findings(target, code))
     return found
+
+
+def _in_place(prog: str, words: list[str]) -> bool:
+    if prog == "sed":
+        return any(re.fullmatch(r"-\w*i\S*|--in-place\S*", w) for w in words)
+    return prog == "perl" and any(re.fullmatch(r"-[a-zA-Z0-9]*i\S*", w) for w in words[1:])
+
+
+def _written_text(
+    simple_words: list[str], prog: str, body: str | None, heredoc: bool, feeder: list[str]
+) -> tuple[str, str] | None:
+    """(removed, added) text a command writes into a file, when its command line spells it
+    out: a heredoc, `echo` or `printf` text, a `sed` or `perl` substitution."""
+    if heredoc and (prog == "tee" or simple_words in (["cat"], ["cat", "-"])):
+        return None if body is None else ("", body)
+    if prog in ("sed", "perl"):
+        parts = (_sed_substitutions if prog == "sed" else _perl_substitutions)(simple_words[1:])
+        if parts is None:
+            return None
+        return "\n".join(p for p, _ in parts), "\n".join(t for _, t in parts)
+    printed = _printed(simple_words) if prog in ("echo", "printf") else None
+    if printed is None and prog == "tee" and feeder:
+        printed = _printed(feeder) if program_name(feeder[0]) in ("echo", "printf") else None
+    return None if printed is None else ("", printed)
+
+
+def written_suppressions(pipelines: list[Pipeline], command: str, opaque: bool) -> list[str]:
+    """The lint or type-check suppression comments (`# noqa`, `# type: ignore`) the command
+    writes into source files, read from the text its command line spells out (a heredoc,
+    `echo`, a `sed` or `perl` substitution); when it writes a source file in a way the judge
+    cannot read (`python -c`, an unknown program), every one its command line holds."""
+    bodies = _heredocs(command)
+    simples = [simple for pipeline in pipelines for simple in pipeline.commands]
+    if sum(simple.heredoc for simple in simples) != len(bodies):
+        bodies = [None] * len(simples)
+    found: list[str] = []
+    unread = opaque
+    heredoc = 0
+    for pipeline in pipelines:
+        for index, simple in enumerate(pipeline.commands):
+            body = bodies[heredoc] if simple.heredoc else None
+            heredoc += simple.heredoc
+            words = unwrap(list(simple.words))
+            prog = program_name(words[0]) if words else ""
+            targets = list(simple.writes)
+            if prog == "tee":
+                targets.extend(w for w in words[1:] if not w.startswith("-"))
+            if _in_place(prog, words):
+                targets.extend(w for w in words[2:] if not w.startswith("-"))
+            if not any(edits.is_code_path(t) for t in targets):
+                continue
+            feeder = unwrap(list(pipeline.commands[index - 1].words)) if index else []
+            text = _written_text(words, prog, body, bool(simple.heredoc), feeder)
+            if text is None:
+                unread = True
+            else:
+                found.extend(edits.added_suppressions(text[0].splitlines(), text[1].splitlines()))
+    if unread:
+        found.extend(edits.added_suppressions([], command.splitlines()))
+    return sorted(set(found))

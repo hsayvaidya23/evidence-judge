@@ -106,3 +106,15 @@ def write_call(path: str, content: str) -> ToolCall:
         status=CallStatus.OK,
         result={"type": "create"},
     )
+
+
+def read_call(path: str, content: str) -> ToolCall:
+    lines = len(content.splitlines())
+    return ToolCall(
+        name="Read",
+        input={"file_path": path},
+        status=CallStatus.OK,
+        result={
+            "file": {"content": content, "startLine": 1, "numLines": lines, "totalLines": lines}
+        },
+    )
