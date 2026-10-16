@@ -236,7 +236,7 @@ verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yam
 print(verdict.outcome, verdict.summary)
 ```
 
-The names exported from `evidence_judge` are the supported Python API; SemVer also covers the CLI (flags and exit codes) and the verdict JSON (`schema_id` `evidence-judge/run-verdict@1`). Submodules are internal and may change in any 0.x release. See [Stability](docs/reference/python-api.md#stability).
+Coding-agent sessions work the same way: `SessionJudge(settings, llm).judge(load_session(claude_code=path), SessionJudgeOptions(...))`. The names exported from `evidence_judge` are the supported Python API; SemVer also covers the CLI (flags and exit codes) and the verdict JSON (`schema_id` `evidence-judge/run-verdict@1`). Submodules are internal and may change in any 0.x release. See [Stability](docs/reference/python-api.md#stability).
 
 ## ⚙️ Configuration
 

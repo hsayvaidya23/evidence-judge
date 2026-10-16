@@ -100,6 +100,9 @@ The first release.
 - `judge`, `inspect`, `bench`, `schema`, `version` (also `--version`), `mcp`, `hook ...` and
   `session judge|rerun|inspect`. Piping the output (`| head -1`) keeps the verdict's exit code.
 - A public Python API exported from `evidence_judge`, and a documentation site.
+- The session judge is part of the public Python API: `SessionJudge`, `SessionJudgeOptions`,
+  `SessionSpec` and `load_session` are exported from `evidence_judge` and documented beside
+  `Judge`.
 
 ### Changed
 
