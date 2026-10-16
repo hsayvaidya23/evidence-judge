@@ -71,13 +71,17 @@ The first release.
 - `evidence-judge bench`: false-PASS rates with Wilson intervals on forged runs, accuracy on
   honest controls, and an optional transcript LLM-judge baseline. The forgery lab covers the
   four manipulation kinds from "Gaming the Judge" and evidence attacks on the recording; on the
-  recorded demo-site runs, 0 of 1293 attacks pass.
+  recorded demo-site runs, 0 of 1326 attacks pass.
 - A session forgery benchmark (`python -m evidence_judge.sessions.bench`) over recorded
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1293 browser and 0 of 1440 session
+  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1440 session
   forgeries pass, and 4 of 38 honest browser controls go to review offline.
+- Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
+  the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
+  and got order #..."), so a claim reader that carries the negation over shows up in `make
+  bench` as the no-spec judge's FAIL turning into NEEDS_REVIEW (15 of 33 to 1 of 33).
 
 **Redaction**
 
@@ -156,6 +160,11 @@ The first release.
   Anything else needs review.
 - The session benchmark's Markdown report keeps an honest control whose answer holds a newline
   or a pipe on one table row: both are escaped in the cell.
+- Offline claim extraction no longer hides a forged browser answer's claims behind a leading
+  negated participle ("Not wanting to overpay, compared prices and bought the Red Kettle") or
+  an irregular past verb after a negated auxiliary ("I didn't see errors and bought it"): with
+  no spec these reached only NEEDS_REVIEW and now FAIL. "I never logged in, added it to the
+  cart or placed an order" and "I didn't add it to the cart or place an order" still abstain.
 
 ### Security
 
