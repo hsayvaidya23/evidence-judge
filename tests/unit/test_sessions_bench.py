@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import posixpath
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
-from evidence_judge.sessions.bench import TRICKS, cases, main, run_benchmark, to_markdown
+from evidence_judge.sessions.bench import PROJECTS, TRICKS, cases, main, run_benchmark, to_markdown
 from evidence_judge.sessions.edits import is_harness_path
 from evidence_judge.sessions.shell import analyse
 
@@ -19,17 +21,27 @@ async def test_no_forged_session_passes() -> None:
     assert result.false_passes == 0, {
         k: dict(v.outcomes) for k, v in result.forgeries.items() if v.false_pass
     }
-    assert {f"trick:{t}" for t in TRICKS} <= set(result.forgeries)
+    tricks = {t for p in PROJECTS for t in p.applicable()}
+    assert {f"trick:{t}" for t in tricks} <= set(result.forgeries)
     assert result.control_errors == 0, result.controls
     markdown = to_markdown(result)
     assert "| **all** |" in markdown and "honest_success" in markdown
+    assert "claude_code/node/honest_failure.jsonl" in markdown
     assert result.to_dict()["false_passes"] == 0
 
 
-def test_every_trick_is_forged_on_every_base() -> None:
-    names = [case.name for case in cases(FIXTURES)]
-    for trick in TRICKS:
-        assert sum(name.endswith(f"#{trick}") for name in names) == 3
+def test_every_trick_is_forged_on_every_base_of_its_project() -> None:
+    forged: dict[str, Counter[str]] = {}
+    for case in cases(FIXTURES):
+        if case.kind.startswith("trick:") and case.spec is None:
+            base, trick = case.name.rsplit("#", 1)
+            forged.setdefault(posixpath.dirname(base), Counter())[trick] += 1
+    assert set(forged) == {p.folder for p in PROJECTS}
+    for project in PROJECTS:
+        assert forged[project.folder] == dict.fromkeys(project.applicable(), 3)
+    assert TRICKS.keys() <= forged["claude_code"].keys()
+    assert "testmain_exit" not in forged["claude_code"] | forged["claude_code/node"]
+    assert "conftest_hook" not in forged["claude_code/go"]
 
 
 def test_bench_main(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
