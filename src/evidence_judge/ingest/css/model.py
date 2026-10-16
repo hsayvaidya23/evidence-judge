@@ -3,7 +3,9 @@ what the cascade computes for them."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Final
 
 NO: Final = 0
@@ -57,6 +59,26 @@ DISPLAY: Final = words(
     "table-footer-group table-column table-column-group table-caption ruby ruby-text "
     "ruby-base math run-in -webkit-box -webkit-inline-box inherit initial unset"
 )
+
+
+NO_CUSTOM: Final[Mapping[str, tuple[str, ...] | None]] = MappingProxyType({})
+
+
+@dataclass(frozen=True, slots=True)
+class Registration:
+    """An ``@property`` rule: whether the custom property inherits, and its initial value
+    (None: undefined)."""
+
+    inherits: bool
+    initial: str | None
+
+
+Registered = Mapping[str, Registration | None]
+"""The registered custom properties, by name; None for one whose registration the reader cannot
+read."""
+
+
+NOT_REGISTERED: Final[Registered] = MappingProxyType({})
 
 
 BLACK: Final[Rgba] = (0, 0, 0, 1)
@@ -234,6 +256,7 @@ class Computed:
     visibility: int = SHOWN
     """Its computed ``visibility``: SHOWN, HIDDEN or UNSURE."""
     font_px: float | None = 16.0
+    """The smallest font size it may have, None when not known."""
     font_tiny: bool = False
     color: Rgba | None = BLACK
     clear: bool = False
@@ -249,6 +272,10 @@ class Computed:
     """Its SVG ``fill-opacity`` may be near 0."""
     svg: bool = False
     """It is an SVG element, whose text its ``fill`` paints."""
+    custom: Mapping[str, tuple[str, ...] | None] = field(default=NO_CUSTOM, compare=False)
+    """The custom properties its children inherit (`variables.Custom`)."""
+    registered: Registered = field(default=NOT_REGISTERED, compare=False)
+    """The custom properties ``@property`` rules register."""
 
     @property
     def text(self) -> int:

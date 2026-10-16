@@ -17,8 +17,12 @@ fully model:
   combinators), ``:not()``, ``:is()``, ``:where()``, the ``:nth-*`` and ``*-child`` /
   ``*-of-type`` pseudo-classes, ``:root``, ``:defined`` on built-in elements, ``:any-link``,
   ``:host`` / ``:host()`` and escapes are evaluated;
-- a value it cannot read: ``var()``, ``env()``, ``attr()`` or an unknown keyword in
-  ``display``, ``visibility`` or ``content-visibility``;
+- a value it cannot read in a property that can hide text: an unknown function, unit or
+  keyword, ``attr()``, or a ``var()`` whose custom property it cannot tell (one a rule it cannot
+  evaluate may set, a cycle it cannot settle, one registered outside the document). It
+  substitutes ``var()`` from the cascade's custom properties (`variables`), reads ``env()``
+  safe-area insets as 0, and evaluates ``calc()``, ``min()``, ``max()``, ``clamp()`` and
+  ``abs()``;
 - styles that can make text unreadable without removing it: ``opacity`` near 0, a tiny
   ``font-size``, a transparent text colour or one equal to the background, ``clip`` /
   ``clip-path`` that cut it away, a ``transform`` that scales it to nothing, far off-screen

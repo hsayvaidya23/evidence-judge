@@ -7,7 +7,8 @@ from dataclasses import dataclass, field, replace
 from typing import Final
 
 from evidence_judge.ingest.css.model import Compound, Pseudo, Selector, words
-from evidence_judge.ingest.css.syntax import closing_paren, split_commas, unescape
+from evidence_judge.ingest.css.syntax import split_commas, unescape
+from evidence_judge.ingest.css.values import closing_paren
 
 _VALID, UNKNOWN, INVALID = 0, 1, 2
 

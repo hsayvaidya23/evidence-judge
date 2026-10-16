@@ -16,6 +16,7 @@ from evidence_judge.ingest.css.matching import matches
 from evidence_judge.ingest.css.model import (
     HTML,
     MATHML,
+    MAYBE,
     NO,
     SVG,
     YES,
@@ -23,6 +24,8 @@ from evidence_judge.ingest.css.model import (
     Computed,
     Element,
     Rank,
+    Registered,
+    Registration,
     Rule,
     Selector,
     Sheet,
@@ -38,14 +41,21 @@ from evidence_judge.ingest.css.selector import (
     parse_complex,
 )
 from evidence_judge.ingest.css.syntax import (
+    SHORTHANDS,
     blocks,
-    closing_paren,
     declarations,
+    expand,
     generates_text,
     parse_declaration,
     split_commas,
 )
-from evidence_judge.ingest.css.values import far_offset, length_px
+from evidence_judge.ingest.css.values import closing_paren, far_offset, length_px
+from evidence_judge.ingest.css.variables import (
+    Custom,
+    custom_properties,
+    references,
+    resolve_rule,
+)
 from evidence_judge.ingest.css.visibility import Cascade, compute
 
 _NAMESPACES: Final = {
@@ -87,7 +97,7 @@ _PRESENTATION: Final = words("display visibility opacity fill fill-opacity")
 
 
 _SKIPPED_AT_RULES: Final = words(
-    "font-face keyframes -webkit-keyframes page counter-style property "
+    "font-face keyframes -webkit-keyframes page counter-style "
     "font-feature-values font-palette-values view-transition position-try namespace "
     "charset starting-style document -moz-document"
 )
@@ -150,6 +160,12 @@ class StyleSheets:
         """A ``::details-content`` rule may show or hide closed ``<details>`` bodies."""
         self.generators: list[Selector] = []
         """The elements a ``::before`` or ``::after`` rule gives text (`generates_text`)."""
+        self.registered: dict[str, Registration | None] = {}
+        """The custom properties the scope's ``@property`` rules register. Outside the document
+        (a shadow tree, the browser's own sheet), and under a condition the reader cannot
+        evaluate, what a registered property holds is unknown."""
+        self._document = document and not user_agent
+        self._merged: tuple[Registered, Registered] | None = None
         for sheet in sheets:
             self._sheet(sheet.text, _Context(sheet.url, sheet.maybe))
         if document:
@@ -175,7 +191,10 @@ class StyleSheets:
         there, for ``:host`` rules."""
         best: dict[str, Rule] = {}
         maybe: dict[str, list[Rule]] = {}
+        registered = self._registering(parent.registered)
+        unknown = registered
         if ua and (own := user_agent_sheets().get(element.namespace)) is not None:
+            unknown = own._registering(registered)
             for rule in own._candidates(element):
                 _offer(rule, matches(rule.selector, element), best, maybe)
         if element.namespace == SVG:
@@ -191,15 +210,23 @@ class StyleSheets:
                 context = 2 if inner[0] >= 2 else 0
                 moved = replace(rule, rank=(inner[0], context, *inner[2:]))
                 _offer(moved, matches(rule.selector, proxy), best, maybe)
-        for prop, value, important in declarations(element.attrs.get("style") or ""):
-            rank = (2 if important else 1, 1, 1, (_TOP,), (0, 0, 0), 0)
+        inline = declarations(element.attrs.get("style") or "")
+        for order, (prop, value, important) in enumerate(inline):
+            rank = (2 if important else 1, 1, 1, (_TOP,), (0, 0, 0), order)
             _offer(Rule(_UNIVERSAL, prop, value, rank, False), YES, best, maybe)
         svg = element.namespace == SVG
         if not best and not maybe:
-            return parent if parent.svg == svg else replace(parent, svg=svg)
+            if parent.svg == svg and registered is parent.registered:
+                return parent
+            return replace(parent, svg=svg, registered=registered)
+        custom = _substitute(best, maybe, parent.custom, unknown)
         present = frozenset(best).union(maybe)
         computed = compute(Cascade(best, maybe, present), parent, self._viewport)
-        return computed if computed.svg == svg or computed.removed else replace(computed, svg=svg)
+        if computed.removed:
+            return computed
+        if computed.svg == svg and computed.custom is custom and computed.registered is registered:
+            return computed
+        return replace(computed, svg=svg, custom=custom, registered=registered)
 
     def collapsed(self, element: Element) -> bool:
         """The page's styles certainly give `element` a box at most a pixel wide or high, or
@@ -208,8 +235,9 @@ class StyleSheets:
         for rule in self._candidates(element):
             if matches(rule.selector, element) == YES and not rule.maybe:
                 _offer(rule, YES, best, {})
-        for prop, value, important in declarations(element.attrs.get("style") or ""):
-            rank: Rank = (2 if important else 1, 1, 1, (_TOP,), (0, 0, 0), 0)
+        inline = declarations(element.attrs.get("style") or "")
+        for order, (prop, value, important) in enumerate(inline):
+            rank: Rank = (2 if important else 1, 1, 1, (_TOP,), (0, 0, 0), order)
             _offer(Rule(_UNIVERSAL, prop, value, rank, False), YES, best, {})
         values = {prop: rule.value for prop, rule in best.items() if rule.value is not None}
         for prop in ("width", "height"):
@@ -284,6 +312,9 @@ class StyleSheets:
     def _block(
         self, name: str, condition: str, body: str, parents: list[Selector], context: _Context
     ) -> None:
+        if name == "property":
+            self._register(condition.strip(), body, context)
+            return
         if name in _SKIPPED_AT_RULES:
             return
         if name == "layer":
@@ -343,6 +374,39 @@ class StyleSheets:
             self.unknown = True
             return
         self._sheet(text, _Context(url, context.maybe or holds is None, layer, context.depth + 1))
+
+    def _register(self, name: str, body: str, context: _Context) -> None:
+        """Read an ``@property`` rule (one with a missing or invalid descriptor is ignored)."""
+        if not name.startswith("--"):
+            return
+        descriptors: dict[str, str] = {}
+        for declaration, nested in blocks(body):
+            key, colon, value = declaration.partition(":")
+            if nested is None and colon:
+                descriptors[key.strip().lower()] = " ".join(value.split())
+        syntax = descriptors.get("syntax", "").strip("\"'").strip()
+        inherits = descriptors.get("inherits", "").lower()
+        initial = descriptors.get("initial-value")
+        if not syntax or inherits not in ("true", "false") or (initial is None and syntax != "*"):
+            return
+        if initial is not None and ("var(" in initial or "env(" in initial):
+            return
+        if not self._document or context.maybe:
+            self.registered[name] = None
+            return
+        self.registered[name] = Registration(
+            inherits == "true", None if initial is None else initial.lower()
+        )
+
+    def _registering(self, inherited: Registered) -> Registered:
+        """`inherited` with this scope's registrations added."""
+        if not self.registered:
+            return inherited
+        if self._merged is not None and any(inherited is m for m in self._merged):
+            return self._merged[1]
+        merged = {**inherited, **self.registered}
+        self._merged = (inherited, merged)
+        return merged
 
     def _layer(self, path: tuple[str, ...]) -> None:
         for end in range(1, len(path) + 1):
@@ -450,6 +514,48 @@ def _offer(rule: Rule, matched: int, best: dict[str, Rule], maybe: dict[str, lis
             best[rule.prop] = rule
     else:
         maybe.setdefault(rule.prop, []).append(rule)
+
+
+def _substitute(
+    best: dict[str, Rule],
+    maybe: dict[str, list[Rule]],
+    inherited: Custom,
+    registered: Registered,
+) -> Custom:
+    """Work out the element's custom properties, take them out of `best` and `maybe`, and
+    substitute them (and ``env()``) into the rest, expanding the shorthands that waited on
+    them."""
+    names = [p for p in (*best, *maybe) if p.startswith("--")]
+    custom: Custom = inherited
+    local: Custom = {}
+    if names:
+        cascade = Cascade(best, maybe, frozenset(names))
+        custom, local = custom_properties(
+            {n: cascade.values(n) for n in names}, inherited, registered
+        )
+        for name in names:
+            best.pop(name, None)
+            maybe.pop(name, None)
+    for prop, rules in maybe.items():
+        if any(references(r.value) for r in rules):
+            maybe[prop] = [v for r in rules for v in resolve_rule(r, custom, local, registered)]
+    for prop, rule in list(best.items()):
+        if references(rule.value):
+            first, *rest = resolve_rule(rule, custom, local, registered)
+            best[prop] = first
+            if rest:
+                maybe.setdefault(prop, []).extend(rest)
+    for prop in SHORTHANDS.intersection(best).union(SHORTHANDS.intersection(maybe)):
+        waiting = [(r, YES) for r in ([best.pop(prop)] if prop in best else [])]
+        waiting += [(r, MAYBE) for r in maybe.pop(prop, [])]
+        for rule, matched in waiting:
+            if rule.value is None:
+                longhands = [(name, None) for name, _ in expand(prop, "unset")]
+            else:
+                longhands = list(expand(prop, rule.value))
+            for name, value in longhands:
+                _offer(replace(rule, prop=name, value=value), matched, best, maybe)
+    return custom
 
 
 def _import_target(statement: str) -> tuple[str, str] | None:

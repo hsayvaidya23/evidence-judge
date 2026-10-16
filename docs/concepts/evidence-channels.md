@@ -74,9 +74,9 @@ specifications change them. So the `hidden` attribute, a closed `<dialog>`, `<rp
 `<symbol>`, `<mask>`, `<clipPath>`, `<pattern>`, `<marker>`, gradients, `<filter>`, `<title>`
 and `<desc>`, a `<semantics>` annotation, `<maction>`'s other children and `<mphantom>` never
 read as page text. Text whose visibility depends on something the judge does not fully
-model (a condition or selector it cannot evaluate, `var()`, near-zero opacity or font size, a
-transparent colour or SVG `fill`, clipping, off-screen offsets, a utility class no recorded
-sheet defines, or a stylesheet the trace does not hold; one the trace records as failed, with
+model (a condition or selector it cannot evaluate, a value it cannot read, near-zero opacity
+or font size, a transparent colour or SVG `fill`, clipping, off-screen offsets, a utility class
+no recorded sheet defines, or a stylesheet the trace does not hold; one the trace records as failed, with
 an error status or without a response, applied nothing and counts as empty) goes to
 `unsure_text` instead: it never proves a predicate and keeps its absence from contradicting one.
 So do a `popover` (a snapshot does not record whether it is open), `hidden=until-found` content

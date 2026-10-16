@@ -17,6 +17,7 @@ from evidence_judge.ingest.css import (
     media_holds,
     supports,
 )
+from evidence_judge.ingest.css.colors import parse_color
 
 VIEWPORT = (1000, 800)
 Spec = tuple[str, dict[str, str]]
@@ -109,7 +110,9 @@ BADGE: Spec = ("SPAN", {"class": "badge in"})
         ("p$x{display:none}", ("P", {}), UNSURE),
         (".a $x .in{display:none}", BADGE, UNSURE),
         (".bad{{display:none}}", ("P", {"class": "bad"}), SHOWN),
-        (".x{display: var(--d)}", ("P", {"class": "x"}), UNSURE),
+        (".x{display: var(--d)}", ("P", {"class": "x"}), SHOWN),
+        (":root{--d:none}.x{display: var(--d)}", ("P", {"class": "x"}), HIDDEN),
+        (".x:hover{--d:none}.x{display: var(--d)}", ("P", {"class": "x"}), UNSURE),
         (".x{display: flexx}", ("P", {"class": "x"}), UNSURE),
         (".x{display: inline flex}", ("P", {"class": "x"}), SHOWN),
         (".x{display: revert}", ("P", {"class": "x"}), UNSURE),
@@ -136,7 +139,8 @@ BADGE: Spec = ("SPAN", {"class": "badge in"})
         ("@media(min-width:768px){.x{display:none}}", ("P", {"class": "x"}), HIDDEN),
         ("@media print{.x{display:none}}", ("P", {"class": "x"}), SHOWN),
         ("@media (min-resolution:1dppx){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
-        ("@media (min-width:calc(1px)){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
+        ("@media (min-width:calc(1px)){.x{display:none}}", ("P", {"class": "x"}), HIDDEN),
+        ("@media (min-width:calc(1px + 1%)){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
         ("@container (min-width:1px){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
         ("@scope (.p){.x{display:none}}", ("P", {"class": "x"}), UNSURE),
         ("@whatever{.x{display:none}}", ("P", {"class": "x"}), UNSURE),
@@ -280,6 +284,75 @@ def test_styles_that_may_hide_text_leave_it_unsure(css: str, state: int) -> None
 @pytest.mark.parametrize(
     ("css", "state"),
     [
+        (".in{--o:0;opacity:var(--o)}", UNSURE),
+        (".in{opacity:calc(0)}", UNSURE),
+        (".in{opacity:calc(1 - 0.98)}", UNSURE),
+        (".in{opacity:clamp(0, 0.5, 1)}", SHOWN),
+        (".in{opacity:foo(1)}", UNSURE),
+        (".in{opacity:attr(data-o type(<number>))}", UNSURE),
+        (".in{opacity:calc(1/0)}", UNSURE),
+        (".in{transform:scale(calc(0))}", UNSURE),
+        (".in{transform:scale(calc(1 / 2))}", SHOWN),
+        (".in{transform:translate(-50%, -50%)}", SHOWN),
+        (".in{transform:translateX(calc(-100% - 1px))}", UNSURE),
+        (".in{--c:transparent;color:var(--c)}", UNSURE),
+        (":root{--c:#333}.in{color:var(--c)}", SHOWN),
+        (".in{color:var(--c, transparent)}", UNSURE),
+        (".in{color:mystery(1 2 3)}", UNSURE),
+        (".in{color:oklch(0.21 0.034 264.665)}", SHOWN),
+        (".in{color:color-mix(in oklab, black 50%, transparent)}", SHOWN),
+        (".in{font-size:max(0px,0px)}", UNSURE),
+        (".in{font-size:clamp(1rem, 2vw, 2rem)}", SHOWN),
+        (".in{font-size:var(--fs)}", SHOWN),
+        (".in{font-size:larger(2)}", UNSURE),
+        (".in{position:absolute;left:calc(-10000px)}", UNSURE),
+        (".in{position:absolute;left:calc(50% - 20px)}", SHOWN),
+        (".in{position:absolute;left:anchor(--a right)}", UNSURE),
+        (".in{position:fixed;top:env(safe-area-inset-top, 0)}", SHOWN),
+        (".in{position:fixed;top:env(titlebar-area-y)}", UNSURE),
+        (".in{margin:var(--m)}", SHOWN),
+        (":root{--m:0 0 0 -9999px}.in{margin:var(--m)}", UNSURE),
+        (":root{--m:0}.x:hover{--m:-9999px}.in{margin-left:var(--m)}", SHOWN),
+        (":root{--m:0}.in:hover{--m:-9999px}.in{margin-left:var(--m)}", UNSURE),
+        (".in{--a:var(--b);--b:var(--a);opacity:var(--a, 0)}", UNSURE),
+        (".in{--a:var(--a, 0);opacity:var(--a, 1)}", SHOWN),
+        (".in{--a:var(--b) var(--b);--b:var(--c) var(--c);--c:x;opacity:var(--a)}", UNSURE),
+        (
+            "@property --o{syntax:'<number>';inherits:false;initial-value:0}.in{opacity:var(--o)}",
+            UNSURE,
+        ),
+        ("@property --o{syntax:'*';inherits:true}.in{opacity:var(--o, 1)}", SHOWN),
+        ("@property --o{syntax:'<number>';inherits:false}.in{opacity:var(--o, 0)}", UNSURE),
+        (
+            "@supports (gap:1px){@property --o{syntax:'*';inherits:true}}.in{opacity:var(--o,1)}",
+            UNSURE,
+        ),
+        (".in{text-indent:calc(-100vw - 10px)}", UNSURE),
+        (".in{text-indent:var(--i)}", SHOWN),
+        (".in{width:0;overflow:hidden;width:calc(1px - 1px)}", UNSURE),
+        (".in{height:calc(100vh - 60px);overflow:auto}", SHOWN),
+    ],
+)
+def test_values_the_reader_cannot_read_leave_text_unsure(css: str, state: int) -> None:
+    assert _state(css, BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("style", "state"),
+    [
+        ("opacity:1;opacity:0", UNSURE),
+        ("opacity:0;opacity:1", SHOWN),
+        ("margin:var(--m);margin-left:0", SHOWN),
+        ("margin-left:0;margin:var(--m)", UNSURE),
+    ],
+)
+def test_the_last_inline_declaration_wins(style: str, state: int) -> None:
+    assert _state(":root{--m:0 0 0 -9999px}", ("SPAN", {"style": style})) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
         (".wrap{opacity:0}", UNSURE),
         (".wrap{font-size:0}", UNSURE),
         (".wrap{font-size:0}.in{font-size:16px}", SHOWN),
@@ -294,7 +367,16 @@ def test_styles_that_may_hide_text_leave_it_unsure(css: str, state: int) -> None
         (".wrap{height:0;overflow:hidden}", UNSURE),
         (".wrap{visibility:hidden}", HIDDEN),
         (".wrap{visibility:hidden}.in{visibility:visible}", SHOWN),
-        (".wrap{visibility:hidden}.in{visibility:var(--v)}", UNSURE),
+        (".wrap{visibility:hidden}.in{visibility:var(--v)}", HIDDEN),
+        (".wrap{visibility:hidden}.wrap:hover{--v:visible}.in{visibility:var(--v,hidden)}", UNSURE),
+        (".wrap{--o:0}.in{opacity:var(--o)}", UNSURE),
+        (
+            "@property --o{syntax:'<number>';inherits:false;initial-value:1}"
+            ".wrap{--o:0}.in{opacity:var(--o)}",
+            SHOWN,
+        ),
+        (".wrap{--o:0}.in{--o:initial;opacity:var(--o, 1)}", SHOWN),
+        (".wrap{--o:0}.in{--o:inherit;opacity:var(--o, 1)}", UNSURE),
         (".wrap:hover{visibility:hidden}", UNSURE),
         (".wrap{visibility:hidden}.wrap:hover{visibility:visible}", UNSURE),
         (".wrap{display:none}.wrap:hover{display:block}", UNSURE),
@@ -589,7 +671,8 @@ def test_host_rules_reach_into_the_shadow_tree() -> None:
         ("", VIEWPORT, True),
         ("(min-width: 10px)", None, None),
         ("(orientation: portrait)", None, None),
-        ("(min-width: calc(10px))", VIEWPORT, None),
+        ("(min-width: calc(10px))", VIEWPORT, True),
+        ("(min-width: calc(10px + 1%))", VIEWPORT, None),
         ("(min-resolution: 2dppx)", VIEWPORT, None),
         ("not (min-resolution: 2dppx)", VIEWPORT, None),
         ("print and (min-resolution: 2dppx)", VIEWPORT, False),
@@ -630,3 +713,39 @@ def test_a_stylesheet_over_its_cap_leaves_the_scope_unknown() -> None:
 
     assert sheets.unknown
     assert _state_in(sheets, ("P", {"class": "x"})) == SHOWN
+
+
+@pytest.mark.parametrize(
+    ("text", "rgba"),
+    [
+        ("snow", (255, 250, 250, 1.0)),
+        ("#abc", (170, 187, 204, 1.0)),
+        ("rgb(10 20 30 / 50%)", (10, 20, 30, 0.5)),
+        ("rgba(0,0,0,0)", (0, 0, 0, 0.0)),
+        ("hsl(0 0% 100%)", (255, 255, 255, 1.0)),
+        ("hsla(120, 100%, 25%, .5)", (0, 128, 0, 0.5)),
+        ("hwb(0 100% 0%)", (255, 255, 255, 1.0)),
+        ("oklch(1 0 0)", (255, 255, 255, 1.0)),
+        ("oklab(0 0 0 / 0.2)", (0, 0, 0, 0.2)),
+        ("lab(100 0 0)", (255, 255, 255, 1.0)),
+        ("lch(0% 0 0)", (0, 0, 0, 1.0)),
+        ("color(srgb 1 1 1)", (255, 255, 255, 1.0)),
+        ("color-mix(in srgb, white 50%, black)", (128, 128, 128, 1.0)),
+        ("color-mix(in oklab, black 50%, transparent)", (0, 0, 0, 0.5)),
+        ("light-dark(white, black)", (255, 255, 255, 1.0)),
+        ("canvastext", (0, 0, 0, 1.0)),
+        ("currentcolor", (1, 2, 3, 1.0)),
+        ("rgb(from red r g b)", None),
+        ("color(rec2020 1 1 1)", None),
+        ("mystery", None),
+    ],
+)
+def test_colours(text: str, rgba: tuple[float, float, float, float] | None) -> None:
+    found = parse_color(text, (1, 2, 3, 1.0))
+
+    if rgba is None:
+        assert found is None
+    else:
+        assert found is not None
+        assert all(abs(a - b) <= 1 for a, b in zip(found[:3], rgba[:3], strict=True))
+        assert found[3] == pytest.approx(rgba[3])

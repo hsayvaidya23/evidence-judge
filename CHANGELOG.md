@@ -252,6 +252,20 @@ The first release.
   matches, is worked out once and kept on the element; a selector whose ancestor compounds no
   ancestor has is rejected at once; a match that still takes more than 50,000 tests counts as
   "may match", so the element is unsure, not a hang.
+- The page-text reader no longer counts a value it cannot read as "does not hide". `opacity:
+  var(--o)` with `--o: 0`, `opacity: calc(0)`, `transform: scale(calc(0))`, `color: var(--c)`
+  with `--c: transparent`, `font-size: max(0px, 0px)` and `left: calc(-10000px)` on an
+  absolutely positioned element passed a stock check whose "Out of stock" text they hid; they
+  now need review, like `opacity: 0`. Custom properties are now cascaded and substituted into
+  `var()` (fallbacks, cycles, `@property` initial values and inheritance, `:hover`-style rules
+  that may set them), `env()` safe-area insets read as 0, `calc()`, `min()`, `max()`,
+  `clamp()` and `abs()` are evaluated, nested function calls are read whole, and colours cover
+  every CSS named and system colour, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`,
+  `color()`, `color-mix()` and `light-dark()`. What is still unreadable in a property that can
+  hide text (an unknown function, unit or keyword, `attr()`, a custom property it cannot
+  tell) makes the text unsure. A `background-image` now hides the background colour from the
+  colour comparison, and of two inline declarations of one property the later one wins (the
+  reader kept the first).
 
 ### Security
 

@@ -185,7 +185,7 @@ shape the pipeline:
 | `ingest/har.py`, `ingest/_network.py` | HAR logs and HAR entries → network events |
 | `ingest/browser_use.py` | browser-use histories → `Run` |
 | `ingest/_dom.py` | Playwright frame snapshots → page text (shown), text the page may hide, and what they show hidden; shadow roots and slots |
-| `ingest/css/` | The cascade of a tree scope's stylesheets: whether each element shows, is hidden for certain, or may be hidden by styles the reader does not fully model. `cascade.py` reads and indexes the rules (layers, `@import`, nesting) and picks each property's value, `selector.py` and `matching.py` parse and match selectors, `visibility.py` decides what the winning values hide, `conditions.py` evaluates `@media` and `@supports`, and `syntax.py`, `values.py` and `model.py` hold the CSS text, value and data types they share |
+| `ingest/css/` | The cascade of a tree scope's stylesheets: whether each element shows, is hidden for certain, or may be hidden by styles the reader does not fully model. `cascade.py` reads and indexes the rules (layers, `@import`, nesting) and picks each property's value, `selector.py` and `matching.py` parse and match selectors, `visibility.py` decides what the winning values hide, `conditions.py` evaluates `@media` and `@supports`, `variables.py` substitutes custom properties into `var()`, `colors.py` reads colours, and `syntax.py`, `values.py` (with the `calc()` evaluator) and `model.py` hold the CSS text, value and data types they share |
 | `core/evidence.py` | `Run` and its events |
 | `core/index.py` | `EvidenceIndex`, the read side every checker uses |
 | `core/agent_input.py` | What the agent put into the run: typed and replayed field values, copied page text, uploads, URL values |
