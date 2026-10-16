@@ -131,7 +131,7 @@ evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3 \
 | `--with-llm-baseline` | Also judge every case with a transcript LLM judge (needs an LLM: `ANTHROPIC_API_KEY` or `--llm`) |
 | `--baseline-screenshot` | Show the baseline judge the final screenshot (not with `--llm gemini`, which cannot send images) |
 | `--offline` / `--online` | Evidence Judge without (default) or with LLM claim extraction |
-| `--llm BACKEND` | The LLM backend for `--online` and `--with-llm-baseline`: `anthropic`, `claude-code`, `codex` or `gemini`. Default: `EVJ_LLM_BACKEND` |
+| `--llm BACKEND` | The LLM backend for `--online` and `--with-llm-baseline`: `anthropic`, `claude-code`, `codex` or `gemini`. Default: `EVJ_LLM_BACKEND`. As for `judge`, `anthropic` without `ANTHROPIC_API_KEY` or a CLI that is missing or not logged in exits `4` |
 | `--no-redact` | Judge unredacted evidence and agent text |
 | `--quiet`, `-q` | Do not print the report |
 

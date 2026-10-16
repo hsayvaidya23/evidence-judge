@@ -36,13 +36,16 @@ def test_exports_include_the_core_workflow() -> None:
         "RunVerdict",
         "Outcome",
         "Settings",
+        "read_settings",
     } <= set(evidence_judge.__all__)
 
 
 def test_exports_are_the_same_objects_as_their_internal_homes() -> None:
+    from evidence_judge.config import read_settings
     from evidence_judge.core.verdict import Outcome, RunVerdict
     from evidence_judge.engine import Judge
 
+    assert evidence_judge.read_settings is read_settings
     assert evidence_judge.Judge is Judge
     assert evidence_judge.RunVerdict is RunVerdict
     assert evidence_judge.Outcome is Outcome

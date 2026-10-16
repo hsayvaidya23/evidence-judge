@@ -53,9 +53,9 @@ def test_quiet_prints_nothing() -> None:
     assert result.output == ""
 
 
-def test_baseline_without_an_llm_is_a_usage_error() -> None:
+def test_baseline_without_an_llm_exits_internal() -> None:
     result = runner.invoke(app, ["bench", str(RUNS), "--with-llm-baseline", "-q"])
-    assert result.exit_code == ExitCode.USAGE
+    assert result.exit_code == ExitCode.INTERNAL
     assert "ANTHROPIC_API_KEY" in result.output
 
 
@@ -109,3 +109,23 @@ def test_bench_internal_error_exits_4_with_a_hint(monkeypatch: pytest.MonkeyPatc
     assert result.exit_code == ExitCode.INTERNAL, result.output
     assert "internal error: RuntimeError: boom" in result.output
     assert "--debug" in result.output
+
+
+@pytest.mark.parametrize(("flags", "redacted"), [([], True), (["--no-redact"], False)])
+def test_bench_redaction_follows_no_redact(
+    monkeypatch: pytest.MonkeyPatch, flags: list[str], redacted: bool
+) -> None:
+    import evidence_judge.bench
+
+    seen: list[Any] = []
+    real = evidence_judge.bench.BenchmarkRunner
+
+    def capture(*args: Any, **kwargs: Any) -> Any:
+        built = real(*args, **kwargs)
+        seen.append(built)
+        return built
+
+    monkeypatch.setattr(evidence_judge.bench, "BenchmarkRunner", capture)
+    result = runner.invoke(app, ["bench", str(RUNS), "--seeds", "1", "-q", *flags])
+    assert result.exit_code == ExitCode.PASS, result.output
+    assert (seen[0].redactor is not None) is redacted
