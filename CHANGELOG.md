@@ -284,6 +284,31 @@ The first release.
   name. `unmodelled_hiding` forgeries now render their page through the reader with 15
   variants covering these, so a reader regression becomes a false PASS in the benchmark. A
   full-page opaque overlay painted over the text is still not modelled (it needs layout).
+- The page-text reader unescapes property names as a browser does. `--\63: transparent` with
+  `color: var(--c)`, `--\64: none` with `display: var(--d)`, and `co\6cor: transparent` hid
+  text the reader showed: it unescaped values but not names, so `--\63` never matched `--c`.
+  A declaration now splits at its first unescaped colon (`--a\:b` is one name), escapes in
+  `@property` names and descriptors are read, and `!\69mportant` counts as `!important`. New
+  `unmodelled_hiding` variant `escaped_custom_property`; it was a false SHOWN before the fix.
+- A `background-image` no longer switches off the colour comparison. `color: #fff` over
+  `linear-gradient(transparent, transparent)` or `url(data:,)` read as shown (it was unsure
+  before the colour comparison learnt about images). The reader now works out the colours a
+  gradient paints (each stop over what is behind it, `-webkit-gradient()` too) and finds text
+  unsure when it is faint against any of them; an empty image (`url()`, a `data:` URL with no
+  data), a fully transparent gradient and a layer of zero `background-size` paint nothing; a
+  gradient whose colours it cannot tell (relative colour syntax, too many colours) is unsure.
+  An image it cannot see (`url()` with content, `image-set()`) is still taken to give the text
+  contrast, as documented. New `unmodelled_hiding` variants `transparent_gradient`,
+  `empty_image` and `zero_size_image`; each was a false SHOWN before the fix.
+- Adversarial CSS no longer crashes the judge. `color: lab(1e308 1e308 1e308)` raised
+  OverflowError, and a `var()` chain 400 deep, `calc()` nested 3000 deep, `color-mix()` nested
+  500 deep, deep `var()` fallbacks, `:is()` / `:not()`, `@supports` conditions and nested blocks
+  raised RecursionError out of the snapshot reader. Nesting is now capped at 32 levels (past it
+  the value is unknown, so the text is unsure, and a stylesheet nested deeper leaves its scope
+  unknown), unary signs are read without recursion, colour channels are clamped, and numbers
+  too large to compute with are unreadable. As a last defence, a snapshot whose styles still
+  make the reader raise is read without them: all of its text unsure and the page opaque,
+  never shown. Seeded fuzz tests cover the value parser and colour functions.
 - A test run through a project wrapper (`make test`, `npm test`, `yarn test`, `pnpm test`,
   `tox`, `nox`, `just test`, `poetry run task test`) is no longer taken as a whole run to the
   end when the session does not show what the wrapper ran: its pass or fail still counts, but

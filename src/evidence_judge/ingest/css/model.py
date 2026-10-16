@@ -293,8 +293,8 @@ class Computed:
     """Its text colour (or text fill) may be transparent, or one the reader cannot read."""
     paints: tuple[Rgba, ...] | None = None
     """The colours its ``-webkit-text-fill-color`` may be (None: its ``color``)."""
-    background: Rgba | None = WHITE
-    """The nearest opaque background behind it, None when not known."""
+    background: tuple[Rgba, ...] | None = (WHITE,)
+    """The opaque colours behind it (more than one under a gradient), None when not known."""
     clip_text: bool = False
     """A background shows through its text (``background-clip: text``)."""
     indent_far: bool = False
@@ -344,8 +344,14 @@ class Computed:
 
 
 @lru_cache(maxsize=4096)
-def _faint(paints: tuple[Rgba, ...], alpha: float, behind: Rgba) -> bool:
-    return any(contrast((r, g, b, a * alpha), behind) < MIN_CONTRAST for r, g, b, a in paints)
+def _faint(paints: tuple[Rgba, ...], alpha: float, behind: tuple[Rgba, ...]) -> bool:
+    """Whether a paint barely stands out from any of the colours behind it: under a gradient,
+    text faint against one stop may be hidden there."""
+    return any(
+        contrast((r, g, b, a * alpha), back) < MIN_CONTRAST
+        for r, g, b, a in paints
+        for back in behind
+    )
 
 
 REMOVED: Final = Computed(removed=True)

@@ -33,6 +33,7 @@ UNMODELLED_VARIANTS: Final = (
     "faded",
     "hover_only",
     "custom_property",
+    "escaped_custom_property",
     "math_function",
     "mask_image",
     "filter_blur",
@@ -41,6 +42,9 @@ UNMODELLED_VARIANTS: Final = (
     "clip_path_shape",
     "contain_paint",
     "near_colour",
+    "transparent_gradient",
+    "empty_image",
+    "zero_size_image",
     "fixed_offscreen",
     "logical_inset",
     "text_indent",
@@ -56,6 +60,9 @@ _HIDING_STYLES: Final = {
     "clip_path_shape": "clip-path:path('M0 0')",
     "contain_paint": "height:0;contain:paint",
     "near_colour": "color:#fefefe",
+    "transparent_gradient": "color:#fff;background-image:linear-gradient(transparent,transparent)",
+    "empty_image": "color:#fff;background-image:url(data:,)",
+    "zero_size_image": "color:#fff;background:linear-gradient(#000,#000) 0 0/0 0 no-repeat",
     "fixed_offscreen": "position:fixed;top:-100vh",
     "logical_inset": "position:absolute;inset-inline-start:-10000px",
     "text_indent": "text-indent:100%;white-space:nowrap;overflow:hidden",
@@ -106,6 +113,8 @@ def _unmodelled(variant: str, query: str) -> tuple[str, list[object]]:
             css = ".panel:not(:hover) .msg{display:none}"
         case "custom_property":
             css = ".panel:hover{--hide:block}.msg{display:var(--hide, none)}"
+        case "escaped_custom_property":
+            css = ".panel{--\\63:transparent}.msg{color:var(--c)}"
         case "svg_presentation":
             text = ["text", {"x": "0", "y": "20", "font-size": "0"}, query]
             return "", ["svg", {"width": "300", "height": "40"}, text]
@@ -166,13 +175,14 @@ def unmodelled_hiding(run: Run, seed: int, targets: Targets) -> Run:
     """The agent clicks through to a site page (one whose URL the spec expects) that holds the
     expected texts where the page hides them with styles the page-text reader does not fully
     model: `opacity: 0`, a rule that applies only on `:hover` (directly, or through a custom
-    property it sets), a math function, a mask, a blur, a 3D rotation or a skew that turns the
-    text edge-on, a clip path the reader does not measure, a zero-height box that contains its
-    paint, a colour a shade off the background, a fixed box above the viewport, a logical
-    offset, an image-replacement indent, or an SVG `font-size` attribute of 0. The page is
-    recorded as the trace ingester records it: its snapshot rendered by the page-text reader,
-    so the texts are text the page may hide (`unsure_text`) only while the reader keeps them
-    there."""
+    property it sets), a transparent colour through a custom property whose name is escaped, a
+    math function, a mask, a blur, a 3D rotation or a skew that turns the text edge-on, a clip
+    path the reader does not measure, a zero-height box that contains its paint, a colour a
+    shade off the background (white text over a transparent gradient, an empty image or one of
+    no size included), a fixed box above the viewport, a logical offset, an image-replacement
+    indent, or an SVG `font-size` attribute of 0. The page is recorded as the trace ingester
+    records it: its snapshot rendered by the page-text reader, so the texts are text the page
+    may hide (`unsure_text`) only while the reader keeps them there."""
     variant = pick_variant(run, seed, UNMODELLED_VARIANTS)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"

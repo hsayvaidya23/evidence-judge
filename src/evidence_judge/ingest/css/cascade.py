@@ -48,8 +48,10 @@ from evidence_judge.ingest.css.syntax import (
     generates_text,
     parse_declaration,
     split_commas,
+    unescape,
 )
 from evidence_judge.ingest.css.values import (
+    MAX_NESTING,
     closing_paren,
     far_offset,
     functions,
@@ -132,12 +134,14 @@ class _Bucket:
 
 @dataclass(frozen=True, slots=True)
 class _Context:
-    """Where a rule is read: under what uncertain condition, in what layer, from what URL."""
+    """Where a rule is read: under what uncertain condition, in what layer, from what URL, how
+    many imports deep and how many blocks deep."""
 
     url: str | None = None
     maybe: bool = False
     layer: tuple[str, ...] = ()
     depth: int = 0
+    nesting: int = 0
 
 
 class StyleSheets:
@@ -299,6 +303,10 @@ class StyleSheets:
         self._read(_COMMENT.sub(" ", text[:MAX_SHEET_CHARS]), [], context)
 
     def _read(self, text: str, parents: list[Selector], context: _Context) -> None:
+        if context.nesting > MAX_NESTING:
+            self.unknown = True
+            return
+        inner = replace(context, nesting=context.nesting + 1)
         for prelude, body in blocks(text):
             at_rule = _AT_RULE.match(prelude)
             if body is None:
@@ -308,11 +316,11 @@ class StyleSheets:
                     self._statement(at_rule.group(1).lower(), at_rule.group(2), context)
                 continue
             if at_rule is not None:
-                self._block(at_rule.group(1).lower(), at_rule.group(2), body, parents, context)
+                self._block(at_rule.group(1).lower(), at_rule.group(2), body, parents, inner)
                 continue
             selectors = self._selectors(prelude, parents, body)
             if selectors:
-                self._read(body, selectors, context)
+                self._read(body, selectors, inner)
 
     def _statement(self, name: str, condition: str, context: _Context) -> None:
         if name == "layer":
@@ -389,13 +397,14 @@ class StyleSheets:
 
     def _register(self, name: str, body: str, context: _Context) -> None:
         """Read an ``@property`` rule (one with a missing or invalid descriptor is ignored)."""
+        name = unescape(name).strip() if "\\" in name else name
         if not name.startswith("--"):
             return
         descriptors: dict[str, str] = {}
         for declaration, nested in blocks(body):
             key, colon, value = declaration.partition(":")
             if nested is None and colon:
-                descriptors[key.strip().lower()] = " ".join(value.split())
+                descriptors[unescape(key).strip().lower()] = " ".join(unescape(value).split())
         syntax = descriptors.get("syntax", "").strip("\"'").strip()
         inherits = descriptors.get("inherits", "").lower()
         initial = descriptors.get("initial-value")

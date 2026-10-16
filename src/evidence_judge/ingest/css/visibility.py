@@ -9,6 +9,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Final
 
+from evidence_judge.ingest.css.backgrounds import (
+    Backdrop,
+    UnreadableError,
+    background_colour,
+    background_images,
+)
 from evidence_judge.ingest.css.colors import CURRENT, parse_color
 from evidence_judge.ingest.css.model import (
     BLACK,
@@ -25,7 +31,6 @@ from evidence_judge.ingest.css.model import (
     Rgba,
     Rule,
     Viewport,
-    over,
     words,
 )
 from evidence_judge.ingest.css.syntax import TRACKED
@@ -165,11 +170,9 @@ def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Co
     if cascade.sets("color", "-webkit-text-fill-color"):
         colors, clear, paints = _paint(cascade, parent)
     background = parent.background
-    if cascade.sets("background-color", "background-image"):
-        found = {_background(v, parent.background) for v in cascade.values("background-color")}
-        background = found.pop() if len(found) == 1 else None
-        if any(v not in _WIDE and v != "none" for v in cascade.values("background-image")):
-            background = None
+    if cascade.sets("background-color", "background-image", "background-size"):
+        background, unreadable = _backdrop(cascade, parent.background, colors)
+        unsure = unsure or unreadable
     clip_text = parent.clip_text or any(
         v is not None and "text" in v.split()
         for p in ("background-clip", "-webkit-background-clip")
@@ -496,7 +499,9 @@ def _transformed_away(cascade: Cascade) -> bool:
 
 def _degenerate(matrix: Matrix) -> bool:
     """Whether a linear map leaves the box (seen face-on, without perspective) too thin, too
-    small or too stretched to read."""
+    small or too stretched to read (or overflows what the reader can compute)."""
+    if not all(math.isfinite(c) for row in matrix for c in row):
+        return True
     ux, uy = matrix[0][0], matrix[1][0]
     vx, vy = matrix[0][1], matrix[1][1]
     across, down = (ux * ux + uy * uy) ** 0.5, (vx * vx + vy * vy) ** 0.5
@@ -810,16 +815,20 @@ def _fills(
     return (tuple(dict.fromkeys(fills)) or parent.fills), none
 
 
-def _background(value: str | None, behind: Rgba | None) -> Rgba | None:
-    if value in (UNSET, "transparent", "initial", "unset"):
-        return behind
-    if value is None or value == "inherit":
-        return None
-    rgba = parse_color(value)
-    if rgba is None:
-        return None
-    if rgba[3] <= FAINT:
-        return behind
-    if rgba[3] >= 1:
-        return rgba
-    return None if behind is None else over(rgba, behind)
+def _backdrop(
+    cascade: Cascade, behind: Backdrop | None, colors: tuple[Rgba, ...]
+) -> tuple[Backdrop | None, bool]:
+    """The colours an element's background paints behind its text, and whether it paints a
+    gradient the reader cannot read."""
+    found = {background_colour(v, behind) for v in cascade.values("background-color")}
+    base = found.pop() if len(found) == 1 else None
+    images = set(cascade.values("background-image"))
+    if len(images) != 1:
+        unknown = any(v not in _WIDE and v != "none" for v in images)
+        return (None if unknown else base), False
+    current = colors[0] if len(colors) == 1 else None
+    try:
+        painted = background_images(images.pop(), cascade.values("background-size"), base, current)
+    except UnreadableError:
+        return None, True
+    return painted, False
