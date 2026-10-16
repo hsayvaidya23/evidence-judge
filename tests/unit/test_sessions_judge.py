@@ -313,7 +313,7 @@ async def test_given_claims_are_used_as_is() -> None:
         ),
         (
             "The suite ran: 1 passed, 2 failed.",
-            [TestResultPredicate(expect="fail", whole_suite=False)],
+            [TestResultPredicate(expect="fail", whole_suite=False, count=2)],
         ),
         ("The tests still fail.", [TestResultPredicate(expect="fail", whole_suite=False)]),
         ("Before the fix, 2 tests failed.", []),
@@ -342,15 +342,15 @@ async def test_given_claims_are_used_as_is() -> None:
         ("Fixed.", [TestResultPredicate()]),
         (
             "`npm test` fails: 1 of 3 tests passes.",
-            [TestResultPredicate(expect="fail", whole_suite=False)],
+            [TestResultPredicate(expect="fail", whole_suite=False, count=2)],
         ),
         ("3 of 3 tests pass.", [TestResultPredicate()]),
         ("3 passed.", [TestResultPredicate()]),
         (
             "Only 1 out of the 3 tests is passing.",
-            [TestResultPredicate(expect="fail", whole_suite=False)],
+            [TestResultPredicate(expect="fail", whole_suite=False, count=2)],
         ),
-        ("2 of 3 tests failed.", [TestResultPredicate(expect="fail", whole_suite=False)]),
+        ("2 of 3 tests failed.", [TestResultPredicate(expect="fail", whole_suite=False, count=2)]),
         ("0 of 3 tests failed.", [TestResultPredicate()]),
         ("0 out of 3 tests fail now.", [TestResultPredicate()]),
         ("0 tests failed.", [TestResultPredicate()]),

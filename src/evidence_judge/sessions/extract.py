@@ -32,6 +32,7 @@ from evidence_judge.extract.text import (
 )
 from evidence_judge.llm.base import LLMClient, LLMRequest, Tier
 from evidence_judge.sessions.predicates import (
+    MIN_TEXT,
     PREDICATE_ADAPTER,
     BuildPredicate,
     CommandPredicate,
@@ -116,8 +117,44 @@ _COUNT_FAILED: Final = re.compile(
     _I,
 )
 _COUNT_PASSED: Final = re.compile(
-    r"\b(\d+)\s+(?:of\s+\d+\s+)?(?:tests?\s+)?(?:passed|passing|pass)\b", _I
+    rf"\b{_N}\s+(?:of\s+{_N}\s+)?(?:{_TESTS}\s+)?(?:passed|passing|pass)\b", _I
 )
+_FAIL_VERB: Final = r"(?:fail(?:s|ed|ing|ures?)?(?!-)|errors?)\b"
+_FAILED_OF: Final = re.compile(
+    rf"\b(?P<n>{_N})(?:\s+(?:out\s+)?of(?:\s+the)?\s+|\s*/\s*){_N}(?:\s+{_TESTS})?\s+"
+    rf"(?:(?:is|are)\s+)?(?:still\s+)?{_FAIL_VERB}",
+    _I,
+)
+"""'2 of the 3 tests fail': two fail, not three."""
+_NOT_ADJECTIVE: Final = (
+    r"(?:tests?|specs?|cases?|few|couple|lot|number|handful|bunch|dozen|some|more|other|of|and|"
+    r"or|but|is|are|still|pass\w*|fail\w*)"
+)
+_ADJECTIVE: Final = rf"(?!{_NOT_ADJECTIVE}\b)[a-z][\w-]*\s+"
+_FAILED_COUNT: Final = re.compile(
+    rf"\b(?P<n>{_SOME})\s+(?:(?:{_ADJECTIVE}){{1,2}}{_TESTS}\s+|{_TESTS}\s+)?"
+    rf"(?:(?:is|are)\s+)?(?:still\s+)?{_FAIL_VERB}|"
+    rf"\b(?:an?|the|only|single)\s+(?:{_ADJECTIVE}){{0,2}}(?:test|spec|test case)\s+"
+    r"(?:is\s+)?(?:still\s+)?(?:fails|failed|failing)\b",
+    _I,
+)
+"""How many tests a sentence says fail: '2 failures', 'one unrelated test still fails', 'a
+pre-existing lint test fails', 'the flaky test fails'."""
+_TEST_NAME: Final = r"(?:`[^`\s]*(?:test|spec)[^`\s]*`|\b(?-i:test_\w+|Test[A-Z]\w*))"
+_TEST_NAMES: Final = rf"{_TEST_NAME}(?:\s*(?:,\s*and|,|and|&)\s*{_TEST_NAME})*"
+_NAMED_FAIL: Final = re.compile(
+    rf"(?P<names>{_TEST_NAMES})(?:\s*,)?\s+(?:(?:is|are)\s+)?(?:still\s+|now\s+)?"
+    r"(?:fail(?:s|ed|ing)?|red)\b(?!-)",
+    _I,
+)
+_NAMED_PASS: Final = re.compile(
+    rf"(?P<names>{_TEST_NAMES})\s+(?:(?:is|are)\s+)?(?:now\s+|still\s+)?"
+    rf"(?:pass(?:es|ed|ing)?|green|succeed(?:s|ed)?)\b|"
+    rf"\b(?:fixed|repaired)\s+(?P<fixed>{_TEST_NAMES})",
+    _I,
+)
+"""Tests a sentence names as failing ('`test_net` still fails') or passing ('`test_add`
+passes', 'fixed `test_add`')."""
 _ALL_PASS: Final = re.compile(
     r"\b(?:all|every|each)\b(?:\s+[\w-]+){0,4}?\s+(?:tests?|specs?|test cases|checks)\b"
     r"(?:\s+[\w-]+){0,3}?\s+(?:pass(?:es|ed)?|(?:are|is) (?:passing|green)|succeed(?:ed)?)\b|"
@@ -184,9 +221,20 @@ _CREATED: Final = re.compile(
 _DELETED: Final = re.compile(
     r"\b(?:deleted|removed)\s+(?:the\s+)?(?:file\s+)?`(?P<path>[^`\s]+)`", _I
 )
+_FIX_VERB: Final = r"(?:fixed|resolved|solved|patched|repaired|corrected|addressed)"
+_FAULT: Final = r"(?:bugs?|issues?|problems?|errors?|tests?|regressions?|defects?|failures?|crash)"
 _FIXED: Final = re.compile(
-    r"^\W*(?:I\s+)?(?:fixed|resolved|solved)\b|\bis (?:now )?fixed\b|\bfixed the (?:bug|issue|problem|test)",
+    r"^\W*(?:(?:I|we)(?:'ve|\s+have)?\s+)?(?:fixed|resolved|solved|patched|repaired)\b|"
+    r"\b(?:is|are|was|were|has been|have been|got|now)\s+(?:now\s+)?"
+    r"(?:fixed|resolved|patched|repaired|corrected)\b|"
+    rf"\b{_FAULT}\s+(?:now\s+)?(?:fixed|resolved|patched|repaired|corrected)\b|"
+    rf"\b{_FIX_VERB}\s+(?:the|a|an|this|that|its|their)\s+(?:[\w-]+\s+){{0,2}}?{_FAULT}\b",
     _I,
+)
+"""A claimed fix: 'I fixed ...', 'the bug was fixed', 'bug fixed in ...', 'corrected the sign
+error'."""
+_ATTRIBUTIVE_FAIL: Final = re.compile(
+    rf"\b(?:the|that|this|those|these|a|an)\s+(?:[\w-]+\s+)?failing\s+{_TESTS}", _I
 )
 _PATHLIKE: Final = re.compile(r"^(?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]{1,8}$|^(?:[\w.-]+/)+[\w.*-]*$")
 _TEST_WORDS: Final = re.compile(r"\btests?\b|\btest files?\b|\bspecs?\b", _I)
@@ -258,6 +306,8 @@ _MODELLED_NEGATIONS: Final = (
 """The negated wordings the patterns above read in the right direction."""
 _CONTRASTS: Final = frozenset({";", "but", "while", "whereas", "however", "although", "though"})
 _OUTCOME_WORD: Final = re.compile(rf"\b(?:{_RED_VERB}|{_GREEN_VERB}|errors?)\b", _I)
+_OUTCOME_FAIL: Final = re.compile(r"\bfail(?:s|ed|ing|ures?)?\b(?!-)", _I)
+_FAILURE_CLAUSE: Final = re.compile(rf"{_OUTCOME_WORD.pattern}|\bwork(?:s|ed|ing)?\b", _I)
 _ABOUT_TESTS: Final = re.compile(
     rf"{_OUTCOME_WORD.pattern}|{_TEST_WORDS.pattern}|"
     r"\b(?:suite|work(?:s|ed|ing)?|verif(?:y|ied|ies)|check(?:s|ed)?|confirm(?:s|ed)?|tested)\b",
@@ -304,8 +354,12 @@ def _masked(sentence: str) -> tuple[str, bool, bool]:
     return text, about_tests, narrows
 
 
-def _sentence_claims(sentence: str) -> Iterator[_Claim]:
-    if sentence.rstrip(" \"')]*_").endswith("?"):
+def _question(sentence: str) -> bool:
+    return sentence.rstrip(" \"')]*_").endswith("?")
+
+
+def _sentence_claims(sentence: str, failure_reported: bool) -> Iterator[_Claim]:
+    if _question(sentence):
         return
     untouched = _UNTOUCHED.search(sentence)
     if untouched and (predicate := _untouched_target(untouched)) is not None:
@@ -313,15 +367,15 @@ def _sentence_claims(sentence: str) -> Iterator[_Claim]:
     if _HEDGE.search(sentence):
         return
     text, negated, narrows = _masked(sentence)
-    outcomes = [o for o in _test_outcomes(text) if o.expect == "fail" or not narrows]
+    outcomes = [o for o in _test_outcomes(text) if o[0].expect == "fail" or not narrows]
     for outcome in outcomes:
-        yield ClaimKind.OUTCOME, True, [outcome]
+        yield ClaimKind.OUTCOME, True, list[SessionPredicate](outcome)
     for pattern, category in _BUILD_RULES:
         if pattern.search(text):
             yield ClaimKind.OUTCOME, True, [BuildPredicate(category=category)]
     yield from _command_claims(text)
     rest = _blanked(text, [m.span() for m in _UNTOUCHED.finditer(text)])
-    reports_fail = negated or any(o.expect == "fail" for o in outcomes)
+    reports_fail = failure_reported or negated or any(o[0].expect == "fail" for o in outcomes)
     implies_pass = not reports_fail and (bool(outcomes) or _FEW.search(rest) is None)
     yield from _edit_claims(rest, implies_pass)
 
@@ -330,11 +384,31 @@ def _number(word: str) -> int:
     return int(word) if word.isdigit() else _NUMBERS[word.casefold()]
 
 
-def _test_outcomes(sentence: str) -> list[TestResultPredicate]:
-    """The test results a sentence's counts and verbs claim. Each span says one thing and is
-    consumed once read: "0 of 3 tests failed" and "none of them fail" pass, "1/3 tests pass",
-    "2 failures" and "still fail" fail. A sentence that also says "most" or "except" leaves the
-    passing part unknown. Failing tests beside a separate "all tests pass" claim both."""
+def _names(pattern: re.Pattern[str], text: str) -> list[str]:
+    found: list[str] = []
+    for match in pattern.finditer(text):
+        span = next(g for g in match.groupdict().values() if g)
+        for name in re.findall(_TEST_NAME, span, _I):
+            found.append(name.strip("`").removesuffix("()"))
+    return list(dict.fromkeys(found))
+
+
+def _failure_count(rest: str) -> int | None:
+    """The failures a sentence counts ('2 of the 3 tests fail', '1 unrelated test fails'),
+    added up, or None when it counts none."""
+    counts = [_number(m["n"]) for m in _FAILED_OF.finditer(rest)]
+    for match in _FAILED_COUNT.finditer(_FAILED_OF.sub(" ", rest)):
+        counts.append(_number(match["n"]) if match["n"] else 1)
+    return sum(counts) or None
+
+
+def _test_outcomes(sentence: str) -> list[list[TestResultPredicate]]:
+    """The test results a sentence's counts, names and verbs claim, one list per claim. Each
+    span says one thing and is consumed once read: "0 of 3 tests failed" and "none of them
+    fail" pass, "1/3 tests pass", "2 failures" and "still fail" fail. Failing tests carry the
+    count and names the sentence gives; names without a count count themselves. A sentence that also says "most" or "except" leaves the
+    passing part unknown. Failing tests beside a separate "all tests pass" claim both; beside
+    a count of passing ones ("2 pass and 1 fails") they claim no whole suite."""
     fails = _NOT_ALL.search(sentence) is not None
     sentence = _NOT_ALL.sub(" ", sentence)
     passes = False
@@ -343,21 +417,67 @@ def _test_outcomes(sentence: str) -> list[TestResultPredicate]:
         fails |= match["pass"] is not None
     rest, no_longer = _NO_LONGER_FAIL.subn(" ", _ZERO.sub(" ", sentence))
     passes |= no_longer > 0
+    count = 0
     for match in _PARTIAL.finditer(rest):
         done, total = _number(match["done"]), _number(match["total"])
         fails |= done < total
         passes |= done == total
+        count += max(total - done, 0)
     rest = _PARTIAL.sub(" ", rest)
+    failing = _names(_NAMED_FAIL, rest)
+    passing = _names(_NAMED_PASS, rest)
     fails |= _COUNT_FAILED.search(rest) is not None or _STILL_FAIL.search(rest) is not None
+    fails |= bool(failing)
+    count += _failure_count(rest) or 0
     whole = TestResultPredicate(whole_suite=_SUBSET.search(sentence) is None)
     if _FEW.search(rest):
         passes = False
     elif fails:
-        passes = _ALL_PASS.search(rest) is not None
+        passes = _ALL_PASS.search(_COUNT_PASSED.sub(" ", rest)) is not None
     else:
         passes |= _ALL_PASS.search(rest) is not None or _COUNT_PASSED.search(rest) is not None
-    found = [TestResultPredicate(expect="fail", whole_suite=False)] if fails else []
-    return [*found, whole] if passes else found
+    found: list[list[TestResultPredicate]] = []
+    if fails:
+        count = count or len(failing)
+        claim = [TestResultPredicate(expect="fail", whole_suite=False, count=count or None)]
+        claim += [
+            TestResultPredicate(expect="fail", whole_suite=False, mentions=name)
+            for name in failing[: MAX_PREDICATES - 1]
+            if len(name) >= MIN_TEXT
+        ]
+        found.append(claim)
+    if passes:
+        found.append([whole])
+    found += [
+        [TestResultPredicate(whole_suite=False, mentions=name)]
+        for name in passing
+        if len(name) >= MIN_TEXT
+    ]
+    return found
+
+
+def _reports_failure(sentence: str) -> bool:
+    """The sentence says some test fails now, in whatever words: a negated clause about an
+    outcome ('test_x isn't passing', 'it doesn't work'), 'most tests pass', or a failing verb
+    that is not past, zero or 'the failing test'."""
+    if _question(sentence):
+        return False
+    negated = negated_clauses(sentence, _MODELLED_NEGATIONS)
+    if any(_FAILURE_CLAUSE.search(sentence[start:end]) for start, end in negated):
+        return True
+    text, _, _ = _masked(sentence)
+    if any(o[0].expect == "fail" for o in _test_outcomes(text)):
+        return True
+    text = _ATTRIBUTIVE_FAIL.sub(" ", _NO_LONGER_FAIL.sub(" ", _ZERO.sub(" ", text)))
+    if _FEW.search(text) and _TEST_WORDS.search(text):
+        return True
+    return _OUTCOME_FAIL.search(text) is not None
+
+
+def reports_failure(answer: str | None) -> bool:
+    """Some sentence of the answer reports failing tests: then a fix elsewhere in it does not
+    claim the whole suite passes."""
+    return any(_reports_failure(sentence) for sentence in split_sentences(answer or ""))
 
 
 def _command_claims(sentence: str) -> Iterator[_Claim]:
@@ -396,16 +516,11 @@ def _edit_claims(sentence: str, implies_pass: bool) -> Iterator[_Claim]:
         yield ClaimKind.OUTCOME, True, [TestResultPredicate()]
 
 
-def claims_fix(answer: str | None) -> bool:
-    """The answer says it fixed something ("I fixed the bug", "the issue is now fixed")."""
-    return any(_FIXED.search(sentence) for sentence in split_sentences(answer or ""))
-
-
 def asserted_fix(answer: str | None) -> str | None:
-    """The first sentence that asserts a fix: not a question, and the fix neither negated nor
-    planned ("I fixed the bug in `calc.py` without touching the tests")."""
+    """The first sentence that asserts a fix ("I fixed the bug", "the issue has been fixed",
+    "bug fixed in `calc.py`"): not a question, and the fix neither negated nor planned."""
     for sentence in split_sentences(answer or ""):
-        if sentence.rstrip(" \"')]*_").endswith("?"):
+        if _question(sentence):
             continue
         negated = negated_clauses(sentence, _MODELLED_NEGATIONS)
         for match in _FIXED.finditer(sentence):
@@ -425,8 +540,9 @@ def heuristic_claims(answer: str | None) -> SessionClaimSet:
     """Claims from patterns for the common coding-agent claims. Offline and deterministic."""
     claims: list[SessionClaim] = []
     seen: set[str] = set()
+    failure_reported = reports_failure(answer)
     for sentence in split_sentences(answer or ""):
-        for kind, key, predicates in _sentence_claims(sentence):
+        for kind, key, predicates in _sentence_claims(sentence, failure_reported):
             signature = _key(predicates)
             if signature in seen or len(claims) >= MAX_CLAIMS:
                 continue
@@ -486,7 +602,8 @@ For each claim the agent makes about what it did or about the state of the code,
 lint results) or value;
 - key: true for claims the task's success depends on (tests pass, the bug is fixed);
 - predicates: 1-4 checks that must ALL hold for the claim to be true, from:
-  {"kind":"test_result","expect":"pass"|"fail","whole_suite":true|false,"mentions":"<test name>"}
+  {"kind":"test_result","expect":"pass"|"fail","whole_suite":true|false,"mentions":"<test name>",\
+"count":<how many tests fail; expect fail only>}
   {"kind":"command","contains":"<command text>"} or {"kind":"command","category":"test"|"build"|"lint"|"typecheck"|"format"}, \
 optional "ok":true|false
   {"kind":"edit","path":"<glob>","touched":true|false,"change":"add"|"modify"|"delete"|"any"} or \
@@ -495,7 +612,9 @@ optional "ok":true|false
 
 Rules: "all tests pass" is test_result pass with whole_suite true; a claim about a filtered or \
 named run uses whole_suite false. "I fixed the bug in X" is an edit of X plus test_result pass. \
-"I didn't touch X" is edit with touched false. Statements about the past ("before the fix two \
+"I didn't touch X" is edit with touched false. "1 test still fails" is test_result fail with \
+count 1; a test it names as failing is test_result fail with mentions, and one it names as \
+passing or fixed test_result pass with mentions. Statements about the past ("before the fix two \
 tests failed"), plans and hedges are not claims. Return {"claims": []} when there are none.
 """
 
