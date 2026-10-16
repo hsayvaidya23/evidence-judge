@@ -105,6 +105,10 @@ The first release.
   Code, Codex CLI and Gemini CLI guides' descriptions, the README, the docs home page and the
   site description mention coding-agent sessions and the independent test re-run, not only
   browser traces.
+- Every install command in the docs (the MCP client snippets for Claude Code, Codex CLI and
+  Gemini CLI, and the `pip install` lines in the CLI and integrations pages) installs from the
+  GitHub repository until v0.1.0 is on PyPI, so none of them runs whatever is published under
+  the unclaimed PyPI name; a test keeps it that way.
 
 ### Fixed
 

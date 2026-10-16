@@ -8,9 +8,9 @@ Evidence Judge needs **Python 3.12 or newer** (it is tested on 3.12 and 3.13).
 
 !!! info "Not released yet"
 
-    v0.1.0 is not released yet, so nothing is on PyPI: install from the GitHub repository. Once
-    it is, `uv tool install --python 3.12 "evidence-judge[anthropic]"` and
-    `pip install "evidence-judge[anthropic]"` will work as well.
+    v0.1.0 is not released yet, so nothing is on PyPI: install from the GitHub repository, as
+    below. Do not install `evidence-judge` from PyPI until the release notes say it is there.
+    To pin a commit, add it to the URL: `git+https://github.com/hsayvaidya23/evidence-judge@<sha>`.
 
 === "uv (recommended)"
 
