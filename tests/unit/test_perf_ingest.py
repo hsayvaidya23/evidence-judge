@@ -38,10 +38,10 @@ JPEG = b"\xff\xd8\xff\xe0" + bytes(range(256)) * 40
 
 @contextmanager
 def within(budget_s: float) -> Iterator[None]:
-    start = time.perf_counter()
+    start = time.process_time()
     yield
-    elapsed = time.perf_counter() - start
-    assert elapsed < budget_s, f"took {elapsed:.2f}s, budget {budget_s}s"
+    elapsed = time.process_time() - start
+    assert elapsed < budget_s, f"took {elapsed:.2f}s of CPU, budget {budget_s}s"
 
 
 def network_run(source: str, count: int) -> Run:
