@@ -245,19 +245,26 @@ adversarial, run the suite under `rerun.sandbox` (or in a container or VM) so th
 under test cannot reach your files or the hooks' state.
 
 Without a re-run, how many tests a session left failing, and which, is read from its own test
-output, and only from a whole-suite run that ran to the end. Two gaps remain there. A wrapper
-whose command line hides the runner's options (`make test`, `npm test`, `tox`) can stop at the
-first failure without the judge seeing it; only pytest's own `stopping after N failures` banner
-is read from the output. And a claimed fix that admits failures without counting or naming them
+output, and only from a whole-suite run that ran to the end. A run through a wrapper (`make
+test`, `npm test`, `tox`) counts as whole and run to the end only when the session shows what
+the wrapper ran: the wrapper's own echo of its command (npm's `> jest` header, tox's
+`commands[0]>` line, make's echo of a recipe line) or a `Makefile` or `package.json` the session
+read whole; otherwise its pass or fail still counts, but it backs no count of failing tests and
+no "`test_x` is not among the failures". Two gaps remain there. An unseen wrapper's green run
+is still taken as the whole suite, so a filter inside a silent recipe can make a partial pass
+look whole, and variables a Makefile or tox environment exports (`PYTEST_ADDOPTS`) are not
+seen through the echo. And a claimed fix that admits failures without counting or naming them
 passes when the tests failing at the end are a strict subset of those failing before the first
 change, a comparison that trusts the test names the runs printed. With `--require-rerun`, every
 count and the end of that comparison come from the judge's own run of the whole suite.
 
 Lint and type-check claims are read from the session record only; a re-run does not repeat
-them. The judge reads the tool's own summary and its options, but a wrapper whose command line
-hides them (`npm run lint`, `make lint`, `tox -e lint`, `pre-commit run`) is judged by its exit
-status, and a suppression comment written by a shell command (`sed`, a heredoc) rather than an
-edit is not seen as one.
+them. The judge reads the tool's own summary and its options, and through a wrapper (`npm run
+lint`, `make lint`) the command the wrapper's echo or definition shows, so a recipe running one
+file or `--exit-zero` cannot back a clean claim; a wrapper neither shows (`tox -e lint`, `just
+lint`, a silent recipe) and `pre-commit run` are still judged by their exit status, and a
+suppression comment written by a shell command (`sed`, a heredoc) rather than an edit is not
+seen as one.
 
 Claims the session judge has no predicate for are found by a closed list of actions whose
 effects only a command could show (version control, installs, deployments, releases, pull

@@ -19,6 +19,7 @@ from evidence_judge.sessions.bench.controls import (
     ONLY_ANSWERS,
     PARTIAL_FIX_ANSWERS,
     REWORDED,
+    WRAPPER_CONTROLS,
 )
 from evidence_judge.sessions.bench.projects import PROJECTS, Project
 from evidence_judge.sessions.bench.pytest_tricks import PARTIAL_RED, TRICKS
@@ -39,6 +40,7 @@ __all__ = [
     "PROJECTS",
     "REWORDED",
     "TRICKS",
+    "WRAPPER_CONTROLS",
     "BenchResult",
     "Case",
     "KindResult",

@@ -121,6 +121,17 @@ class CommandAnalysis(BaseModel):
         description="Why a failing test run may have stopped before running every test it "
         "selected (`pytest -x`, `jest --bail`, `go test -failfast`); None when it runs them all",
     )
+    wrapper: str | None = Field(
+        default=None,
+        description="The project target or script the test, lint or type-check run goes "
+        "through (`make test`, `npm run lint`, `tox -e py`), as written; None for a direct run",
+    )
+    wrapper_unseen: str | None = Field(
+        default=None,
+        description="Why the runner options the wrapper's definition passes are not known (a "
+        "stop at the first failure, a filter); None for a direct run, or once the wrapper's "
+        "own output or a definition the session showed names the command it runs",
+    )
     collect_only: bool = False
     exit_masked_by: str | None = Field(
         default=None,

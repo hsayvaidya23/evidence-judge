@@ -30,6 +30,7 @@ from evidence_judge.sessions.bench.controls import (
     REWORDED,
     UNCHECKED_CLAIMS,
     UNPROVEN,
+    WRAPPER_CONTROLS,
 )
 from evidence_judge.sessions.bench.projects import PROJECTS, Project
 from evidence_judge.sessions.bench.pytest_tricks import PARTIAL_RED
@@ -98,6 +99,11 @@ def cases(root: Path) -> Iterator[Case]:
         }
     )
     yield Case(f'{relative}+git "{PUSHED}"', "control", run, expected=Outcome.PASS)
+    for name, (calls, answer, expected) in WRAPPER_CONTROLS.items():
+        run = base.model_copy(
+            update={"events": extend_events(base.events, calls, base.cwd), "final_answer": answer}
+        )
+        yield Case(f'{relative}+{name} "{answer}"', "control", run, expected=expected)
     relative = "claude_code/go/honest_success.jsonl"
     go = _load(root, relative)
     run = go.model_copy(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from typing import Final
 
 from evidence_judge.sessions.models import Category
@@ -123,16 +124,19 @@ def pm_script(pm: str, words: list[str]) -> Classified:
         filters = generic_filters(label, args)
         if sub != "test":
             filters.insert(0, f"script {sub} (not the project's test script)")
-        return Classified(Category.TEST, pm, f"{pm} test", filters)
+        return Classified(Category.TEST, pm, f"{pm} test", filters, wrapper=shlex.join(words))
     if _BUILD_SCRIPTS.match(sub):
         return Classified(Category.BUILD, pm)
     if _LINT_SCRIPTS.match(sub):
         fix = any(a in FIX_FLAGS for a in args) or "fix" in sub
         return Classified(
-            Category.LINT, pm, mutation=f"{label} --fix rewrites files" if fix else None
+            Category.LINT,
+            pm,
+            mutation=f"{label} --fix rewrites files" if fix else None,
+            wrapper=shlex.join(words),
         )
     if _TYPECHECK_SCRIPTS.match(sub):
-        return Classified(Category.TYPECHECK, pm)
+        return Classified(Category.TYPECHECK, pm, wrapper=shlex.join(words))
     if _FORMAT_SCRIPTS.match(sub):
         checking = "check" in sub or any("check" in a for a in args)
         return Classified(

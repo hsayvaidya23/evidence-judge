@@ -265,6 +265,8 @@ class _Walk:
     stop_early: str | None = None
     check_filters: list[str] = field(default_factory=list[str])
     check_masked: str | None = None
+    test_wrapper: str | None = None
+    check_wrapper: str | None = None
 
 
 def _note(
@@ -325,6 +327,10 @@ def _take_nested(
         walk.run_env = [*nested.run_env, *outer]
         walk.config_files.extend(nested.config_files)
     walk.check_filters.extend(nested.check_filters)
+    if nested.runners:
+        walk.test_wrapper = walk.test_wrapper or nested.wrapper
+    else:
+        walk.check_wrapper = walk.check_wrapper or nested.wrapper
     if classified.category in _CHECKS and not walk.runners and not nested.runners:
         walk.run_cds = [*walk.cds, *nested.run_cds]
     if nested.runners or (classified.category in _CHECKS and not walk.runners):
@@ -342,6 +348,7 @@ def _take(walk: _Walk, classified: Classified, at: tuple[int, int]) -> None:
         walk.runners.append(classified.runner)
         walk.filters.extend(classified.filters)
         walk.stop_early = walk.stop_early or classified.stop_early
+        walk.test_wrapper = walk.test_wrapper or classified.wrapper
         walk.run_cds = [*walk.cds, *classified.relocations]
         walk.run_env = list(classified.run_env)
         walk.config_files.extend(classified.config_files)
@@ -357,6 +364,7 @@ def _take(walk: _Walk, classified: Classified, at: tuple[int, int]) -> None:
     else:
         walk.check_filters.extend(classified.check_filters)
         walk.check_masked = walk.check_masked or classified.check_masked
+        walk.check_wrapper = walk.check_wrapper or classified.wrapper
         walk.run_cds = [*walk.cds, *classified.relocations]
     walk.primary = at
     walk.masked = None
@@ -451,6 +459,7 @@ def _mutation_after(walk: _Walk) -> bool:
 def _analysis(
     walk: _Walk, pipelines: list[Pipeline], command: str, cwd: str | None, mutation_after: bool
 ) -> CommandAnalysis:
+    wrapper = walk.test_wrapper if walk.runners else walk.check_wrapper
     return CommandAnalysis(
         categories=walk.categories,
         programs=walk.programs,
@@ -465,6 +474,13 @@ def _analysis(
             )
         ),
         stop_early=walk.stop_early,
+        wrapper=wrapper,
+        wrapper_unseen=(
+            f"{wrapper} runs a command its project defines, which the session does not show, so "
+            "the options it passes (a stop at the first failure, a filter) are unseen"
+            if wrapper
+            else None
+        ),
         collect_only=walk.collect_only,
         exit_masked_by=walk.masked or (None if walk.runners else walk.check_masked),
         output_filter=walk.output_filter,

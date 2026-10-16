@@ -209,19 +209,27 @@ _STOPPED: Final = re.compile(
 """pytest's banner for a run that ended before running every test it collected."""
 
 
+_SUITES_RUN: Final = re.compile(r"^Test Suites:.*?\b(\d+) of (\d+) total$", re.M)
+"""jest's suite count for a run that ran fewer suites than it found (`--bail`, an interrupt)."""
+
+
 def stopped_early(event: CommandEvent) -> str | None:
     """Why the run may have ended before running every test it selected, or None."""
     if event.analysis.stop_early:
         return event.analysis.stop_early
-    if match := _STOPPED.search(_strip(event.output)):
+    output = _strip(event.output)
+    if match := _STOPPED.search(output):
         return f"its output says {match.group(0).strip('! ')!r}"
+    if (match := _SUITES_RUN.search(output)) and int(match[1]) < int(match[2]):
+        return f"its output says {match.group(0)!r}: some test suites never ran"
     return None
 
 
 def incomplete(outcome: RunOutcome) -> str | None:
     """Why the run cannot show every test of the suite that fails, or None: a filtered or
-    partial run never ran some, and one that stopped early skipped the rest."""
-    return outcome.partial or stopped_early(outcome.event)
+    partial run never ran some, one that stopped early skipped the rest, and one through a
+    wrapper whose command the session does not show may have done either."""
+    return outcome.partial or stopped_early(outcome.event) or outcome.event.analysis.wrapper_unseen
 
 
 def not_failing(outcome: RunOutcome, name: str) -> RunOutcome | None:
