@@ -2,34 +2,106 @@
 
 from __future__ import annotations
 
+from typing import Final
+
 from evidence_judge.ingest.css.model import MAYBE, NO, YES, Compound, Element, Pseudo, Selector
+
+MAX_MATCH_STEPS: Final = 50_000
+"""How many (compound, element) tests one selector match may make before the reader gives up
+and answers MAYBE."""
+
+
+class _BudgetSpentError(Exception):
+    pass
 
 
 def matches(selector: Selector, element: Element) -> int:
-    found = _match(selector, len(selector.parts) - 1, element)
+    if not selector.ancestors <= element.ancestry:
+        return NO
+    last = len(selector.parts) - 1
+    found = _compound_match(selector.parts[last], element)
+    if found == NO:
+        return NO
+    if last > 0:
+        try:
+            found = _Matcher(selector).top(last, element, found)
+        except _BudgetSpentError:
+            return MAYBE
     return min(found, MAYBE) if selector.maybe else found
 
 
-def _match(selector: Selector, index: int, element: Element) -> int:
-    found = _compound_match(selector.parts[index], element)
-    if found == NO or index == 0:
+class _Matcher:
+    """One selector matched against one element. Each (compound, element) answer and each
+    "an ancestor or earlier sibling matches" answer is kept on the element (`Element.matched`)
+    for every later match of the same selector, so a selector with many descendant combinators
+    costs (parts x depth) tests over a whole tree, not (depth ^ parts) for each element."""
+
+    __slots__ = ("_id", "_selector", "_steps")
+
+    def __init__(self, selector: Selector) -> None:
+        self._selector = selector
+        self._id = id(selector)
+        self._steps = 0
+
+    def top(self, index: int, element: Element, found: int) -> int:
+        """The match of the last compound, which only a fresh `matches` asks about: its own
+        answer `found` combined with the rest, not kept."""
+        self._steps += 1
+        return min(found, self._left(index, element))
+
+    def match(self, index: int, element: Element) -> int:
+        key = (self._id, index)
+        known = _known(element, key)
+        if known is not None and known[0] is self._selector:
+            return known[1]
+        self._steps += 1
+        if self._steps > MAX_MATCH_STEPS:
+            raise _BudgetSpentError
+        found = _compound_match(self._selector.parts[index], element)
+        if found != NO and index > 0:
+            found = min(found, self._left(index, element))
+        _keep(element, key, (self._selector, found))
         return found
-    combinator = selector.combinators[index - 1]
-    if combinator == ">":
-        parent = element.parent
-        return NO if parent is None else min(found, _match(selector, index - 1, parent))
-    if combinator == "+":
-        previous = element.previous
-        return NO if previous is None else min(found, _match(selector, index - 1, previous))
-    best = NO
-    other = element.parent if combinator == " " else element.previous
-    while other is not None:
-        matched = _match(selector, index - 1, other)
-        if matched == YES:
-            return found
-        best = max(best, matched)
-        other = other.parent if combinator == " " else other.previous
-    return min(found, best)
+
+    def _left(self, index: int, element: Element) -> int:
+        """How the selector up to the compound before `index` matches what the combinator
+        before `index` points to from `element`."""
+        combinator = self._selector.combinators[index - 1]
+        if combinator == ">":
+            parent = element.parent
+            return NO if parent is None else self.match(index - 1, parent)
+        if combinator == "+":
+            previous = element.previous
+            return NO if previous is None else self.match(index - 1, previous)
+        up = combinator == " "
+        key = (self._id, -index)
+        walked: list[tuple[Element, int]] = []
+        tail = NO
+        other = element.parent if up else element.previous
+        while other is not None:
+            known = _known(other, key)
+            if known is not None and known[0] is self._selector:
+                tail = known[1]
+                break
+            found = self.match(index - 1, other)
+            walked.append((other, found))
+            if found == YES:
+                break
+            other = other.parent if up else other.previous
+        for item, found in reversed(walked):
+            tail = max(tail, found)
+            _keep(item, key, (self._selector, tail))
+        return tail
+
+
+def _known(element: Element, key: tuple[int, int]) -> tuple[Selector, int] | None:
+    return None if element.matched is None else element.matched.get(key)
+
+
+def _keep(element: Element, key: tuple[int, int], answer: tuple[Selector, int]) -> None:
+    if element.matched is None:
+        element.matched = {}
+    element.matched[key] = answer
 
 
 def _compound_match(part: Compound, element: Element) -> int:

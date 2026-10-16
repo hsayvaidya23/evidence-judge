@@ -8,8 +8,8 @@ from typing import Final
 
 from evidence_judge.ingest.css.model import DISPLAY, Viewport
 from evidence_judge.ingest.css.selector import foreign
-from evidence_judge.ingest.css.syntax import closing_paren, split_commas
-from evidence_judge.ingest.css.values import length_px
+from evidence_judge.ingest.css.syntax import split_commas
+from evidence_judge.ingest.css.values import closing_paren, length_px
 
 _RANGE = re.compile(
     r"^(?:([^<>=]+?)\s*([<>]=?|=))?\s*(width|height)\s*(?:([<>]=?|=)\s*([^<>=]+))?$"

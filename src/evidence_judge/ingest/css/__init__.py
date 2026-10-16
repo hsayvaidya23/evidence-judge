@@ -17,12 +17,25 @@ fully model:
   combinators), ``:not()``, ``:is()``, ``:where()``, the ``:nth-*`` and ``*-child`` /
   ``*-of-type`` pseudo-classes, ``:root``, ``:defined`` on built-in elements, ``:any-link``,
   ``:host`` / ``:host()`` and escapes are evaluated;
-- a value it cannot read: ``var()``, ``env()``, ``attr()`` or an unknown keyword in
-  ``display``, ``visibility`` or ``content-visibility``;
-- styles that can make text unreadable without removing it: ``opacity`` near 0, a tiny
-  ``font-size``, a transparent text colour or one equal to the background, ``clip`` /
-  ``clip-path`` that cut it away, a ``transform`` that scales it to nothing, far off-screen
-  offsets, margins or ``text-indent``, and a zero-size box that clips its overflow.
+- a value it cannot read in a property that can hide text: an unknown function, unit or
+  keyword, ``attr()``, or a ``var()`` whose custom property it cannot tell (one a rule it cannot
+  evaluate may set, a cycle it cannot settle, one registered outside the document). It
+  substitutes ``var()`` from the cascade's custom properties (`variables`), reads ``env()``
+  safe-area insets as 0, and evaluates ``calc()``, ``min()``, ``max()``, ``clamp()`` and
+  ``abs()``;
+- styles that can make text unreadable without removing it: ``opacity`` near 0 (its own or
+  its ancestors' multiplied), a tiny ``font-size``, a text colour (or text fill, or SVG
+  ``fill``) whose contrast with the background is below 1.2, any ``mask``, a ``filter`` other
+  than slight or luminance-keeping ones, a motion path, ``clip`` or a ``clip-path`` that cuts
+  most of a line of text or the viewport away (or a shape it does not measure), a
+  ``transform``, ``rotate`` or ``scale`` that squashes, stretches or turns the box edge-on
+  (or a function it does not know), far off-screen offsets (logical ones too, and a fixed box
+  outside the viewport), margins or ``text-indent``, and a zero-size box that clips, scrolls
+  or contains the paint of its overflow. SVG presentation attributes are read like the
+  properties they name.
+
+It does not model a box painted over the text (a full-page opaque overlay with a higher
+``z-index``): that needs layout.
 
 Utility hiding classes (`UTILITY_CSS`) whose stylesheet is not in the recording make an element
 unsure, not hidden: the site may not load the framework that defines them.

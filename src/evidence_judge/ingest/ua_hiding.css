@@ -22,7 +22,9 @@ dialog:not([open]) { display: none; }
 :is(table, thead, tbody, tfoot, tr) > form { display: none !important; }
 
 /* evidence-judge: hidden=until-found content is revealed by find-in-page and fragment links
-   without a script, so its visibility is unknown rather than hidden. */
+   without a script, so its visibility is unknown rather than hidden. A registered custom
+   property holds a value the reader cannot know. */
+@property --evidence-judge-unknown { syntax: "*"; inherits: false; }
 [hidden=until-found i]:not(embed) {
   content-visibility: var(--evidence-judge-unknown);
 }
@@ -43,6 +45,7 @@ maction > :not(:first-child) { display: none; }
 mphantom { visibility: hidden; }
 
 /* evidence-judge: an annotation outside <semantics> may or may not render. */
+@property --evidence-judge-unknown { syntax: "*"; inherits: false; }
 annotation, annotation-xml {
   display: var(--evidence-judge-unknown);
 }
