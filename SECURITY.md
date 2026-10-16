@@ -265,8 +265,9 @@ before the run is checked like a command of its own. Otherwise its pass or fail 
 no "`test_x` is not among the failures", and its green run proves the whole suite passes only
 when it passed at least as many tests as an earlier whole-suite run of the same framework whose
 command the session showed (plus the tests the session added since, when every change since
-can be counted; a test written by a command, a parametrize case or a deleted test voids the
-earlier count). Gaps remain there: a tox environment's `setenv` is read from a `tox.ini`,
+can be counted; a test written by a command, a parametrize case, a deleted test or any change
+that may redefine the wrapper, such as a new `test.mk` or `tests/tox.ini`, voids the earlier
+count). Gaps remain there: a tox environment's `setenv` is read from a `tox.ini`,
 `setup.cfg` or `pyproject.toml` the session showed (any of them, since which one tox reads may
 turn on a file the session did not show), but not from one it never showed; a noxfile, justfile
 settings and parameters and tox factor-conditional `commands` are never read; and an unseen
