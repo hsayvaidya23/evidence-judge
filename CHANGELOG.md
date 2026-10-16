@@ -266,6 +266,24 @@ The first release.
   tell) makes the text unsure. A `background-image` now hides the background colour from the
   colour comparison, and of two inline declarations of one property the later one wins (the
   reader kept the first).
+- The page-text reader now treats hiding it did not model as unsure instead of shown. These
+  hid the "Out of stock" text of a stock check that then passed: `mask-image` (and
+  `-webkit-mask-image`), `filter: blur(60px)`, `transform: rotate3d(0,1,0,90deg)`, `rotate: y
+  90deg`, `skewX(90deg)`, `clip-path: path(...)` or `rect(...)`, `height: 0` with `contain:
+  paint` or `overflow: auto`, `color: #fefefe` or `snow` on white, `position: fixed; top:
+  -100vh`, `inset-inline-start: -10000px`, `text-indent: 100%` with `overflow: hidden`, and
+  the SVG `<text>` attributes `font-size="0"`, `transform="scale(0)"`, `clip-path` and
+  `fill="white"`. Any mask or motion path is unsure; a filter is unless slight or
+  luminance-keeping; `transform`, `rotate` and `scale` are composed into one matrix and are
+  unsure when it squashes, stretches or turns the box edge-on, or holds a function the reader
+  does not know; clip paths are measured on a line of text and on the viewport; text whose
+  colour (or text fill, or SVG `fill`, with its own and its ancestors' opacity) has a WCAG
+  contrast below 1.2 with the background is unsure, and every CSS named colour is known;
+  logical insets and margins, a fixed box outside the viewport and positive image-replacement
+  indents count as off-screen; SVG presentation attributes are read like the properties they
+  name. `unmodelled_hiding` forgeries now render their page through the reader with 15
+  variants covering these, so a reader regression becomes a false PASS in the benchmark. A
+  full-page opaque overlay painted over the text is still not modelled (it needs layout).
 
 ### Security
 

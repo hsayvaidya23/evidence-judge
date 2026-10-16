@@ -49,7 +49,13 @@ from evidence_judge.ingest.css.syntax import (
     parse_declaration,
     split_commas,
 )
-from evidence_judge.ingest.css.values import closing_paren, far_offset, length_px
+from evidence_judge.ingest.css.values import (
+    closing_paren,
+    far_offset,
+    functions,
+    length_px,
+    parse_number,
+)
 from evidence_judge.ingest.css.variables import (
     Custom,
     custom_properties,
@@ -92,8 +98,14 @@ _TOP: Final = 1 << 30
 """The layer key of unlayered rules: after every layer."""
 
 
-_PRESENTATION: Final = words("display visibility opacity fill fill-opacity")
+_PRESENTATION: Final = words(
+    "display visibility opacity fill fill-opacity font-size transform clip-path mask filter color"
+)
 """SVG presentation attributes the reader applies: author-level, beneath every rule."""
+
+
+_SVG_UNITS: Final = {"translate": "px", "rotate": "deg", "skewx": "deg", "skewy": "deg"}
+"""The unit an SVG ``transform`` attribute's bare numbers are in, by function."""
 
 
 _SKIPPED_AT_RULES: Final = words(
@@ -200,7 +212,7 @@ class StyleSheets:
         if element.namespace == SVG:
             for prop in _PRESENTATION.intersection(element.attrs):
                 rank: Rank = (1, 1, 0, (-2,), (0, 0, 0), 0)
-                value = element.attrs[prop].strip().lower()
+                value = _presentation(prop, " ".join(element.attrs[prop].lower().split()))
                 _offer(Rule(_UNIVERSAL, prop, value, rank, False), YES, best, maybe)
         for rule in self._candidates(element):
             _offer(rule, matches(rule.selector, element), best, maybe)
@@ -503,6 +515,31 @@ def user_agent_sheets() -> dict[str, StyleSheets]:
         _NAMESPACES[uri]: StyleSheets([Sheet(body)], None, document=False, user_agent=True)
         for uri, body in zip(parts[1::2], parts[2::2], strict=True)
     }
+
+
+def _presentation(prop: str, value: str) -> str | None:
+    """An SVG presentation attribute's value as CSS: bare font sizes and ``transform`` numbers
+    in user units (pixels) and degrees, its comma or space separated arguments as CSS's."""
+    if prop == "font-size" and parse_number(value) is not None:
+        return f"{value}px" if not (parse_number(value) or (0, ""))[1] else value
+    if prop != "transform" or value == "none":
+        return value
+    found = functions(value)
+    if not found:
+        return None
+    out: list[str] = []
+    for name, args in found:
+        unit = _SVG_UNITS.get(name, "")
+        parts = [p for p in re.split(r"[\s,]+", args) if p]
+        if name == "rotate":
+            parts = parts[:1]
+        out.append(f"{name}({', '.join(_with_unit(p, unit) for p in parts)})")
+    return " ".join(out)
+
+
+def _with_unit(number: str, unit: str) -> str:
+    found = parse_number(number)
+    return f"{number}{unit}" if unit and found is not None and not found[1] else number
 
 
 def _offer(rule: Rule, matched: int, best: dict[str, Rule], maybe: dict[str, list[Rule]]) -> None:

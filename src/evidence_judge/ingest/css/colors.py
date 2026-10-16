@@ -1,5 +1,4 @@
-"""CSS colours: named and system colours, the colour functions, ``color-mix()``, compositing
-and contrast."""
+"""CSS colours: named and system colours, the colour functions and ``color-mix()``."""
 
 from __future__ import annotations
 
@@ -7,7 +6,7 @@ import math
 import re
 from typing import Final
 
-from evidence_judge.ingest.css.model import Rgba
+from evidence_judge.ingest.css.model import Rgba, linear
 from evidence_judge.ingest.css.values import (
     functions,
     parse_amount,
@@ -233,17 +232,13 @@ def _lab(name: str, parts: list[str]) -> tuple[float, float, float] | None:
         a, b = _number(parts[1], 0.4 if ok else 125.0), _number(parts[2], 0.4 if ok else 125.0)
         if a is None or b is None:
             return None
-    linear = _oklab_to_linear(lightness, a, b) if ok else _lab_to_linear(lightness, a, b)
-    r, g, b2 = (round(255 * _gamma(max(0.0, min(1.0, c)))) for c in linear)
+    lit = _oklab_to_linear(lightness, a, b) if ok else _lab_to_linear(lightness, a, b)
+    r, g, b2 = (round(255 * _gamma(max(0.0, min(1.0, c)))) for c in lit)
     return r, g, b2
 
 
 def _gamma(c: float) -> float:
     return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
-
-
-def _linear(c: float) -> float:
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
 def _oklab_to_linear(lightness: float, a: float, b: float) -> tuple[float, float, float]:
@@ -323,13 +318,13 @@ def _mix(args: str, current: Rgba | None) -> Rgba | None:
     if alpha <= 0:
         return (0, 0, 0, 0)
     if space in ("oklab", "oklch", "lab", "lch"):
-        one = _linear_to_oklab(*(_linear(c / 255) for c in (r1, g1, b1)))
-        two = _linear_to_oklab(*(_linear(c / 255) for c in (r2, g2, b2)))
+        one = _linear_to_oklab(*(linear(c / 255) for c in (r1, g1, b1)))
+        two = _linear_to_oklab(*(linear(c / 255) for c in (r2, g2, b2)))
         mixed = [
             (x * a1 * weight + y * a2 * (1 - weight)) / alpha for x, y in zip(one, two, strict=True)
         ]
-        linear = _oklab_to_linear(*mixed)
-        rgb = [round(255 * _gamma(max(0.0, min(1.0, c)))) for c in linear]
+        lit = _oklab_to_linear(*mixed)
+        rgb = [round(255 * _gamma(max(0.0, min(1.0, c)))) for c in lit]
     elif space in ("srgb", "srgb-linear", "hsl", "hwb", "xyz", "xyz-d50", "xyz-d65"):
         rgb = [
             round((x * a1 * weight + y * a2 * (1 - weight)) / alpha)
@@ -338,21 +333,3 @@ def _mix(args: str, current: Rgba | None) -> Rgba | None:
     else:
         return None
     return (rgb[0], rgb[1], rgb[2], alpha * scale)
-
-
-def over(colour: Rgba, behind: Rgba) -> Rgba:
-    """`colour` painted over the opaque `behind`."""
-    alpha = colour[3]
-    r, g, b = (c * alpha + d * (1 - alpha) for c, d in zip(colour[:3], behind[:3], strict=True))
-    return (r, g, b, 1.0)
-
-
-def luminance(colour: Rgba) -> float:
-    r, g, b = (_linear(c / 255) for c in colour[:3])
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b
-
-
-def contrast(colour: Rgba, behind: Rgba) -> float:
-    """The WCAG contrast ratio of `colour` painted over the opaque `behind`."""
-    one, two = luminance(over(colour, behind)), luminance(behind)
-    return (max(one, two) + 0.05) / (min(one, two) + 0.05)

@@ -217,7 +217,7 @@ def test_cascade_layers(css: str, state: int) -> None:
         (".in{opacity:.5}", SHOWN),
         (".in{opacity:var(--o)}", SHOWN),
         (".in{filter:opacity(0)}", UNSURE),
-        (".in{filter:blur(2px)}", SHOWN),
+        (".in{filter:blur(2px)}", UNSURE),
         (".in{font-size:0}", UNSURE),
         (".in{font-size:1px}", UNSURE),
         (".in{font-size:0.1em}", UNSURE),
@@ -335,6 +335,119 @@ def test_styles_that_may_hide_text_leave_it_unsure(css: str, state: int) -> None
 )
 def test_values_the_reader_cannot_read_leave_text_unsure(css: str, state: int) -> None:
     assert _state(css, BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{mask-image:linear-gradient(transparent,transparent)}", UNSURE),
+        (".in{-webkit-mask-image:url(m.svg)}", UNSURE),
+        (".in{-webkit-mask:none;mask:none}", SHOWN),
+        (".in{filter:blur(60px)}", UNSURE),
+        (".in{filter:blur(0.3px) drop-shadow(0 1px 2px #000) grayscale(1)}", SHOWN),
+        (".in{filter:brightness(1.1) contrast(0.9)}", SHOWN),
+        (".in{filter:brightness(100)}", UNSURE),
+        (".in{filter:invert(1)}", UNSURE),
+        (".in{filter:url(#f)}", UNSURE),
+        (".in{filter:none}", SHOWN),
+        (".in{transform:rotate3d(0,1,0,90deg)}", UNSURE),
+        (".in{transform:rotate3d(0,0,1,90deg)}", SHOWN),
+        (".in{rotate:y 90deg}", UNSURE),
+        (".in{rotate:45deg}", SHOWN),
+        (".in{rotate:y 60deg;scale:0.08}", UNSURE),
+        (".in{transform:skewX(90deg)}", UNSURE),
+        (".in{transform:skew(10deg, 5deg)}", SHOWN),
+        (".in{transform:matrix3d(0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1)}", UNSURE),
+        (".in{transform:perspective(10px) translateZ(20px)}", UNSURE),
+        (".in{transform:perspective(800px) rotateY(20deg)}", SHOWN),
+        (".in{transform:wobble(1)}", UNSURE),
+        (".in{transform:none}", SHOWN),
+        (".in{offset-path:path('M0 0 L9999 0');offset-distance:100%}", UNSURE),
+        (".in{clip-path:path('M0 0')}", UNSURE),
+        (".in{clip-path:rect(0 0 0 0)}", UNSURE),
+        (".in{clip-path:url(#c)}", UNSURE),
+        (".in{clip-path:circle(5px)}", UNSURE),
+        (".in{clip-path:circle(50%)}", SHOWN),
+        (".in{clip-path:inset(10px)}", UNSURE),
+        (".in{clip-path:inset(0 round 8px)}", SHOWN),
+        (".in{clip-path:polygon(0 0, 100% 0, 100% calc(100% - 4px), 0 100%)}", SHOWN),
+        (".in{clip-path:polygon(0 0, 100% 0, 100% 0)}", UNSURE),
+        (".in{clip-path:border-box}", SHOWN),
+        (".in{height:0;contain:paint}", UNSURE),
+        (".in{height:0;contain:layout}", SHOWN),
+        (".in{height:0;overflow:auto}", UNSURE),
+        (".in{color:#fefefe}", UNSURE),
+        (".in{color:snow}", UNSURE),
+        (".in{color:#ccc}", SHOWN),
+        (".in{color:rgba(0,0,0,0.04)}", UNSURE),
+        (".in{color:#000;opacity:0.3}", SHOWN),
+        (".in{background:#000;color:#0a0a0a}", UNSURE),
+        (".in{background:rgba(0,0,0,0.5);color:#7f7f7f}", UNSURE),
+        (".in{-webkit-text-fill-color:#fff}", UNSURE),
+        (".in{color:#fff;-webkit-text-fill-color:#000}", SHOWN),
+        (".in{position:fixed;top:-100vh}", UNSURE),
+        (".in{position:fixed;top:100vh}", UNSURE),
+        (".in{position:fixed;top:-60px}", SHOWN),
+        (".in{position:absolute;inset-inline-start:-10000px}", UNSURE),
+        (".in{position:absolute;inset-block:-9999px auto}", UNSURE),
+        (".in{margin-inline:-9999px 0}", UNSURE),
+        (".in{text-indent:100%;white-space:nowrap;overflow:hidden}", UNSURE),
+        (".in{text-indent:5%}", SHOWN),
+    ],
+)
+def test_hiding_the_reader_did_not_model_leaves_text_unsure(css: str, state: int) -> None:
+    assert _state(css, BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".wrap{opacity:0.2}.in{opacity:0.2}", UNSURE),
+        (".wrap{opacity:0.5}.in{opacity:0.5}", SHOWN),
+        (".wrap{color:#000}.wrap:hover{color:#fefefe}", UNSURE),
+        (".wrap{color:#000}.x:hover{color:#fefefe}", SHOWN),
+        (".wrap{background-image:url(x.png)}.in{color:#fff}", SHOWN),
+    ],
+)
+def test_faint_text_through_its_ancestors(css: str, state: int) -> None:
+    assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("attrs", "state"),
+    [
+        ({}, SHOWN),
+        ({"font-size": "0"}, UNSURE),
+        ({"font-size": "12"}, SHOWN),
+        ({"transform": "scale(0)"}, UNSURE),
+        ({"transform": "translate(10 20) rotate(30 5 5)"}, SHOWN),
+        ({"transform": "translate(-20000, 0)"}, UNSURE),
+        ({"clip-path": "url(#c)"}, UNSURE),
+        ({"mask": "url(#m)"}, UNSURE),
+        ({"filter": "url(#f)"}, UNSURE),
+        ({"fill": "white"}, UNSURE),
+        ({"fill": "#333"}, SHOWN),
+        ({"fill": "url(#g)"}, UNSURE),
+        ({"fill": "currentColor", "color": "white"}, UNSURE),
+        ({"opacity": "0"}, UNSURE),
+    ],
+)
+def test_svg_presentation_attributes_read_like_css(attrs: dict[str, str], state: int) -> None:
+    svg: Spec = ("svg", {"width": "300", "height": "40"})
+    parent: Element | None = None
+    style: Computed = ROOT
+    sheets = _sheets("")
+    for tag, given, namespace in (
+        ("HTML", {}, "html"),
+        ("BODY", {}, "html"),
+        (*svg, "svg"),
+        ("text", {"x": "0", "y": "20", **attrs}, "svg"),
+    ):
+        element = Element(tag, given, parent, namespace=namespace)
+        style = sheets.style(element, style)
+        parent = element
+
+    assert style.text == state
 
 
 @pytest.mark.parametrize(

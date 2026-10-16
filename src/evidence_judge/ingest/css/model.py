@@ -245,6 +245,36 @@ class Element:
         return self.siblings[self.index - 1]
 
 
+MIN_CONTRAST: Final = 1.2
+"""A WCAG contrast ratio below which text barely stands out from its background."""
+
+
+FAINT_ALPHA: Final = 0.05
+"""An opacity at or below which the reader is unsure text can be seen."""
+
+
+def linear(c: float) -> float:
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def over(colour: Rgba, behind: Rgba) -> Rgba:
+    """`colour` painted over the opaque `behind`."""
+    alpha = colour[3]
+    r, g, b = (c * alpha + d * (1 - alpha) for c, d in zip(colour[:3], behind[:3], strict=True))
+    return (r, g, b, 1.0)
+
+
+def luminance(colour: Rgba) -> float:
+    r, g, b = (linear(c / 255) for c in colour[:3])
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(colour: Rgba, behind: Rgba) -> float:
+    """The WCAG contrast ratio of `colour` painted over the opaque `behind`."""
+    one, two = luminance(over(colour, behind)), luminance(behind)
+    return (max(one, two) + 0.05) / (min(one, two) + 0.05)
+
+
 @dataclass(frozen=True, slots=True)
 class Computed:
     """What the cascade decides for an element, with what its children inherit."""
@@ -258,9 +288,12 @@ class Computed:
     font_px: float | None = 16.0
     """The smallest font size it may have, None when not known."""
     font_tiny: bool = False
-    color: Rgba | None = BLACK
+    colors: tuple[Rgba, ...] = (BLACK,)
+    """The colours its ``color`` may be."""
     clear: bool = False
-    """Its text colour (or text fill) may be transparent."""
+    """Its text colour (or text fill) may be transparent, or one the reader cannot read."""
+    paints: tuple[Rgba, ...] | None = None
+    """The colours its ``-webkit-text-fill-color`` may be (None: its ``color``)."""
     background: Rgba | None = WHITE
     """The nearest opaque background behind it, None when not known."""
     clip_text: bool = False
@@ -270,6 +303,10 @@ class Computed:
     """Its SVG ``fill`` may paint nothing (``none``, a transparent colour)."""
     fill_faint: bool = False
     """Its SVG ``fill-opacity`` may be near 0."""
+    fills: tuple[Rgba, ...] = (BLACK,)
+    """The colours its SVG ``fill`` may be."""
+    alpha: float = 1.0
+    """The least its own and its ancestors' ``opacity`` multiply to."""
     svg: bool = False
     """It is an SVG element, whose text its ``fill`` paints."""
     custom: Mapping[str, tuple[str, ...] | None] = field(default=NO_CUSTOM, compare=False)
@@ -282,13 +319,31 @@ class Computed:
         """Whether this element's own text shows: SHOWN, UNSURE or HIDDEN."""
         if self.visibility == HIDDEN:
             return HIDDEN
-        faded = (
-            not self.clip_text
-            and (self.clear or (self.color is not None and self.color == self.background))
-        ) or (self.svg and (self.fill_none or self.fill_faint))
-        if self.unsure or self.visibility == UNSURE or self.font_tiny or self.indent_far or faded:
+        if self.svg:
+            faded = self.fill_none or self.fill_faint or self._faint(self.fills)
+        else:
+            faded = not self.clip_text and (
+                self.clear or self._faint(self.colors if self.paints is None else self.paints)
+            )
+        if (
+            self.unsure
+            or self.visibility == UNSURE
+            or self.font_tiny
+            or self.indent_far
+            or faded
+            or self.alpha <= FAINT_ALPHA
+        ):
             return UNSURE
         return SHOWN
+
+    def _faint(self, paints: tuple[Rgba, ...]) -> bool:
+        """Whether a colour text may be painted in barely stands out from the background."""
+        behind = self.background
+        if behind is None:
+            return False
+        return any(
+            contrast((r, g, b, a * self.alpha), behind) < MIN_CONTRAST for r, g, b, a in paints
+        )
 
 
 REMOVED: Final = Computed(removed=True)

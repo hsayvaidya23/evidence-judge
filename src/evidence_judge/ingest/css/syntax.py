@@ -11,17 +11,21 @@ from evidence_judge.ingest.css.model import words
 from evidence_judge.ingest.css.values import FONT_KEYWORDS, parse_number, tokens
 
 TRACKED: Final = words(
-    "display visibility content-visibility opacity filter transform scale translate zoom "
-    "clip clip-path position left right top bottom margin-left margin-top "
-    "margin-inline-start margin-block-start height max-height width max-width block-size "
-    "max-block-size inline-size max-inline-size overflow-x overflow-y font-size color "
+    "display visibility content-visibility opacity filter transform scale translate rotate zoom "
+    "clip clip-path position left right top bottom inset-inline-start inset-inline-end "
+    "inset-block-start inset-block-end margin-left margin-top margin-inline-start "
+    "margin-block-start height max-height width max-width block-size max-block-size "
+    "inline-size max-inline-size overflow-x overflow-y contain font-size color "
     "-webkit-text-fill-color text-indent background-color background-image background-clip "
-    "-webkit-background-clip fill fill-opacity"
+    "-webkit-background-clip fill fill-opacity offset offset-path mask mask-image mask-border "
+    "mask-border-source -webkit-mask -webkit-mask-image -webkit-mask-box-image"
 )
 """The properties the reader applies: what removes an element, and what can hide its text."""
 
 
-SHORTHANDS: Final = frozenset({"all", "font", "background", "inset", "margin", "overflow"})
+SHORTHANDS: Final = words(
+    "all font background inset inset-inline inset-block margin margin-inline margin-block overflow"
+)
 """The shorthands whose tracked longhands the reader applies. One whose value holds a
 ``var()`` is kept whole (as a declaration of the shorthand) until the cascade substitutes it."""
 
@@ -170,6 +174,12 @@ def expand(prop: str, value: str) -> Iterator[tuple[str, str]]:
         case "margin":
             top, _, _, left = _sides(value)
             yield from (("margin-top", top), ("margin-left", left))
+        case "inset-inline" | "inset-block" | "margin-inline" | "margin-block":
+            start, *rest = tokens(value) or ["0"]
+            if prop.startswith("margin"):
+                yield f"{prop}-start", start
+            else:
+                yield from ((f"{prop}-start", start), (f"{prop}-end", rest[0] if rest else start))
         case "overflow":
             first, *rest = value.split() or [""]
             yield from (("overflow-x", first), ("overflow-y", rest[0] if rest else first))
