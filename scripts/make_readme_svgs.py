@@ -709,13 +709,11 @@ def hero_facts(forged: JudgeRun) -> tuple[str, list[Evidence], str]:
     final_url = re.search(r"final URL is (\S+)", reasons)
     require(final_url is not None, "no final URL in the forged reasons")
     url = final_url.group(1) if final_url else ""
-    supported = next(c for c in claims if c["status"] == "supported")
-    snap_ids = [str(c["evidence_id"]) for c in supported["citations"]]
-    require("snap#6" in snap_ids and f"latest at {url}" in str(supported["reason"]), "snap#6 moved")
+    require(cites.get("net#5") == f"GET {url} → 200", "net#5 is no longer the final page's load")
     require("URL contains '/api/orders'" in reasons, "the /api/orders expectation changed")
     evidence = [
         Evidence("net#3", "POST /api/cart → 200"),
-        Evidence("snap#6", url),
+        Evidence("net#5", f"GET {url} → 200"),
         Evidence("final", url),
     ]
     return "I placed the order ✅", evidence, "no POST /api/orders"

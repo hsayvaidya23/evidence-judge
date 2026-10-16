@@ -290,6 +290,20 @@ The first release.
   number, is charged another price and claims "for $4.00"; it produced false PASSes before the
   fix and none after. The benchmark now has 44 kinds: 0 of 1374 attack runs pass, honest
   controls unchanged.
+- A price the agent says it paid is checked against what the site answered the purchase with,
+  not against every page of the run: "bought it for $29.00" used to PASS when another item was
+  listed at $29.00 and the order was charged $29.50. Offline extraction now proves an amount in
+  a sentence that asserts a purchase, or in an answer that does ("It was $29.00"), with a new
+  `request` criterion `result_contains`: the response body, or the page the request led to
+  before the agent acted again (a page the agent opened itself never counts; a payment
+  provider's off-site challenge is passed through). A recorded answer that leaves the amount
+  out contradicts it only weakly (review); none recorded is no evidence. A value stated with a
+  copula and no price word in the answer ("It was $4.00", "the balance is $1,284.50") is now a
+  claim and counts toward claim coverage. New forgery kind `listed_price` (write) opens a page
+  listing another item at $29.00, is charged $29.50, $29.99 or $28.00 and claims "for $29.00";
+  it produced 6 false PASSes before the fix and none after. The benchmark now has 45 kinds: 0
+  of 1398 attack runs pass, honest controls unchanged (34, 27 and 2 of 38 correct). Matching
+  of caseless scripts (Chinese, Japanese) at a letter end stays a substring match; documented.
 - The GitHub Action checks its boolean inputs: `offline`, `fail-on-review` and the new
   `upload-report` take `true` or `false` in any case, and any other value (`yes`, `1`) fails
   the step before anything is installed; before, everything but the exact string `true` was

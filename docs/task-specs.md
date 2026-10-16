@@ -475,6 +475,7 @@ navigation, prove the visit with what the page shows (`page_text`) instead of it
 | `status` | `"ok"` | `ok` (2xx or 3xx, and the request did not fail), exact code (`"201"`), class (`"2xx"`), `none` (no response), `any` (anything, with or without a response), or `null` (any response) |
 | `body_contains` | `[]` | every substring must appear in the request body (normalised as for [`page_text`](#page_text-the-pages-text-contains-a-phrase); one with a digit only as a whole token) |
 | `response_contains` | `[]` | every substring must appear in the response body (matched as `body_contains`) |
+| `result_contains` | `[]` | every substring must appear in what the site answered: the response body, or the page the request led to before the agent acted again (see [what a purchase cost](concepts/claims-and-predicates.md#what-a-purchase-cost)) |
 
 ```yaml
 - {kind: request, method: POST, url_contains: [/api/orders], status: 2xx}
@@ -573,8 +574,10 @@ The phrase and the page are compared after normalisation: Unicode NFKC, typograp
 dashes as ASCII, case folded, whitespace collapsed, and invisible characters such as the soft
 hyphen and zero-width space dropped. A phrase with a digit in it (an order number, a price, a
 reference) must match a whole token: `1001` is not met by `10012` or `21001`, `$24` is met by
-`$24.00` but not by `$24.50`, and `ACC-2041` is not met by `ACC-20411`. Other phrases are
-substrings (`confirm` is met by `confirmed`). `body_contains` and `response_contains` match the
+`$24.00` but not by `$24.50`, and `ACC-2041` is not met by `ACC-20411`. Letters without case
+(Chinese, Japanese) have no word boundary the judge can see, so a phrase that ends in one is
+matched as a substring at that end (`注文1001` is met by `新注文1001`, but not by `注文10012`).
+Other phrases are substrings (`confirm` is met by `confirmed`). `body_contains` and `response_contains` match the
 same way.
 
 Page text is the text of the DOM snapshot the page shows. The judge reads the page's styles

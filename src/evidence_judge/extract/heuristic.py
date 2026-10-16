@@ -34,10 +34,12 @@ from evidence_judge.extract.text import (
     CURRENCY,
     Sentence,
     asserted,
+    names_purchase,
     normalize,
     paid_amount,
     sentences,
     stated_amounts,
+    stated_value,
 )
 
 _I = re.IGNORECASE
@@ -108,6 +110,7 @@ _SECRET_FIELD = re.compile(r"password|passcode|pin\b|card|cvv|cvc|ssn|secret|tok
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _VALUE_WORD = re.compile(r"[^\W_]{2,}")
 _FROM = re.compile(r"\s+from\s+")
+ORDER_URL = r"^\w+://[^/?#]*/[^?#]*(?:order|checkout|pay|purchase|book|reserv|appointment)"
 
 PredicateBuilder = Callable[[Sentence, re.Match[str], str | None], list[Predicate]]
 
@@ -331,11 +334,13 @@ class HeuristicExtractor:
     ) -> ClaimSet:
         task_norm = normalize(task or "")
         tally = _Tally()
-        for sentence in sentences(answer, reasoning):
+        told = sentences(answer, reasoning)
+        bought = any(names_purchase(s.text) for s in told if s.origin == "answer")
+        for sentence in told:
             _rule_claims(sentence, task_norm, tally)
             _setting_claims(sentence, tally)
             _reference_claims(sentence, tally)
-            _price_claims(sentence, task_norm, tally)
+            _price_claims(sentence, task_norm, bought, tally)
         unique, _ = dedupe_claims(tally.claims, max_predicates=MAX_PREDICATES_PER_CLAIM)
         capped, truncated = cap_claims(unique, self._max_claims)
         return ClaimSet(
@@ -439,20 +444,38 @@ def _reference_claims(sentence: Sentence, tally: _Tally) -> None:
         _claim(sentence, text, ClaimKind.STATE, True, predicates, tally)
 
 
-def _price_claims(sentence: Sentence, task_norm: str, tally: _Tally) -> None:
-    """'The price was $24', 'total $1,249.50' and, in a sentence naming no price field, what a
-    purchase cost: 'bought it for $24.00', 'ordered at $24.00', 'the kettle ($24.00)'."""
+def _price_claims(sentence: Sentence, task_norm: str, bought: bool, tally: _Tally) -> None:
+    """'The price was $24', 'total $1,249.50', a value a sentence states ('It was $4.00', 'the
+    balance is $1,284.50') and, in a sentence naming no price field, what a purchase cost:
+    'bought it for $24.00', 'ordered at $24.00', 'the kettle ($24.00)'.
+
+    An amount in a sentence that asserts a purchase, or in an answer that does (`bought`), is
+    what the purchase cost, so only what the site answered the order with proves it
+    (`_order_results`): any page of the run could list the same amount for another item. A
+    value stated without a price word is read from the answer only.
+    """
     field_match = _PRICE_FIELD.search(sentence.text)
     name = "total" if field_match and field_match.group(1).lower() in _TOTAL_WORDS else "price"
     key = _PRICE_TASK.search(task_norm) is not None
+    answer = sentence.origin == "answer"
+    purchase = names_purchase(sentence.text) or (answer and bought)
     for match in stated_amounts(sentence.text):
-        if field_match is None and not paid_amount(sentence.text, match):
+        paid = field_match is not None or paid_amount(sentence.text, match)
+        if not paid and not (answer and stated_value(sentence.text, match)):
             continue
+        amount = match.group(0).strip()
         _claim(
             sentence,
-            f"The {name} was {match.group(1)}",
+            f"The {name if paid else 'amount'} was {match.group(1)}",
             ClaimKind.VALUE,
             key,
-            _page_texts([match.group(0).strip()]),
+            _order_results(amount) if purchase else _page_texts([amount]),
             tally,
         )
+
+
+def _order_results(amount: str) -> list[Predicate]:
+    """A POST to an order, checkout, payment or booking URL (the requests the purchase and
+    booking claims point at) that the site answered with `amount`: in its response or on the
+    page it led to before the agent acted again (checks.request.site_result)."""
+    return [RequestPredicate(method="POST", url_regex=ORDER_URL, result_contains=[amount])]

@@ -48,7 +48,9 @@ def find_phrase(text: str, phrase: str) -> int:
     token: a digit at either end has no digit beside it, a cased letter at either end has no
     cased letter or digit beside it, and no decimal or group separator joining it to more digits, so '100' does not occur
     in '1001' or '1,100' and '$24' does not occur in '$24.50'. Trailing zero decimals are the
-    same amount, so '$24' occurs in '$24.00'. Any other phrase is a plain substring.
+    same amount, so '$24' occurs in '$24.00'. Letters without case (Chinese, Japanese) mark no
+    word boundary, so at an end that is one the phrase matches as a substring. Any other phrase is
+    a plain substring.
     """
     at = text.find(phrase)
     if at < 0 or not any(c.isdigit() for c in phrase):

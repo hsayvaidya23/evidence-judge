@@ -65,6 +65,7 @@ def reads_short_word(predicate: Predicate) -> bool:
                 *predicate.path_contains,
                 *predicate.query_contains,
                 *predicate.response_contains,
+                *predicate.result_contains,
             ]
             return predicate.url_regex is not None or any(is_short_word(n) for n in needles)
         case ValuePredicate():
@@ -125,9 +126,9 @@ def covered_text(predicate: Predicate) -> tuple[str, ...]:
         case PageTextPredicate():
             return (predicate.contains,)
         case RequestPredicate():
-            return tuple(predicate.response_contains)
+            return (*predicate.response_contains, *predicate.result_contains)
         case ValuePredicate(in_request=RequestPredicate() as request):
-            return tuple(request.response_contains)
+            return (*request.response_contains, *request.result_contains)
         case _:
             return ()
 

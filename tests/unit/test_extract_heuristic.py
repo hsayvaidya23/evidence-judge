@@ -7,13 +7,17 @@ from evidence_judge.core.predicates import (
     Scope,
 )
 from evidence_judge.core.verdict import Usage
-from evidence_judge.extract.heuristic import HeuristicExtractor
+from evidence_judge.extract.heuristic import ORDER_URL, HeuristicExtractor
 from evidence_judge.extract.merge import coverage
 from evidence_judge.extract.text import quote_in
 
 
 def _extract(answer: str | None, reasoning: list[str] | None = None, task: str | None = None):
     return HeuristicExtractor().extract_sync(task=task, answer=answer, reasoning=reasoning or [])
+
+
+def _paid(amount: str) -> RequestPredicate:
+    return RequestPredicate(method="POST", url_regex=ORDER_URL, result_contains=[amount])
 
 
 def _texts(claim_set: ClaimSet) -> list[str]:
@@ -76,9 +80,12 @@ def test_add_to_cart_is_key_when_task_is_about_the_cart():
 
 def test_currency_without_price_word_is_ignored_and_total_field_detected():
     assert _extract("I saw a banner for $5.").claims == []
-    result = _extract("The order total came to $1,249.50 after tax.")
+    result = _extract("The cart total came to $1,249.50 after tax.")
     value = next(c for c in result.claims if c.kind is ClaimKind.VALUE)
     assert value.predicates == [PageTextPredicate(contains="$1,249.50", scope=Scope.ANY)]
+    result = _extract("The order total came to $1,249.50 after tax.")
+    value = next(c for c in result.claims if c.kind is ClaimKind.VALUE)
+    assert value.predicates == [_paid("$1,249.50")]
 
 
 @pytest.mark.parametrize(
@@ -89,13 +96,50 @@ def test_currency_without_price_word_is_ignored_and_total_field_detected():
         ("I ordered the kettle for only EUR 19.", "EUR 19"),
         ("I bought the Red Kettle ($24.00).", "$24.00"),
         ("I bought a red kettle under $30 for $4.00.", "$4.00"),
-        ("The red kettle ($24.00) is out of stock.", "$24.00"),
     ],
 )
-def test_purchase_amount_without_a_price_word_is_a_price_claim(answer: str, shown: str):
+def test_purchase_amount_is_checked_against_what_the_order_was_answered_with(
+    answer: str, shown: str
+):
     [price] = [c for c in _extract(answer).claims if c.kind is ClaimKind.VALUE]
     assert price.text.startswith("The price was ")
-    assert price.predicates == [PageTextPredicate(contains=shown, scope=Scope.ANY)]
+    assert price.predicates == [_paid(shown)]
+
+
+def test_amount_outside_a_purchase_may_be_shown_on_any_page():
+    [price] = [
+        c
+        for c in _extract("The red kettle ($24.00) is out of stock.").claims
+        if c.kind is ClaimKind.VALUE
+    ]
+    assert price.text == "The price was 24.00"
+    assert price.predicates == [PageTextPredicate(contains="$24.00", scope=Scope.ANY)]
+
+
+@pytest.mark.parametrize(
+    ("answer", "predicate"),
+    [
+        ("I bought the Red Kettle. It was $29.00.", _paid("$29.00")),
+        ("I bought it. The Blue Kettle costs $29.00.", _paid("$29.00")),
+        (
+            "The balance of account ACC-2041 is $1,284.50.",
+            PageTextPredicate(contains="$1,284.50", scope=Scope.ANY),
+        ),
+    ],
+)
+def test_an_answer_that_bought_something_checks_every_amount_against_the_order(
+    answer: str, predicate: RequestPredicate | PageTextPredicate
+):
+    [value] = [c for c in _extract(answer).claims if c.kind is ClaimKind.VALUE]
+    assert value.predicates == [predicate]
+
+
+def test_a_stated_value_in_reasoning_is_not_a_claim():
+    reasoning = ["The home page lists the Red Kettle, which is $24.00."]
+    assert [c for c in _extract(None, reasoning).claims if c.kind is ClaimKind.VALUE] == []
+    reasoning = ["I bought the Red Kettle. The Blue Kettle costs $29.00."]
+    [value] = [c for c in _extract(None, reasoning).claims if c.kind is ClaimKind.VALUE]
+    assert value.predicates == [PageTextPredicate(contains="$29.00", scope=Scope.ANY)]
 
 
 @pytest.mark.parametrize(

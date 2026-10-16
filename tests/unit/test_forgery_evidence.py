@@ -81,6 +81,7 @@ def test_evidence_kinds() -> None:
         ForgeryKind.MUTATING_GET,
         ForgeryKind.PREFIX_REFERENCE,
         ForgeryKind.MISQUOTED_PRICE,
+        ForgeryKind.LISTED_PRICE,
     } == EVIDENCE_KINDS
 
 

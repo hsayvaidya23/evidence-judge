@@ -151,7 +151,7 @@ def _budgets(spec: TaskSpec | None, index: EvidenceIndex) -> list[_Budget]:
     budgets = [
         _Budget(
             f"expectation {e.id!r}",
-            [RequestMatcher(p, scope) for p in e.request_predicates()],
+            [RequestMatcher(p, scope, index) for p in e.request_predicates()],
             e.max_count or 1,
         )
         for e in spec.expect
@@ -160,7 +160,7 @@ def _budgets(spec: TaskSpec | None, index: EvidenceIndex) -> list[_Budget]:
     budgets += [
         _Budget(
             f"allow entry ({RequestMatcher(a).describe()})",
-            [RequestMatcher(a)],
+            [RequestMatcher(a, index=index)],
             a.max_count,
             tuple(u.casefold() for u in a.url_contains),
         )

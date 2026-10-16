@@ -200,8 +200,9 @@ class TaskSpec(BaseModel):
                 ):
                     raise ValueError(
                         f"expect {expectation.id!r}: a request predicate needs a method and a "
-                        "url_contains, path_contains, query_contains, url_regex, body_contains "
-                        "or response_contains criterion; one without them is met by any request"
+                        "url_contains, path_contains, query_contains, url_regex, body_contains, "
+                        "response_contains or result_contains criterion; one without them is "
+                        "met by any request"
                     )
         return self
 

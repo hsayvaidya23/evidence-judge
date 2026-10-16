@@ -165,7 +165,7 @@ def matching_mutations(
     scope: EvidenceScope | None = None,
 ) -> list[NetworkEvent]:
     """Mutations that took effect and match one of `predicates`, in recorded order."""
-    matchers = [RequestMatcher(p, scope) for p in predicates]
+    matchers = [RequestMatcher(p, scope, index) for p in predicates]
     if not matchers:
         return []
     return [e for e in index.mutations() if took_effect(e) and matches_any(e, matchers)]

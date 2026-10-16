@@ -8,6 +8,8 @@ from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import PageTextPredicate, RequestPredicate
 from evidence_judge.core.verdict import Support
 from tests.unit.conftest import (
+    HOST,
+    act,
     ctx,
     forged_run,
     honest_run,
@@ -328,3 +330,42 @@ def test_a_persisted_query_without_its_document_counts_as_a_possible_write() -> 
     assert event.shown_method == "GET (persisted query)"
     sent = net(2, "GET", f"/graphql?query=%7Bme%7Bid%7D%7D&extensions={extensions}")
     assert not sent.is_mutation
+
+
+def _paid(amount: str) -> RequestPredicate:
+    return RequestPredicate(method="POST", url_contains=["/api/orders"], result_contains=[amount])
+
+
+async def test_result_contains_reads_the_page_the_order_led_to() -> None:
+    res = await RequestChecker().evaluate(_paid("$24.00"), ctx(honest_run()))
+    assert res.status is Support.SUPPORTED, res.reason
+
+
+async def test_a_price_listed_on_another_page_is_not_what_the_order_showed() -> None:
+    res = await RequestChecker().evaluate(_paid("$19.00"), ctx(honest_run()))
+    assert res.status is Support.CONTRADICTED
+    assert res.confidence < 0.7
+    assert "neither its response nor the page it led to shows '$19.00'" in res.reason
+
+
+async def test_a_page_the_agent_opened_after_the_order_is_not_its_result() -> None:
+    run = honest_run()
+    detour = [
+        act(6, "goto", url=f"{HOST}/"),
+        *[a for a in run.actions if a.id != "act#6"],
+    ]
+    res = await RequestChecker().evaluate(
+        _paid("$24.00"), ctx(run.model_copy(update={"actions": detour}))
+    )
+    assert res.status is Support.NO_EVIDENCE
+    assert "before the agent acted again" in res.reason
+
+
+async def test_no_page_after_the_order_is_no_evidence_unless_the_response_shows_it() -> None:
+    run = honest_run()
+    network = [n for n in run.network if n.id != "net#7"]
+    bare = run.model_copy(update={"network": network, "snapshots": run.snapshots[:2]})
+    res = await RequestChecker().evaluate(_paid("$24.00"), ctx(bare))
+    assert res.status is Support.NO_EVIDENCE
+    res = await RequestChecker().evaluate(_paid("confirmed"), ctx(bare))
+    assert res.status is Support.SUPPORTED

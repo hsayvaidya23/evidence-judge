@@ -10,6 +10,7 @@ import regex
 
 from evidence_judge.checks._common import (
     MAX_CITATIONS,
+    WEAK_CONTRADICTION_CONFIDENCE,
     cite_request,
     describe_request,
     plural,
@@ -32,9 +33,19 @@ from evidence_judge.checks.matching import (
     url_query_contains,
     validate_status_spec,
 )
+from evidence_judge.core.actions import (
+    CHECK,
+    FILL,
+    GOTO,
+    HOVER,
+    UNCHECK,
+    UPLOAD,
+    canonical_action,
+)
 from evidence_judge.core.evidence import Channel, NetworkEvent
 from evidence_judge.core.index import EvidenceIndex, is_document_navigation
 from evidence_judge.core.predicates import STATUS_ANY, Predicate, RequestPredicate
+from evidence_judge.core.site import Site
 from evidence_judge.core.verdict import PredicateResult, Support
 from evidence_judge.textnorm import normalize
 
@@ -42,20 +53,28 @@ from evidence_judge.textnorm import normalize
 @dataclass(frozen=True, slots=True)
 class Miss:
     """One unmet criterion. `unrecorded` means the evidence needed to decide it was not captured;
-    `off_site` that the request went to a host outside the evidence scope."""
+    `off_site` that the request went to a host outside the evidence scope; `unshown` that what
+    the site answered (`site_result`) was recorded and does not show a `result_contains` text."""
 
     reason: str
     unrecorded: bool = False
     off_site: bool = False
+    unshown: bool = False
 
 
 class RequestMatcher:
     """Compiled form of a RequestPredicate. Raises InvalidPredicateError on a malformed one."""
 
-    def __init__(self, predicate: RequestPredicate, scope: EvidenceScope | None = None) -> None:
+    def __init__(
+        self,
+        predicate: RequestPredicate,
+        scope: EvidenceScope | None = None,
+        index: EvidenceIndex | None = None,
+    ) -> None:
         validate_status_spec(predicate.status)
         self.predicate = predicate
         self.scope = scope
+        self.index = index
         self._regex = compile_regex(predicate.url_regex) if predicate.url_regex else None
 
     @property
@@ -70,6 +89,7 @@ class RequestMatcher:
             + int(p.status != STATUS_ANY)
             + len(p.body_contains)
             + len(p.response_contains)
+            + len(p.result_contains)
         )
 
     def describe(self) -> str:
@@ -95,6 +115,11 @@ class RequestMatcher:
         if p.response_contains:
             parts.append(
                 "with a response containing " + " and ".join(quoted(r) for r in p.response_contains)
+            )
+        if p.result_contains:
+            parts.append(
+                "whose response or the page it led to shows "
+                + " and ".join(quoted(r) for r in p.result_contains)
             )
         return " ".join([head, *parts])
 
@@ -124,6 +149,7 @@ class RequestMatcher:
             out.append(Miss(f"{_got(event)}, expected {describe_status(p.status)}"))
         out.extend(_body_misses(event.request_body, p.body_contains, "request body"))
         out.extend(_body_misses(event.response_body, p.response_contains, "response body"))
+        out.extend(self._result_misses(event))
         if self.scope is not None and not self.scope.request_allowed(event):
             out.append(
                 Miss(
@@ -134,6 +160,27 @@ class RequestMatcher:
 
     def matches(self, event: NetworkEvent) -> bool:
         return not self.misses(event)
+
+    def _result_misses(self, event: NetworkEvent) -> list[Miss]:
+        needles = self.predicate.result_contains
+        if not needles:
+            return []
+        shown = site_result(event, self.index, self.scope) if self.index is not None else None
+        if shown is None:
+            return [
+                Miss(
+                    "neither its response nor a page it led to before the agent acted again "
+                    f"was recorded showing {quoted(n)}",
+                    unrecorded=True,
+                )
+                for n in needles
+                if not contains(event.response_body, n)
+            ]
+        return [
+            Miss(f"neither its response nor the page it led to shows {quoted(n)}", unshown=True)
+            for n in needles
+            if not any(contains(text, n) for text in shown)
+        ]
 
 
 def describe_status(spec: str | None) -> str:
@@ -170,7 +217,7 @@ def _body_misses(body: str | None, needles: list[str], label: str) -> list[Miss]
 def matching_requests(
     predicate: RequestPredicate, index: EvidenceIndex, scope: EvidenceScope | None = None
 ) -> list[NetworkEvent]:
-    matcher = RequestMatcher(predicate, scope)
+    matcher = RequestMatcher(predicate, scope, index)
     return [e for e in index.requests() if matcher.matches(e)]
 
 
@@ -180,11 +227,12 @@ Scored = list[tuple[NetworkEvent, list[Miss]]]
 def check_request(
     predicate: RequestPredicate, index: EvidenceIndex, scope: EvidenceScope | None = None
 ) -> PredicateResult:
-    matcher = RequestMatcher(predicate, scope)
+    matcher = RequestMatcher(predicate, scope, index)
     scored = [(event, matcher.misses(event)) for event in index.requests()]
     return (
         _hit_result(matcher, scored, index)
         or _unverifiable_result(matcher, scored)
+        or _unshown_result(matcher, scored)
         or _off_site_result(matcher, scored)
         or _absent_result(matcher, scored, index)
     )
@@ -237,6 +285,24 @@ def _unverifiable_result(matcher: RequestMatcher, scored: Scored) -> PredicateRe
     return _no_evidence(matcher, event, " and ".join(m.reason for m in misses))
 
 
+def _unshown_result(matcher: RequestMatcher, scored: Scored) -> PredicateResult | None:
+    """A weak CONTRADICTED for the latest request that meets every criterion but shows the site
+    did not answer with a `result_contains` text: a confirmation that leaves the price out
+    refutes a claimed price only as far as review."""
+    unshown = [(e, m) for e, m in scored if m and all(miss.unshown for miss in m)]
+    if not unshown:
+        return None
+    event, misses = unshown[-1]
+    return result(
+        Support.CONTRADICTED,
+        f"{describe_request(event)} meets every other criterion of a {matcher.describe()}, "
+        f"but {' and '.join(m.reason for m in misses)}",
+        RequestChecker.kind,
+        [cite_request(event)],
+        confidence=WEAK_CONTRADICTION_CONFIDENCE,
+    )
+
+
 def _off_site_result(matcher: RequestMatcher, scored: Scored) -> PredicateResult | None:
     """NO_EVIDENCE for the latest request that would match if it had gone to the site."""
     off_site = [(e, m) for e, m in scored if _only_off_site(m)]
@@ -284,6 +350,10 @@ def _absent_result(
     )
 
 
+STILL_ACTIONS: Final = frozenset({FILL, HOVER, CHECK, UNCHECK, UPLOAD})
+"""Actions that cannot take the browser to another page."""
+MAX_OFF_SITE_HOPS: Final = 3
+"""Off-site pages (a payment provider's) an order's answer may pass through on its way back."""
 _LETTER_BEFORE = r"(?<![^\W\d_])"
 _LETTER_AFTER = r"(?![^\W\d_])"
 _URL_FAILURE = re.compile(
@@ -367,6 +437,82 @@ def _landing(event: NetworkEvent, index: EvidenceIndex) -> NetworkEvent | None:
     loads = [n for n in index.requests("GET") if n.ts > event.ts and _page_load(n)]
     landing = next((n for n in loads if target and _same_page(n.url, target)), None)
     return landing or (loads[0] if loads else None)
+
+
+def site_result(
+    event: NetworkEvent, index: EvidenceIndex, scope: EvidenceScope | None = None
+) -> list[str] | None:
+    """What the site answered `event` with: its response body, and the page it led to
+    (`_answer_page`) as its document and what it showed (`_landing_texts`); None when it led to
+    no page that loaded with a 2xx, or nothing of that page was recorded."""
+    landing = _answer_page(event, index, scope)
+    if landing is None or landing.status is None or not 200 <= landing.status < 300:
+        return None
+    if landing.failed:
+        return None
+    page = [t for t in (landing.response_body, *_landing_texts(landing, index)) if t]
+    return [event.response_body or "", *page] if page else None
+
+
+def _answer_page(
+    event: NetworkEvent, index: EvidenceIndex, scope: EvidenceScope | None
+) -> NetworkEvent | None:
+    """The page of the site `event` led to: the page its redirect named, else the next page load
+    if the agent did nothing that can move the browser (an action but STILL_ACTIONS) before it.
+    A page the agent opened itself is its choice, not the site's answer, however soon after the
+    request it loads. A landing away from the site's own pages (a payment provider's 3-D Secure
+    challenge, allowed or not) is passed through to the next page load, while the agent only
+    acts on those pages and opens no URL itself."""
+    landing = _landing(event, index)
+    if landing is None:
+        return None
+    if not _redirected_to(event, landing) and _moved(index, event.ts, landing.ts, None):
+        return None
+    home = {Site.of_url(event.url), index.primary_site} - {None}
+    for _ in range(MAX_OFF_SITE_HOPS):
+        if _at_home(landing.url, home, scope):
+            return landing
+        after = next(
+            (n for n in index.requests("GET") if n.ts > landing.ts and _page_load(n)), None
+        )
+        if after is None or _moved(index, landing.ts, after.ts, (home, scope)):
+            return None
+        landing = after
+    return None
+
+
+def _at_home(url: str | None, home: set[Site | None], scope: EvidenceScope | None) -> bool:
+    """Whether `url` is a page of the site's own: on its scope and on the host the request went
+    to or the run started on."""
+    if url is None:
+        return True
+    if scope is not None and not scope.page_allowed(url):
+        return False
+    return not home or Site.of_url(url) in home
+
+
+def _redirected_to(event: NetworkEvent, landing: NetworkEvent) -> bool:
+    location = next((v for k, v in event.response_headers.items() if k.lower() == "location"), None)
+    return location is not None and _same_page(landing.url, urljoin(event.url, location))
+
+
+def _moved(
+    index: EvidenceIndex,
+    start: float,
+    end: float,
+    away: tuple[set[Site | None], EvidenceScope | None] | None,
+) -> bool:
+    """Whether the agent did something between `start` and `end` that can move the browser:
+    any such action, or, while the browser is `away` from the site's own pages, opening a URL
+    itself or acting on a page of the site's own."""
+    for action in index.run.actions:
+        if not start < action.ts < end or canonical_action(action.name) in STILL_ACTIONS:
+            continue
+        if away is None or canonical_action(action.name) == GOTO:
+            return True
+        if _at_home(action.url, *away):
+            return True
+    return False
 
 
 def _origin(event: NetworkEvent, index: EvidenceIndex) -> str | None:
