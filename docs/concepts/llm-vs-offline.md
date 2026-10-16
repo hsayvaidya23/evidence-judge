@@ -31,8 +31,14 @@ no LLM configured; judging offline
 
 The offline extractor recognises common completion phrases (*placed the order*, *added to
 cart*, *changed the email*, *order #1042*, *the price was $24*) and maps them to `request`,
-`page_text` and `value` predicates. Negated (*could not place*) and intended (*will place*)
-phrases are skipped.
+`page_text` and `value` predicates. Intended (*will place*) phrases are skipped, and so is
+every clause that holds a negation word (*could not place*, *nothing was purchased*, *no
+message was sent*): the rules match words, not sentences, so rather than guess which way a
+negation turns a verb, the extractor abstains on that clause. A clause ends at `,`, `;`, `:`,
+a bracket or *and* / *but* / *while*. The session extractor does the same, except for the
+wordings it has tested rules for (*no tests failed*, *not all tests pass*). Abstaining can only
+lower claim coverage, never add a claim, so an answer made only of negated clauses goes to
+review; an LLM extractor reads the whole sentence.
 
 It is deterministic and fast, and it is what the [benchmark](../benchmark.md) and the golden
 regression tests use. Its limit: wording it does not recognise produces no claim. Claim

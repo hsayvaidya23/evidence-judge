@@ -77,7 +77,7 @@ The first release.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
   Go toy projects with runner-specific tricks; 0 of 1293 browser and 0 of 1197 session
-  forgeries pass, and 3 of 32 honest browser controls go to review offline.
+  forgeries pass, and 4 of 38 honest browser controls go to review offline.
 
 **Redaction**
 
@@ -97,6 +97,12 @@ The first release.
   the 3 tests failed.", "0/3 tests failed." or "1/3 tests pass.": zero, slash and worded counts
   are read in the right direction, and a pattern-read claim that tests fail, contradicted by a
   passing run, now needs review instead of failing the run.
+- Offline claim extraction no longer reads honest negated wordings the wrong way round:
+  "Nothing was purchased", "no message was sent", "Nothing in her profile was changed" used to
+  become completion claims that FAILED the run, and "Not all tests pass" a passing-suite claim.
+  Both extractors now abstain on any clause holding a negation word they have no tested rule
+  for; "not a single test failed", "not all tests pass" and "2 fail" are read in the right
+  direction, and amounts after "limit", "under", "shipping" or "fee" are not price claims.
 
 ### Security
 
