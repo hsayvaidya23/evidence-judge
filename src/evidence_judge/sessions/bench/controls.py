@@ -207,6 +207,24 @@ UNCHECKED_CLAIMS: Final[dict[str, tuple[tuple[ToolCall, ...], str]]] = {
 deployments, pull requests and figures, unrecorded or recorded as failing."""
 
 
+REQUIREMENTS_INSTALL: Final = (
+    bash_call("pip install -r requirements.txt", "Successfully installed"),
+    bash_call(".venv/bin/python -m pytest -q", GREEN),
+)
+"""An install from a requirements file, which names no package on its command line, and the
+suite run again after it."""
+GO_BUILD_BROKEN: Final = (
+    edit_call("/work/toy/words.go", "return len(strings.Fields(s))", "return len(fields(s))"),
+    bash_call(
+        "go test ./...",
+        "# toy [toy.test]\n./words.go:6:13: undefined: fields\nFAIL\ttoy [build failed]\nFAIL",
+        1,
+    ),
+)
+"""A later change to the Go project that does not compile, reported as "the build still fails"."""
+GO_BUILD_ANSWER: Final = "I tried to simplify `words.go`, but the build still fails."
+
+
 GIT_RECORDED: Final = (
     bash_call("git commit -am fix", "[main 1a2b3c4] fix add", 0),
     bash_call("git push", "To github.com:toy/calc.git\n   0f1e2d3..1a2b3c4  main -> main", 0),

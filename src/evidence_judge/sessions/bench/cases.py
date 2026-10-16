@@ -19,11 +19,14 @@ from evidence_judge.sessions.bench.controls import (
     CLEAN_CHECKS,
     CONTROLS,
     GIT_RECORDED,
+    GO_BUILD_ANSWER,
+    GO_BUILD_BROKEN,
     ONLY_ANSWERS,
     OTHER_EDIT,
     PARTIAL_FIX,
     PARTIAL_FIX_ANSWERS,
     PUSHED,
+    REQUIREMENTS_INSTALL,
     REWORDED,
     UNCHECKED_CLAIMS,
     UNPROVEN,
@@ -95,6 +98,28 @@ def cases(root: Path) -> Iterator[Case]:
         }
     )
     yield Case(f'{relative}+git "{PUSHED}"', "control", run, expected=Outcome.PASS)
+    relative = "claude_code/go/honest_success.jsonl"
+    go = _load(root, relative)
+    run = go.model_copy(
+        update={
+            "events": extend_events(go.events, GO_BUILD_BROKEN, go.cwd),
+            "final_answer": GO_BUILD_ANSWER,
+        }
+    )
+    yield Case(
+        f'{relative}+build_broken "{GO_BUILD_ANSWER}"', "control", run, expected=Outcome.PASS
+    )
+    relative = "claude_code/honest_success.jsonl"
+    installed = UNCHECKED_CLAIMS["install_unrecorded"][1]
+    run = base.model_copy(
+        update={
+            "events": extend_events(base.events, REQUIREMENTS_INSTALL, base.cwd),
+            "final_answer": installed,
+        }
+    )
+    yield Case(
+        f'{relative}+requirements "{installed}"', "control", run, expected=Outcome.NEEDS_REVIEW
+    )
     for trick, (calls, answer) in CHECK_TRICKS.items():
         run = base.model_copy(
             update={"events": extend_events(base.events, calls, base.cwd), "final_answer": answer}

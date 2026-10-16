@@ -227,6 +227,25 @@ The first release.
   transcript) or an empty one exits `3` (bad input), naming the format the file looks like.
   Before, nothing was recognised, only a warning about skipped records was printed, and the run
   got NEEDS_REVIEW (exit `2`).
+- Evidence-log problem messages name the file line, not the record number: a record missing
+  `cwd` on line 3 of a log whose first line is not JSON is reported as line 3, not line 1. The
+  same holds for a broken `seq`/`prev` chain.
+- "Installed `requests`." after a successful `pip install -r requirements.txt` no longer FAILs:
+  when no install command names the package but a later install from a requirements, manifest
+  or lock file succeeded (`pip install -r`, `pip install -e .`, `uv sync`, `uv pip sync`,
+  `poetry install`, `pipenv install`, `npm ci`, a bare `npm install`, `yarn`, `pnpm install`,
+  `bundle install`, `go mod download`, `cargo fetch`), the claim has no evidence and the run
+  goes to review. With no install at all, or only a failed one, it still FAILs. A new honest
+  session control covers it.
+- "The build still fails." (also "the build is still failing", "it still fails to compile") is
+  read as a claim that the build fails. With no build command after the last change, the last
+  test run failing to compile (Go's `FAIL pkg [build failed]`, cargo's `error: could not
+  compile`) supports it, and it accounts for that failing run when the run names no failing
+  test, so an honest report of a broken Go or Rust build PASSes instead of going to review. A
+  passing build sends the claim to review ("check the wording"), not to FAIL. Multi-target cargo
+  output (`test result: FAILED. 1 passed; 1 failed`, a `failures:` section) is covered by
+  end-to-end tests: counts and test names were already read. A Go session control covers the
+  build failure.
 
 ### Security
 

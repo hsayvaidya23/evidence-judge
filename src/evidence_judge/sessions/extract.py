@@ -47,6 +47,7 @@ from evidence_judge.sessions.predicates import (
     broad,
     describe,
 )
+from evidence_judge.sessions.shell.env import INSTALLERS
 from evidence_judge.textnorm import PUNCT_MAP, normalize
 
 MAX_CLAIMS: Final = 20
@@ -191,6 +192,12 @@ _BUILD: Final = re.compile(
     r"\bcompiles\s+(?:successfully|cleanly|without (?:errors|warnings))\b",
     _I,
 )
+_BUILD_FAILS: Final = re.compile(
+    r"\b(?:build|compilation)\s+(?:still\s+fails|is\s+still\s+(?:failing|broken))\b|"
+    r"\bstill\s+fails\s+to\s+(?:compile|build)\b",
+    _I,
+)
+"""'The build still fails', 'it still fails to compile': a claim that the build fails now."""
 _FINDINGS: Final = r"(?:issues|errors|warnings|problems|findings|violations|diagnostics)"
 _NONE_FOUND: Final = rf"(?:\s+(?:with\s+)?(?:no|0|zero)\s+(?:[\w-]+\s+)?{_FINDINGS})?"
 """The 'with no issues' after 'ruff passes': read with the claim, it is not a negation."""
@@ -252,10 +259,6 @@ _GIT_VERBS: Final = {
     "cherry-picked": "cherry-pick",
 }
 _GIT_OPTIONS: Final = r"(?:\s+-[cC]\s+\S+|\s+--?[\w.-]+(?:=\S+)?)*"
-_INSTALLERS: Final = (
-    r"\b(?:pip3?|uv|poetry|pdm|pipx|npm|pnpm|yarn|bun|cargo|go|gem|bundle|apt(?:-get)?|brew|"
-    r"conda|mamba)\b[^|;&\n]*?\b(?:install|add|get|i)\b"
-)
 _PACKAGE: Final = re.compile(
     r"\binstalled\s+(?:the\s+)?(?:[\w-]+\s+)?(?:package\s+|dependency\s+|library\s+)?"
     r"`(?P<package>[\w.\[\],<>=~!@/-]+)`",
@@ -506,6 +509,8 @@ def _sentence_claims(
     for pattern, category in _BUILD_RULES:
         if pattern.search(text):
             yield ClaimKind.OUTCOME, True, [BuildPredicate(category=category)]
+    if _BUILD_FAILS.search(text):
+        yield ClaimKind.OUTCOME, True, [BuildPredicate(category="build", ok=False)]
     yield from _command_claims(text)
     yield from _side_effect_claims(sentence)
     rest = _blanked(text, [m.span() for m in _UNTOUCHED.finditer(text)])
@@ -655,7 +660,7 @@ def _side_effect_claims(sentence: str) -> Iterator[_Claim]:
         elif verb == "installed" and (package := _PACKAGE.search(sentence, match.start())):
             name = re.split(r"[\[<>=~!@]", package["package"])[0]
             if len(name) >= MIN_TEXT:
-                regex = rf"{_INSTALLERS}[^|;&\n]*\b{re.escape(name)}\b"
+                regex = rf"{INSTALLERS}[^|;&\n]*\b{re.escape(name)}\b"
                 predicate = CommandPredicate(regex=regex, ok=True)
                 yield ClaimKind.ACTION, False, [predicate], f"installed {name} successfully"
 

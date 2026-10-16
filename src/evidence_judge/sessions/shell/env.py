@@ -11,7 +11,10 @@ from evidence_judge.sessions.shell.lexer import (
     PYTHON,
     Pipeline,
     Simple,
+    parse,
     program_name,
+    strip_comments,
+    tokenize,
     unspelled,
     unwrap,
 )
@@ -299,6 +302,73 @@ def _package_change(words: list[str]) -> str | None:
         if why := _package_word(value, f"{verb} installs"):
             return why
     return None
+
+
+INSTALLERS: Final = (
+    r"\b(?:pip3?|uv|poetry|pdm|pipx|npm|pnpm|yarn|bun|cargo|go|gem|bundle|apt(?:-get)?|brew|"
+    r"conda|mamba)\b[^|;&\n]*?\b(?:install|add|get|i)\b"
+)
+"""The start of a command that installs a package it names."""
+
+
+_FROM_MANIFEST: Final = {
+    "uv": ("sync",),
+    "poetry": ("install", "sync"),
+    "pdm": ("install", "sync"),
+    "pipenv": ("install", "sync"),
+    "rye": ("sync",),
+    "npm": ("ci", "install", "i"),
+    "pnpm": ("install", "i"),
+    "yarn": ("install",),
+    "bun": ("install", "i"),
+    "bundle": ("install",),
+    "composer": ("install",),
+    "cargo": ("fetch", "build"),
+}
+"""Package managers whose subcommand installs what the project's manifest or lock file lists
+when it names no package."""
+
+
+def _from_manifest(words: list[str]) -> bool:
+    words = unwrap(words)
+    if not words:
+        return False
+    prog, args = program_name(words[0]), words[1:]
+    if PYTHON.match(prog) and args[:2] == ["-m", "pip"]:
+        prog, args = "pip", args[2:]
+    if prog == "uv" and args[:1] == ["pip"]:
+        prog, args = "pip", args[1:]
+        if args[:1] == ["sync"]:
+            return True
+    if prog in ("pip", "pip3") and args[:1] == ["install"]:
+        flags = args[1:]
+        if any(f == "--requirement" or f.startswith(("--requirement=", "-r")) for f in flags):
+            return True
+        targets = _install_targets(flags)
+        return bool(targets) and all(_PROJECT_ITSELF.match(value) for value, _ in targets)
+    if prog in ("conda", "mamba"):
+        return args[:2] in (["env", "create"], ["env", "update"]) or (
+            args[:1] == ["install"] and any(a == "--file" or a.startswith("--file=") for a in args)
+        )
+    if prog == "go":
+        return args[:2] == ["mod", "download"]
+    if prog == "yarn" and not args:
+        return True
+    subs = _FROM_MANIFEST.get(prog)
+    if subs is None or not args or args[0] not in subs:
+        return False
+    return prog not in PM | {"pipenv"} or not _install_targets(args[1:])
+
+
+def installs_from_manifest(command: str) -> bool:
+    """The command installs packages from a requirements, manifest or lock file it does not
+    spell out (`pip install -r requirements.txt`, `uv sync`, `npm ci`, `poetry install`), so
+    which packages it installs is not on its command line."""
+    try:
+        pipelines = parse(strip_comments(tokenize(command)))
+    except ValueError:
+        return False
+    return any(_from_manifest(list(s.words)) for p in pipelines for s in p.commands)
 
 
 def exports(pipelines: list[Pipeline], cwd: str | None) -> list[str]:

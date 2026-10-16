@@ -555,6 +555,21 @@ def test_evidence_log_detects_a_broken_chain(tmp_path: Path) -> None:
     assert not load_evidence_log(_write(tmp_path / "g.jsonl", gap)).complete
 
 
+def test_evidence_log_problems_name_physical_lines(tmp_path: Path) -> None:
+    missing = _log_line()
+    del missing["cwd"]
+    run = load_evidence_log(
+        _write(tmp_path / "e.jsonl", ["not json", "", missing, _log_line(v=2), _log_line()])
+    )
+    assert "line 3: missing cwd" in run.notes
+    assert "line 4: unsupported version 2" in run.notes
+    gap = _chain([_log_line(), _log_line()])
+    gap_record = json.loads(gap[1])
+    gap_record["seq"] = 5
+    chained = load_evidence_log(_write(tmp_path / "g.jsonl", ["{", gap[0], json.dumps(gap_record)]))
+    assert "hash chain broken: line 3 has seq 5, expected 1" in chained.notes
+
+
 def test_evidence_log_without_chain_and_bad_records(tmp_path: Path) -> None:
     missing = _log_line()
     del missing["cwd"]

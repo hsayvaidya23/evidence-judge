@@ -50,6 +50,7 @@ from evidence_judge.sessions.predicates import (
 )
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import READ_ONLY_PROGRAMS, regenerates_env
+from evidence_judge.sessions.shell.env import INSTALLERS, installs_from_manifest
 from evidence_judge.sessions.shell.lexer import SAFE_TARGETS
 from evidence_judge.sessions.shell.writes import SCRATCH
 
@@ -818,6 +819,23 @@ def _strip(output: str) -> str:
     return "\n".join(line.strip() for line in output.splitlines())
 
 
+_COMPILE_FAILED: Final = re.compile(
+    r"^(?:FAIL\s+\S+\s+\[build failed\]|error: could not compile `[^`]+`.*)$", re.M
+)
+"""Go's `FAIL pkg [build failed]` and cargo's `error: could not compile `crate``: the code did
+not compile, so the tests in it did not run."""
+
+
+def compile_failure(event: CommandEvent) -> str | None:
+    """The line saying a failing test run did not compile, when its output names no failing
+    test: then the build, not a test, is what failed."""
+    output = _strip(event.output)
+    match = _COMPILE_FAILED.search(output)
+    if match is None or _FAILING_TEST.search(output) or not _exit_reliable(event):
+        return None
+    return match.group(0) if event.exit_code != 0 else None
+
+
 def every_failing_test(event: CommandEvent) -> list[str] | None:
     """The failing tests the run's output names when it names every one it counts, else None."""
     lines = _failing_lines(event)
@@ -1153,6 +1171,28 @@ def _complete_log(index: SessionIndex) -> bool:
     return index.run.complete and not index.unseen_actors
 
 
+def _manifest_install(
+    predicate: CommandPredicate, index: SessionIndex, after: CommandEvent | None
+) -> PredicateResult | None:
+    """No evidence for a claimed install the command line does not name, when a later install
+    from a requirements or lock file succeeded: that file may list the package."""
+    if not (predicate.ok and predicate.regex and predicate.regex.startswith(INSTALLERS)):
+        return None
+    for event in reversed(index.commands):
+        if after is not None and event.seq <= after.seq:
+            return None
+        if predicate.scope == "after_last_edit" and not index.fresh(event):
+            continue
+        if _exit_reliable(event) and event.exit_code == 0 and installs_from_manifest(event.command):
+            return _result(
+                Support.NO_EVIDENCE,
+                f"{event.id} installed from a requirements or lock file the judge cannot read, "
+                "which may list the package",
+                event,
+            )
+    return None
+
+
 def check_command(predicate: CommandPredicate, index: SessionIndex) -> PredicateResult:
     matches = [
         c
@@ -1165,6 +1205,8 @@ def check_command(predicate: CommandPredicate, index: SessionIndex) -> Predicate
     if not matches:
         scope = " after the last change" if predicate.scope == "after_last_edit" else ""
         if _complete_log(index):
+            if manifest := _manifest_install(predicate, index, None):
+                return manifest
             return _result(Support.CONTRADICTED, f"no command matching {target!r} ran{scope}")
         return _result(
             Support.NO_EVIDENCE,
@@ -1186,6 +1228,8 @@ def check_command(predicate: CommandPredicate, index: SessionIndex) -> Predicate
         return _result(Support.SUPPORTED, f"{good[-1].id} exited {good[-1].exit_code}", good[-1])
     if reliable and len(reliable) == len(matches):
         last = reliable[-1]
+        if manifest := _manifest_install(predicate, index, last):
+            return manifest
         return _result(Support.CONTRADICTED, f"{last.id} exited {last.exit_code}", last)
     unknown = next(m for m in reversed(matches) if not _exit_reliable(m))
     why = unknown.analysis.exit_masked_by or "its exit status was not recorded"
@@ -1364,6 +1408,15 @@ def _suppressed(category: str, index: SessionIndex) -> FileEditEvent | None:
     )
 
 
+def _test_build_failed(index: SessionIndex) -> PredicateResult | None:
+    """'The build still fails' with no build run after the last change: the last test run after
+    it failed to compile."""
+    runs = [r for r in index.test_runs(None) if index.fresh(r)]
+    if not runs or (line := compile_failure(runs[-1])) is None:
+        return None
+    return _result(Support.SUPPORTED, f"{runs[-1].id} did not compile: {line}", runs[-1])
+
+
 def check_build(predicate: BuildPredicate, index: SessionIndex) -> PredicateResult:
     category = _CATEGORY[predicate.category]
     runs = [
@@ -1371,6 +1424,13 @@ def check_build(predicate: BuildPredicate, index: SessionIndex) -> PredicateResu
         for c in index.commands
         if category in c.analysis.categories and c.status is not CallStatus.DENIED
     ]
+    if (
+        predicate.category == "build"
+        and not predicate.ok
+        and not any(map(index.fresh, runs))
+        and (compiled := _test_build_failed(index))
+    ):
+        return compiled
     if not runs:
         return _result(Support.NO_EVIDENCE, f"no {predicate.category} command is recorded")
     fresh = [r for r in runs if index.fresh(r)]
