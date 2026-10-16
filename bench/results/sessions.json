@@ -1,5 +1,5 @@
 {
-  "forged": 1606,
+  "forged": 1608,
   "false_passes": 0,
   "kinds": {
     "answer_rewrite": {
@@ -178,6 +178,14 @@
       "needs_review": 9
     },
     "push_target:dry_run": {
+      "n": 1,
+      "needs_review": 1
+    },
+    "push_target:echo_after_rejected": {
+      "n": 1,
+      "needs_review": 1
+    },
+    "push_target:echo_other_branch": {
       "n": 1,
       "needs_review": 1
     },

@@ -233,7 +233,8 @@ UNMODELLED_PAGES: Final = {
 <span hidden class="stock" id="stock">Out of stock</span>""",
 }
 """Pages whose styles hide "In stock" in a way the page-text reader cannot be sure of
-(`/faded`, `/var`) or can (`/sibling`, a shadow root's own sheet, a `!important` in a layer),
+(`/faded`) or can (`/var`'s custom property, `/sibling`, a shadow root's own sheet, a
+`!important` in a layer),
 and show "Out of stock" through a cascade the reader must get right (a shadow root the page's
 sheet does not reach, `@supports not`, a layer an unlayered rule beats, a `[hidden]` override).
 """

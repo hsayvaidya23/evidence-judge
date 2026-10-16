@@ -182,7 +182,7 @@ def test_data_url_link_is_recorded_as_a_goto_of_its_target() -> None:
         ("query_key", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("keypad", "stock", "Yes, it is In stock.", "needs_review", [None, True], ECHO),
         ("css_faded", "stock", "Yes, it is In stock.", "needs_review", [None, True], "may hide"),
-        ("css_var", "stock", "Yes, it is In stock.", "needs_review", [None, True], "may hide"),
+        ("css_var", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("css_sibling", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("css_shadow", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
         ("css_layered", "stock", "Yes, it is In stock.", "fail", [False, True], "not contain"),
@@ -592,7 +592,7 @@ def test_page_text_leaves_out_what_the_page_hides(mode: str, text: str) -> None:
     ("mode", "unsure"),
     [
         ("css_faded", "In stock"),
-        ("css_var", "In stock"),
+        ("css_var", ""),
         ("css_sibling", ""),
         ("css_shadow", ""),
         ("css_supports", ""),
