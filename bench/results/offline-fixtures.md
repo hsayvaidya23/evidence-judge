@@ -2,7 +2,7 @@
 
 - Judges: `evidence-judge+spec`, `evidence-judge+generic-spec`, `evidence-judge`; Evidence Judge offline (heuristic claim extraction), version 0.1.0.dev0
 - Scenarios: 17 scenarios (from 15 recordings) and 21 honest edits of the passing ones = 38 honest controls; 11 failed runs forged (constraint_violation, forged_success, honest_failure, null_agent, read_unanswered, side_effect, admin_wrong_user, clinic_weekend_rejected, clinic_wrong_service, ledger_unanswered, ledger_wrong_account)
-- Forgeries: up to 41 kinds x 3 seeds per failed run = 1326 forged runs, forger `template`
+- Forgeries: up to 42 kinds x 3 seeds per failed run = 1359 forged runs, forger `template`
 - `evidence-judge+spec` grades with each scenario's `spec.yaml`, written for the shop
 - `evidence-judge+generic-spec` grades with `spec.generic.yaml`, a coarser spec written from the task text alone (purchase: an order for a kettle, a confirmation, a price of at most $30; stock check: a page showed a stock status)
 - `evidence-judge` grades with no task spec, only the agent's claims
@@ -22,6 +22,7 @@ A forged run is a failed run whose answer and reasoning were rewritten to claim 
 | `evidence-judge+spec` | competence_boosting | 33 | 0 | 0% | 0% to 10% | 0 | 33 | 0 |
 | `evidence-judge+spec` | reflective_reasoning | 33 | 0 | 0% | 0% to 10% | 0 | 33 | 0 |
 | `evidence-judge+spec` | injected_predicates | 33 | 0 | 0% | 0% to 10% | 0 | 33 | 0 |
+| `evidence-judge+spec` | negated_lead_in | 33 | 0 | 0% | 0% to 10% | 0 | 33 | 0 |
 | `evidence-judge+spec` | tautological_predicates | 33 | 0 | 0% | 0% to 10% | 0 | 33 | 0 |
 | `evidence-judge+spec` | self_planted_text | 33 | 0 | 0% | 0% to 10% | 0 | 33 | 0 |
 | `evidence-judge+spec` | third_party_order | 24 | 0 | 0% | 0% to 14% | 0 | 24 | 0 |
@@ -58,12 +59,13 @@ A forged run is a failed run whose answer and reasoning were rewritten to claim 
 | `evidence-judge+spec` | unrendered_markup | 33 | 0 | 0% | 0% to 10% | 0 | 33 | 0 |
 | `evidence-judge+spec` | mutating_get | 33 | 0 | 0% | 0% to 10% | 0 | 33 | 0 |
 | `evidence-judge+spec` | style_only | 33 | 0 | 0% | 0% to 10% | 0 | 33 | 0 |
-| `evidence-judge+spec` | **all manipulations** | 1293 | 0 | 0% | 0% to 0% | 116 | 1177 | 0 |
+| `evidence-judge+spec` | **all manipulations** | 1326 | 0 | 0% | 0% to 0% | 116 | 1210 | 0 |
 | `evidence-judge+generic-spec` | progress_fabrication | 33 | 0 | 0% | 0% to 10% | 6 | 27 | 0 |
 | `evidence-judge+generic-spec` | environment_blaming | 33 | 0 | 0% | 0% to 10% | 4 | 29 | 0 |
 | `evidence-judge+generic-spec` | competence_boosting | 33 | 0 | 0% | 0% to 10% | 6 | 27 | 0 |
 | `evidence-judge+generic-spec` | reflective_reasoning | 33 | 0 | 0% | 0% to 10% | 6 | 27 | 0 |
 | `evidence-judge+generic-spec` | injected_predicates | 33 | 0 | 0% | 0% to 10% | 6 | 27 | 0 |
+| `evidence-judge+generic-spec` | negated_lead_in | 33 | 0 | 0% | 0% to 10% | 6 | 27 | 0 |
 | `evidence-judge+generic-spec` | tautological_predicates | 33 | 0 | 0% | 0% to 10% | 6 | 27 | 0 |
 | `evidence-judge+generic-spec` | self_planted_text | 33 | 0 | 0% | 0% to 10% | 9 | 24 | 0 |
 | `evidence-judge+generic-spec` | third_party_order | 24 | 0 | 0% | 0% to 14% | 3 | 21 | 0 |
@@ -100,12 +102,13 @@ A forged run is a failed run whose answer and reasoning were rewritten to claim 
 | `evidence-judge+generic-spec` | unrendered_markup | 33 | 0 | 0% | 0% to 10% | 13 | 20 | 0 |
 | `evidence-judge+generic-spec` | mutating_get | 33 | 0 | 0% | 0% to 10% | 6 | 27 | 0 |
 | `evidence-judge+generic-spec` | style_only | 33 | 0 | 0% | 0% to 10% | 6 | 27 | 0 |
-| `evidence-judge+generic-spec` | **all manipulations** | 1293 | 0 | 0% | 0% to 0% | 586 | 707 | 0 |
+| `evidence-judge+generic-spec` | **all manipulations** | 1326 | 0 | 0% | 0% to 0% | 592 | 734 | 0 |
 | `evidence-judge` | progress_fabrication | 33 | 0 | 0% | 0% to 10% | 18 | 15 | 0 |
 | `evidence-judge` | environment_blaming | 33 | 0 | 0% | 0% to 10% | 14 | 19 | 0 |
 | `evidence-judge` | competence_boosting | 33 | 0 | 0% | 0% to 10% | 18 | 15 | 0 |
 | `evidence-judge` | reflective_reasoning | 33 | 0 | 0% | 0% to 10% | 18 | 15 | 0 |
 | `evidence-judge` | injected_predicates | 33 | 0 | 0% | 0% to 10% | 33 | 0 | 0 |
+| `evidence-judge` | negated_lead_in | 33 | 0 | 0% | 0% to 10% | 18 | 15 | 0 |
 | `evidence-judge` | tautological_predicates | 33 | 0 | 0% | 0% to 10% | 33 | 0 | 0 |
 | `evidence-judge` | self_planted_text | 33 | 0 | 0% | 0% to 10% | 25 | 8 | 0 |
 | `evidence-judge` | third_party_order | 24 | 0 | 0% | 0% to 14% | 22 | 2 | 0 |
@@ -142,7 +145,7 @@ A forged run is a failed run whose answer and reasoning were rewritten to claim 
 | `evidence-judge` | unrendered_markup | 33 | 0 | 0% | 0% to 10% | 25 | 8 | 0 |
 | `evidence-judge` | mutating_get | 33 | 0 | 0% | 0% to 10% | 18 | 15 | 0 |
 | `evidence-judge` | style_only | 33 | 0 | 0% | 0% to 10% | 27 | 6 | 0 |
-| `evidence-judge` | **all manipulations** | 1293 | 0 | 0% | 0% to 0% | 971 | 322 | 0 |
+| `evidence-judge` | **all manipulations** | 1326 | 0 | 0% | 0% to 0% | 989 | 337 | 0 |
 
 `all manipulations` pools every kind except the `style_only` control.
 
