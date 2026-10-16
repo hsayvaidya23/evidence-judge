@@ -201,6 +201,31 @@ class _Scope:
     """An enclosing scope has ``::part()`` rules that may hide elements of this one."""
 
 
+@dataclass(frozen=True, slots=True)
+class _Visit:
+    """An element being rendered: its node and snapshot, the element the cascade sees, what
+    its parent decided, its tree scope, and its tag and attributes."""
+
+    node: list[Any]
+    index: int
+    element: Element
+    inherited: Computed
+    scope: _Scope
+    tag: str
+    attrs: JsonObject
+
+
+@dataclass(frozen=True, slots=True)
+class _Shadow:
+    """An element's declarative shadow root: its template node and snapshot, the scope inside
+    it, and the element that stands for the host in the root's own rules."""
+
+    node: list[Any]
+    index: int
+    scope: _Scope
+    proxy: Element
+
+
 _Item = tuple[object, int, Element | None, Computed, bool, _Scope]
 """A node to render: the node, its snapshot, the element the cascade sees for it, what its
 parent decided, whether it is inside a closed ``<details>`` (only a ``<summary>`` shows), and its
@@ -359,9 +384,8 @@ class _Renderer:
                 if not scope.sheets.details:
                     continue
                 inherited, folded = replace(inherited, unsure=True), False
-            self._element(
-                node, snapshot_index, element, inherited, folded, scope, tag, attrs, stack
-            )
+            visit = _Visit(node, snapshot_index, element, inherited, scope, tag, attrs)
+            self._element(visit, stack)
         return RenderedPage(
             title=_normalise(title) or None,
             text=_normalise("".join(self._shown)),
@@ -371,23 +395,41 @@ class _Renderer:
             opaque=self._opaque,
         )
 
-    def _element(
-        self,
-        node: list[Any],
-        snapshot_index: int,
-        element: Element,
-        inherited: Computed,
-        folded: bool,
-        scope: _Scope,
-        tag: str,
-        attrs: JsonObject,
-        stack: list[_Item],
-    ) -> None:
+    def _element(self, visit: _Visit, stack: list[_Item]) -> None:
+        tag, attrs, element, scope = visit.tag, visit.attrs, visit.element, visit.scope
         if tag in _SKIPPED_TAGS or (tag == "TEMPLATE" and _SHADOW_ROOT_ATTR not in attrs):
             if tag in _FRAMES and not self._opaque:
-                self._opaque = self._frame_shows(element, inherited, scope, attrs)
+                self._opaque = self._frame_shows(element, visit.inherited, scope, attrs)
             return
-        children = self._resolved(node, snapshot_index, parent=element)
+        children = self._resolved(visit.node, visit.index, parent=element)
+        shadow = self._shadow_root(visit, children)
+        style = self._style(visit, shadow)
+        if style.removed:
+            return
+        if ("-" in tag and not children) or (
+            style.text != HIDDEN and scope.sheets.generates(element)
+        ):
+            self._opaque = True
+        if tag not in _INLINE_TAGS:
+            self._emit(" ", None)
+            stack.append((_BLOCK_END, visit.index, None, style, False, scope))
+        if self._shows_control(visit, style):
+            return
+        closed = tag == "DETAILS" and "open" not in attrs
+        if shadow is not None:
+            self._push_shadow(shadow, style, closed, stack)
+            return
+        if self._push_slotted(visit, style, stack):
+            return
+        stack.extend(
+            (c.node, c.index, c.element, s, closed, scope)
+            for c, s in reversed(
+                list(zip(children, _child_styles(element, style, children), strict=True))
+            )
+        )
+
+    def _shadow_root(self, visit: _Visit, children: list[_Child]) -> _Shadow | None:
+        """The element's declarative shadow root, if it has one."""
         shadow = next(
             (
                 c
@@ -398,56 +440,58 @@ class _Renderer:
             ),
             None,
         )
-        inner: _Scope | None = None
-        proxy: Element | None = None
-        if shadow is not None and isinstance(shadow.node, list):
-            proxy = Element(tag, element.attrs, None, host=element)
-            inner = self._shadow_scope(shadow, children, scope)
-        host = inner.sheets if inner is not None else None
+        if shadow is None or not isinstance(shadow.node, list):
+            return None
+        proxy = Element(visit.tag, visit.element.attrs, None, host=visit.element)
+        inner = self._shadow_scope(shadow, children, visit.scope)
+        return _Shadow(shadow.node, shadow.index, inner, proxy)
+
+    def _style(self, visit: _Visit, shadow: _Shadow | None) -> Computed:
+        element, inherited, scope = visit.element, visit.inherited, visit.scope
+        host = shadow.scope.sheets if shadow is not None else None
+        proxy = shadow.proxy if shadow is not None else None
         style = scope.sheets.style(element, inherited, host=host, proxy=proxy)
         if style.removed and element.namespace == SVG and self._referenced:
-            style = self._copied(node, snapshot_index, element, inherited, scope, host, proxy)
+            style = self._copied(visit.node, visit.index, element, inherited, scope, host, proxy)
         if style.removed:
-            return
-        if element.namespace == SVG and tag == "TEXT" and _off_canvas(element, style):
+            return style
+        if element.namespace == SVG and visit.tag == "TEXT" and _off_canvas(element, style):
             style = replace(style, unsure=True)
         if scope.parts and "part" in element.attrs and not style.unsure:
             style = replace(style, unsure=True)
-        if ("-" in tag and not children) or (
-            style.text != HIDDEN and scope.sheets.generates(element)
-        ):
-            self._opaque = True
-        if tag not in _INLINE_TAGS:
-            self._emit(" ", None)
-            stack.append((_BLOCK_END, snapshot_index, None, style, False, scope))
-        control_text = self._control_text(node, tag, attrs, snapshot_index)
-        if control_text is not None:
-            self._emit(control_text, style.text)
-            if self._fixed:
-                self._emit(f" {self._fixed} ", max(style.text, UNSURE))
-                self._fixed = ""
-            return
-        closed = tag == "DETAILS" and "open" not in attrs
-        if inner is not None and shadow is not None and isinstance(shadow.node, list):
-            start = style if not inner.unknown else replace(style, unsure=True)
-            rooted = self._resolved(shadow.node, shadow.index, parent=proxy)
-            stack.extend(
-                (c.node, c.index, c.element, start, closed, inner) for c in reversed(rooted)
-            )
-            return
-        assigned = self._assigned(node, attrs, scope) if tag == "SLOT" else None
-        if assigned and scope.outer is not None:
-            passed = style if not scope.sheets.slotted else replace(style, unsure=True)
-            stack.extend(
-                (c.node, c.index, c.element, passed, False, scope.outer) for c in reversed(assigned)
-            )
-            return
+        return style
+
+    def _shows_control(self, visit: _Visit, style: Computed) -> bool:
+        """Emit a form control's text, which stands for its children; False if not a control."""
+        control_text = self._control_text(visit.node, visit.tag, visit.attrs, visit.index)
+        if control_text is None:
+            return False
+        self._emit(control_text, style.text)
+        if self._fixed:
+            self._emit(f" {self._fixed} ", max(style.text, UNSURE))
+            self._fixed = ""
+        return True
+
+    def _push_shadow(
+        self, shadow: _Shadow, style: Computed, closed: bool, stack: list[_Item]
+    ) -> None:
+        start = style if not shadow.scope.unknown else replace(style, unsure=True)
+        rooted = self._resolved(shadow.node, shadow.index, parent=shadow.proxy)
         stack.extend(
-            (c.node, c.index, c.element, s, closed, scope)
-            for c, s in reversed(
-                list(zip(children, _child_styles(element, style, children), strict=True))
-            )
+            (c.node, c.index, c.element, start, closed, shadow.scope) for c in reversed(rooted)
         )
+
+    def _push_slotted(self, visit: _Visit, style: Computed, stack: list[_Item]) -> bool:
+        """Push the light children a slot shows, styled in the host's scope; False if none."""
+        scope = visit.scope
+        assigned = self._assigned(visit.node, visit.attrs, scope) if visit.tag == "SLOT" else None
+        if not assigned or scope.outer is None:
+            return False
+        passed = style if not scope.sheets.slotted else replace(style, unsure=True)
+        stack.extend(
+            (c.node, c.index, c.element, passed, False, scope.outer) for c in reversed(assigned)
+        )
+        return True
 
     def _frame_shows(
         self, element: Element, inherited: Computed, scope: _Scope, attrs: JsonObject
