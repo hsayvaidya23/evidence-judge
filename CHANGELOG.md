@@ -48,6 +48,12 @@ The first release.
   `verification` (`rerun` or `transcript`); `--require-rerun` refuses a pass without a re-run;
   `session rerun` judges a re-run without a session record; `rerun.include` adds gitignored
   paths to the copy and `rerun.sandbox` runs the command under an OS sandbox.
+- A session spec's `trusted_wrappers` (`{"make test": "pytest -q"}`) declares what a project
+  wrapper runs, so an honest run through a wrapper the session does not show (`make test`
+  echoing `pytest -q` with no Makefile shown) can pass. The declaration stops applying once the
+  session may have changed what the wrapper runs (an edit or shell write to anything but source
+  code or prose, a harness change, a `cd`, a subagent or an MCP tool), and a definition the
+  session showed outranks it.
 
 **Integrations**
 
@@ -76,7 +82,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1398 browser and 0 of 1608 session
+  Go toy projects with runner-specific tricks; 0 of 1398 browser and 0 of 1653 session
   forgeries pass, and 4 of 41 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
@@ -360,6 +366,14 @@ The first release.
   check that may change files (a prerequisite's `rm tests/...` or `echo ... > conftest.py`)
   leaves the wrapper unseen and is checked like a command of its own, so a deleted test file or
   a written `conftest.py` is tampering.
+- A wrapper's echo no longer counts beside an `.npmrc` the session showed with a `loglevel`,
+  `silent`, `quiet` or `reporter` setting (npm then prints no header, so the script can print
+  one). A tox `setenv`/`set_env` now counts from a `setup.cfg`'s `[testenv]` sections and a
+  `pyproject.toml`'s `[tool.tox]` (its `legacy_tox_ini` or native `set_env` tables) as well as a
+  `tox.ini`, and one the judge cannot read (a `file|` line) leaves tox's echo unread. A silent
+  wrapper's green run is no longer measured against an earlier whole-suite count when the
+  session changed the tests since in a way the judge cannot count (a test written by a command,
+  a parametrize case, a removed or deleted test). 30 forged sessions passed before; none does now.
 - A lint or type-check claim no longer passes after a suppression comment written from the
   shell (`sed -i 's/$/  # noqa/'`, `perl -pi`, a heredoc or `echo` appended to a source file,
   `python -c` rewriting one), or on a `pre-commit run` without `--all-files`, with a hook id,
