@@ -545,6 +545,41 @@ class SessionIndex:
                 best = (total, event)
         return best
 
+    def red_runs(self) -> list[CommandEvent]:
+        """The test runs after the last change that failed."""
+        return [
+            r
+            for r in self.test_runs(None)
+            if self.fresh(r) and self.outcome(r).result is Result.FAIL
+        ]
+
+    def fixed_subset(self) -> bool:
+        """The tests failing at the end are a strict subset of those failing before the first
+        change: both runs ran the whole suite to the end with the same runner and named every
+        test they failed, and the change made none fail that did not before."""
+        if not self.changes:
+            return False
+        first = min(position for position, _, _ in self.changes)
+        before = [r for r in self.test_runs(None) if r.seq < first]
+        if not before or (start := self._every_failing(before[-1])) is None:
+            return False
+        if self.rerun is not None:
+            rerun = self.rerun
+            every = len(rerun.failing) >= rerun.failed + rerun.errors
+            complete = rerun.status is RerunStatus.FAIL and rerun.report_read and every
+            end = rerun.failing if complete else None
+        else:
+            red = self.red_runs()
+            same = red and all(_runner_key(r) == _runner_key(before[-1]) for r in red)
+            end = self._every_failing(red[-1]) if same else None
+        return end is not None and set(end) < set(start)
+
+    def _every_failing(self, event: CommandEvent) -> list[str] | None:
+        outcome = self.outcome(event)
+        if outcome.result is not Result.FAIL or _incomplete(outcome):
+            return None
+        return every_failing_test(event)
+
     def test_runs(self, runner: str | None) -> list[CommandEvent]:
         runs = [
             c for c in self.commands if c.analysis.is_test and c.status is not CallStatus.DENIED
@@ -848,6 +883,17 @@ def _rerun_applies(predicate: TestResultPredicate, rerun: RerunResult) -> bool:
     return wanted in (rerun.runner or "").casefold() or any(
         wanted in part.casefold() for part in rerun.command
     )
+
+
+def ran_with(runner: str, index: SessionIndex) -> bool:
+    """Every failing run the final evidence rests on (the judge's re-run, else the runs after
+    the last change, as for a re-run whose runner is not known) ran `runner`."""
+    rerun = index.rerun
+    if rerun is not None and (rerun.runner or rerun.command):
+        return _rerun_applies(TestResultPredicate(runner=runner), rerun)
+    wanted = runner.casefold()
+    red = index.red_runs()
+    return bool(red) and all(any(wanted in r.casefold() for r in e.analysis.runners) for e in red)
 
 
 def check_rerun(predicate: TestResultPredicate, index: SessionIndex) -> PredicateResult:

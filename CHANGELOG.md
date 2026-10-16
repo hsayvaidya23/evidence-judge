@@ -148,6 +148,12 @@ The first release.
   the distinct tests the output names, with or without parameters. A claim that tests fail
   whose count is still wrong now needs review instead of failing the run, whatever the
   extractor; it never passes.
+- A claimed fix beside a vague report of failures ("Some tests still fail.", "A few unrelated
+  tests are still failing.") no longer PASSes a red session, nor does a report naming a runner
+  that did not fail ("The jest tests fail." on a pytest run): with a claimed fix, a claim that
+  tests fail must count or name them, or the tests failing at the end must be a strict subset
+  of those failing before the first change, and a runner it names must be the one that failed.
+  Anything else needs review.
 
 ### Security
 

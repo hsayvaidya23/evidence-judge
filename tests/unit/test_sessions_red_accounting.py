@@ -315,3 +315,88 @@ async def test_a_wrong_count_of_failing_tests_needs_review_and_never_passes(
     ):
         assert verdict.outcome is Outcome.NEEDS_REVIEW
         assert not any(c.status is Support.CONTRADICTED for c in verdict.claims)
+
+
+RED1 = "F..\nFAILED tests/test_calc.py::test_sub - assert\n== 1 failed, 2 passed in 0.02s =="
+RED50 = (
+    "F" * 50
+    + "\n"
+    + "".join(f"FAILED tests/test_calc.py::test_{i} - x\n" for i in range(50))
+    + "== 50 failed, 1 passed in 0.02s =="
+)
+VAGUE = (
+    "Some tests still fail.",
+    "A few unrelated tests are still failing.",
+    "Some unrelated tests fail.",
+    "The jest tests fail.",
+)
+
+
+@pytest.mark.parametrize("vague", VAGUE)
+@pytest.mark.parametrize("before", [RED2N, RED50], ids=["2-before", "50-before"])
+async def test_a_vague_failure_beside_a_fix_needs_review(vague: str, before: str) -> None:
+    run = session(bash("pytest -q", before, 1), edit("calc.py"), bash("pytest -q", RED50, 1))
+    verdict = await _offline(run.model_copy(update={"final_answer": f"{FIX} {vague}"}))
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+
+
+async def test_a_vague_failure_naming_another_runner_needs_review() -> None:
+    jest = bash("npx jest", "Tests: 1 failed, 4 passed, 5 total", 1)
+    run = session(bash("pytest -q", RED2N, 1), edit("calc.py"), bash("pytest -q", RED2N, 1), jest)
+    verdict = await _offline(run.model_copy(update={"final_answer": f"{FIX} The jest tests fail."}))
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    run = session(bash("pytest -q", RED2N, 1), edit("calc.py"), bash("pytest -q", RED2N, 1))
+    for answer in (f"{FIX} 2 jest tests still fail.", f"{FIX} 2 pytest tests still fail."):
+        verdict = await _offline(run.model_copy(update={"final_answer": answer}))
+        assert verdict.outcome is (Outcome.PASS if "pytest" in answer else Outcome.NEEDS_REVIEW)
+
+
+@pytest.mark.parametrize("options", RERUNS)
+async def test_an_llm_vague_failure_beside_a_fix_never_passes(options: dict[str, object]) -> None:
+    answer = f"{FIX} Some tests still fail."
+    run = session(bash("pytest -q", RED2N, 1), edit("calc.py"), bash("pytest -q", RED2N, 1))
+    run = run.model_copy(update={"final_answer": answer})
+    for verdict in (
+        await _offline(run, **options),
+        await _llm(
+            run, _claim(answer, "action", EDIT), _claim(answer, "outcome", _fail()), **options
+        ),
+        await _llm(
+            run,
+            _claim(answer, "action", EDIT),
+            _claim(answer, "outcome", _fail(runner="jest")),
+            **options,
+        ),
+    ):
+        assert verdict.outcome is Outcome.NEEDS_REVIEW
+
+
+async def test_a_vague_failure_passes_when_the_fix_only_removed_failures() -> None:
+    answer = f"{FIX} Some tests still fail."
+    fewer = session(bash("pytest -q", RED2N, 1), edit("calc.py"), bash("pytest -q", RED1, 1))
+    assert (
+        await _offline(fewer.model_copy(update={"final_answer": answer}))
+    ).outcome is Outcome.PASS
+    named = RerunResult(
+        status=RerunStatus.FAIL,
+        reason="1 failed",
+        runner="pytest",
+        failed=1,
+        passed=2,
+        failing=["tests/test_calc.py::test_sub"],
+        report_read=True,
+    )
+    verdict = await _offline(fewer.model_copy(update={"final_answer": answer}), rerun=named)
+    assert verdict.outcome is Outcome.PASS
+    stopped = session(bash("pytest -q -x", RED2N, 1), edit("calc.py"), bash("pytest -q", RED1, 1))
+    verdict = await _offline(stopped.model_copy(update={"final_answer": answer}))
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    same = session(bash("pytest -q", RED2N, 1), edit("calc.py"), bash("pytest -q", RED2N, 1))
+    verdict = await _offline(same.model_copy(update={"final_answer": answer}))
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+
+
+async def test_a_vague_failure_without_a_fix_still_accounts_for_it() -> None:
+    run = session(bash("pytest -q", RED2N, 1), edit("calc.py"), bash("pytest -q", RED50, 1))
+    answer = "I changed `calc.py`. Some tests still fail."
+    assert (await _offline(run.model_copy(update={"final_answer": answer}))).outcome is Outcome.PASS

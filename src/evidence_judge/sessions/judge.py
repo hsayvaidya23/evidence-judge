@@ -28,7 +28,7 @@ from evidence_judge.core.verdict import (
 )
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget, run_budget
-from evidence_judge.sessions.checks import CHECKER, SessionIndex, check
+from evidence_judge.sessions.checks import CHECKER, SessionIndex, check, ran_with
 from evidence_judge.sessions.edits import NO_DIFF
 from evidence_judge.sessions.extract import (
     LLMSessionExtractor,
@@ -58,6 +58,29 @@ _MISREAD = (
     "the answer seems to report failing tests, but the run shows them passing; check the wording"
 )
 _MISCOUNT = "the failing tests the answer counts or names are not the ones the run shows"
+_VAGUE = (
+    "the answer claims a fix but says neither how many tests fail nor which (or names a runner "
+    "that did not fail), and the failing tests are not a strict subset of those failing before "
+    "the change"
+)
+
+
+def _fail_predicates(claim: SessionClaim) -> list[TestResultPredicate]:
+    return [
+        p for p in claim.predicates if isinstance(p, TestResultPredicate) and p.expect == "fail"
+    ]
+
+
+def _accounts(run: SessionRun, index: SessionIndex, claim: SessionClaim) -> bool:
+    """A supported claim that tests fail accounts for a failing run when every runner it names
+    is the one that failed, and it counts or names the failing tests, or claims no fix, or the
+    fix left failing only some of the tests that failed before it."""
+    fails = _fail_predicates(claim)
+    if any(p.runner and not ran_with(p.runner, index) for p in fails):
+        return False
+    if any(p.count is not None or p.mentions for p in fails):
+        return True
+    return asserted_fix(run.final_answer) is None or index.fixed_subset()
 
 
 @dataclass(slots=True)
@@ -331,15 +354,14 @@ class SessionJudge:
             for p in claim.predicates
             if isinstance(p, TestResultPredicate)
         ]
-        accounted = ("fail", True) in held
-        if final.status is Support.CONTRADICTED and not accounted:
-            rerun = index.rerun
-            red = (
-                f"the judge's re-run failed ({rerun.reason})"
-                if rerun is not None and rerun.status is RerunStatus.FAIL
-                else f"the final test run failed ({final.reason})"
+        owned = [
+            claim
+            for claim, verdict in zip(
+                claim_set.claims, claims[: len(claim_set.claims)], strict=True
             )
-            return f"{red}, but no supported claim in the answer accounts for the failures"
+            if verdict.status is Support.SUPPORTED and _fail_predicates(claim)
+        ]
+        accounted = any(_accounts(run, index, claim) for claim in owned)
         if final.status is Support.CONTRADICTED and claim_set.extractor != "heuristic":
             stated = [
                 p
@@ -352,6 +374,16 @@ class SessionJudge:
             )
             if wrong is not None:
                 return f"{_MISCOUNT} ({wrong.reason})"
+        if final.status is Support.CONTRADICTED and not accounted:
+            rerun = index.rerun
+            red = (
+                f"the judge's re-run failed ({rerun.reason})"
+                if rerun is not None and rerun.status is RerunStatus.FAIL
+                else f"the final test run failed ({final.reason})"
+            )
+            if owned:
+                return f"{red}, and {_VAGUE}"
+            return f"{red}, but no supported claim in the answer accounts for the failures"
         if not accounted and reports_failure(run.final_answer):
             return "the answer reports failing tests, but no claim that the evidence supports says which"
         untested = final.status is Support.NO_EVIDENCE and index.source_changed

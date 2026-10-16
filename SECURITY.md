@@ -244,6 +244,15 @@ Pass `--require-rerun` so that a session without a re-run cannot pass, and when 
 adversarial, run the suite under `rerun.sandbox` (or in a container or VM) so that the code
 under test cannot reach your files or the hooks' state.
 
+Without a re-run, how many tests a session left failing, and which, is read from its own test
+output, and only from a whole-suite run that ran to the end. Two gaps remain there. A wrapper
+whose command line hides the runner's options (`make test`, `npm test`, `tox`) can stop at the
+first failure without the judge seeing it; only pytest's own `stopping after N failures` banner
+is read from the output. And a claimed fix that admits failures without counting or naming them
+passes when the tests failing at the end are a strict subset of those failing before the first
+change, a comparison that trusts the test names the runs printed. With `--require-rerun`, every
+count and the end of that comparison come from the judge's own run of the whole suite.
+
 The MCP server applies the same rule to what it returns. Page- and agent-derived text is
 fenced in `<untrusted_data>` tags. `judge_run` never replaces a file that is not an earlier
 evidence-judge report unless the caller passes `overwrite: true`.
