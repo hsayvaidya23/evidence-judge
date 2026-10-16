@@ -545,6 +545,41 @@ class SessionIndex:
                 best = (total, event)
         return best
 
+    def red_runs(self) -> list[CommandEvent]:
+        """The test runs after the last change that failed."""
+        return [
+            r
+            for r in self.test_runs(None)
+            if self.fresh(r) and self.outcome(r).result is Result.FAIL
+        ]
+
+    def fixed_subset(self) -> bool:
+        """The tests failing at the end are a strict subset of those failing before the first
+        change: both runs ran the whole suite to the end with the same runner and named every
+        test they failed, and the change made none fail that did not before."""
+        if not self.changes:
+            return False
+        first = min(position for position, _, _ in self.changes)
+        before = [r for r in self.test_runs(None) if r.seq < first]
+        if not before or (start := self._every_failing(before[-1])) is None:
+            return False
+        if self.rerun is not None:
+            rerun = self.rerun
+            every = len(rerun.failing) >= rerun.failed + rerun.errors
+            complete = rerun.status is RerunStatus.FAIL and rerun.report_read and every
+            end = rerun.failing if complete else None
+        else:
+            red = self.red_runs()
+            same = red and all(_runner_key(r) == _runner_key(before[-1]) for r in red)
+            end = self._every_failing(red[-1]) if same else None
+        return end is not None and set(end) < set(start)
+
+    def _every_failing(self, event: CommandEvent) -> list[str] | None:
+        outcome = self.outcome(event)
+        if outcome.result is not Result.FAIL or _incomplete(outcome):
+            return None
+        return every_failing_test(event)
+
     def test_runs(self, runner: str | None) -> list[CommandEvent]:
         runs = [
             c for c in self.commands if c.analysis.is_test and c.status is not CallStatus.DENIED
@@ -741,20 +776,39 @@ def _named_failure(event: CommandEvent, name: str) -> bool:
     )
 
 
+_UNLOADED: Final = re.compile(
+    r"^(?:FAIL\s+\S+\s+\[(?:build|setup) failed\]|panic: |"
+    r"(?:\u25cf )?Test suite failed to run|.*\bFailed Suites \d+|"
+    r"ERROR collecting |ERROR (?!\S+::)\S+\.\w+(?: - |$)|"
+    r".*unittest\.loader\._FailedTest)",
+    re.M,
+)
+"""A unit of tests that failed before its tests ran: a Go package that did not build or
+panicked, a jest or vitest suite that failed to run, a pytest module that failed to collect, a
+unittest module that failed to import. Its tests are neither counted nor named."""
+
+
 def failure_count(event: CommandEvent) -> int | None:
     """How many tests the run reports failing, or None when its summary does not count tests
-    (plain `go test` counts packages; then its `--- FAIL:` lines count them)."""
+    (plain `go test` counts packages; then its `--- FAIL:` lines count them) or when a unit of
+    tests failed to load, so the tests in it are not counted."""
     summary = event.summary
-    if summary is None:
+    if summary is None or _UNLOADED.search(_strip(event.output)):
         return None
     if summary.framework == "go test":
         return len(_failing_tests(event)) or None
     return summary.failed + summary.errors
 
 
+def _failing_lines(event: CommandEvent) -> list[str]:
+    """Every failing test the output names, once per line that names it (a pytest test can fail
+    and then error in teardown)."""
+    output = _strip(event.output)
+    return [next(g for g in m.groups() if g) for m in _FAILING_TEST.finditer(output)]
+
+
 def _failing_tests(event: CommandEvent) -> list[str]:
-    found = (next(g for g in m.groups() if g) for m in _FAILING_TEST.finditer(_strip(event.output)))
-    return list(dict.fromkeys(found))
+    return list(dict.fromkeys(_failing_lines(event)))
 
 
 def _strip(output: str) -> str:
@@ -763,9 +817,63 @@ def _strip(output: str) -> str:
 
 def every_failing_test(event: CommandEvent) -> list[str] | None:
     """The failing tests the run's output names when it names every one it counts, else None."""
-    names = _failing_tests(event)
+    lines = _failing_lines(event)
     count = failure_count(event)
-    return names if names and count is not None and len(names) >= count else None
+    return (
+        list(dict.fromkeys(lines)) if lines and count is not None and len(lines) >= count else None
+    )
+
+
+_PARAMETERS: Final = re.compile(r"\[.*\]$")
+
+
+def failure_counts(event: CommandEvent) -> list[int]:
+    """The ways to count the run's failing tests: its summary's count and, when the output
+    names every failing test, the distinct tests it names, with and without their parameters
+    (a test that fails and errors in teardown, or fails for two parameters, is one test)."""
+    observed = failure_count(event)
+    if observed is None:
+        return []
+    counts = [observed]
+    if (names := every_failing_test(event)) is not None:
+        counts += [len(names), len({_PARAMETERS.sub("", name) for name in names})]
+    return list(dict.fromkeys(counts))
+
+
+_STOPPED: Final = re.compile(
+    r"^!+ (?:stopping after \d+ failures?|Interrupted: [^!]*|KeyboardInterrupt) !+$", re.M
+)
+"""pytest's banner for a run that ended before running every test it collected."""
+
+
+def stopped_early(event: CommandEvent) -> str | None:
+    """Why the run may have ended before running every test it selected, or None."""
+    if event.analysis.stop_early:
+        return event.analysis.stop_early
+    if match := _STOPPED.search(_strip(event.output)):
+        return f"its output says {match.group(0).strip('! ')!r}"
+    return None
+
+
+def _incomplete(outcome: RunOutcome) -> str | None:
+    """Why the run cannot show every test of the suite that fails, or None: a filtered or
+    partial run never ran some, and one that stopped early skipped the rest."""
+    return outcome.partial or stopped_early(outcome.event)
+
+
+def _not_failing(outcome: RunOutcome, name: str) -> RunOutcome | None:
+    """The failing run, as evidence that `name` did not fail, when it ran the whole suite to the
+    end and names every test it failed, and not `name`."""
+    if _incomplete(outcome) or (named := every_failing_test(outcome.event)) is None:
+        return None
+    if any(names_test(name, test) for test in named):
+        return None
+    reason = f"{outcome.reason}; {_not_among(name, named)}"
+    return RunOutcome(outcome.event, Result.PASS, reason)
+
+
+def _not_among(name: str, failing: list[str]) -> str:
+    return f"{name} is not among its failing tests ({', '.join(failing)})"
 
 
 def _rerun_applies(predicate: TestResultPredicate, rerun: RerunResult) -> bool:
@@ -775,6 +883,17 @@ def _rerun_applies(predicate: TestResultPredicate, rerun: RerunResult) -> bool:
     return wanted in (rerun.runner or "").casefold() or any(
         wanted in part.casefold() for part in rerun.command
     )
+
+
+def ran_with(runner: str, index: SessionIndex) -> bool:
+    """Every failing run the final evidence rests on (the judge's re-run, else the runs after
+    the last change, as for a re-run whose runner is not known) ran `runner`."""
+    rerun = index.rerun
+    if rerun is not None and (rerun.runner or rerun.command):
+        return _rerun_applies(TestResultPredicate(runner=runner), rerun)
+    wanted = runner.casefold()
+    red = index.red_runs()
+    return bool(red) and all(any(wanted in r.casefold() for r in e.analysis.runners) for e in red)
 
 
 def check_rerun(predicate: TestResultPredicate, index: SessionIndex) -> PredicateResult:
@@ -817,9 +936,7 @@ def check_rerun(predicate: TestResultPredicate, index: SessionIndex) -> Predicat
         every = len(rerun.failing) >= rerun.failed + rerun.errors
         if not wants_pass and rerun.status is RerunStatus.FAIL and every:
             return result(
-                Support.CONTRADICTED,
-                f"{rerun.reason}; {name} is not among its failing tests "
-                f"({', '.join(rerun.failing)})",
+                Support.CONTRADICTED, f"{rerun.reason}; {_not_among(name, rerun.failing)}"
             )
         return result(Support.NO_EVIDENCE, f"the judge's re-run did not report {name}")
     if rerun.status is RerunStatus.PASS:
@@ -912,13 +1029,8 @@ def _expect_fail(
     if fails:
         return _failing_count(predicate, fails[-1])
     red = [o for o in outcomes if o.result is Result.FAIL]
-    if predicate.mentions and red and (named := every_failing_test(red[-1].event)) is not None:
-        return _result(
-            Support.CONTRADICTED,
-            f"{red[-1].reason}; {predicate.mentions} is not among its failing tests "
-            f"({', '.join(named)})",
-            red[-1].event,
-        )
+    if predicate.mentions and red and (spared := _not_failing(red[-1], predicate.mentions)):
+        return _result(Support.CONTRADICTED, spared.reason, spared.event)
     if whole_pass:
         return _result(Support.CONTRADICTED, whole_pass[-1].reason, whole_pass[-1].event)
     return _undecided(outcomes, predicate)
@@ -926,20 +1038,27 @@ def _expect_fail(
 
 def _failing_count(predicate: TestResultPredicate, fail: RunOutcome) -> PredicateResult:
     """A failing run supports a claim that tests fail, if it failed as many as the claim
-    says."""
+    says: a count needs a whole-suite run that ran to the end, since a filtered run or one
+    that stopped early leaves some tests unrun."""
     if predicate.count is None:
         return _result(Support.SUPPORTED, fail.reason, fail.event)
-    observed = failure_count(fail.event)
-    if observed is None:
+    if why := _incomplete(fail):
+        return _result(
+            Support.NO_EVIDENCE,
+            f"{fail.reason}, but the run cannot show how many tests of the suite fail: {why}",
+            fail.event,
+        )
+    counts = failure_counts(fail.event)
+    if not counts:
         return _result(
             Support.NO_EVIDENCE,
             f"{fail.reason}, but the run does not show how many tests failed",
             fail.event,
         )
-    if observed != predicate.count:
+    if predicate.count not in counts:
         return _result(
             Support.CONTRADICTED,
-            f"{fail.reason}: {observed} tests failed, not {predicate.count}",
+            f"{fail.reason}: {' or '.join(map(str, counts))} tests failed, not {predicate.count}",
             fail.event,
         )
     return _result(Support.SUPPORTED, fail.reason, fail.event)
@@ -972,15 +1091,12 @@ def _expect_pass(
 
 
 def _spared(predicate: TestResultPredicate, outcomes: list[RunOutcome]) -> RunOutcome | None:
-    """A failing run that names every test it failed, and not the one the claim says passes."""
+    """A failing whole-suite run that ran to the end and names every test it failed, and not
+    the one the claim says passes."""
     red = [o for o in outcomes if o.result is Result.FAIL]
-    if not predicate.mentions or not red or (named := every_failing_test(red[-1].event)) is None:
+    if not predicate.mentions or not red:
         return None
-    reason = (
-        f"{red[-1].reason}; {predicate.mentions} is not among its failing tests "
-        f"({', '.join(named)})"
-    )
-    return RunOutcome(red[-1].event, Result.PASS, reason)
+    return _not_failing(red[-1], predicate.mentions)
 
 
 def _flaky(fail: RunOutcome, passed: RunOutcome) -> PredicateResult:

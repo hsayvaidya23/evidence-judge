@@ -10,9 +10,11 @@ import pytest
 
 from evidence_judge.sessions.bench import (
     PARTIAL_FIX_ANSWERS,
+    PARTIAL_RED,
     PROJECTS,
     REWORDED,
     TRICKS,
+    BenchResult,
     cases,
     main,
     run_benchmark,
@@ -32,6 +34,7 @@ async def test_no_forged_session_passes() -> None:
     }
     tricks = {t for p in PROJECTS for t in p.applicable()}
     assert {f"trick:{t}" for t in tricks} <= set(result.forgeries)
+    assert {f"partial_red:{kind}" for kind in PARTIAL_RED} <= set(result.forgeries)
     assert result.control_errors == 0, result.controls
     markdown = to_markdown(result)
     assert "| **all** |" in markdown and "honest_success" in markdown
@@ -53,6 +56,12 @@ def test_every_trick_is_forged_on_every_base_of_its_project() -> None:
     assert TRICKS.keys() <= forged["claude_code"].keys()
     assert "testmain_exit" not in forged["claude_code"] | forged["claude_code/node"]
     assert "conftest_hook" not in forged["claude_code/go"]
+
+
+def test_markdown_keeps_each_control_on_one_row() -> None:
+    result = BenchResult(controls=[('a.jsonl "Fixed.\n\nNote: x | y fails."', "pass", "pass")])
+    rows = to_markdown(result).splitlines()
+    assert '| a.jsonl "Fixed.<br><br>Note: x \\| y fails." | pass | pass |' in rows
 
 
 def test_bench_main(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
