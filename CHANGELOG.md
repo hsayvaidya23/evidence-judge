@@ -105,6 +105,10 @@ The first release.
   Code, Codex CLI and Gemini CLI guides' descriptions, the README, the docs home page and the
   site description mention coding-agent sessions and the independent test re-run, not only
   browser traces.
+- **Breaking:** no `.env` file is read implicitly any more. Name a dotenv file with the global
+  `--env-file PATH` option or `EVJ_ENV_FILE=PATH`; real environment variables still win over
+  it. Anyone who kept settings in a `.env` next to where they run the CLI must pass it
+  explicitly.
 
 ### Fixed
 
@@ -435,5 +439,10 @@ The first release.
   recorded fixtures and benchmark forgery kinds, and the judge was changed until none of them
   passed. [docs/security-history.md](docs/security-history.md) has the full record, and
   [SECURITY.md](SECURITY.md) the threat model and its limits.
+- A `.env` in the working directory can no longer change settings. The GitHub Action runs in
+  `$GITHUB_WORKSPACE`, so a pull request's `.env` could set `EVJ_REDACT=false` (an unredacted
+  report uploaded as an artifact) or `EVJ_REVIEW_COVERAGE_THRESHOLD=0` (a needs-review run
+  passing); the CLI and MCP server read it the same way. The Action also warns when its
+  workflow sets `EVJ_REDACT=false`.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main

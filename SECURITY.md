@@ -338,6 +338,11 @@ compromised agent:
   recordings there. The LLM cache and redaction key live outside the repository, in the per-user
   cache directory (`EVJ_CACHE_DIR`).
 - Never commit `.env`. API keys are read from the environment only.
+- No dotenv file is read unless it is named with `--env-file PATH` or `EVJ_ENV_FILE`. A `.env`
+  in the working directory is ignored, so in the GitHub Action (which runs in
+  `$GITHUB_WORKSPACE`), the MCP server or a plain CLI run, the checked-out repository cannot set
+  `EVJ_REDACT=false` or `EVJ_REVIEW_COVERAGE_THRESHOLD=0`. The workflow's own `env:` still
+  applies; the Action prints a warning when it turns redaction off.
 - Third-party GitHub Actions in the workflows and `action.yml` are pinned to full commit SHAs
   with a `# vX.Y.Z` comment (Dependabot keeps both current); a new one must be pinned the same
   way, which a unit test checks.

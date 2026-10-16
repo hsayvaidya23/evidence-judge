@@ -19,8 +19,10 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 
 v0.1.0 is not released yet, so install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install "evidence-judge[...]"` forms below work once it is on PyPI.
 
-Settings (models, budget, redaction, cache) come from environment variables or a `.env` file;
-see the [configuration reference](reference/configuration.md).
+Settings (models, budget, redaction, cache) come from environment variables, plus a dotenv file
+only when you name one with the global `--env-file PATH` option (before the command) or
+`EVJ_ENV_FILE`; a `.env` in the working directory is never read on its own. See the
+[configuration reference](reference/configuration.md).
 
 Exit codes are the same for every command: `0` pass, `1` fail, `2` needs review, `3` bad input
 (missing or unreadable evidence, an invalid spec, claims file or setting, a corrupt redaction key

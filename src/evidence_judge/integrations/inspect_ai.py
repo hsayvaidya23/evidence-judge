@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.config import Settings, read_settings, stable_redaction_key
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
@@ -148,7 +148,8 @@ def evidence_judge_scorer(
     ``value="outcome"`` gives C (pass), I (fail) or ``needs_review`` (default N, which counts as
     0 in accuracy); ``value="score"`` gives the 0..1 verdict score. Without ``offline`` an LLM is
     used for claim extraction when ``ANTHROPIC_API_KEY`` is set. ``settings`` defaults to
-    ``Settings()`` (``EVJ_*`` environment variables); ``judge`` overrides the judge entirely.
+    ``read_settings()`` (``EVJ_*`` environment variables and any ``EVJ_ENV_FILE``); ``judge``
+    overrides the judge entirely.
     """
     root = Path(base_dir) if base_dir is not None else None
     active_settings = settings
@@ -157,7 +158,7 @@ def evidence_judge_scorer(
     async def score(state: TaskState, target: Target) -> Score:
         nonlocal active_settings, active_judge
         if active_settings is None:
-            active_settings = Settings()
+            active_settings = read_settings()
         if active_judge is None:
             active_judge = Judge(active_settings, None if offline else build_llm(active_settings))
         run, spec = await asyncio.to_thread(

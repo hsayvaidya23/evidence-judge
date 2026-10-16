@@ -243,7 +243,9 @@ The names exported from `evidence_judge` are the supported Python API; SemVer al
 
 ## ⚙️ Configuration
 
-Environment variables (or `.env`, see [.env.example](.env.example)):
+Environment variables, or a dotenv file you name with `evidence-judge --env-file PATH` or
+`EVJ_ENV_FILE=PATH` (see [.env.example](.env.example)); a `.env` in the working directory is
+never read on its own:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

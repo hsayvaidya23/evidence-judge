@@ -14,7 +14,16 @@ from typer.testing import CliRunner
 import evidence_judge.cli
 from evidence_judge._cli_common import load_redactor
 from evidence_judge.cli import ExitCode, app
-from evidence_judge.config import REDACTION_KEY_FILE, Settings, default_cache_dir
+from evidence_judge.config import (
+    ENV_FILE_VAR,
+    REDACTION_KEY_FILE,
+    EnvFileError,
+    Settings,
+    default_cache_dir,
+    read_settings,
+)
+from evidence_judge.mcp import Roots, ServerConfig
+from evidence_judge.mcp.service import settings_of
 from tests.unit.test_cli import Calls, install
 
 runner = CliRunner()
@@ -246,3 +255,79 @@ def test_blank_secrets_in_env_mean_unset(monkeypatch: pytest.MonkeyPatch) -> Non
     settings = Settings()
     assert settings.anthropic_api_key is None
     assert settings.redaction_key is None
+
+
+@pytest.fixture
+def hostile_env_in_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    for name in ("EVJ_REDACT", "EVJ_REVIEW_COVERAGE_THRESHOLD", "EVJ_MAX_BODY_CHARS", ENV_FILE_VAR):
+        monkeypatch.delenv(name, raising=False)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".env").write_text(
+        "EVJ_REDACT=false\nEVJ_REVIEW_COVERAGE_THRESHOLD=0\nEVJ_MAX_BODY_CHARS=lots\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(workspace)
+    return workspace / ".env"
+
+
+def test_a_dotenv_in_the_working_directory_is_never_read(hostile_env_in_cwd: Path) -> None:
+    settings = read_settings()
+    assert settings.redact is True
+    assert settings.review_coverage_threshold == 0.6
+    assert Settings().redact is True
+
+
+def test_the_cli_ignores_a_dotenv_in_the_working_directory(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, hostile_env_in_cwd: Path
+) -> None:
+    install(monkeypatch, calls)
+    result = runner.invoke(app, ["judge", "--har", str(evidence)])
+    assert result.exit_code == ExitCode.PASS, result.output
+    assert "redaction disabled" not in result.output
+
+
+def test_the_mcp_server_ignores_a_dotenv_in_the_working_directory(
+    hostile_env_in_cwd: Path, tmp_path: Path
+) -> None:
+    settings = settings_of(ServerConfig(roots=Roots.of([tmp_path])))
+    assert settings.redact is True
+    assert settings.review_coverage_threshold == 0.6
+
+
+def test_env_file_option_is_read(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, hostile_env_in_cwd: Path
+) -> None:
+    install(monkeypatch, calls)
+    result = runner.invoke(
+        app, ["--env-file", str(hostile_env_in_cwd), "inspect", "--har", str(evidence)]
+    )
+    assert result.exit_code == ExitCode.USAGE, result.output
+    assert "EVJ_MAX_BODY_CHARS" in result.output
+
+
+def test_env_file_variable_is_read_and_real_variables_win(
+    monkeypatch: pytest.MonkeyPatch, hostile_env_in_cwd: Path
+) -> None:
+    monkeypatch.setenv(ENV_FILE_VAR, str(hostile_env_in_cwd))
+    monkeypatch.setenv("EVJ_MAX_BODY_CHARS", "100")
+    settings = read_settings()
+    assert settings.redact is False
+    assert settings.review_coverage_threshold == 0
+    assert settings.max_body_chars == 100
+
+
+def test_a_missing_env_file_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch, calls: Calls, evidence: Path, tmp_path: Path
+) -> None:
+    install(monkeypatch, calls)
+    monkeypatch.setenv(ENV_FILE_VAR, str(tmp_path / "missing.env"))
+    with pytest.raises(EnvFileError):
+        read_settings()
+    result = runner.invoke(app, ["inspect", "--har", str(evidence)])
+    assert result.exit_code == ExitCode.USAGE, result.output
+    assert ENV_FILE_VAR in result.output and "Traceback" not in result.output
+    missing = runner.invoke(
+        app, ["--env-file", str(tmp_path / "missing.env"), "inspect", "--har", str(evidence)]
+    )
+    assert missing.exit_code == ExitCode.USAGE, missing.output

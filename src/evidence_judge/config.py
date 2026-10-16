@@ -21,6 +21,7 @@ APP_DIR_NAME = "evidence-judge"
 
 LLMBackend = Literal["anthropic", "claude-code", "codex", "gemini"]
 LLM_BACKENDS: tuple[LLMBackend, ...] = ("anthropic", "claude-code", "codex", "gemini")
+ENV_FILE_VAR = "EVJ_ENV_FILE"
 
 
 def default_cache_dir() -> Path:
@@ -40,9 +41,10 @@ def default_cache_dir() -> Path:
 
 
 class Settings(BaseSettings):
-    """Runtime settings. Read from environment variables (EVJ_*) or a .env file; never from code."""
+    """Runtime settings, read from environment variables (EVJ_*); never from code. No ``.env``
+    file is read unless one is named explicitly (see `read_settings`)."""
 
-    model_config = SettingsConfigDict(env_prefix="EVJ_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="EVJ_", env_file=None, extra="ignore")
 
     llm_backend: LLMBackend = Field(
         default="anthropic",
@@ -114,6 +116,25 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+
+class EnvFileError(ValueError):
+    """The dotenv file named by ``--env-file`` or ``EVJ_ENV_FILE`` is not a readable file."""
+
+
+def read_settings(env_file: Path | None = None) -> Settings:
+    """Settings from the environment plus the dotenv file ``env_file``, else the one
+    ``EVJ_ENV_FILE`` names; real environment variables win over the file. A ``.env`` in the
+    working directory is never read implicitly, so a checked-out repository cannot change
+    settings such as ``EVJ_REDACT``."""
+    named = os.environ.get(ENV_FILE_VAR, "").strip()
+    path = env_file or (Path(named) if named else None)
+    if path is None:
+        return Settings()
+    if not path.is_file():
+        source = "--env-file" if env_file is not None else ENV_FILE_VAR
+        raise EnvFileError(f"{source}: {path} is not a file")
+    return Settings(_env_file=path)  # pyright: ignore[reportCallIssue]
 
 
 def describe_settings_error(e: ValidationError) -> str:

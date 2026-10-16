@@ -25,17 +25,19 @@ from evidence_judge._cli_common import (
     FileOpt,
     LLMChoice,
     build_llm,
+    chosen_env_file,
     fail,
     internal,
     load_claims,
     load_redactor,
     load_settings,
     stderr,
+    use_env_file,
     write_output,
 )
 from evidence_judge._extras import needs_extra
 from evidence_judge._version import __version__
-from evidence_judge.config import Settings
+from evidence_judge.config import Settings, read_settings
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
@@ -130,8 +132,20 @@ def main(
             is_eager=True,
         ),
     ] = None,
+    env_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--env-file",
+            metavar="PATH",
+            help=(
+                "Read EVJ_* settings from this dotenv file (default: EVJ_ENV_FILE); "
+                "environment variables still win. No .env is read otherwise"
+            ),
+            **IN_FILE,
+        ),
+    ] = None,
 ) -> None:
-    pass
+    use_env_file(env_file)
 
 
 app.add_typer(hook_app)
@@ -526,8 +540,10 @@ def mcp_server(
             )
         )
         raise typer.Exit(int(ExitCode.USAGE)) from None
+    chosen = chosen_env_file()
     config = ServerConfig(
         roots=Roots.of(root or [Path.cwd()]),
+        settings=lambda: read_settings(chosen),
         allow_llm=not offline_only,
     )
     serve(config, transport="streamable-http" if http else "stdio", port=port)

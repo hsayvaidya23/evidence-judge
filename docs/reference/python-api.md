@@ -22,7 +22,7 @@ verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yam
 print(verdict.outcome, verdict.summary)
 ```
 
-1.  Reads `EVJ_*` variables and `.env`, like the CLI.
+1.  Reads `EVJ_*` environment variables only; no `.env` file is read.
 2.  Any of `trace`, `har` and `browser_use`, plus `answer` or `answer_file`, `reasoning_file`,
     `task`, `run_id`, `max_body_chars`, `allow_mismatch` and `screenshot_root`.
 3.  `build_llm` returns `None` when no API key is configured; the judge then runs offline.
@@ -132,7 +132,7 @@ SemVer covers:
 | `load_run` | Load a trace, HAR or browser-use history into a run |
 | `TaskSpec` | A task spec; `TaskSpec.load(path)` |
 | `RunVerdict`, `Outcome` | The verdict and its `pass` / `fail` / `needs_review` outcome |
-| `Settings` | Configuration from `EVJ_*` variables and `.env` |
+| `Settings` | Configuration from `EVJ_*` environment variables |
 | `build_llm` | The configured LLM client, or `None` offline |
 | `Redactor` | Redact a run and spec before the verdict leaves the process |
 | `__version__` | The installed version |

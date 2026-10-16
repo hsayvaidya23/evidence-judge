@@ -105,7 +105,10 @@ The input is masked in the log and only set for the judging step; left empty, it
 override an `ANTHROPIC_API_KEY` the job already sets. With `offline: "false"` and no key, the step
 warns and judges offline. Secrets are not passed to workflows triggered from forks, so
 pull requests from forks run offline. Any `EVJ_*` setting from
-[Configuration](../reference/configuration.md) can be set as an environment variable.
+[Configuration](../reference/configuration.md) can be set as an environment variable in the
+workflow. A `.env` file in the checked-out repository is never read, so a pull request cannot
+change settings such as `EVJ_REDACT` or `EVJ_REVIEW_COVERAGE_THRESHOLD`; when the workflow
+itself sets `EVJ_REDACT=false`, the step prints a warning.
 
 ## Safe with untrusted agent text
 

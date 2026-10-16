@@ -4,9 +4,13 @@ description: Every Evidence Judge setting - EVJ_* environment variables and ANTH
 
 # Configuration
 
-Settings come from environment variables or a `.env` file in the working directory (see
-`.env.example` in the repository), never from code. The one command-line override is `--llm`
-on `judge` and `bench`, which picks `EVJ_LLM_BACKEND` for that run. Every variable except
+Settings come from environment variables, never from code. A dotenv file is read only when you
+name it: the global `--env-file PATH` option (`evidence-judge --env-file ci.env judge ...`) or
+`EVJ_ENV_FILE=PATH`. Real environment variables win over the file. A `.env` in the working
+directory is never read on its own, so a checked-out repository (say, a pull request in the
+GitHub Action) cannot turn off redaction or lower the review threshold; `.env.example` in the
+repository lists every variable. The one other command-line override is `--llm` on `judge` and
+`bench`, which picks `EVJ_LLM_BACKEND` for that run. Every variable except
 `ANTHROPIC_API_KEY` has the `EVJ_` prefix. An invalid value exits with code `3`.
 
 | Variable | Type | Default | Purpose |
