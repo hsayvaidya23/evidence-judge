@@ -12,7 +12,8 @@ import pytest
 from typer.testing import CliRunner
 
 import evidence_judge.cli
-from evidence_judge.cli import ExitCode, _redactor, app
+from evidence_judge._cli_common import load_redactor
+from evidence_judge.cli import ExitCode, app
 from evidence_judge.config import REDACTION_KEY_FILE, Settings, default_cache_dir
 from tests.unit.test_cli import Calls, install
 
@@ -145,7 +146,7 @@ def test_online_judge_with_unwritable_cache_falls_back_to_a_process_key(
 
 def test_redactor_without_persistence_never_touches_the_cache(tmp_path: Path) -> None:
     settings = Settings.model_validate({"cache_dir": tmp_path / "cache", "redaction_key": None})
-    _redactor(settings, persistent=False)
+    load_redactor(settings, persistent=False)
     assert not (tmp_path / "cache").exists()
 
 

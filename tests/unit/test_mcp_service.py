@@ -14,6 +14,7 @@ from evidence_judge.core.evidence import Run
 from evidence_judge.llm.base import LLMConfigError, LLMError
 from evidence_judge.mcp import Roots, ServerConfig, ToolInputError
 from evidence_judge.mcp.service import JudgeRequest
+from evidence_judge.redact import redactor_for
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -35,23 +36,37 @@ def _request(**extra: Any) -> JudgeRequest:
 
 def test_a_persistent_redactor_uses_the_key_file(tmp_path: Path) -> None:
     settings = _settings(cache_dir=tmp_path)
-    service.redactor_for(settings, persistent=True)
+    redactor_for(settings, persistent=True)
     assert (tmp_path / REDACTION_KEY_FILE).is_file()
 
 
-def test_a_corrupt_key_file_is_an_input_error(tmp_path: Path) -> None:
-    (tmp_path / REDACTION_KEY_FILE).write_text("zz", encoding="ascii")
-    with pytest.raises(ToolInputError, match="redaction key"):
-        service.redactor_for(_settings(cache_dir=tmp_path), persistent=True)
+async def test_a_corrupt_key_file_is_an_input_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shutil.copytree(FIXTURES / "runs" / "forged_success", tmp_path / "run")
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "cache" / REDACTION_KEY_FILE).write_text("zz", encoding="ascii")
+    config = ServerConfig(
+        roots=Roots.of([tmp_path]), settings=lambda: _settings(cache_dir=tmp_path / "cache")
+    )
+    monkeypatch.setattr(service.factory, "build_llm", lambda settings: object())
+    req = _request(offline=False)
+    prepared = service.prepare_judge(config, req)
+    with pytest.raises(ToolInputError, match=r"redaction key: .* is corrupt"):
+        await service.judge(config, req, prepared)
 
 
 def test_an_unwritable_cache_falls_back_to_a_process_key(tmp_path: Path) -> None:
     blocker = tmp_path / "file"
     blocker.write_text("x", encoding="utf-8")
-    redactor = service.redactor_for(_settings(cache_dir=blocker / "cache"), persistent=True)
-    assert redactor.fingerprint("a") == service.redactor_for(
+    warnings: list[str] = []
+    redactor = redactor_for(
+        _settings(cache_dir=blocker / "cache"), persistent=True, warn=warnings.append
+    )
+    assert redactor.fingerprint("a") == redactor_for(
         _settings(cache_dir=None), persistent=False
     ).fingerprint("a")
+    assert len(warnings) == 1 and "per-process key" in warnings[0]
 
 
 class _FakeJudge:

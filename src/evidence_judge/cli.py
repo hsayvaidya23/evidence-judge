@@ -28,13 +28,14 @@ from evidence_judge._cli_common import (
     fail,
     internal,
     load_claims,
+    load_redactor,
     load_settings,
     stderr,
     write_output,
 )
 from evidence_judge._extras import needs_extra
 from evidence_judge._version import __version__
-from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.config import Settings
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
@@ -175,24 +176,6 @@ def _run_judge(
         raise CliError(f"LLM error: {e}", ExitCode.INTERNAL) from e
 
 
-def _redactor(settings: Settings, *, persistent: bool = True) -> Redactor:
-    """The run's redactor. Only a ``persistent`` one (an LLM cache will be used) reads or creates
-    the key file in the cache directory; an unwritable cache falls back to a per-process key."""
-    if not persistent or settings.redaction_key is not None:
-        return Redactor.from_settings(settings)
-    try:
-        key = stable_redaction_key(settings)
-    except ValueError as e:
-        raise CliError(f"redaction key: {e}", ExitCode.USAGE) from e
-    except OSError as e:
-        stderr().print(
-            Text(f"warning: redaction key unavailable ({e}); using a per-process key", "yellow"),
-            soft_wrap=True,
-        )
-        key = None
-    return Redactor(key) if key is not None else Redactor.from_settings(settings)
-
-
 def _load_spec(path: Path) -> TaskSpec:
     try:
         return load_yaml(path.read_text(encoding="utf-8"), TaskSpec)
@@ -263,7 +246,7 @@ def _redact_for_judging(
         if err is not None:
             err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
         return run, spec, claims
-    redactor = _redactor(settings, persistent=persistent)
+    redactor = load_redactor(settings, persistent=persistent)
     run, spec, claims, report = _redact_inputs(redactor, run, spec, claims)
     if err is not None:
         err.print(Text(report.describe(), style="dim"))
@@ -467,7 +450,7 @@ def inspect(
             trace=trace, har=har, browser_use=browser_use, max_body_chars=settings.max_body_chars
         )
         if settings.redact and not no_redact:
-            run, _ = _redactor(settings, persistent=False).redact_run(run)
+            run, _ = load_redactor(settings, persistent=False).redact_run(run)
         summary = summarize_evidence(run)
     except CliError as e:
         raise fail(e) from None
@@ -640,7 +623,7 @@ def bench(
                 else None
             ),
             redactor=(
-                _redactor(settings, persistent=llm is not None)
+                load_redactor(settings, persistent=llm is not None)
                 if settings.redact and not no_redact
                 else None
             ),

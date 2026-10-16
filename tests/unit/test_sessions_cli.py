@@ -286,6 +286,19 @@ def test_llm_build_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "could not initialise" in result.output
 
 
+def test_a_corrupt_redaction_key_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("EVJ_REDACTION_KEY")
+    monkeypatch.setenv("EVJ_CACHE_DIR", str(tmp_path))
+    (tmp_path / "redaction.key").write_text("not hex", encoding="ascii")
+    monkeypatch.setattr(evidence_judge.llm.factory, "build_llm", lambda settings: FakeLLM())
+    result = runner.invoke(app, ["session", "judge", "--claude-code", str(SUCCESS)])
+    assert result.exit_code == 3, result.output
+    text = " ".join(result.output.split())
+    assert "redaction key: redaction key file" in text and "is corrupt" in text
+
+
 def test_internal_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*args: object, **kwargs: object) -> None:
         raise RuntimeError("kaput")

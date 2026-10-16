@@ -15,7 +15,7 @@ from urllib.parse import quote, unquote, unquote_plus, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from evidence_judge.config import Settings
+from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.evidence import (
     ActionEvent,
     ConsoleEvent,
@@ -518,6 +518,23 @@ class Redactor:
                 "text": self._text(state.text, counts),
             }
         )
+
+
+def redactor_for(
+    settings: Settings, *, persistent: bool, warn: Callable[[str], object] | None = None
+) -> Redactor:
+    """The run's redactor. Only a ``persistent`` one (an LLM cache will be used) reads or creates
+    the key file in the cache directory. A corrupt key file raises ValueError; an unwritable
+    cache falls back to a per-process key and tells ``warn``."""
+    if not persistent or settings.redaction_key is not None:
+        return Redactor.from_settings(settings)
+    try:
+        key = stable_redaction_key(settings)
+    except OSError as e:
+        if warn is not None:
+            warn(f"redaction key unavailable ({e}); using a per-process key")
+        key = None
+    return Redactor(key) if key is not None else Redactor.from_settings(settings)
 
 
 def _run_texts(run: Run) -> Iterator[str]:

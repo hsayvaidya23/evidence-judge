@@ -22,12 +22,12 @@ from evidence_judge._cli_common import (
     fail,
     internal,
     load_claims,
+    load_redactor,
     load_settings,
     stderr,
     write_output,
 )
 from evidence_judge._version import __version__
-from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.spec_errors import SpecError, load_yaml
 from evidence_judge.core.verdict import (
     Citation,
@@ -38,7 +38,6 @@ from evidence_judge.core.verdict import (
     VerificationMethod,
 )
 from evidence_judge.llm.base import LLMConfigError, LLMError
-from evidence_judge.redact import Redactor
 from evidence_judge.report.console import StdoutConsole, print_verdict
 from evidence_judge.report.json_report import write_json
 from evidence_judge.sessions.ingest import load_session, locate
@@ -156,17 +155,6 @@ def _load(
         raise CliError(f"could not load the session: {e}", ExitCode.USAGE) from e
 
 
-def _redactor(settings: Settings, *, persistent: bool) -> Redactor:
-    if persistent and settings.redaction_key is None:
-        try:
-            key = stable_redaction_key(settings)
-        except (OSError, ValueError):
-            key = None
-        if key is not None:
-            return Redactor(key)
-    return Redactor.from_settings(settings)
-
-
 def _spec(path: Path | None) -> SessionSpec | None:
     if path is None:
         return None
@@ -282,7 +270,7 @@ def judge_command(
         )
         llm = None if offline else build_llm(settings)
         if settings.redact and not no_redact:
-            redactor = _redactor(settings, persistent=llm is not None)
+            redactor = load_redactor(settings, persistent=llm is not None)
             run, report = redact_session(redactor, run)
             session_spec = redact_spec(redactor, session_spec) if session_spec else None
             claim_set = redact_claims(redactor, claim_set) if claim_set else None
@@ -450,7 +438,7 @@ def inspect_command(
         settings = load_settings()
         run = _load(claude_code, project, codex, evidence_log)
         if settings.redact and not no_redact:
-            run, _ = redact_session(_redactor(settings, persistent=False), run)
+            run, _ = redact_session(load_redactor(settings, persistent=False), run)
     except CliError as e:
         raise fail(e) from None
     except Exception as e:

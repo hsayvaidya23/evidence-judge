@@ -18,6 +18,7 @@ from evidence_judge.core.spec_errors import json_syntax_problem
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMError
+from evidence_judge.redact import Redactor, redactor_for
 from evidence_judge.report.console import StderrConsole
 
 
@@ -121,3 +122,16 @@ def write_output(path: Path, write: Callable[[Path], object]) -> None:
     except OSError as e:
         reason = e.strerror or str(e)
         raise CliError(f"cannot write {path}: {reason}", ExitCode.USAGE) from e
+
+
+def load_redactor(settings: Settings, *, persistent: bool) -> Redactor:
+    """The run's redactor (see `redactor_for`): a corrupt key file is a usage error, and an
+    unwritable cache is a warning."""
+
+    def warn(message: str) -> None:
+        stderr().print(Text(f"warning: {message}", "yellow"), soft_wrap=True)
+
+    try:
+        return redactor_for(settings, persistent=persistent, warn=warn)
+    except ValueError as e:
+        raise CliError(f"redaction key: {e}", ExitCode.USAGE) from e

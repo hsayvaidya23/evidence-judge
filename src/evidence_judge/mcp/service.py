@@ -15,7 +15,7 @@ from typing import Any, Final, Literal, cast
 from pydantic import ValidationError
 
 from evidence_judge import engine, ingest
-from evidence_judge.config import Settings, describe_settings_error, stable_redaction_key
+from evidence_judge.config import Settings, describe_settings_error
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
 from evidence_judge.core.taskspec import TaskSpec
@@ -37,7 +37,7 @@ from evidence_judge.mcp.models import (
 from evidence_judge.mcp.models import Injection as InjectionOut
 from evidence_judge.mcp.paths import PathNotAllowedError, Roots, walk
 from evidence_judge.mcp.specs import SpecCheck, describe, parse_spec
-from evidence_judge.redact import RedactionReport, Redactor
+from evidence_judge.redact import RedactionReport, Redactor, redactor_for
 from evidence_judge.report.console import summarize_evidence
 from evidence_judge.report.html_report import write_html
 from evidence_judge.report.json_report import write_json
@@ -220,20 +220,6 @@ def _site(value: str | None) -> str | None:
         raise ToolInputError(str(e)) from e
 
 
-def redactor_for(settings: Settings, *, persistent: bool) -> Redactor:
-    """The run's redactor; only a ``persistent`` one (an LLM cache is used) reads or creates the
-    key file, and an unwritable cache falls back to a per-process key."""
-    if not persistent or settings.redaction_key is not None:
-        return Redactor.from_settings(settings)
-    try:
-        key = stable_redaction_key(settings)
-    except ValueError as e:
-        raise ToolInputError(f"redaction key: {e}") from e
-    except OSError:
-        key = None
-    return Redactor(key) if key is not None else Redactor.from_settings(settings)
-
-
 def _describe_redaction(report: RedactionReport | None) -> str:
     if report is None:
         return "redaction disabled by EVJ_REDACT=false: the verdict may contain secrets"
@@ -293,7 +279,10 @@ async def judge(config: ServerConfig, req: JudgeRequest, prepared: PreparedJudge
     llm = _llm(config, settings, req.offline)
     report: RedactionReport | None = None
     if settings.redact:
-        redactor = redactor_for(settings, persistent=llm is not None)
+        try:
+            redactor = redactor_for(settings, persistent=llm is not None)
+        except ValueError as e:
+            raise ToolInputError(f"redaction key: {e}") from e
         run, report = redactor.redact_run(run)
         if spec is not None:
             spec, _ = redactor.redact_model(spec)

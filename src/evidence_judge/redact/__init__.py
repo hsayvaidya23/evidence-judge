@@ -7,6 +7,6 @@ that quotes a redacted value still matches the redacted evidence, while the valu
 leaves the process. Redacting already-redacted data is a no-op.
 """
 
-from evidence_judge.redact.redactor import TOKEN_RE, RedactionReport, Redactor
+from evidence_judge.redact.redactor import TOKEN_RE, RedactionReport, Redactor, redactor_for
 
-__all__ = ["TOKEN_RE", "RedactionReport", "Redactor"]
+__all__ = ["TOKEN_RE", "RedactionReport", "Redactor", "redactor_for"]

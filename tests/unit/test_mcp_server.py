@@ -26,7 +26,8 @@ EMAIL = "alice@example.com"
 
 def _settings(**overrides: Any) -> Callable[[], Settings]:
     def make() -> Settings:
-        return Settings(_env_file=None, anthropic_api_key=None, cache_dir=None, **overrides)  # pyright: ignore[reportCallIssue]
+        options = {"cache_dir": None, **overrides}
+        return Settings(_env_file=None, anthropic_api_key=None, **options)  # pyright: ignore[reportCallIssue]
 
     return make
 
@@ -237,6 +238,21 @@ async def test_online_judging_needs_a_model(
     monkeypatch.setattr(evidence_judge.mcp.service.factory, "build_llm", lambda settings: None)
     message = await _fail(workspace, "judge_run", _run_args("forged_success", offline=False))
     assert "ANTHROPIC_API_KEY" in message
+
+
+async def test_a_corrupt_redaction_key_is_a_tool_error(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (workspace / "cache").mkdir()
+    (workspace / "cache" / "redaction.key").write_text("not hex", encoding="ascii")
+    monkeypatch.setattr(evidence_judge.mcp.service.factory, "build_llm", lambda settings: object())
+    message = await _fail(
+        workspace,
+        "judge_run",
+        _run_args("forged_success", offline=False),
+        settings=_settings(cache_dir=workspace / "cache"),
+    )
+    assert "redaction key" in message and "corrupt" in message
 
 
 async def test_offline_only_servers_refuse_online_judging(workspace: Path) -> None:
