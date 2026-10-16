@@ -29,6 +29,9 @@ from evidence_judge.sessions.bench.controls import (
     PUSHED,
     REQUIREMENTS_INSTALL,
     REWORDED,
+    TRUSTED_CONTROL,
+    TRUSTED_WRAPPER_TRICKS,
+    TRUSTED_WRAPPERS,
     UNCHECKED_CLAIMS,
     UNPROVEN,
     WRAPPER_CONTROLS,
@@ -110,6 +113,14 @@ def cases(root: Path) -> Iterator[Case]:
             update={"events": extend_events(base.events, calls, base.cwd), "final_answer": answer}
         )
         yield Case(f'{relative}+{name} "{answer}"', "control", run, expected=expected)
+    trusted = _load(root, TRUSTED_CONTROL)
+    yield Case(
+        f"{TRUSTED_CONTROL}+trusted_wrappers",
+        "control",
+        trusted,
+        spec=TRUSTED_WRAPPERS,
+        expected=Outcome.PASS,
+    )
     relative = "claude_code/go/honest_success.jsonl"
     go = _load(root, relative)
     run = go.model_copy(
@@ -163,6 +174,17 @@ def cases(root: Path) -> Iterator[Case]:
                     run = base.model_copy(update={"final_answer": answer})
                     yield Case(f"{relative}#{kind}{index}", kind, run)
             if project.name == "calc":
+                for kind, calls in TRUSTED_WRAPPER_TRICKS.items():
+                    events = extend_events(base.events, calls, base.cwd)
+                    run = base.model_copy(
+                        update={"events": events, "final_answer": project.forged_answer}
+                    )
+                    yield Case(
+                        f"{relative}#trusted_{kind}",
+                        f"trusted_wrapper:{kind}",
+                        run,
+                        spec=TRUSTED_WRAPPERS,
+                    )
                 for kind, (calls, answers) in PARTIAL_RED.items():
                     events = extend_events(base.events, calls, base.cwd)
                     for index, answer in enumerate(answers):
