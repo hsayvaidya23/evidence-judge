@@ -20,7 +20,7 @@
 
 <img align="right" src="docs/assets/mascot.svg" width="120" alt="Judge Owl, the Evidence Judge mascot">
 
-Evidence Judge grades **browser and computer-use agent runs** by pulling out every claim the agent makes and checking each one against what was actually recorded: network requests, page state, screenshots and the final page. An agent can't talk its way into a PASS.
+Evidence Judge grades **browser and computer-use agent runs** and **coding-agent sessions** (Claude Code, Codex CLI, Gemini CLI) by pulling out every claim the agent makes and checking each one against what was actually recorded: network requests, page state, screenshots and the final page for a browser run; commands, edits and test runs for a session, optionally re-running the tests itself. An agent can't talk its way into a PASS.
 
 ## 🎬 See it catch a lie
 
@@ -297,7 +297,7 @@ Send verdicts to the tools you already use (each is an optional extra; see [docs
 
 MCP server: `evidence-judge mcp` (extra `evidence-judge[mcp]`) serves `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and `find_recordings` as MCP tools for Claude Code, Codex CLI, Gemini CLI or any MCP client; see [docs/guides/mcp.md](docs/guides/mcp.md).
 
-Coding agents: check the agent's answer against its own browser trace before it is allowed to stop.
+Coding agents: check the agent's answer against its own browser trace and, with a session spec, an independent re-run of the session's tests before it is allowed to stop.
 
 - **Claude Code**: `/plugin marketplace add hsayvaidya23/evidence-judge`, then `/plugin install evidence-judge@evidence-judge` (or `/plugin install evidence-judge --marketplace hsayvaidya23/evidence-judge`). A Stop hook blocks on FAIL, recorder hooks keep a hash-chained evidence log, and the plugin adds the MCP server and a skill. The plugin runs `evidence-judge` from your `PATH`, so install the CLI with the `mcp` extra first (as in [Install](#-install)). See [docs/guides/claude-code.md](docs/guides/claude-code.md).
 - **Codex CLI**: `evidence-judge hook codex-stop` as a blocking `Stop` hook, `codex-record` as a `PostToolUse` recorder, and `codex mcp add evidence-judge -- evidence-judge mcp`. See [docs/guides/codex.md](docs/guides/codex.md).

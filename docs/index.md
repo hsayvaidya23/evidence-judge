@@ -1,6 +1,6 @@
 ---
 title: Evidence Judge
-description: Grade browser and computer-use agent runs by checking every claim against recorded evidence. Don't trust what the agent says. Check what it did.
+description: Grade browser and computer-use agent runs and coding-agent sessions by checking every claim against recorded evidence. Don't trust what the agent says. Check what it did.
 hide:
   - navigation
   - toc
@@ -8,9 +8,9 @@ hide:
 
 <section class="ej-hero" id="ej-hero">
   <div class="ej-hero__text">
-    <p class="ej-eyebrow">Evals for browser &amp; computer-use agents</p>
+    <p class="ej-eyebrow">Evals for browser, computer-use &amp; coding agents</p>
     <h1 class="ej-hero__title">Don't trust what the agent says. <span class="ej-gradient">Check what it did.</span></h1>
-    <p class="ej-hero__lead">Evidence Judge pulls every claim out of an agent's answer and checks each one against what the browser actually recorded: network requests, page state, screenshots and the final page. An agent can't talk its way into a PASS.</p>
+    <p class="ej-hero__lead">Evidence Judge pulls every claim out of an agent's answer and checks each one against what was actually recorded: network requests, page state, screenshots and the final page for a browser run; commands, edits and test runs for a coding-agent session. An agent can't talk its way into a PASS.</p>
     <div class="ej-cta">
       <a class="md-button md-button--primary" href="getting-started/">Get started</a>
       <a class="md-button" href="benchmark/">Benchmark</a>
