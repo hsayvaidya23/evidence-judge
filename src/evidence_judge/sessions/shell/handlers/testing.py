@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Final
 
 from evidence_judge.sessions.models import Category
@@ -105,7 +106,8 @@ def _node(c: Call) -> Classified | None:
 
 
 def _tox(c: Call) -> Classified:
-    return Classified(Category.TEST, c.prog, c.prog, tox_filters(c.prog, c.args))
+    filters = tox_filters(c.prog, c.args)
+    return Classified(Category.TEST, c.prog, c.prog, filters, wrapper=shlex.join(c.words))
 
 
 TEST_RUNNERS: Final = (

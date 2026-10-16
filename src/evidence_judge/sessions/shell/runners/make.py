@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -49,7 +50,7 @@ _MAKE_OPTIONS["gmake"] = _MAKE_OPTIONS["make"]
 
 
 @dataclass(slots=True)
-class _MakeArgs:
+class MakeArgs:
     targets: list[str] = field(default_factory=list[str])
     assigns: dict[str, str] = field(default_factory=dict[str, str])
     dirs: list[str] = field(default_factory=list[str])
@@ -58,11 +59,11 @@ class _MakeArgs:
     dry_run: bool = False
 
 
-def _make_args(prog: str, args: list[str]) -> _MakeArgs:
+def make_args(prog: str, args: list[str]) -> MakeArgs:
     """Targets, `VAR=value` arguments and options of a make-like command line, options
     anywhere (`make test -C dir`, `make -Cdir -j4 test`)."""
     takes, harmless = _MAKE_OPTIONS[prog]
-    out = _MakeArgs()
+    out = MakeArgs()
 
     def option(name: str, value: str | None) -> bool:
         """Record `name`; True when it took `value`."""
@@ -117,7 +118,7 @@ def _make_args(prog: str, args: list[str]) -> _MakeArgs:
 
 
 def make_like(prog: str, words: list[str]) -> Classified:
-    parsed = _make_args(prog, words[1:])
+    parsed = make_args(prog, words[1:])
     if parsed.dry_run:
         return Classified(Category.READ_ONLY, prog)
     targets = parsed.targets
@@ -125,6 +126,7 @@ def make_like(prog: str, words: list[str]) -> Classified:
         return Classified(Category.BUILD, prog, mutation=f"{prog} runs the default target")
     target = targets[0]
     label = f"{prog} {target}"
+    wrapper = shlex.join(words)
     if target in _TEST_TARGETS or target.startswith(("test-", "test_", "tests-")):
         filters = [] if target in _TEST_TARGETS else [f"target {target}"]
         filters.extend(f"also runs {t}" for t in targets[1:])
@@ -143,13 +145,14 @@ def make_like(prog: str, words: list[str]) -> Classified:
                 for name, value in parsed.assigns.items()
                 if not run_env_allowed(name) and not harmless_env(name, value)
             ],
+            wrapper=wrapper,
         )
     if target in ("build", "all", "compile", "dist"):
         return Classified(Category.BUILD, prog)
     if target in ("lint", "check-lint", "ruff", "flake8"):
-        return Classified(Category.LINT, prog)
+        return Classified(Category.LINT, prog, wrapper=wrapper)
     if target in ("typecheck", "type-check", "types", "mypy", "pyright", "tsc"):
-        return Classified(Category.TYPECHECK, prog)
+        return Classified(Category.TYPECHECK, prog, wrapper=wrapper)
     if target in ("fmt", "format"):
         return Classified(Category.FORMAT, prog, mutation=f"{label} rewrites files")
     return Classified(Category.UNKNOWN, prog, mutation=f"{label} runs a project target")

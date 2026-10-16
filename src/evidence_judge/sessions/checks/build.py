@@ -7,7 +7,13 @@ from evidence_judge.sessions.checks.common import Result, RunOutcome, result
 from evidence_judge.sessions.checks.index import SessionIndex
 from evidence_judge.sessions.checks.runs import compile_failure, exit_reliable
 from evidence_judge.sessions.edits import SUPPRESSES
-from evidence_judge.sessions.models import CallStatus, Category, CommandEvent, FileEditEvent
+from evidence_judge.sessions.models import (
+    CallStatus,
+    Category,
+    CommandEvent,
+    FileEditEvent,
+    SessionEvent,
+)
 from evidence_judge.sessions.predicates import BuildPredicate
 
 _CATEGORY = {
@@ -43,12 +49,18 @@ def judge_check_run(event: CommandEvent, index: SessionIndex) -> RunOutcome:
     return RunOutcome(event, Result.PASS, f"{event.id} exited 0", partial)
 
 
-def _suppressed(category: str, index: SessionIndex) -> FileEditEvent | None:
-    """An edit that added a comment switching `category` off for a line or a file."""
-    return next(
-        (e for e in index.edits if any(SUPPRESSES.get(s) == category for s in e.suppressions)),
-        None,
-    )
+def _suppressed(category: str, index: SessionIndex) -> tuple[SessionEvent, str] | None:
+    """An edit, or a command that ran, that added a comment switching `category` off for a line
+    or a file, and the file it names."""
+    for edit in index.edits:
+        if any(SUPPRESSES.get(s) == category for s in edit.suppressions):
+            return edit, edit.path
+    for command in index.commands:
+        if command.status is CallStatus.DENIED:
+            continue
+        if any(SUPPRESSES.get(s) == category for s in command.analysis.suppressions):
+            return command, "a source file from the shell"
+    return None
 
 
 def _test_build_failed(index: SessionIndex) -> PredicateResult | None:
@@ -103,14 +115,22 @@ def check_build(predicate: BuildPredicate, index: SessionIndex) -> PredicateResu
         )
         return result(Support.NO_EVIDENCE, why, last.event)
     succeeded = deciding.result is Result.PASS
-    if succeeded and predicate.ok and (edit := _suppressed(predicate.category, index)):
-        marks = ", ".join(s for s in edit.suppressions if SUPPRESSES.get(s) == predicate.category)
+    if succeeded and predicate.ok and (found := _suppressed(predicate.category, index)):
+        source, where = found
+        labels = (
+            source.suppressions
+            if isinstance(source, FileEditEvent)
+            else source.analysis.suppressions
+            if isinstance(source, CommandEvent)
+            else []
+        )
+        marks = ", ".join(s for s in labels if SUPPRESSES.get(s) == predicate.category)
         return result(
             Support.NO_EVIDENCE,
-            f"{deciding.reason}, but {edit.id} added {marks} to {edit.path}, which hides "
+            f"{deciding.reason}, but {source.id} added {marks} to {where}, which hides "
             f"{predicate.category} findings",
             deciding.event,
-            edit,
+            source,
         )
     status = Support.SUPPORTED if succeeded == predicate.ok else Support.CONTRADICTED
     return result(status, deciding.reason, deciding.event)

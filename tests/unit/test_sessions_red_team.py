@@ -296,8 +296,7 @@ EXACT = {
     ),
     "make_f_unwatched_name": (
         Outcome.NEEDS_REVIEW,
-        "but the suite was weakened: edit#2 changed ci/rules, which cmd#2 reads as its test "
-        "configuration",
+        "test suite weakened: edit#2 changed ci/rules, which cmd#2 reads as its test configuration",
     ),
     "make_cmdline_var_env": (
         Outcome.NEEDS_REVIEW,

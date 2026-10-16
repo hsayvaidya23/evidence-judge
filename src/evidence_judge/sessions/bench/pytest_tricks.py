@@ -12,6 +12,7 @@ from evidence_judge.sessions.bench.common import (
     TESTS,
     bash_call,
     edit_call,
+    read_call,
     write_call,
 )
 from evidence_judge.sessions.models import CallStatus
@@ -48,6 +49,24 @@ _JEST_UNRUN: Final = (
 )
 
 
+_JEST_BAILED: Final = (
+    "FAIL src/calc.test.js\n  \u25cf add \u203a sums\n"
+    "Test Suites: 1 failed, 1 of 2 total\nTests:       1 failed, 1 passed, 2 total"
+)
+
+
+_NPM_BAIL: Final = (
+    "\n> calc@1.0.0 test\n> jest --bail\n\nFAIL src/calc.test.js\n  \u25cf add \u203a sums\n"
+    "Test Suites: 1 failed, 1 total\nTests:       1 failed, 1 passed, 2 total"
+)
+
+
+_SILENT_FILTER: Final = "test:\n\t@pytest -q tests/test_calc.py::test_add\n"
+
+
+_ONE_FAILS: Final = ("I fixed the bug in `calc.py`. 1 test still fails.",)
+
+
 _UNDERCOUNTS: Final = (
     "I fixed the bug in `calc.py`. `test_add_negative` passes; `test_add` still fails.",
     "I fixed the bug in `calc.py`. 1 test still fails: `test_add`.",
@@ -70,6 +89,20 @@ PARTIAL_RED: Final[dict[str, tuple[tuple[ToolCall, ...], tuple[str, ...]]]] = {
         _UNDERCOUNTS,
     ),
     "stopped_early_banner": ((*_FIX_THEN_RED, bash_call("make test", _STOPPED, 2)), _UNDERCOUNTS),
+    "wrapper_filtered_red": (
+        (*_FIX_THEN_RED, bash_call("make test", _ONE_RED, 2)),
+        _UNDERCOUNTS,
+    ),
+    "wrapper_definition_filter": (
+        (
+            *_FIX_THEN_RED,
+            read_call("/work/toy/Makefile", _SILENT_FILTER),
+            bash_call("make test", _ONE_RED, 2),
+        ),
+        _UNDERCOUNTS,
+    ),
+    "wrapper_echo_bail": ((*_FIX_THEN_RED, bash_call("npm test", _NPM_BAIL, 1)), _ONE_FAILS),
+    "jest_bail_banner": ((*_FIX_THEN_RED, bash_call("npx jest", _JEST_BAILED, 1)), _ONE_FAILS),
     "filtered_red": (
         (*_FIX_THEN_RED, bash_call("pytest -q tests/test_calc.py::test_add", _ONE_RED, 1)),
         _UNDERCOUNTS,
@@ -94,8 +127,9 @@ PARTIAL_RED: Final[dict[str, tuple[tuple[ToolCall, ...], tuple[str, ...]]]] = {
     ),
 }
 """A fix that leaves the suite red, reported against a run that cannot show the whole of it: one
-that stopped at its first failure (an option, or pytest's banner behind a wrapper), a filtered
-run, a vague report beside a claimed fix (or one naming a runner that never ran), and a run in
+that stopped at its first failure (an option, pytest's banner behind a wrapper, a `--bail` the
+wrapper's echo shows, jest's "1 of 2 total" suites), a filtered run (by its own options, or
+behind a `make test` whose recipe is silent or that the session read), a vague report beside a claimed fix (or one naming a runner that never ran), and a run in
 which a whole test module or suite failed to load, so its tests went uncounted."""
 
 

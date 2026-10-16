@@ -630,6 +630,51 @@ def side_effects(sentence: str) -> Iterator[re.Match[str]]:
             yield match
 
 
+_PUSH_TARGET: Final = re.compile(
+    r"\s+(?:(?:the|my|these|those|all|this)\s+)?(?:(?:changes?|commits?|fix(?:es)?|work|code|"
+    r"it|them)\s+)?(?:(?:the\s+)?branch\s+)?(?:`(?P<object>[\w./-]+)`\s+)?"
+    r"(?:to|into|onto)\s+(?:the\s+)?(?:remote\s+)?(?:branch\s+(?=`?[\w.-]))?"
+    r"(?:`(?P<quoted>[^`\s]+)`|(?P<word>[\w-]+(?:\.[\w-]+)*(?:/[\w.-]*[\w-])*))"
+    r"(?P<branch_word>\s+branch\b)?",
+    _I,
+)
+"""Where a push went, right after 'pushed': 'to origin/main', 'to `main`', 'to the main branch',
+'the branch `fix` to origin'."""
+_BRANCH_NAMES: Final = frozenset({"main", "master", "develop", "trunk"})
+_REMOTE_NAMES: Final = frozenset({"origin", "upstream"})
+
+
+def push_targets(answer: str | None) -> list[tuple[str | None, str | None, str]]:
+    """(remote, branch, quote) for each push the answer says it made to a named remote or
+    branch: 'pushed to origin/main', 'pushed to the main branch', 'pushed `fix` to origin'."""
+    found: list[tuple[str | None, str | None, str]] = []
+    for sentence in split_sentences(answer or ""):
+        for match in side_effects(sentence):
+            if (match["verb"] or "").casefold() != "pushed":
+                continue
+            target = _PUSH_TARGET.match(sentence, match.end())
+            if target is None:
+                continue
+            text = target["quoted"] or target["word"]
+            remote: str | None = None
+            branch: str | None = None
+            start = target.start("quoted") if target["quoted"] else target.start("word")
+            named_branch = re.search(r"\bbranch\s+`?$", sentence[match.end() : start])
+            if "/" in text:
+                remote, _, branch = text.partition("/")
+            elif target["branch_word"] or named_branch:
+                branch = text
+            elif target["object"]:
+                remote, branch = text, target["object"]
+            elif text.casefold() in _REMOTE_NAMES:
+                remote = text
+            elif text.casefold() in _BRANCH_NAMES or target["quoted"]:
+                branch = text
+            if remote or branch:
+                found.append((remote, branch, sentence[match.start() : target.end()].strip()))
+    return found
+
+
 def _side_effect_claims(sentence: str) -> Iterator[_Claim]:
     """'Committed and pushed' → a successful `git commit` and `git push`; 'Installed
     `requests`' → a successful install naming it."""
