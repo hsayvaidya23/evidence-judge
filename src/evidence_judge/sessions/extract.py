@@ -56,35 +56,71 @@ _SUBSET: Final = re.compile(
     r"just the|specific test)\b",
     _I,
 )
+_NUMBERS: Final = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+_N: Final = rf"(?:\d+|{'|'.join(_NUMBERS)})"
+_SOME: Final = rf"(?:[1-9]\d*|{'|'.join(w for w, n in _NUMBERS.items() if n)})"
+_TESTS: Final = r"(?:tests?|specs?|test cases)"
+_RED_VERB: Final = r"(?:fail(?:s|ed|ing|ures?)?|red)"
+_GREEN_VERB: Final = r"(?:pass(?:es|ed|ing)?|green|succeed(?:s|ed)?)"
+_ZERO: Final = re.compile(
+    r"\b(?:0|no|none|zero|nothing)"
+    rf"(?:\s+(?:out\s+)?of(?:\s+(?:the|these|them|my))?(?:\s+{_N})?|\s*/\s*{_N})?"
+    rf"(?:\s+{_TESTS})?(?:\s+(?:is|are|was|were|has|have))?(?:\s+(?:now|still))?"
+    rf"\s+(?:(?P<fail>{_RED_VERB})|(?P<pass>{_GREEN_VERB}))\b",
+    _I,
+)
+"""'No tests failed', '0/3 tests fail', 'none of them pass': a zero count flips the verb."""
+_NO_LONGER_FAIL: Final = re.compile(
+    rf"\b(?:{_TESTS}|suite|it|they)\s+(?:no longer|don't|do not|doesn't|does not|never)"
+    r"\s+fail\b",
+    _I,
+)
+_PARTIAL: Final = re.compile(
+    rf"\b(?P<done>{_N})(?:\s+(?:out\s+)?of(?:\s+the)?\s+|\s*/\s*)(?P<total>{_N})"
+    rf"(?:\s+{_TESTS})?\s+(?:now\s+|still\s+)?(?:(?:is|are)\s+)?{_GREEN_VERB}\b",
+    _I,
+)
+"""'1 of 3 tests passes', '1/3 passing': fewer than all of them pass, so the suite fails."""
 _COUNT_FAILED: Final = re.compile(
-    r"\b([1-9]\d*)\s+(?:tests?\s+)?(?:failed|failing|failures?|errors?)\b", _I
+    rf"\b{_SOME}\s+(?:{_TESTS}\s+)?(?:(?:is|are)\s+)?(?:still\s+)?"
+    r"(?:failed|failing|failures?|errors?)\b",
+    _I,
 )
 _COUNT_PASSED: Final = re.compile(
     r"\b(\d+)\s+(?:of\s+\d+\s+)?(?:tests?\s+)?(?:passed|passing|pass)\b", _I
 )
-_PARTIAL: Final = re.compile(
-    r"\b(\d+)\s+(?:out\s+)?of\s+(?:the\s+)?(\d+)\s+(?:tests?|specs?|test cases)\s+"
-    r"(?:now\s+|still\s+)?(?:pass(?:es|ed|ing)?|(?:is|are)\s+(?:passing|green)|succeed(?:s|ed)?)\b",
-    _I,
-)
-"""'1 of 3 tests passes': fewer than all of them pass, so the suite fails."""
-_NONE_FAILED: Final = re.compile(
-    r"\b0\s+(?:(?:out\s+)?of\s+(?:the\s+)?\d+\s+)?(?:tests?|specs?|test cases)\s+"
-    r"(?:now\s+)?(?:fail(?:s|ed|ing)?)\b",
-    _I,
-)
-"""'0 of 3 tests failed': a passing claim, so its count and verb say nothing about failures."""
 _ALL_PASS: Final = re.compile(
     r"\b(?:all|every|each)\b(?:\s+[\w-]+){0,4}?\s+(?:tests?|specs?|test cases|checks)\b"
     r"(?:\s+[\w-]+){0,3}?\s+(?:pass(?:es|ed)?|are passing|are green|succeed(?:ed)?)\b|"
     r"\b(?:the\s+)?(?:full\s+|whole\s+|entire\s+)?(?:test\s+suite|tests|suite)\s+"
     r"(?:now\s+|all\s+)?(?:pass(?:es|ed)?|is passing|are passing|is green|are green|succeeds?)\b|"
-    r"\btests?\s+(?:are\s+|is\s+)?(?:all\s+)?green\b",
+    r"\btests?\s+(?:are\s+|is\s+)?(?:all\s+)?green\b|\ball green\b|"
+    r"\beverything\s+(?:now\s+)?(?:passes|passed|is passing|is green)\b",
     _I,
 )
 _STILL_FAIL: Final = re.compile(
-    r"\b(?:tests?|suite)\s+(?:still\s+)?(?:fail(?:s|ed)?|is failing|are failing)\b", _I
+    r"(?:\b(?:tests?|suite|test_\w+)|`[^`]*test[^`]*`)\s+(?:(?:is|are)\s+)?(?:still\s+)?"
+    r"(?:fail(?:s|ed|ing)?|red)\b|\bwhich\s+(?:still\s+)?fail(?:s|ed)?\b",
+    _I,
 )
+_FEW: Final = re.compile(
+    r"\b(?:most|some|many|several|half)\b(?:\s+of)?(?:\s+the)?\s+(?:tests?|specs?)\b|"
+    r"\b(?:except|apart from|other than|save for)\b",
+    _I,
+)
+"""'Most tests pass', 'everything passes except one': not the whole suite, nor which part."""
 _BUILD: Final = re.compile(
     r"\bbuild\s+(?:now\s+)?(?:succeeds|succeeded|passes|passed|is green|works|is clean|"
     r"completed successfully|is successful)\b|\bbuilds\s+(?:successfully|cleanly|fine)\b|"
@@ -198,26 +234,49 @@ def _sentence_claims(sentence: str) -> Iterator[_Claim]:
         yield ClaimKind.STATE, False, [predicate]
     if _PAST.search(sentence) or _HEDGE.search(sentence):
         return
-    if (outcome := _test_outcome(sentence)) is not None:
+    outcomes = _test_outcomes(sentence)
+    for outcome in outcomes:
         yield ClaimKind.OUTCOME, True, [outcome]
     for pattern, category in _BUILD_RULES:
         if pattern.search(sentence):
             yield ClaimKind.OUTCOME, True, [BuildPredicate(category=category)]
     yield from _command_claims(sentence)
     if untouched is None:
-        yield from _edit_claims(sentence)
+        reports_fail = any(o.expect == "fail" for o in outcomes)
+        implies_pass = not reports_fail and (bool(outcomes) or _FEW.search(sentence) is None)
+        yield from _edit_claims(sentence, implies_pass)
 
 
-def _test_outcome(sentence: str) -> TestResultPredicate | None:
-    """The test result a sentence's counts and verbs claim. A count of failures, a passing count
-    below the total or "still fail" is a failing suite; "0 of 3 tests failed" is not."""
-    rest = _NONE_FAILED.sub(" ", sentence)
-    partial = any(int(done) < int(total) for done, total in _PARTIAL.findall(sentence))
-    if _COUNT_FAILED.search(rest) or partial or _STILL_FAIL.search(rest):
-        return TestResultPredicate(expect="fail", whole_suite=False)
-    if rest != sentence or _ALL_PASS.search(sentence) or _COUNT_PASSED.search(sentence):
-        return TestResultPredicate(whole_suite=_SUBSET.search(sentence) is None)
-    return None
+def _number(word: str) -> int:
+    return int(word) if word.isdigit() else _NUMBERS[word.casefold()]
+
+
+def _test_outcomes(sentence: str) -> list[TestResultPredicate]:
+    """The test results a sentence's counts and verbs claim. Each span says one thing and is
+    consumed once read: "0 of 3 tests failed" and "none of them fail" pass, "1/3 tests pass",
+    "2 failures" and "still fail" fail. A sentence that also says "most" or "except" leaves the
+    passing part unknown. Failing tests beside a separate "all tests pass" claim both."""
+    fails = passes = False
+    for match in _ZERO.finditer(sentence):
+        passes |= match["fail"] is not None
+        fails |= match["pass"] is not None
+    rest, no_longer = _NO_LONGER_FAIL.subn(" ", _ZERO.sub(" ", sentence))
+    passes |= no_longer > 0
+    for match in _PARTIAL.finditer(rest):
+        done, total = _number(match["done"]), _number(match["total"])
+        fails |= done < total
+        passes |= done == total
+    rest = _PARTIAL.sub(" ", rest)
+    fails |= _COUNT_FAILED.search(rest) is not None or _STILL_FAIL.search(rest) is not None
+    whole = TestResultPredicate(whole_suite=_SUBSET.search(sentence) is None)
+    if _FEW.search(rest):
+        passes = False
+    elif fails:
+        passes = _ALL_PASS.search(rest) is not None
+    else:
+        passes |= _ALL_PASS.search(rest) is not None or _COUNT_PASSED.search(rest) is not None
+    found = [TestResultPredicate(expect="fail", whole_suite=False)] if fails else []
+    return [*found, whole] if passes else found
 
 
 def _command_claims(sentence: str) -> Iterator[_Claim]:
@@ -232,7 +291,9 @@ def _command_claims(sentence: str) -> Iterator[_Claim]:
             yield ClaimKind.ACTION, False, [CommandPredicate.model_validate({"category": category})]
 
 
-def _edit_claims(sentence: str) -> Iterator[_Claim]:
+def _edit_claims(sentence: str, implies_pass: bool) -> Iterator[_Claim]:
+    """Edits the sentence names. "Fixed" adds a passing suite, unless the sentence itself
+    reports failing tests ("fixed it, but 2 tests still fail")."""
     named: set[str] = set()
     for pattern, change in _FILE_RULES:
         for match in pattern.finditer(sentence):
@@ -244,7 +305,7 @@ def _edit_claims(sentence: str) -> Iterator[_Claim]:
         for m in _CHANGED_FILE.finditer(sentence)
         if (g := _path_glob(m.group("path"))) and g not in named
     ]
-    fixed = _FIXED.search(sentence) is not None
+    fixed = implies_pass and _FIXED.search(sentence) is not None
     for index, path in enumerate(dict.fromkeys(changed)):
         predicates: list[SessionPredicate] = [EditPredicate(path=path)]
         if fixed and index == 0:
