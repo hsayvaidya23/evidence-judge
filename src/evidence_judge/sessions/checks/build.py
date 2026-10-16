@@ -30,6 +30,10 @@ def judge_check_run(event: CommandEvent, index: SessionIndex) -> RunOutcome:
     whatever its exit status; a pass needs the tool's own exit status 0."""
     where = index.run_dir(event)
     scope = [*event.analysis.check_filters]
+    if event.analysis.wrapper_unseen is not None:
+        scope.append(event.analysis.wrapper_unseen)
+    if "pre-commit" in event.analysis.programs and "SKIP" in index.inherited(event):
+        scope.append("SKIP, exported by an earlier command, leaves pre-commit hooks out")
     if where != ".":
         scope.append(
             f"ran in {where or 'a directory only the shell knows'}, not the session directory"
