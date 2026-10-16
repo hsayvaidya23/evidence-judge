@@ -302,7 +302,7 @@ async def test_a_count_the_answer_states_is_checked_whatever_the_extractor() -> 
         update={"predicates": [TestResultPredicate(expect="fail", whole_suite=False)]}
     )
     unsaid = SessionClaimSet(claims=[uncounted], extractor="llm:fake")
-    assert (await _judge(_red(answer), claims=unsaid)).outcome is Outcome.PASS
+    assert (await _judge(_red(answer), claims=unsaid)).outcome is Outcome.NEEDS_REVIEW
 
 
 @pytest.mark.parametrize(
