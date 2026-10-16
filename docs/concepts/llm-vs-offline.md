@@ -30,8 +30,8 @@ no LLM configured; judging offline
 ## Offline: heuristic extraction
 
 The offline extractor recognises common completion phrases (*placed the order*, *added to
-cart*, *changed the email*, *order #1042*, *the price was $24*) and maps them to `request`,
-`page_text` and `value` predicates. Intended (*will place*) phrases are skipped, and so is
+cart*, *changed the email*, *order #1042*, *the price was $24*, *bought it for $24*) and maps
+them to `request`, `page_text` and `value` predicates. Intended (*will place*) phrases are skipped, and so is
 every clause that holds a negation word (*could not place*, *nothing was purchased*, *no
 message was sent*): the rules match words, not sentences, so rather than guess which way a
 negation turns a verb, the extractor abstains on that clause. A clause ends at `,`, `;`, `:`,
@@ -43,7 +43,10 @@ review; an LLM extractor reads the whole sentence.
 It is deterministic and fast, and it is what the [benchmark](../benchmark.md) and the golden
 regression tests use. Its limit: wording it does not recognise produces no claim. Claim
 coverage catches that: when too little of the answer became checkable claims, the run goes to
-`NEEDS_REVIEW` instead of passing. A task spec checks the run regardless of wording.
+`NEEDS_REVIEW` instead of passing. A claim-like sentence that states a currency amount no claim
+checks (*I bought the kettle, $4.00, ...*) counts as not covered, even when another claim quotes
+it; bounds, surcharges and differences (*under $30*, *shipping $5*, *$6 under budget*) are not
+amounts it has to check. A task spec checks the run regardless of wording.
 
 ## With an LLM: extraction, defended
 

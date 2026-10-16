@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 ROOT = Path(__file__).parents[2]
 
@@ -168,6 +172,66 @@ def test_action_never_reuses_an_earlier_verdict() -> None:
     assert 'if [ "$code" -ge 3 ] ||' in script
 
 
+def _check_inputs(tmp_path: Path, **inputs: str) -> tuple[int, str, dict[str, str]]:
+    step = next(s for s in _action()["runs"]["steps"] if s.get("id") == "inputs")
+    outputs = tmp_path / "outputs"
+    outputs.touch()
+    env = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(outputs)}
+    env.update({f"EJ_{name.upper()}": value for name, value in inputs.items()})
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True, check=False
+    )
+    written = dict(line.split("=", 1) for line in outputs.read_text().splitlines())
+    return result.returncode, result.stdout, written
+
+
+@pytest.mark.parametrize(
+    ("given", "read"), [("true", "true"), ("True", "true"), ("FALSE", "false")]
+)
+def test_action_reads_boolean_inputs_in_any_case(tmp_path: Path, given: str, read: str) -> None:
+    code, _, written = _check_inputs(
+        tmp_path, offline=given, fail_on_review=given, upload_report="false"
+    )
+    assert code == 0
+    assert written == {"offline": read, "fail-on-review": read, "upload-report": "false"}
+
+
+@pytest.mark.parametrize("given", ["yes", "1", "", "true ", "on"])
+def test_action_rejects_a_boolean_input_that_is_not_true_or_false(
+    tmp_path: Path, given: str
+) -> None:
+    code, stdout, _ = _check_inputs(
+        tmp_path, offline="true", fail_on_review=given, upload_report="false"
+    )
+    assert code != 0
+    assert "::error::input fail-on-review must be true or false" in stdout
+
+
+def test_action_steps_use_the_checked_inputs() -> None:
+    action = _action()
+    steps = action["runs"]["steps"]
+    assert steps[0]["id"] == "inputs"
+    judge = next(s for s in steps if s.get("id") == "judge")
+    assert judge["env"]["EJ_OFFLINE"] == "${{ steps.inputs.outputs.offline }}"
+    assert judge["env"]["EJ_FAIL_ON_REVIEW"] == "${{ steps.inputs.outputs.fail-on-review }}"
+    upload = steps[-1]
+    assert upload["if"].startswith("always() && steps.inputs.outputs.upload-report == 'true'")
+    assert str(upload["uses"]).startswith("actions/upload-artifact@")
+    assert upload["with"]["path"] == "${{ steps.judge.outputs.report }}"
+    assert action["inputs"]["upload-report"]["default"] == "false"
+
+
+def test_action_api_key_input_never_clears_the_job_environment() -> None:
+    action = _action()
+    assert action["inputs"]["anthropic-api-key"]["default"] == ""
+    judge = next(s for s in action["runs"]["steps"] if s.get("id") == "judge")
+    assert judge["env"]["EJ_API_KEY"] == "${{ inputs.anthropic-api-key }}"
+    assert "ANTHROPIC_API_KEY" not in judge["env"]
+    script: str = judge["run"]
+    assert 'if [ -n "$EJ_API_KEY" ]; then' in script
+    assert script.index("export ANTHROPIC_API_KEY") < script.index("::stop-commands::")
+
+
 def test_ci_exercises_the_action_failure_path() -> None:
     import yaml
 
@@ -176,6 +240,10 @@ def test_ci_exercises_the_action_failure_path() -> None:
     broken = next(s for s in steps if s.get("id") == "broken")
     assert broken["continue-on-error"] is True
     assert 'test "$BROKEN_STEP" = failure' in steps[-1]["run"]
+    badflag = next(s for s in steps if s.get("id") == "badflag")
+    assert badflag["continue-on-error"] is True
+    assert badflag["with"]["offline"] == "yes"
+    assert 'test "$BADFLAG_STEP" = failure' in steps[-1]["run"]
 
 
 def test_project_urls_point_at_the_docs_changelog_and_issues() -> None:

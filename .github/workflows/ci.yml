@@ -128,6 +128,16 @@ jobs:
           har: tests/fixtures/runs/honest_success/run.har
           answer-file: tests/fixtures/runs/honest_success/answer.txt
           spec: tests/fixtures/runs/honest_success/spec.yaml
+          fail-on-review: "True"
+          upload-report: "TRUE"
+          report-artifact: evidence-judge-honest-report
+      - name: Reject a boolean input that is not true or false
+        id: badflag
+        continue-on-error: true
+        uses: $/
+        with:
+          trace: tests/fixtures/runs/honest_success/trace.zip
+          offline: "yes"
       - name: Judge a missing trace with the action (bad input must fail, not reuse a verdict)
         id: broken
         continue-on-error: true
@@ -150,12 +160,16 @@ jobs:
           FORGED_STEP: ${{ steps.forged.outcome }}
           BROKEN: ${{ steps.broken.outputs.outcome }}
           BROKEN_STEP: ${{ steps.broken.outcome }}
+          BADFLAG: ${{ steps.badflag.outputs.outcome }}
+          BADFLAG_STEP: ${{ steps.badflag.outcome }}
         run: |
           test "$HONEST" = pass
           test "$FORGED" = fail
           test "$FORGED_STEP" = failure
           test -z "$BROKEN"
           test "$BROKEN_STEP" = failure
+          test -z "$BADFLAG"
+          test "$BADFLAG_STEP" = failure
 
   changelog:
     name: changelog updated with src/

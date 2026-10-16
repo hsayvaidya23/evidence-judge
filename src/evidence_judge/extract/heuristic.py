@@ -31,11 +31,13 @@ from evidence_judge.core.verdict import Usage
 from evidence_judge.extract.base import MAX_CLAIMS, MAX_PREDICATES_PER_CLAIM
 from evidence_judge.extract.merge import cap_claims, dedupe_claims, renumber
 from evidence_judge.extract.text import (
+    CURRENCY,
     Sentence,
     asserted,
-    clause_before,
     normalize,
+    paid_amount,
     sentences,
+    stated_amounts,
 )
 
 _I = re.IGNORECASE
@@ -74,23 +76,11 @@ _TOPIC_AFTER = re.compile(rf"^[^.;!?]{{0,40}}?\b({_TOPIC_WORDS})s?\b", _I)
 _TOPIC_BEFORE = re.compile(rf"\b({_TOPIC_WORDS})s?\b[^.;!?]{{0,30}}$", _I)
 _EMAIL_VALUE = re.compile(r"\bto\s+([\w.+-]+@[\w-]+(?:\.[\w-]+)+)", _I)
 
-_CURRENCY = re.escape(chr(0x24) + chr(0x20AC) + chr(0xA3) + chr(0x20B9))
-_PRICE = re.compile(
-    rf"(?:[{_CURRENCY}]|\b(?:USD|EUR|GBP|INR)\s?)\s?"
-    r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)",
-    _I,
-)
 _PRICE_FIELD = re.compile(
     r"\b(total|subtotal|price|priced|cost|costs|paid|charged|fee|amount)\b", _I
 )
-_PRICE_BOUND = re.compile(
-    r"\b(?:limit|budget|under|below|max(?:imum)?|up\s+to|at\s+most|less\s+than|over|above|"
-    r"shipping|delivery|postage|tax(?:es)?|vat|fees?|tip)\b(?:\W+\w+){0,2}\W*$",
-    _I,
-)
-"""'under $30', '(shipping $0.00)', 'limit $30.00': a bound or a surcharge, not the price."""
 _TOTAL_WORDS = frozenset({"total", "subtotal", "paid", "charged", "amount"})
-_PRICE_TASK = re.compile(rf"[{_CURRENCY}]|\b(?:price|cost|cheap|cheapest|under|budget|total)\b", _I)
+_PRICE_TASK = re.compile(rf"[{CURRENCY}]|\b(?:price|cost|cheap|cheapest|under|budget|total)\b", _I)
 _REFERENCE = re.compile(
     r"\b(order|confirmation|booking|reservation|reference|ticket|tracking|case|invoice)"
     r"(?:\s+(?:number|no\.?|id|code))?\s*(?:is|was|:)?\s*#?\s*"
@@ -450,23 +440,19 @@ def _reference_claims(sentence: Sentence, tally: _Tally) -> None:
 
 
 def _price_claims(sentence: Sentence, task_norm: str, tally: _Tally) -> None:
+    """'The price was $24', 'total $1,249.50' and, in a sentence naming no price field, what a
+    purchase cost: 'bought it for $24.00', 'ordered at $24.00', 'the kettle ($24.00)'."""
     field_match = _PRICE_FIELD.search(sentence.text)
-    if field_match is None:
-        return
-    name = "total" if field_match.group(1).lower() in _TOTAL_WORDS else "price"
+    name = "total" if field_match and field_match.group(1).lower() in _TOTAL_WORDS else "price"
     key = _PRICE_TASK.search(task_norm) is not None
-    for match in _PRICE.finditer(sentence.text):
-        if not asserted(sentence.text, match.start()) or _PRICE_BOUND.search(
-            clause_before(sentence.text, match.start())
-        ):
+    for match in stated_amounts(sentence.text):
+        if field_match is None and not paid_amount(sentence.text, match):
             continue
-        raw = match.group(1)
-        shown = match.group(0).strip()
         _claim(
             sentence,
-            f"The {name} was {raw}",
+            f"The {name} was {match.group(1)}",
             ClaimKind.VALUE,
             key,
-            _page_texts([shown]),
+            _page_texts([match.group(0).strip()]),
             tally,
         )

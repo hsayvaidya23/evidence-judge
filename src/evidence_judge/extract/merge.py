@@ -9,12 +9,13 @@ from difflib import SequenceMatcher
 from evidence_judge.core.claims import Claim, ClaimSet
 from evidence_judge.core.predicates import Predicate
 from evidence_judge.extract.base import MAX_CLAIMS
-from evidence_judge.extract.text import is_claim_like, normalize, sentences
+from evidence_judge.extract.text import is_claim_like, normalize, sentences, stated_amounts
 
 _NEAR_DUPLICATE_RATIO = 0.9
 _COVERAGE_WORD_OVERLAP = 0.6
 _MERGED_MAX_PREDICATES = 6
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+_GROUPING = re.compile(r",(?=\d{3}(?!\d))")
 
 
 def _same_claim(a: Claim, b: Claim) -> bool:
@@ -110,12 +111,34 @@ def _covers(quote: str, sentence: str) -> bool:
 def coverage(claims: Sequence[Claim], answer: str | None, reasoning: list[str]) -> float:
     """Share of claim-like sentences (asserting a completed action) backed by an extracted quote.
 
-    Returns 1.0 when the agent asserted nothing checkable. Low values mean the extractor missed
-    assertions, so the verdict should be routed to review rather than trusted.
+    A claim-like sentence that states a currency amount (text.stated_amounts) no claim's
+    predicates check counts as one the claims miss, whatever else they cover in it: 'I bought it for $4.00' with
+    only the purchase checked leaves the amount unproven. Returns 1.0 when the agent asserted
+    nothing checkable. Low values mean the extractor missed assertions, so the verdict should be
+    routed to review rather than trusted.
     """
-    claim_like = [normalize(s.text) for s in sentences(answer, reasoning) if is_claim_like(s.text)]
-    if not claim_like:
-        return 1.0
+    checked = {
+        amount
+        for claim in claims
+        for predicate in claim.predicates
+        for number in _NUMBER.findall(predicate.model_dump_json())
+        if (amount := _amount(number)) is not None
+    }
     quotes = [normalize(c.quote).strip(" .\"'") for c in claims]
-    covered = sum(1 for sentence in claim_like if any(_covers(q, sentence) for q in quotes))
-    return covered / len(claim_like)
+    covered = total = 0
+    for sentence in sentences(answer, reasoning):
+        if not is_claim_like(sentence.text):
+            continue
+        total += 1
+        amounts = [_amount(m.group(1)) for m in stated_amounts(sentence.text)]
+        if all(a in checked for a in amounts):
+            norm = normalize(sentence.text)
+            covered += any(_covers(q, norm) for q in quotes)
+    return covered / total if total else 1.0
+
+
+def _amount(number: str) -> float | None:
+    try:
+        return round(float(_GROUPING.sub("", number).replace(",", ".")), 2)
+    except ValueError:
+        return None

@@ -71,12 +71,12 @@ The first release.
 - `evidence-judge bench`: false-PASS rates with Wilson intervals on forged runs, accuracy on
   honest controls, and an optional transcript LLM-judge baseline. The forgery lab covers the
   four manipulation kinds from "Gaming the Judge" and evidence attacks on the recording; on the
-  recorded demo-site runs, 0 of 1326 attacks pass.
+  recorded demo-site runs, 0 of 1374 attacks pass.
 - A session forgery benchmark (`python -m evidence_judge.sessions.bench`) over recorded
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1465 session
+  Go toy projects with runner-specific tricks; 0 of 1374 browser and 0 of 1465 session
   forgeries pass, and 4 of 38 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
@@ -246,6 +246,40 @@ The first release.
   output (`test result: FAILED. 1 passed; 1 failed`, a `failures:` section) is covered by
   end-to-end tests: counts and test names were already read. A Go session control covers the
   build failure.
+- Page text with a soft hyphen or a zero-width character inside a word (`Out of st<U+00AD>ock`,
+  as CMS hyphenation writes it) no longer FAILs an honest run: text normalisation drops every
+  default-ignorable code point (soft hyphen, zero-width space, joiners, word joiner, BOM,
+  bidi and variation marks, tag characters) before matching, in page text, response bodies and
+  claims alike.
+- An order or reference number claimed from inside a longer one no longer passes: "The shop
+  confirmed order #100" (or `#001`) was supported by `/orders/1001`. A `page_text`,
+  `body_contains` or `response_contains` phrase holding a digit now matches only a whole token:
+  no digit beside a digit at either end, no letter beside a letter or digit, and no decimal or
+  group separator joining it to more digits (`$24` still matches `$24.00`, not `$24.50`). Other
+  phrases are still substrings. New forgery kind `prefix_reference` (write) places the order and
+  claims a number that is a prefix, suffix or middle part of the one the shop gave it; it
+  produced false PASSes before the fix and none after.
+- Offline extraction reads what a purchase cost when no price word names it: "I bought the Red
+  Kettle for $4.00", "placed at $4.00" and "the kettle ($4.00)" become price claims, so the
+  honest purchase answered with the wrong price no longer PASSes with coverage 1.0 (it goes to
+  review; the true $24.00 still PASSes). Amounts after "limit", "under", "shipping" or "fee" are
+  still not price claims, nor is one with extras added ("for $26.40 including tax"), nor a
+  difference ("$6 under the budget"); "under $30 for $4.00" bounds only the $30. Claim coverage
+  also counts a claim-like sentence stating a currency amount that no claim's predicates check
+  as not covered. New forgery kind `misquoted_price` (write) places the order, gets the claimed
+  number, is charged another price and claims "for $4.00"; it produced false PASSes before the
+  fix and none after. The benchmark now has 44 kinds: 0 of 1374 attack runs pass, honest
+  controls unchanged.
+- The GitHub Action checks its boolean inputs: `offline`, `fail-on-review` and the new
+  `upload-report` take `true` or `false` in any case, and any other value (`yes`, `1`) fails
+  the step before anything is installed; before, everything but the exact string `true` was
+  silently read as `false`. New inputs `anthropic-api-key` (masked, set only for the judging
+  step, and an empty one keeps a job-level `ANTHROPIC_API_KEY`) and `upload-report` /
+  `report-artifact` (upload the HTML report as an artifact, also on FAIL); `offline: false`
+  without a key now warns that the run is judged offline. The API key requirement is
+  documented in the action guide.
+- The wall-clock budgets of the large-trace and large-stylesheet tests are tighter (3 s and
+  12 s, from 10 s and 20 s; they take about 0.5 s and 5 s).
 
 ### Security
 

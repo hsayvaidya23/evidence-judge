@@ -81,6 +81,37 @@ def test_currency_without_price_word_is_ignored_and_total_field_detected():
     assert value.predicates == [PageTextPredicate(contains="$1,249.50", scope=Scope.ANY)]
 
 
+@pytest.mark.parametrize(
+    ("answer", "shown"),
+    [
+        ("I bought the Red Kettle for $4.00. Order #1001.", "$4.00"),
+        ("Order #1001 placed for the Red Kettle at $24.00.", "$24.00"),
+        ("I ordered the kettle for only EUR 19.", "EUR 19"),
+        ("I bought the Red Kettle ($24.00).", "$24.00"),
+        ("I bought a red kettle under $30 for $4.00.", "$4.00"),
+        ("The red kettle ($24.00) is out of stock.", "$24.00"),
+    ],
+)
+def test_purchase_amount_without_a_price_word_is_a_price_claim(answer: str, shown: str):
+    [price] = [c for c in _extract(answer).claims if c.kind is ClaimKind.VALUE]
+    assert price.text.startswith("The price was ")
+    assert price.predicates == [PageTextPredicate(contains=shown, scope=Scope.ANY)]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "I saw a banner for $5.",
+        "I bought the Red Kettle for $26.40 including tax.",
+        "I bought the Red Kettle, $6 under the $30 budget.",
+        "I bought the Red Kettle with free shipping $0.00.",
+        "I could not buy the Red Kettle for $24.00.",
+    ],
+)
+def test_bounds_surcharges_and_extras_are_not_purchase_prices(answer: str):
+    assert [c for c in _extract(answer).claims if c.kind is ClaimKind.VALUE] == []
+
+
 def test_changed_email_maps_to_email_or_account_requests_with_body():
     result = _extract("I changed the email to sam@example.com in the settings.")
     claim = result.claims[0]

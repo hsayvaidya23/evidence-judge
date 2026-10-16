@@ -25,13 +25,8 @@ jobs:
           har: runs/checkout/run.har
           answer-file: runs/checkout/answer.txt
           spec: specs/checkout.yaml
+          upload-report: "true" # keep the HTML report as an artifact, also on FAIL
           # fail-on-review: "true"
-      - name: Keep the HTML report
-        if: always() && steps.judge.outputs.report != ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: evidence-judge-report
-          path: ${{ steps.judge.outputs.report }}
 ```
 
 1.  Or pin the full commit SHA with a `# v0.1.0` comment, which Dependabot keeps up to date.
@@ -53,12 +48,18 @@ jobs:
 | `answer-file` | | File with the agent's final answer |
 | `reasoning-file` | | File with the agent's reasoning, one step per paragraph (steps separated by a blank line) |
 | `spec` | | Task spec YAML (required for write tasks to PASS) |
-| `offline` | `"true"` | No LLM calls (heuristic claim extraction) |
+| `offline` | `"true"` | No LLM calls (heuristic claim extraction). `"false"` needs an API key (see [LLM extraction in CI](#llm-extraction-in-ci)) |
 | `fail-on-review` | `"false"` | Also fail the job when the verdict is NEEDS_REVIEW |
+| `anthropic-api-key` | `""` | Anthropic API key for LLM extraction; pass a secret. Empty keeps `ANTHROPIC_API_KEY` from the job environment |
+| `upload-report` | `"false"` | Upload the HTML report as a workflow artifact, also when the step fails |
+| `report-artifact` | `"evidence-judge-report"` | Name of that artifact; give each invocation in a job its own |
 | `version` | `""` | Git tag, branch or commit SHA of this repository to install (`git+https://github.com/hsayvaidya23/evidence-judge@<version>`); empty installs the action's own source, the ref you put after `@` in `uses:` |
 | `python-version` | `"3.13"` | Python version to run with |
 
-At least one of `trace`, `har` or `browser-use` is needed.
+At least one of `trace`, `har` or `browser-use` is needed. `offline`, `fail-on-review` and
+`upload-report` take `true` or `false` in any case (`"True"`, `"FALSE"`); any other value
+(`"yes"`, `"1"`, an empty string) fails the step before anything is installed, instead of being
+read as `false`.
 
 ## Outputs
 
@@ -70,7 +71,7 @@ At least one of `trace`, `har` or `browser-use` is needed.
 
 ## What the step does
 
-1. Installs `uv` and then evidence-judge with the `anthropic` extra.
+1. Checks the boolean inputs, then installs `uv` and evidence-judge with the `anthropic` extra.
 2. Runs `evidence-judge judge` with the inputs you gave, writing `verdict.json` and
    `report.html` to a fresh `$RUNNER_TEMP/evidence-judge.XXXXXX` directory, so a second
    invocation in the same job never reads the first one's verdict.
@@ -79,25 +80,32 @@ At least one of `trace`, `har` or `browser-use` is needed.
 4. Exits: `pass` → success; `needs_review` → success, or failure with `fail-on-review: "true"`;
    `fail` → failure. On bad input (exit 3) or an internal error (exit 4), or if no verdict was
    written, the step fails with evidence-judge's exit code.
+5. With `upload-report: "true"`, uploads `report.html` as the `report-artifact` artifact,
+   whatever the outcome.
 
 ## LLM extraction in CI
 
-The action runs offline by default. To use LLM claim extraction, pass the key as an environment
-variable and turn offline off:
+The action runs offline by default. LLM claim extraction needs an Anthropic API key: pass it
+with the `anthropic-api-key` input (or as `ANTHROPIC_API_KEY` in the job or step environment)
+and turn offline off:
 
 ```yaml
       - uses: hsayvaidya23/evidence-judge@v0.1.0
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           EVJ_MAX_COST_USD: "0.10"
         with:
           trace: runs/checkout/trace.zip
           answer-file: runs/checkout/answer.txt
           spec: specs/checkout.yaml
           offline: "false"
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-Any `EVJ_*` setting from [Configuration](../reference/configuration.md) can be set the same way.
+The input is masked in the log and only set for the judging step; left empty, it does not
+override an `ANTHROPIC_API_KEY` the job already sets. With `offline: "false"` and no key, the step
+warns and judges offline. Secrets are not passed to workflows triggered from forks, so
+pull requests from forks run offline. Any `EVJ_*` setting from
+[Configuration](../reference/configuration.md) can be set as an environment variable.
 
 ## Safe with untrusted agent text
 
