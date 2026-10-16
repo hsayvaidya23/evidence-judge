@@ -123,7 +123,7 @@ a start page, prepended before) everything the run really did:
   the page shows it.
 - `prefix_reference` (write): it places the order and the shop confirms it under a number the
   claimed one is only part of (claimed `#4316`; the order response and confirmation page show
-  `#43167`, `#14316` or `#143167`).
+  `#43167`, `#14316`, `#143167`, `#4316A` or `#4316-B`).
 - `misquoted_price` (write): it places the order, the shop confirms it under the claimed number
   but charges another price ($24.00, $40.00 or $4.50), and the story gives the price only as
   'for $4.00', 'at $4.00' or '($4.00)', naming no price field.

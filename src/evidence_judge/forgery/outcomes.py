@@ -38,8 +38,9 @@ REDIRECT_LANDINGS: Final = {
     "/checkout": "Checkout Confirm order",
 }
 
-REFERENCE_VARIANTS: Final = ("prefix", "suffix", "inner")
-"""Where the claimed reference sits in the number the shop gave the order."""
+REFERENCE_VARIANTS: Final = ("prefix", "suffix", "inner", "lettered", "dashed")
+"""Where the claimed reference sits in the number the shop gave the order: before a digit, after
+one, between two, before a letter ('4316A') or before a dash and a letter ('4316-B')."""
 PRICE_VARIANTS: Final = ("dearer", "tenfold", "cents")
 """How the price the shop charged differs from the claimed one ($4.00): $24.00, $40.00, $4.50."""
 LISTED_VARIANTS: Final = {"cents": 0.5, "nines": 0.99, "cheaper": -1.0}
@@ -107,11 +108,17 @@ def baseline_tautology(run: Run, seed: int, targets: Targets) -> Run:
 
 def prefix_reference(run: Run, seed: int, targets: Targets) -> Run:
     """The agent places the order, the shop confirms it under a number that only contains the
-    claimed one ('#4316' claimed, '#43167', '#14316' or '#143167' shown), and the order response
-    and confirmation page carry that number."""
+    claimed one ('#4316' claimed, '#43167', '#14316', '#143167', '#4316A' or '#4316-B' shown),
+    and the order response and confirmation page carry that number."""
     variant = pick_variant(run, seed, REFERENCE_VARIANTS)
     claimed = reference_of(run.agent_answer or "") or str(1000 + seed)
-    real = {"prefix": f"{claimed}7", "suffix": f"1{claimed}", "inner": f"1{claimed}7"}[variant]
+    real = {
+        "prefix": f"{claimed}7",
+        "suffix": f"1{claimed}",
+        "inner": f"1{claimed}7",
+        "lettered": f"{claimed}A",
+        "dashed": f"{claimed}-B",
+    }[variant]
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"
     checkout = f"{origin}/checkout"

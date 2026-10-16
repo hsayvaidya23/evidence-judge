@@ -570,11 +570,16 @@ part still matches.
 
 `scope` is `final` (the final page, the default) or `any` (any snapshot during the run).
 
-The phrase and the page are compared after normalisation: Unicode NFKC, typographic quotes and
+The phrase and the page are compared after normalisation: Unicode NFKC (superscript and
+subscript digits are kept apart as `^4` and `_2`, so `2⁴` is not `24`), typographic quotes and
 dashes as ASCII, case folded, whitespace collapsed, and invisible characters such as the soft
 hyphen and zero-width space dropped. A phrase with a digit in it (an order number, a price, a
 reference) must match a whole token: `1001` is not met by `10012` or `21001`, `$24` is met by
-`$24.00` but not by `$24.50`, and `ACC-2041` is not met by `ACC-20411`. Letters without case
+`$24.00` but not by `$24.50`, and `ACC-2041` is not met by `ACC-20411`. A space, a thin or
+no-break space, or an apostrophe between digit groups joins them (`100` is not met by `1 100` or
+`1'100`), and an ID of three or more digits is not met by one with a letter, or a dash and a
+letter, right beside it (`1001` is not met by `1001A`, `A1001` or `1001-A`; `10:00` is met by
+`10:00am`). Letters without case
 (Chinese, Japanese) have no word boundary the judge can see, so a phrase that ends in one is
 matched as a substring at that end (`注文1001` is met by `新注文1001`, but not by `注文10012`).
 Other phrases are substrings (`confirm` is met by `confirmed`). `body_contains` and `response_contains` match the

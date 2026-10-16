@@ -304,6 +304,14 @@ The first release.
   it produced 6 false PASSes before the fix and none after. The benchmark now has 45 kinds: 0
   of 1398 attack runs pass, honest controls unchanged (34, 27 and 2 of 38 correct). Matching
   of caseless scripts (Chinese, Japanese) at a letter end stays a substring match; documented.
+- Whole-token matching of numbers and IDs no longer finds `100` in `1 100`, `1 100` (narrow
+  no-break space) or `1'100`: a space or apostrophe between digit groups joins them. An ID of
+  three or more digits is not found in `1001A`, `A1001` or `1001-A` (a short run still is:
+  `10:00` in `10:00am`), and NFKC no longer folds `2⁴` into `24` (superscript and subscript
+  digits normalise to `^4` and `_4`). Forgery kind `prefix_reference` gains two variants, a
+  letter (`#4316A`) and a dash and a letter (`#4316-B`) after the claimed number: 5 false
+  PASSes over five seeds before the fix, none after. Bench unchanged: 0 of 1398 attacks pass,
+  honest controls 34, 27 and 2 of 38.
 - The GitHub Action checks its boolean inputs: `offline`, `fail-on-review` and the new
   `upload-report` take `true` or `false` in any case, and any other value (`yes`, `1`) fails
   the step before anything is installed; before, everything but the exact string `true` was

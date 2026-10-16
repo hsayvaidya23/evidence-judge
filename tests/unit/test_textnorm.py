@@ -111,7 +111,12 @@ async def test_soft_hyphenated_page_text_passes_the_honest_read(tmp_path: Path) 
         ("total: $24.00", "$24.00"),
         ("total 24,00 eur", "24"),
         ("at 10:00am", "10:00"),
-        ("ref ord1001", "1001"),
+        ("2x kettle 24kg", "24"),
+        ("ref ord-1001", "ord-1001"),
+        ("order #1001-", "1001"),
+        ("total 1 100 €", "1 100 €"),
+        ("total 1'100", "1'100"),
+        ("2^4 = 16", "2^4"),
         ("account acc-2041.", "acc-2041"),
         ("out of stocks", "out of stock"),
         ("reconfirmed", "confirm"),
@@ -134,6 +139,16 @@ def test_phrase_found(text: str, phrase: str) -> None:
         ("24.000 eur", "24"),
         ("acc-20411", "acc-2041"),
         ("xacc-2041", "acc-2041"),
+        ("ref ord1001", "1001"),
+        ("order 1001a", "1001"),
+        ("order a1001", "1001"),
+        ("order 1001-a", "1001"),
+        ("order #1001-a", "#1001"),
+        ("order hd-1001", "1001"),
+        ("total: 1 100 €", "100 €"),
+        ("total 1 100", "100"),
+        ("total 1'100", "100"),
+        ("100 000 items", "100"),
     ],
 )
 def test_number_inside_a_longer_token_is_not_found(text: str, phrase: str) -> None:
@@ -144,3 +159,16 @@ def test_a_later_whole_occurrence_is_found() -> None:
     assert find_phrase("orders 1001 and 100", "100") == 16
     assert contains("Orders 1001 and 100", "100")
     assert not contains("Order 1001", "100")
+
+
+@pytest.mark.parametrize("space", ["\N{NARROW NO-BREAK SPACE}", "\N{THIN SPACE}", NBSP, "'"])
+def test_a_thousands_separator_joins_digit_groups(space: str) -> None:
+    assert not contains(f"Total 1{space}100", "100")
+    assert contains(f"Total 1{space}100", f"1{space}100")
+
+
+def test_superscript_digits_do_not_fold_into_the_number() -> None:
+    assert normalize("2\N{SUPERSCRIPT FOUR}") == "2^4"
+    assert normalize("H\N{SUBSCRIPT TWO}O") == "h_2o"
+    assert not contains("area 2\N{SUPERSCRIPT FOUR} m", "24")
+    assert contains("$24\N{SUPERSCRIPT ONE} incl. VAT", "$24")

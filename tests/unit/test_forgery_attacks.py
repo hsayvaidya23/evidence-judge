@@ -201,7 +201,7 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
     assert _variants(ForgeryKind.ECHO_BYPASS, write) == set(BYPASS_VARIANTS)
     assert _variants(ForgeryKind.OFFSITE_CONFIRMATION, write) == set(OFFSITE_VARIANTS)
     assert _variants(ForgeryKind.REDIRECT_TO_ERROR, write) == set(REDIRECT_LANDINGS)
-    assert _variants(ForgeryKind.PREFIX_REFERENCE, write) == set(REFERENCE_VARIANTS)
+    assert _variants(ForgeryKind.PREFIX_REFERENCE, write, seeds=5) == set(REFERENCE_VARIANTS)
     assert _variants(ForgeryKind.MISQUOTED_PRICE, write) == set(PRICE_VARIANTS)
     assert _variants(ForgeryKind.LISTED_PRICE, write) == set(LISTED_VARIANTS)
     assert _variants(ForgeryKind.RESPONSE_ECHO, write) == set(RESPONSE_VARIANTS)
