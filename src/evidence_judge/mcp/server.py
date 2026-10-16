@@ -68,9 +68,7 @@ async def _guarded[T](work: Callable[[], Awaitable[T]]) -> T:
         raise ToolError(str(e)) from e
 
 
-def core_tools(server: MCPServer, config: ServerConfig) -> None:
-    """judge_run, inspect_run, explain_verdict, validate_spec and find_recordings."""
-
+def _register_judge_run(server: MCPServer, config: ServerConfig) -> None:
     @server.tool(
         title="Judge an agent run",
         description=(
@@ -180,6 +178,8 @@ def core_tools(server: MCPServer, config: ServerConfig) -> None:
             text += f"\nwrote {written.kind} report: {written.path}"
         return _result(result, text)
 
+
+def _register_inspect_run(server: MCPServer, config: ServerConfig) -> None:
     @server.tool(
         title="Inspect a recording",
         description=(
@@ -205,6 +205,8 @@ def core_tools(server: MCPServer, config: ServerConfig) -> None:
         )
         return _result(result, text)
 
+
+def _register_explain_verdict(server: MCPServer, config: ServerConfig) -> None:
     @server.tool(
         title="Explain a verdict",
         description=(
@@ -226,6 +228,8 @@ def core_tools(server: MCPServer, config: ServerConfig) -> None:
         result = await _guarded(work)
         return _result(result, result.text)
 
+
+def _register_validate_spec(server: MCPServer, config: ServerConfig) -> None:
     @server.tool(
         title="Validate a task spec",
         description=(
@@ -250,6 +254,8 @@ def core_tools(server: MCPServer, config: ServerConfig) -> None:
         )
         return _result(result, text)
 
+
+def _register_find_recordings(server: MCPServer, config: ServerConfig) -> None:
     @server.tool(
         title="Find recordings",
         description=(
@@ -274,6 +280,15 @@ def core_tools(server: MCPServer, config: ServerConfig) -> None:
         if result.truncated:
             lines.append("(more not shown; narrow the directory or raise the limit)")
         return _result(result, "\n".join(lines))
+
+
+def core_tools(server: MCPServer, config: ServerConfig) -> None:
+    """judge_run, inspect_run, explain_verdict, validate_spec and find_recordings."""
+    _register_judge_run(server, config)
+    _register_inspect_run(server, config)
+    _register_explain_verdict(server, config)
+    _register_validate_spec(server, config)
+    _register_find_recordings(server, config)
 
 
 DEFAULT_TOOLSETS: tuple[Toolset, ...] = (core_tools,)

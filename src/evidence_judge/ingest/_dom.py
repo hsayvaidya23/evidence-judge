@@ -16,7 +16,7 @@ filter must not read as the page saying the product is in stock. Button labels, 
 authors, are kept.
 
 Each piece of text is shown, hidden, or of unsure visibility, and only certainty hides it
-(`_css`). Hidden: ``<script>``, ``<style>``, ``<template>`` and the like, the body of a closed
+(`css`). Hidden: ``<script>``, ``<style>``, ``<template>`` and the like, the body of a closed
 ``<details>``, light-DOM children of a shadow host that no ``<slot>`` shows, what the browser's
 own stylesheets hide unless the page's styles show it (``ua_hiding.css``, vendored from the HTML,
 SVG and MathML specifications: the ``hidden`` attribute, a closed ``<dialog>``, ``<rp>``,
@@ -27,7 +27,7 @@ hidden`` or ``content-visibility: hidden`` from inline styles, SVG presentation 
 ``<style>`` elements, constructed stylesheets and the ``<link rel=stylesheet>`` and ``@import``
 sheets the recording holds. Each shadow root is its own scope: its sheets style only its tree,
 and the page's sheets do not reach into it. Unsure: text whose visibility depends on what the
-reader does not model (see `_css`), including a ``popover`` (snapshots do not record whether it
+reader does not model (see `css`), including a ``popover`` (snapshots do not record whether it
 is open), the content of a never-rendered SVG element something refers to (a ``<use>`` copy, a
 pattern fill, a mask), a ``<switch>`` child other than an unconditional first one, and SVG text
 placed past its canvas; and all text of a scope whose stylesheets the recording does not fully
@@ -47,7 +47,8 @@ from typing import Any, Final, cast
 from urllib.parse import urljoin, urlsplit
 
 from evidence_judge.core.site import registrable_domain
-from evidence_judge.ingest._css import (
+from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, as_str
+from evidence_judge.ingest.css import (
     HIDDEN,
     HTML,
     MATHML,
@@ -64,7 +65,6 @@ from evidence_judge.ingest._css import (
     Viewport,
     media_holds,
 )
-from evidence_judge.ingest._json import JsonObject, as_int, as_list, as_object, as_str
 
 DEFAULT_MAX_VISITS = 1_000_000
 
