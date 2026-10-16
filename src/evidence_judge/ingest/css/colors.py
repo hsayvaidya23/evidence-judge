@@ -8,6 +8,7 @@ from typing import Final
 
 from evidence_judge.ingest.css.model import Rgba, linear
 from evidence_judge.ingest.css.values import (
+    MAX_NESTING,
     functions,
     parse_amount,
     parse_degrees,
@@ -68,6 +69,10 @@ CURRENT: Final = "currentcolor"
 def parse_color(value: str, current: Rgba | None = None) -> Rgba | None:
     """The sRGB colour `value` paints, `current` standing for ``currentcolor``; None when the
     reader cannot tell."""
+    return _parse(value, current, 0)
+
+
+def _parse(value: str, current: Rgba | None, depth: int) -> Rgba | None:
     value = value.strip()
     if value == CURRENT:
         return current
@@ -85,11 +90,13 @@ def parse_color(value: str, current: Rgba | None = None) -> Rgba | None:
     if found is None or len(found) != 1 or not value.endswith(")"):
         return None
     name, args = found[0]
+    if name in ("color-mix", "light-dark") and depth >= MAX_NESTING:
+        return None
     if name == "color-mix":
-        return _mix(args, current)
+        return _mix(args, current, depth + 1)
     if name == "light-dark":
         parts = split_args(args)
-        return parse_color(parts[0], current) if len(parts) == 2 else None
+        return _parse(parts[0], current, depth + 1) if len(parts) == 2 else None
     channels, alpha = _channels(args)
     if channels is None or alpha is None:
         return None
@@ -223,18 +230,31 @@ def _lab(name: str, parts: list[str]) -> tuple[float, float, float] | None:
     lightness = _number(parts[0], 1.0 if ok else 100.0)
     if lightness is None:
         return None
+    lightness = max(0.0, min(1.0 if ok else 100.0, lightness))
+    reach = _OK_REACH if ok else _LAB_REACH
     if name.endswith("lch"):
         chroma, hue = _number(parts[1], 0.4 if ok else 150.0), _hue(parts[2])
         if chroma is None or hue is None:
             return None
+        chroma = max(0.0, min(reach, chroma))
         a, b = chroma * math.cos(math.radians(hue)), chroma * math.sin(math.radians(hue))
     else:
         a, b = _number(parts[1], 0.4 if ok else 125.0), _number(parts[2], 0.4 if ok else 125.0)
         if a is None or b is None:
             return None
+        a, b = max(-reach, min(reach, a)), max(-reach, min(reach, b))
     lit = _oklab_to_linear(lightness, a, b) if ok else _lab_to_linear(lightness, a, b)
     r, g, b2 = (round(255 * _gamma(max(0.0, min(1.0, c)))) for c in lit)
     return r, g, b2
+
+
+_LAB_REACH: Final = 1000.0
+"""How far from grey the reader takes a ``lab()`` / ``lch()`` colour's a, b or chroma: far past
+what sRGB shows, and small enough to cube."""
+
+
+_OK_REACH: Final = 4.0
+"""The same for ``oklab()`` / ``oklch()``."""
 
 
 def _gamma(c: float) -> float:
@@ -283,7 +303,7 @@ def _lab_to_linear(lightness: float, a: float, b: float) -> tuple[float, float, 
     )
 
 
-def _mix(args: str, current: Rgba | None) -> Rgba | None:
+def _mix(args: str, current: Rgba | None, depth: int) -> Rgba | None:
     """``color-mix()``: premultiplied interpolation in Oklab for the Lab-family spaces, else in
     sRGB."""
     parts = split_args(args)
@@ -296,8 +316,8 @@ def _mix(args: str, current: Rgba | None) -> Rgba | None:
         tokens = part.rsplit(" ", 1)
         share = parse_percent(tokens[-1]) if len(tokens) == 2 else None
         text = tokens[0] if share is not None else part
-        colour = parse_color(text, current)
-        if colour is None:
+        colour = _parse(text, current, depth)
+        if colour is None or (share is not None and not 0 <= share <= 100):
             return None
         colours.append(colour)
         shares.append(share)

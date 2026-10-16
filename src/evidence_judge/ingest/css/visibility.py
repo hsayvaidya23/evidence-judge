@@ -496,7 +496,9 @@ def _transformed_away(cascade: Cascade) -> bool:
 
 def _degenerate(matrix: Matrix) -> bool:
     """Whether a linear map leaves the box (seen face-on, without perspective) too thin, too
-    small or too stretched to read."""
+    small or too stretched to read (or overflows what the reader can compute)."""
+    if not all(math.isfinite(c) for row in matrix for c in row):
+        return True
     ux, uy = matrix[0][0], matrix[1][0]
     vx, vy = matrix[0][1], matrix[1][1]
     across, down = (ux * ux + uy * uy) ** 0.5, (vx * vx + vy * vy) ** 0.5

@@ -291,6 +291,15 @@ The first release.
   A declaration now splits at its first unescaped colon (`--a\:b` is one name), escapes in
   `@property` names and descriptors are read, and `!\69mportant` counts as `!important`. New
   `unmodelled_hiding` variant `escaped_custom_property`; it was a false SHOWN before the fix.
+- Adversarial CSS no longer crashes the judge. `color: lab(1e308 1e308 1e308)` raised
+  OverflowError, and a `var()` chain 400 deep, `calc()` nested 3000 deep, `color-mix()` nested
+  500 deep, deep `var()` fallbacks, `:is()` / `:not()`, `@supports` conditions and nested blocks
+  raised RecursionError out of the snapshot reader. Nesting is now capped at 32 levels (past it
+  the value is unknown, so the text is unsure, and a stylesheet nested deeper leaves its scope
+  unknown), unary signs are read without recursion, colour channels are clamped, and numbers
+  too large to compute with are unreadable. As a last defence, a snapshot whose styles still
+  make the reader raise is read without them: all of its text unsure and the page opaque,
+  never shown. Seeded fuzz tests cover the value parser and colour functions.
 - A test run through a project wrapper (`make test`, `npm test`, `yarn test`, `pnpm test`,
   `tox`, `nox`, `just test`, `poetry run task test`) is no longer taken as a whole run to the
   end when the session does not show what the wrapper ran: its pass or fail still counts, but

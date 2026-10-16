@@ -10,7 +10,7 @@ from dataclasses import replace
 from typing import Final
 
 from evidence_judge.ingest.css.model import UNSET, Registered, Registration, Rule
-from evidence_judge.ingest.css.values import closing_paren, split_args
+from evidence_judge.ingest.css.values import MAX_NESTING, closing_paren, split_args
 
 Values = tuple[str, ...]
 """The values a custom property may hold (more than one when a rule that may apply, such as a
@@ -46,9 +46,9 @@ _ENV_ZERO: Final = re.compile(r"(safe-area-inset|safe-area-max-inset|keyboard-in
 """Environment variables that are 0 on the desktop page a recording shows."""
 
 
-_Lookup = Callable[[str], Values]
-"""The values a custom property holds; raises `_InvalidError` when it is undefined and
-`_UnknownError` when the reader cannot tell."""
+_Lookup = Callable[[str, int], Values]
+"""The values a custom property holds, looked up `depth` substitutions deep; raises
+`_InvalidError` when it is undefined and `_UnknownError` when the reader cannot tell."""
 
 
 def custom_properties(
@@ -64,7 +64,7 @@ def custom_properties(
     resolving: list[str] = []
     cyclic: set[str] = set()
 
-    def lookup(name: str) -> Values:
+    def lookup(name: str, depth: int) -> Values:
         if name in undefined:
             raise _InvalidError
         if name in own:
@@ -74,9 +74,12 @@ def custom_properties(
         if name in resolving:
             cyclic.update(resolving[resolving.index(name) :])
             raise _InvalidError
+        if depth > MAX_NESTING:
+            own[name] = None
+            raise _UnknownError
         resolving.append(name)
         try:
-            found = _choose(name, candidates[name], inherited, registered, lookup)
+            found = _choose(name, candidates[name], inherited, registered, lookup, depth + 1)
         except _UnknownError:
             own[name] = None
             raise
@@ -90,7 +93,7 @@ def custom_properties(
 
     for name in candidates:
         with suppress(_InvalidError, _UnknownError):
-            lookup(name)
+            lookup(name, 0)
     local = {n: v for n, v in own.items() if not _inherits(registered.get(n, _UNREGISTERED))}
     passed = {n: v for n, v in own.items() if n not in local}
     gone = [n for n in undefined if n in inherited]
@@ -145,6 +148,7 @@ def _choose(
     inherited: Custom,
     registered: Registered,
     lookup: _Lookup,
+    depth: int,
 ) -> Values | None:
     """The values a custom property may take (None: it is undefined)."""
     registration = registered.get(name, _UNREGISTERED)
@@ -166,7 +170,7 @@ def _choose(
                 found.extend(held)
             continue
         try:
-            found.extend(_substitute(value, lookup))
+            found.extend(_substitute(value, lookup, depth))
         except _InvalidError:
             undefined = True
     if undefined:
@@ -186,7 +190,7 @@ def resolve(value: str, custom: Custom, local: Custom, registered: Registered) -
     """The values `value` may take with every ``var()`` and ``env()`` substituted: ``unset``
     when it is invalid at computed-value time, None when the reader cannot tell."""
     try:
-        return _substitute(value, lambda name: _held(name, custom, local, registered))
+        return _substitute(value, lambda name, _depth: _held(name, custom, local, registered), 0)
     except _InvalidError:
         return ("unset",)
     except _UnknownError:
@@ -203,7 +207,11 @@ def resolve_rule(rule: Rule, custom: Custom, local: Custom, registered: Register
     return [replace(rule, value=value) for value in found]
 
 
-def _substitute(value: str, lookup: _Lookup) -> Values:
+def _substitute(value: str, lookup: _Lookup, depth: int) -> Values:
+    """`value` with its references substituted, `depth` substitutions deep: past MAX_NESTING
+    the reader cannot tell."""
+    if depth > MAX_NESTING:
+        raise _UnknownError
     out: Values = ("",)
     at = 0
     while (found := _REFERENCE.search(value, at)) is not None:
@@ -217,18 +225,18 @@ def _substitute(value: str, lookup: _Lookup) -> Values:
             if _ENV_ZERO.match(name):
                 held: Values = ("0px",)
             elif fallback is not None:
-                held = _substitute(fallback, lookup)
+                held = _substitute(fallback, lookup, depth + 1)
             else:
                 raise _UnknownError
         else:
             if not name.startswith("--"):
                 raise _UnknownError
             try:
-                held = lookup(name)
+                held = lookup(name, depth)
             except _InvalidError:
                 if fallback is None:
                     raise
-                held = _substitute(fallback, lookup)
+                held = _substitute(fallback, lookup, depth + 1)
         before = value[at : found.start()]
         out = _distinct([f"{o}{before}{h}" for o in out for h in held])
         at = close + 1

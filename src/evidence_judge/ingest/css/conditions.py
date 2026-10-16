@@ -9,7 +9,7 @@ from typing import Final
 from evidence_judge.ingest.css.model import DISPLAY, Viewport
 from evidence_judge.ingest.css.selector import foreign
 from evidence_judge.ingest.css.syntax import split_commas
-from evidence_judge.ingest.css.values import closing_paren, length_px
+from evidence_judge.ingest.css.values import MAX_NESTING, closing_paren, length_px
 
 _RANGE = re.compile(
     r"^(?:([^<>=]+?)\s*([<>]=?|=))?\s*(width|height)\s*(?:([<>]=?|=)\s*([^<>=]+))?$"
@@ -22,15 +22,21 @@ _FLIPPED: Final = {"<": ">", ">": "<", "<=": ">=", ">=": "<=", "=": "="}
 def supports(condition: str) -> bool | None:
     """Whether an ``@supports`` condition holds in Chromium; None when the reader does not
     know."""
+    return _supports(condition, 0)
+
+
+def _supports(condition: str, depth: int) -> bool | None:
+    if depth > MAX_NESTING:
+        return None
     text = condition.strip()
     lowered = text.lower()
     if lowered.startswith("not ") or lowered.startswith("not("):
-        inner = supports(text[3:])
+        inner = _supports(text[3:], depth + 1)
         return None if inner is None else not inner
     for joiner in (" or ", " and "):
         pieces = _split_top(text, joiner)
         if len(pieces) > 1:
-            results = [supports(p) for p in pieces]
+            results = [_supports(p, depth + 1) for p in pieces]
             if joiner == " or ":
                 return True if True in results else (None if None in results else False)
             return False if False in results else (None if None in results else True)
@@ -38,7 +44,7 @@ def supports(condition: str) -> bool | None:
         inner = text[1:-1].strip()
         prop, colon, value = inner.partition(":")
         if not colon or "(" in prop:
-            return supports(inner)
+            return _supports(inner, depth + 1)
         return _supported(prop.strip().lower(), " ".join(value.lower().split()))
     return None
 

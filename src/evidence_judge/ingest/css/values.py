@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from typing import Final
@@ -30,6 +31,26 @@ is on screen."""
 
 FAINT: Final = 0.05
 """An opacity or scale at or below which the reader is unsure text can be seen."""
+
+
+MAX_NESTING: Final = 32
+"""How deeply functions, ``var()`` fallbacks, selectors and blocks may nest before the reader
+gives up on them (and is unsure)."""
+
+
+def too_deep(text: str, limit: int = MAX_NESTING) -> bool:
+    """Whether parentheses nest more than `limit` deep in `text`."""
+    if text.count("(") <= limit:
+        return False
+    depth = 0
+    for match in _PARENS.finditer(text):
+        depth += 1 if match.group() == "(" else -1
+        if depth > limit:
+            return True
+    return False
+
+
+_PARENS = re.compile(r"[()]")
 
 
 _CALL = re.compile(r"(-?[a-z][a-z0-9-]*)?\(")
@@ -113,7 +134,7 @@ def evaluate(value: str, leaf: Leaf) -> float | None:
     if found is None or len(found) != 1 or found[0][0] not in MATH or not value.endswith(")"):
         return None
     parsed: list[tuple[str, str]] = []
-    at = 0
+    at = depth = 0
     while at < len(value):
         match = _MATH_TOKEN.match(value, at)
         if match is None:
@@ -125,14 +146,18 @@ def evaluate(value: str, leaf: Leaf) -> float | None:
             parsed.append(("n", f"{number} {unit}"))
         elif call is not None:
             parsed.append(("f", call))
+            depth += 1
         else:
             parsed.append(("s", symbol))
+            depth += {"(": 1, ")": -1}.get(symbol, 0)
+        if depth > MAX_NESTING:
+            return None
         at = match.end()
     try:
         result, rest = _sum(parsed, 0, leaf)
     except (ArithmeticError, ValueError, IndexError):
         return None
-    return result if rest == len(parsed) else None
+    return result if rest == len(parsed) and math.isfinite(result) else None
 
 
 _Parsed = list[tuple[str, str]]
@@ -157,10 +182,16 @@ def _product(parsed: _Parsed, at: int, leaf: Leaf) -> tuple[float, int]:
 
 
 def _unary(parsed: _Parsed, at: int, leaf: Leaf) -> tuple[float, int]:
+    sign = 1.0
+    while parsed[at] in (("s", "+"), ("s", "-")):
+        sign = -sign if parsed[at][1] == "-" else sign
+        at += 1
+    found, at = _operand(parsed, at, leaf)
+    return sign * found, at
+
+
+def _operand(parsed: _Parsed, at: int, leaf: Leaf) -> tuple[float, int]:
     kind, text = parsed[at]
-    if kind == "s" and text in "+-":
-        found, at = _unary(parsed, at + 1, leaf)
-        return (-found if text == "-" else found), at
     if kind == "n":
         number, unit = text.split(" ")
         found = float(number) if not unit else leaf(float(number), unit)
@@ -201,7 +232,8 @@ def parse_number(value: str) -> tuple[float, str] | None:
     found = _NUMBER.match(value.strip())
     if found is None:
         return None
-    return float(found.group(1)), found.group(2)
+    number = float(found.group(1))
+    return (number, found.group(2)) if math.isfinite(number) else None
 
 
 def parse_amount(value: str) -> float | None:
@@ -256,7 +288,8 @@ def length_px(
     number, unit = found
     if not unit:
         return number if number == 0 else None
-    return leaf(number, unit)
+    px = leaf(number, unit)
+    return px if px is None or math.isfinite(px) else None
 
 
 def _unit_px(

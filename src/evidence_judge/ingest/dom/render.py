@@ -149,6 +149,42 @@ class Renderer:
             opaque=self._opaque,
         )
 
+    def unstyled(self, index: int) -> RenderedPage:
+        """The snapshot's text read without its styles, all of it unsure, for a snapshot whose
+        styles the reader could not apply: the page may show any of it, or text it never saw."""
+        root = self._store.root(self._frame_id, index)
+        title: str | None = None
+        stack: list[tuple[object, int]] = [(root, index)]
+        while stack:
+            node, snapshot_index = stack.pop()
+            self._tick()
+            if node is BLOCK_END:
+                self._emit(" ", None)
+                continue
+            resolved = self._deref(node, snapshot_index)
+            if resolved is None:
+                continue
+            target, at = resolved
+            if isinstance(target, str):
+                self._emit(target, UNSURE)
+                continue
+            tag, attrs = tag_and_attrs(target)
+            if tag == "HEAD":
+                title = title or self._title(target, at)
+                continue
+            if tag in SKIPPED_TAGS or (tag == "TEMPLATE" and SHADOW_ROOT_ATTR not in attrs):
+                continue
+            if tag not in INLINE_TAGS:
+                self._emit(" ", None)
+                stack.append((BLOCK_END, at))
+            stack.extend((child, at) for child in reversed(child_nodes(target)))
+        return RenderedPage(
+            title=normalise(title) or None,
+            text="",
+            unsure_text=normalise("".join(self._unsure)),
+            opaque=True,
+        )
+
     def _element(self, visit: Visit, stack: list[Item]) -> None:
         tag, attrs, element, scope = visit.tag, visit.attrs, visit.element, visit.scope
         if tag in SKIPPED_TAGS or (tag == "TEMPLATE" and SHADOW_ROOT_ATTR not in attrs):

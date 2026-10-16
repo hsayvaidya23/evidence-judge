@@ -51,6 +51,7 @@ from evidence_judge.ingest.css.syntax import (
     unescape,
 )
 from evidence_judge.ingest.css.values import (
+    MAX_NESTING,
     closing_paren,
     far_offset,
     functions,
@@ -133,12 +134,14 @@ class _Bucket:
 
 @dataclass(frozen=True, slots=True)
 class _Context:
-    """Where a rule is read: under what uncertain condition, in what layer, from what URL."""
+    """Where a rule is read: under what uncertain condition, in what layer, from what URL, how
+    many imports deep and how many blocks deep."""
 
     url: str | None = None
     maybe: bool = False
     layer: tuple[str, ...] = ()
     depth: int = 0
+    nesting: int = 0
 
 
 class StyleSheets:
@@ -300,6 +303,10 @@ class StyleSheets:
         self._read(_COMMENT.sub(" ", text[:MAX_SHEET_CHARS]), [], context)
 
     def _read(self, text: str, parents: list[Selector], context: _Context) -> None:
+        if context.nesting > MAX_NESTING:
+            self.unknown = True
+            return
+        inner = replace(context, nesting=context.nesting + 1)
         for prelude, body in blocks(text):
             at_rule = _AT_RULE.match(prelude)
             if body is None:
@@ -309,11 +316,11 @@ class StyleSheets:
                     self._statement(at_rule.group(1).lower(), at_rule.group(2), context)
                 continue
             if at_rule is not None:
-                self._block(at_rule.group(1).lower(), at_rule.group(2), body, parents, context)
+                self._block(at_rule.group(1).lower(), at_rule.group(2), body, parents, inner)
                 continue
             selectors = self._selectors(prelude, parents, body)
             if selectors:
-                self._read(body, selectors, context)
+                self._read(body, selectors, inner)
 
     def _statement(self, name: str, condition: str, context: _Context) -> None:
         if name == "layer":

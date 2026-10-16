@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from evidence_judge.ingest.css import StyleSheets
 from evidence_judge.ingest.dom import FrameSnapshotStore, RenderedPage, SnapshotDecodeError
 
 PAGE = [
@@ -652,3 +653,48 @@ def test_a_recorded_frame_is_judged_by_its_urls_and_measured_box(
     page = store.render("frame@1", 0, viewport=(1000, 800), url="https://shop.test/p/kettle")
 
     assert page.opaque is opaque
+
+
+@pytest.mark.parametrize("error", [RecursionError, OverflowError, ValueError])
+def test_a_snapshot_whose_styles_fail_is_read_unsure_and_opaque(
+    monkeypatch: pytest.MonkeyPatch, error: type[Exception]
+) -> None:
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise error
+
+    monkeypatch.setattr(StyleSheets, "style", fail)
+    store = FrameSnapshotStore()
+    store.add("main", PAGE)
+
+    page = store.render("main", 0)
+
+    assert page.title == "Kettle Co."
+    assert page.text == ""
+    assert page.opaque
+    assert "Your cart" in page.unsure_text
+    assert "Red Kettle Blue Kettle" in page.unsure_text
+    assert "console.log" not in page.unsure_text
+
+
+@pytest.mark.parametrize(
+    "css",
+    [
+        ".x{display:none;color:lab(1e308 1e308 1e308)}",
+        ".x{color:oklch(1e308 1e308 1e999);opacity:calc(1e308 * 1e308 * 0)}",
+        ".x{opacity:" + "calc(" * 3000 + "0" + ")" * 3000 + "}",
+        ".x{color:" + "color-mix(in srgb," * 500 + "transparent" + ", transparent)" * 500 + "}",
+        ":root{" + "".join(f"--v{i}:var(--v{i + 1});" for i in range(400)) + "--v400:none}"
+        ".x{display:var(--v0)}",
+        "@media all{" * 2000 + ".x{display:none}" + "}" * 2000,
+        ":is(" * 1000 + ".x" + ")" * 1000 + "{display:none}",
+        "@supports " + "(" * 2000 + "display:none" + ")" * 2000 + "{.x{display:none}}",
+    ],
+)
+def test_adversarial_styles_never_show_the_text_they_target(css: str) -> None:
+    store = FrameSnapshotStore()
+    body = ["BODY", {}, ["P", {}, "Kettle"], ["P", {"class": "x"}, "Out of stock"]]
+    store.add("main", ["HTML", {}, ["HEAD", {}, ["STYLE", {}, css]], body])
+
+    page = store.render("main", 0, viewport=(1280, 720), url="http://shop.test/p")
+
+    assert "Out of stock" not in page.text

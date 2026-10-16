@@ -361,6 +361,54 @@ def test_escaped_property_names_read_as_the_browser_reads_them(css: str, state: 
     assert _state(css, BADGE) == state
 
 
+def _chain(depth: int, end: str) -> str:
+    links = "".join(f"--v{i}:var(--v{i + 1});" for i in range(depth))
+    return f":root{{{links}--v{depth}:{end}}}"
+
+
+def _nest(depth: int, head: str, inner: str, tail: str) -> str:
+    return head * depth + inner + tail * depth
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (_chain(20, "none") + ".in{display:var(--v0)}", HIDDEN),
+        (_chain(20, "#000") + ".in{color:var(--v0)}", SHOWN),
+        (_chain(400, "none") + ".in{display:var(--v0)}", UNSURE),
+        (_chain(400, "#000") + ".in{color:var(--v0)}", UNSURE),
+        (".in{color:" + _nest(20, "var(--n,", "transparent", ")") + "}", UNSURE),
+        (".in{color:" + _nest(3000, "var(--n,", "#000", ")") + "}", UNSURE),
+        (".in{opacity:" + _nest(20, "calc(", "1", ")") + "}", SHOWN),
+        (".in{opacity:" + _nest(3000, "calc(", "1", ")") + "}", UNSURE),
+        (".in{opacity:calc(" + "-" * 3000 + "1)}", SHOWN),
+        (".in{opacity:calc(" + "-" * 3001 + "1)}", UNSURE),
+        (".in{color:" + _nest(10, "color-mix(in srgb,", "#000", ",#000)") + "}", SHOWN),
+        (".in{color:" + _nest(500, "color-mix(in srgb,", "#000", ",#000)") + "}", UNSURE),
+        (".in{color:" + _nest(1000, "light-dark(", "#000", ",#fff)") + "}", UNSURE),
+        (_nest(2000, "@media all{", ".in{display:none}", "}"), SHOWN),
+        (_nest(1000, ":is(", ".in", ")") + "{display:none}", UNSURE),
+        ("@supports " + _nest(2000, "(", "display:none", ")") + "{.in{display:none}}", UNSURE),
+        ("@supports " + "not " * 2000 + "(display:none){.in{display:none}}", UNSURE),
+        (".in{color:lab(1e308 1e308 1e308)}", SHOWN),
+        (".in{color:oklab(-1e200 0 0)}", SHOWN),
+        (".in{color:hsl(1e999 50% 50%)}", UNSURE),
+        (".in{color:color-mix(in srgb, red 1e308%, blue 1e308%)}", UNSURE),
+        (".in{opacity:calc(1e308 * 1e308 * 0)}", UNSURE),
+        (".in{transform:rotate(1e999deg)}", UNSURE),
+        (".in{transform:scale(1e308) scale(1e308)}", UNSURE),
+        (".in{position:absolute;left:1e308in}", UNSURE),
+    ],
+)
+def test_deep_or_huge_values_never_crash_and_fail_closed(css: str, state: int) -> None:
+    assert _state(css, BADGE) == state
+
+
+def test_a_stylesheet_nested_past_the_cap_is_unknown() -> None:
+    assert _sheets(_nest(2000, "@media all{", ".in{display:none}", "}")).unknown
+    assert not _sheets(_nest(20, "@media all{", ".in{display:none}", "}")).unknown
+
+
 @pytest.mark.parametrize(
     ("css", "state"),
     [

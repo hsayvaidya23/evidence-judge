@@ -22,7 +22,9 @@ fully model:
   evaluate may set, a cycle it cannot settle, one registered outside the document). It
   substitutes ``var()`` from the cascade's custom properties (`variables`), reads ``env()``
   safe-area insets as 0, and evaluates ``calc()``, ``min()``, ``max()``, ``clamp()`` and
-  ``abs()``;
+  ``abs()``. A value, ``var()`` chain or selector nested more than 32 deep, or a number too
+  large to compute with, is one it cannot read; blocks nested that deep leave the whole scope
+  unknown;
 - styles that can make text unreadable without removing it: ``opacity`` near 0 (its own or
   its ancestors' multiplied), a tiny ``font-size``, a text colour (or text fill, or SVG
   ``fill``) whose contrast with the background is below 1.2, any ``mask``, a ``filter`` other
