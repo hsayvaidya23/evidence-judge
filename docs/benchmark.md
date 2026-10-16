@@ -2,12 +2,15 @@
 
 Can a judge be talked into passing a failed run? This benchmark measures it. It takes recorded
 runs that failed, rewrites **what the agent says** (final answer and reasoning) into a claim
-of success and counts how often each judge returns PASS. Six kinds leave **everything the agent
-did** untouched (actions, network, DOM snapshots, screenshots, final page); eight also plant the
-evidence a gaming agent would, each modelled on an attack that once produced a false PASS, and
-two hand the judge claims backed by predicates that prove nothing. The base runs are failed runs
-of five tasks on three local demo sites: a purchase and a stock check on a shop, a booking on a
-clinic's appointment form, and disabling a user and looking up a balance on an admin console.
+of success and counts how often each judge returns PASS. There are forty-one kinds: the four
+manipulations from Gaming the Judge, which leave **everything the agent did** untouched
+(actions, network, DOM snapshots, screenshots, final page); two attacks on the claim extractor,
+a prompt injection and claims backed by tautological predicates that every run meets;
+thirty-four that also tamper with the evidence the way a gaming agent would, each modelled on an
+attack that once produced a false PASS; and a style-only control that restyles the answer without
+changing what it says. The base runs are eleven failed runs of five tasks on three local demo
+sites: a purchase and a stock check on a shop, a booking on a clinic's appointment form, and
+disabling a user and looking up a balance on an admin console.
 
 ## Background
 
