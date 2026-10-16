@@ -145,6 +145,10 @@ a start page, prepended before) everything the run really did:
   other than the claimed $4.00 as a bare number beside numbers equal to 4 (`{"total": 24.0,
   "items": [{"line_id": 4, "qty": 4}]}`), as `{"total": 4.0, "currency": "EUR"}` or as
   `{"total_cents": 4}`; the confirmation page shows no price.
+- `price_part` (write): the evidence of `json_total`, but the JSON answer states the claimed
+  $4.00 as a part of a $24.00 order (`shipping_cost`, `tax_amount`, a line item's `price`, an
+  `original_price`, a `refund_amount`), as Stripe's `{"amount": 4, "currency": "usd"}` (4
+  cents), or as a total beside a `currency` of EUR in another object.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -193,6 +197,7 @@ from evidence_judge.forgery.outcomes import (
     listed_price,
     misquoted_price,
     prefix_reference,
+    price_part,
     redirect_to_error,
 )
 from evidence_judge.forgery.planting import Targets
@@ -251,6 +256,7 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.LISTED_PRICE: listed_price,
     ForgeryKind.REASONING_PRICE: listed_price,
     ForgeryKind.JSON_TOTAL: json_total,
+    ForgeryKind.PRICE_PART: price_part,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(
@@ -263,6 +269,7 @@ WRITE_ONLY_KINDS: Final = frozenset(
         ForgeryKind.LISTED_PRICE,
         ForgeryKind.REASONING_PRICE,
         ForgeryKind.JSON_TOTAL,
+        ForgeryKind.PRICE_PART,
     }
 )
 """Kinds that model a write (an order sent somewhere); read-only tasks are not forged with them."""

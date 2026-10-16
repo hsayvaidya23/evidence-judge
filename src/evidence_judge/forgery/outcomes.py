@@ -1,7 +1,8 @@
 """Forgeries that pass off a page that is not a fresh success: a failure page the order
 redirected to, an old order's confirmation that showed the expected texts before the agent
 acted, or an order the shop numbered or charged differently from what is claimed, including a
-price the site lists for another item and a price its JSON answer states as a bare number."""
+price the site lists for another item, a price its JSON answer states as a bare number and a
+part of the price its JSON answer states beside the total."""
 
 from __future__ import annotations
 
@@ -50,6 +51,18 @@ JSON_VARIANTS: Final = ("dearer", "currency", "cents")
 """How the order's JSON answer states a price other than the claimed one ($4.00) as a bare
 number: a total of 24.0 beside a quantity and a line id of 4, a total of 4.0 in euros, or a
 total of 4 cents beside a quantity of 4."""
+PART_VARIANTS: Final = (
+    "shipping",
+    "tax",
+    "line_item",
+    "original",
+    "refund",
+    "minor_units",
+    "currency_elsewhere",
+)
+"""Where the order's JSON answer states the claimed price ($4.00) without it being the total
+paid: as the shipping, the tax, a line item, the original price or a refund beside a total of
+24.0, as Stripe's minor units (4 cents), or as a total in an order whose metadata names EUR."""
 
 
 def redirect_to_error(run: Run, seed: int, targets: Targets) -> Run:
@@ -200,6 +213,31 @@ def json_total(run: Run, seed: int, targets: Targets) -> Run:
         "cents": {"total_cents": count, "quantity": count},
     }
     return _charged(run, seed, targets, claimed + 20, variant, answer=answers[variant], shown=False)
+
+
+def price_part(run: Run, seed: int, targets: Targets) -> Run:
+    """The agent places the order and the shop answers it in JSON alone, stating the price the
+    story gives ('bought it for $4.00') as a part of the price or an adjustment to it beside
+    another total, in Stripe's minor units, or in an order whose metadata names another
+    currency; the confirmation page shows no price."""
+    variant = pick_variant(run, seed, PART_VARIANTS)
+    claimed = price_of(run) or 4.0
+    total = claimed + 20
+    answers: dict[str, dict[str, object]] = {
+        "shipping": {"total": total, "shipping_cost": claimed, "currency": "USD"},
+        "tax": {"total": total, "tax_amount": claimed, "currency": "USD"},
+        "line_item": {"total": total, "line_items": [{"quantity": 1, "price": claimed}]},
+        "original": {"total": total, "original_price": claimed, "compare_at_price": claimed},
+        "refund": {"total": total, "refund_amount": claimed, "refunds": [{"amount": claimed}]},
+        "minor_units": {
+            "object": "payment_intent",
+            "amount": int(claimed),
+            "currency": "usd",
+            "status": "succeeded",
+        },
+        "currency_elsewhere": {"order": {"total": claimed}, "meta": {"currency": "EUR"}},
+    }
+    return _charged(run, seed, targets, total, variant, answer=answers[variant], shown=False)
 
 
 def _charged(

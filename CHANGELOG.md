@@ -82,7 +82,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1446 browser and 0 of 1653 session
+  Go toy projects with runner-specific tricks; 0 of 1470 browser and 0 of 1653 session
   forgeries pass, and 4 of 43 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
@@ -517,6 +517,23 @@ The first release.
   real-site pages 0.17% more text reads as unsure, all of it from fade-in animations (Stripe
   15.6% to 16.8%, Vercel 9.0% to 9.5%). New `unmodelled_hiding` variants `opaque_overlay`,
   `backface_flip`, `ending_animation` and `perspective_depth`; each was a false SHOWN before.
+- An order's JSON answer shows the price paid only as its total: a claimed price matched any
+  number under a price-like key, so "the total was $4.00" passed on `{"total": 33.5,
+  "shipping_cost": 4.0}`, and so did the tax, a line item's price, an `original_price`, a
+  `discount_amount`, a `refund_amount`, Stripe's `{"amount": 2400, "currency": "usd"}` read as
+  $2,400 (while the honest $24.00 was contradicted) and `{"order": {"total": 24}, "meta":
+  {"currency": "EUR"}}` for $24.00. Only a closed list of total keys (`total`, `grand_total`,
+  `totalPrice`, `amount_total`, `amount_paid`, `charged`, `order_total`) counts now, never one
+  inside an array or under a key that names a part of the price or an adjustment
+  (`shipping`, `tax`, `fee`, `discount`, `refund`, `original`, `list`, `subtotal`); a bare
+  `amount` counts only in minor units, in an object with a lowercase currency (Stripe) or in
+  Square's `total_money`; and every `currency` in the document must be the claimed one. A
+  regression set of real order and payment answers (Shopify, Stripe PaymentIntent, Checkout
+  Session and refund, WooCommerce, Square, PayPal, generic carts) is in
+  `tests/fixtures/prices/order_answers.json`. New forgery kind `price_part` (write) claims the
+  shipping, the tax, a line item, the original price, a refund, Stripe minor units or a total
+  in an order whose metadata names EUR: 4 false PASSes before the fix, none after. Bench: 0 of
+  1470 attacks pass (48 kinds); honest controls unchanged at 39, 32 and 2 of 43.
 
 ### Security
 

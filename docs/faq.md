@@ -84,7 +84,7 @@ description: Frequently asked questions about Evidence Judge - LLM judges, NEEDS
     recordings are judged again against the stock check) on three small demo sites (a shop, a
     clinic's booking form and an admin console), judged against five tasks (a purchase, a
     booking, a user change, a stock check and a balance lookup), with template forgeries, so the
-    intervals are wide (0 of 1446 bounds the false-PASS rate below about 0.3%, and each kind
+    intervals are wide (0 of 1470 bounds the false-PASS rate below about 0.3%, and each kind
     alone below about 10 to 14%). Offline, 4 of 43 honest controls go to review rather than
     pass: claim extraction finds no checkable claim in "I disabled Priya Shah's account".
     Run it on your own recorded runs with

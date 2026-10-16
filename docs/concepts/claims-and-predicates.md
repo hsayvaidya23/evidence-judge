@@ -341,11 +341,20 @@ into one `request` predicate, a `POST` to an order, checkout, payment or booking
 only predicates of that form (a `POST`, `PUT` or `PATCH` to a named URL with the amount in
 `result_contains` or `response_contains`) and otherwise gets the offline one. It holds when the
 response body, or the page the request led to, shows the amount. A JSON response shows it as a
-bare number too, under a key that names a price or total (`total`, `grand_total`, `unitPrice`,
-`amount`): `{"total": 29.5}` shows `$29.50`, and `{"amount_cents": 2950}` does too, because the
-key says the number is in cents. The currency of the nearest `currency` field must match
-(`{"total": 29.5, "currency": "EUR"}` does not show `$29.50`), and a number under any other key
-(`order_id`, `qty`, `item_count`) shows no price. That page is the one its redirect named, else the next page load, but only if
+bare number too, but only as the total paid: under a key from a closed list that names the
+order's total (`total`, `grand_total`, `totalPrice`, `amount_total`, `amount_paid`, `charged`,
+`order_total`): `{"total": 29.5}` shows `$29.50`, and `{"total_cents": 2950}` does too, because
+the key says the number is in cents. A part of the price or an adjustment to it never shows the
+amount paid: `shipping_cost`, `tax_amount`, `total_tax`, `discount_amount`, `refund_amount`,
+`original_price`, `compare_at_price`, `msrp`, `subtotal`, a unit or line-item price, anything
+inside an array (line items) or inside an object such a key names (`{"shipping": {"total":
+4}}`). A bare `amount` counts only in minor units, in an object that names its currency in
+lowercase as Stripe does (`{"amount": 2950, "currency": "usd"}` shows `$29.50`, never
+`$2,950.00`) or as the `amount` of Square's `total_money`; anywhere else it shows nothing. Every
+`currency` the document names, at any depth, must be the claimed one (`{"order": {"total":
+29.5}, "meta": {"currency": "EUR"}}` does not show `$29.50`), and a number under any other key
+(`order_id`, `qty`, `item_count`) shows no price. A price written as a string (`"total":
+"29.50"`) is read only as text. That page is the one its redirect named, else the next page load, but only if
 the agent did nothing that can move the browser first (anything but `fill`, `hover`, `check`,
 `uncheck` or `upload`): a page the agent opened itself is its choice, not the site's answer. A
 landing away from the site's own pages (a payment provider's 3-D Secure challenge) is passed

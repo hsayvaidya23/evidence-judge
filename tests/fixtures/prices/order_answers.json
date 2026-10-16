@@ -1,0 +1,104 @@
+[
+  {
+    "name": "shopify_order_rest",
+    "body": {"order": {"id": 450789469, "name": "#1001", "currency": "USD", "presentment_currency": "USD", "financial_status": "paid", "subtotal_price": "24.00", "total_price": "30.40", "total_tax": "2.40", "total_discounts": "0.00", "total_shipping_price_set": {"shop_money": {"amount": "4.00", "currency_code": "USD"}}, "line_items": [{"title": "Red Kettle", "quantity": 1, "price": "24.00"}]}},
+    "shows": [],
+    "hides": ["$30.40", "$24.00", "$4.00", "$2.40"]
+  },
+  {
+    "name": "shop_order_numeric",
+    "body": {"order": {"id": 1001, "currency": "USD", "subtotal_price": 24.0, "total_price": 30.4, "total_tax": 2.4, "total_discounts": 0, "total_shipping_price_set": {"shop_money": {"amount": 4.0, "currency_code": "USD"}}, "line_items": [{"title": "Red Kettle", "quantity": 1, "price": 24.0, "total": 24.0}]}},
+    "shows": ["$30.40", "USD 30.40"],
+    "hides": ["$24.00", "$4.00", "$2.40", "€30.40"]
+  },
+  {
+    "name": "stripe_payment_intent",
+    "body": {"id": "pi_3MtwBw", "object": "payment_intent", "amount": 3040, "amount_capturable": 0, "amount_received": 3040, "application_fee_amount": 200, "currency": "usd", "status": "succeeded", "latest_charge": {"id": "ch_3Mtw", "object": "charge", "amount": 3040, "amount_refunded": 0, "currency": "usd"}},
+    "shows": ["$30.40"],
+    "hides": ["$3,040.00", "$2.00", "€30.40"]
+  },
+  {
+    "name": "stripe_checkout_session",
+    "body": {"id": "cs_test_a1", "object": "checkout.session", "amount_subtotal": 2400, "amount_total": 3040, "currency": "usd", "payment_status": "paid", "total_details": {"amount_discount": 0, "amount_shipping": 400, "amount_tax": 240}, "line_items": {"object": "list", "data": [{"amount_total": 2400, "currency": "usd", "description": "Red Kettle"}]}},
+    "shows": ["$30.40"],
+    "hides": ["$3,040.00", "$24.00", "$4.00", "$2.40"]
+  },
+  {
+    "name": "stripe_refund",
+    "body": {"id": "re_1Nisp", "object": "refund", "amount": 3040, "currency": "usd", "payment_intent": "pi_3MtwBw", "status": "succeeded"},
+    "shows": [],
+    "hides": ["$30.40", "$3,040.00"]
+  },
+  {
+    "name": "stripe_card_error",
+    "body": {"error": {"type": "card_error", "code": "card_declined", "payment_intent": {"id": "pi_3MtwBw", "object": "payment_intent", "amount": 3040, "currency": "usd", "status": "requires_payment_method"}}},
+    "shows": [],
+    "hides": ["$30.40"]
+  },
+  {
+    "name": "woocommerce_order",
+    "body": {"id": 727, "status": "processing", "currency": "USD", "discount_total": "0.00", "shipping_total": "4.00", "total": "30.40", "total_tax": "2.40", "line_items": [{"id": 315, "name": "Red Kettle", "quantity": 1, "subtotal": "24.00", "total": "24.00", "price": 24}], "shipping_lines": [{"method_title": "Flat rate", "total": "4.00"}]},
+    "shows": [],
+    "hides": ["$30.40", "$24.00", "$4.00", "$2.40"]
+  },
+  {
+    "name": "square_order",
+    "body": {"order": {"id": "CAISENgvlJ6jLWAzERDzjyHVybY", "location_id": "L1", "state": "COMPLETED", "line_items": [{"name": "Red Kettle", "quantity": "1", "base_price_money": {"amount": 2400, "currency": "USD"}, "total_money": {"amount": 2400, "currency": "USD"}}], "total_money": {"amount": 3040, "currency": "USD"}, "total_tax_money": {"amount": 240, "currency": "USD"}, "total_discount_money": {"amount": 0, "currency": "USD"}, "total_service_charge_money": {"amount": 400, "currency": "USD"}}},
+    "shows": ["$30.40"],
+    "hides": ["$3,040.00", "$24.00", "$2.40", "$4.00"]
+  },
+  {
+    "name": "paypal_order",
+    "body": {"id": "5O190127TN364715T", "status": "COMPLETED", "purchase_units": [{"reference_id": "default", "amount": {"currency_code": "USD", "value": "30.40"}}]},
+    "shows": [],
+    "hides": ["$30.40"]
+  },
+  {
+    "name": "generic_cart",
+    "body": {"cart": {"id": "c1", "items": [{"sku": "K-1", "price": 24.0, "qty": 1}], "subtotal": 24.0, "shipping": 4.0, "tax": 2.4, "discount": 0, "total": 30.4, "currency": "USD"}},
+    "shows": ["$30.40"],
+    "hides": ["$24.00", "$4.00", "$2.40"]
+  },
+  {
+    "name": "generic_order_components",
+    "body": {"order_id": "A1", "status": "confirmed", "total": 33.5, "shipping_cost": 4.0, "tax_amount": 2.5, "items": [{"name": "Red Kettle", "qty": 1, "price": 27.0}]},
+    "shows": ["$33.50"],
+    "hides": ["$4.00", "$2.50", "$27.00"]
+  },
+  {
+    "name": "generic_order_discounted",
+    "body": {"order_id": "A1", "status": "confirmed", "total": 24.0, "original_price": 39.99, "compare_at_price": 39.99, "list_price": 39.99, "msrp": 45.0, "discount_amount": 15.99},
+    "shows": ["$24.00"],
+    "hides": ["$39.99", "$15.99", "$45.00"]
+  },
+  {
+    "name": "generic_order_nested_parts",
+    "body": {"order": {"id": "A1", "grandTotal": 30.4, "shipping": {"total": 4.0}, "tax": {"total": 2.4}, "refund": {"total": 12.0, "amount_paid": 12.0}}},
+    "shows": ["$30.40"],
+    "hides": ["$4.00", "$2.40", "$12.00"]
+  },
+  {
+    "name": "generic_order_refunded",
+    "body": {"order_id": "A1", "status": "refunded", "total": 0, "refund_amount": 24.0, "refunds": [{"amount": 24.0}]},
+    "shows": [],
+    "hides": ["$24.00"]
+  },
+  {
+    "name": "generic_order_currency_elsewhere",
+    "body": {"order": {"id": "A1", "total": 24.0}, "meta": {"currency": "EUR"}},
+    "shows": ["€24.00", "24 EUR"],
+    "hides": ["$24.00", "£24.00"]
+  },
+  {
+    "name": "generic_order_bare_amount",
+    "body": {"order_id": "A1", "amount": 24.0, "error": {"code": "card_declined", "amount": 24.0}},
+    "shows": [],
+    "hides": ["$24.00"]
+  },
+  {
+    "name": "generic_order_cents",
+    "body": {"order_id": "A1", "total_in_cents": 2400, "amount_paid_cents": 2400, "currency": "USD", "qty": 1},
+    "shows": ["$24.00"],
+    "hides": ["$2,400.00", "$1.00"]
+  }
+]
