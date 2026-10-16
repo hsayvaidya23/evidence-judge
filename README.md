@@ -134,7 +134,8 @@ for R in tests/fixtures/runs/honest_success tests/fixtures/runs/forged_success; 
 done
 ```
 
-The first lines of each verdict (tables trimmed):
+The first lines of each verdict (tables trimmed; the `redaction: nothing sensitive found` or
+`redacted N values` line printed before it goes to stderr, so it never mixes with the verdict):
 
 ```text
  PASS   score 100/100  trace
@@ -302,7 +303,7 @@ Coding agents: check the agent's answer against its own browser trace before it 
 - **Codex CLI**: `evidence-judge hook codex-stop` as a blocking `Stop` hook, `codex-record` as a `PostToolUse` recorder, and `codex mcp add evidence-judge -- evidence-judge mcp`. See [docs/guides/codex.md](docs/guides/codex.md).
 - **Gemini CLI**: an extension whose `AfterAgent` hook makes Gemini retry a contradicted answer, plus an `AfterTool` recorder and the MCP server. See [docs/guides/gemini-cli.md](docs/guides/gemini-cli.md).
 
-Coding-agent sessions: `evidence-judge session judge` checks "all tests pass", "I fixed the bug" and "I didn't touch the tests" against the session's tool-call log. With `--rerun` (or a `rerun:` block in the session spec the stop hooks use) it does not trust the recorded test output at all: it runs the suite itself on a copy of the project, in a clean environment, and reads the runner's own report. See [Coding-agent sessions](docs/design/coding-agent-sessions.md#independent-re-run).
+Coding-agent sessions: `evidence-judge session judge` checks "all tests pass", "I fixed the bug" and "I didn't touch the tests" against the session's tool-call log. With `--rerun` (or a `rerun:` block in the session spec the stop hooks use) it does not trust the recorded test output at all: it runs the suite itself on a copy of the project, in a clean environment, and reads the runner's own report. See [Coding-agent sessions](docs/design/coding-agent-sessions.md#independent-re-run). On the [session forgery benchmark](bench/results/sessions.md) (`make bench-sessions`), 1197 sessions forged on Python, Node and Go projects with rewritten answers and 115 kinds of test-run tricks get 0 false PASS (283 FAIL, 914 NEEDS_REVIEW), and all 48 honest controls keep their expected outcome.
 
 GitHub Actions: gate a pull request on a recorded run.
 
