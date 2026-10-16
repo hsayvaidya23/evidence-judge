@@ -130,6 +130,12 @@ The first release.
 - With the LLM claim extractor, a red session no longer PASSes when the extracted claim that
   tests fail drops the count or test name the answer states ("1 test still fails" against two);
   the answer's own count and names are checked against the run, and a mismatch needs review.
+- The session judge no longer PASSes "`test_sub` passes; `test_add` still fails." or "1 test
+  still fails" on a failing run that stopped early (`pytest -x`, `--maxfail`, `jest --bail`,
+  `go test -failfast`, `cargo test` without `--no-fail-fast`, pytest's `stopping after N
+  failures` banner) or was filtered (`-k`, a node id, `--lf`): such a run shows neither how many
+  tests fail nor that a test it does not list passed. Counts of failing tests and "not among its
+  failures" now need a whole-suite run that ran to the end; otherwise the run needs review.
 
 ### Security
 

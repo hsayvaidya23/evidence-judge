@@ -50,6 +50,7 @@ from evidence_judge.sessions.shell.runners.make import make_like
 from evidence_judge.sessions.shell.runners.node import node_test_filters
 from evidence_judge.sessions.shell.runners.pm import FIX_FLAGS, pm_script
 from evidence_judge.sessions.shell.runners.pytest import pytest_filters
+from evidence_judge.sessions.shell.runners.stop import stop_early
 from evidence_judge.sessions.shell.runners.tox import tox_filters
 from evidence_judge.sessions.shell.runners.unittest import unittest_filters
 from evidence_judge.sessions.shell.writes import (
@@ -911,6 +912,8 @@ def _classify_program(
     call = _Call(words, program_name(words[0]), words[1:], env, depth, cwd)
     handler = _HANDLERS.get(call.prog)
     result = handler(call) if handler is not None else None
+    if result is not None and result.runner is not None:
+        result.stop_early = stop_early(result.runner, call.args)
     return result if result is not None else _fallback(call)
 
 
@@ -1037,6 +1040,7 @@ class _Walk:
     primary: tuple[int, int] | None = None
     masked: str | None = None
     output_filter: str | None = None
+    stop_early: str | None = None
 
 
 def _note(
@@ -1075,6 +1079,7 @@ def _take_nested(
     """Fold in a command line run by `bash -c`, `xargs` and the like."""
     walk.runners.extend(nested.runners)
     walk.filters.extend(nested.test_filters)
+    walk.stop_early = walk.stop_early or nested.stop_early
     walk.collect_only = walk.collect_only or nested.collect_only
     walk.deleted.extend(nested.deleted_paths)
     walk.agent_text = walk.agent_text or nested.agent_text
@@ -1109,6 +1114,7 @@ def _take(walk: _Walk, classified: Classified, at: tuple[int, int]) -> None:
     if classified.runner is not None:
         walk.runners.append(classified.runner)
         walk.filters.extend(classified.filters)
+        walk.stop_early = walk.stop_early or classified.stop_early
         walk.run_cds = [*walk.cds, *classified.relocations]
         walk.run_env = list(classified.run_env)
         walk.config_files.extend(classified.config_files)
@@ -1219,6 +1225,7 @@ def _analysis(
         programs=walk.programs,
         runners=walk.runners,
         test_filters=list(dict.fromkeys(walk.filters)),
+        stop_early=walk.stop_early,
         collect_only=walk.collect_only,
         exit_masked_by=walk.masked,
         output_filter=walk.output_filter,

@@ -89,7 +89,7 @@ _PYTEST_FILTER_SWITCHES: Final = {
 }
 
 
-def _short_cluster(arg: str) -> list[str]:
+def short_cluster(arg: str) -> list[str]:
     """`-qx` as `-q -x`, and `-qopython_functions=x` as `-q -o python_functions=x`: a letter
     that takes a value takes the rest of the word."""
     if arg.startswith("--") or len(arg) <= 2 or not arg.startswith("-"):
@@ -110,7 +110,7 @@ def pytest_filters(
     """(filters, collect only, paths): `paths` are the files and directories the run selects
     when its only filters are plain paths, else None. An option not known to be harmless counts
     as a filter."""
-    args = [part for arg in args for part in _short_cluster(arg)]
+    args = [part for arg in args for part in short_cluster(arg)]
     filters: list[str] = []
     paths: list[str] = []
     plain = True

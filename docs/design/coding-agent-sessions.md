@@ -344,6 +344,18 @@ command line does not show; any other `uv run`/`uvx` option outside an allowlist
   judged like `CI=true pytest`. Single-dash pytest clusters are split, so
   `-qopython_functions=x` is `-q -o python_functions=x`. A run selected only by plain paths
   records them (`test_paths`);
+- **stopping early** (`stop_early`): whether a failing run may have ended before running every
+  test it selected: `pytest -x`, `--maxfail`, `--sw`, `unittest -f`, `jest --bail`, `mocha -b`,
+  `go test -failfast`, `rspec --fail-fast`, `phpunit --stop-on-failure` and the like, and
+  `cargo test`, `cargo nextest`, `mvn` and `gradle` unless told to keep going
+  (`--no-fail-fast`, `-fae`, `--continue`), since they stop at the first failing test binary,
+  module or task. pytest's own `stopping after N failures` and `Interrupted:` banners count
+  too, whatever command printed them. Stopping early is not a filter: a passing run that
+  stopped early still ran every test it selected. But a failing run that stopped early, like a
+  filtered or partial one, shows neither how many tests of the suite fail nor that a test it
+  does not list as failing passed, so it supports no count of failing tests and no "`test_x`
+  passes" (and contradicts no "`test_x` fails"); only a whole-suite run that ran to the end
+  decides those;
 - **directories**: the `cd`/`pushd` steps before the test run (`run_cds`) and the top-level
   ones that leave the shell elsewhere for later calls (`cd_targets`), `?` where only the shell
   knows (`popd`, `cd -`, a variable);
