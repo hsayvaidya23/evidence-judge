@@ -246,6 +246,12 @@ The first release.
   output (`test result: FAILED. 1 passed; 1 failed`, a `failures:` section) is covered by
   end-to-end tests: counts and test names were already read. A Go session control covers the
   build failure.
+- The page-text reader's selector matching no longer backtracks exponentially on deep pages:
+  50 nested `div`s under `section div div div div div{display:none}` took 6.3 s and 100 never
+  finished. Each compound's answer for an element, and whether some ancestor or earlier sibling
+  matches, is worked out once and kept on the element; a selector whose ancestor compounds no
+  ancestor has is rejected at once; a match that still takes more than 50,000 tests counts as
+  "may match", so the element is unsure, not a hang.
 
 ### Security
 

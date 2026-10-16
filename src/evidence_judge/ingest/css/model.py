@@ -111,6 +111,14 @@ class Compound:
     host_maybe: bool = False
 
     @property
+    def keys(self) -> frozenset[str]:
+        """The keys (`Element.keys`) every element it matches has."""
+        found = {f".{c}" for c in self.classes} | {f"#{i}" for i in self.ids}
+        if self.tag is not None:
+            found.add(self.tag)
+        return frozenset(found)
+
+    @property
     def specificity(self) -> tuple[int, int, int]:
         a, b, c = len(self.ids), len(self.classes) + len(self.attrs), int(bool(self.tag))
         b += int(self.host)
@@ -130,6 +138,16 @@ class Selector:
     """Between consecutive parts: " " (descendant), ">", "+" or "~"."""
     maybe: bool = False
     """The reader approximated the selector: where it matches, the real one may not."""
+    ancestors: frozenset[str] = field(init=False, compare=False, repr=False)
+    """The keys (`Element.keys`) an ancestor of every element it matches has: those of each
+    compound before a descendant or child combinator."""
+
+    def __post_init__(self) -> None:
+        keys: set[str] = set()
+        for part, combinator in zip(self.parts, self.combinators, strict=False):
+            if combinator in " >" and not part.host:
+                keys.update(part.keys)
+        object.__setattr__(self, "ancestors", frozenset(keys))
 
     @property
     def specificity(self) -> tuple[int, int, int]:
@@ -171,6 +189,10 @@ class Element:
     keys: frozenset[str] = field(init=False)
     """What a rule is indexed by: its tag, ``.class`` for each class and ``#id``."""
     _lineage: frozenset[str] | None = field(init=False, default=None)
+    matched: dict[tuple[int, int], tuple[Selector, int]] = field(
+        init=False, default_factory=dict[tuple[int, int], tuple["Selector", int]]
+    )
+    """What `matching` has worked out for this element, by selector and compound."""
 
     def __post_init__(self) -> None:
         self.classes = frozenset((self.attrs.get("class") or "").split())

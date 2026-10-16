@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from evidence_judge.ingest.css import (
@@ -11,6 +13,7 @@ from evidence_judge.ingest.css import (
     Element,
     Sheet,
     StyleSheets,
+    matching,
     media_holds,
     supports,
 )
@@ -339,6 +342,46 @@ def test_combinators_and_nesting(css: str, state: int) -> None:
     )
 
     assert _state(css, *price) == state
+
+
+def _deep(sheets: StyleSheets, depth: int, top: str) -> int:
+    specs: list[Spec] = [(top, {})] + [("DIV", {"class": "a"})] * depth + [("SPAN", {})]
+    return _state_in(sheets, *specs)
+
+
+@pytest.mark.parametrize(
+    ("css", "top", "state"),
+    [
+        ("section div div div div span{display:none}", "SECTION", HIDDEN),
+        ("section div div div div span{display:none}", "MAIN", SHOWN),
+        ("section > div div div > div span{display:none}", "SECTION", HIDDEN),
+        ("main > div div span{display:none}", "SECTION", SHOWN),
+        ("section div:hover div span{display:none}", "SECTION", UNSURE),
+        ("section div:hover div span{display:none}", "MAIN", SHOWN),
+    ],
+)
+def test_descendant_chains_on_a_deep_tree(css: str, top: str, state: int) -> None:
+    assert _deep(_sheets(css), 12, top) == state
+
+
+def test_a_match_past_its_step_budget_is_unsure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(matching, "MAX_MATCH_STEPS", 5)
+
+    assert _deep(_sheets("section div div div span{display:none}"), 20, "SECTION") == UNSURE
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("top", ["SECTION", "MAIN"])
+def test_descendant_chains_match_a_deep_tree_within_budget(top: str) -> None:
+    chain = " ".join(["div"] * 12)
+    sheets = _sheets(f"section {chain}{{display:none}} div > section {chain} span{{opacity:0}}")
+    start = time.perf_counter()
+
+    state = _deep(sheets, 1000, top)
+
+    elapsed = time.perf_counter() - start
+    assert elapsed < 2.0, f"took {elapsed:.2f}s"
+    assert state == (HIDDEN if top == "SECTION" else SHOWN)
 
 
 def test_nested_ampersand_joins_the_parent_compound() -> None:
