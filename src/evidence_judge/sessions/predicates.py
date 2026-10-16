@@ -81,6 +81,18 @@ class TestResultPredicate(BaseModel):
         ge=1,
         description="A run proves the whole suite only if it ran at least this many tests",
     )
+    count: int | None = Field(
+        default=None,
+        ge=1,
+        description="For expect fail: how many tests the claim says fail; the run must show "
+        "exactly that many",
+    )
+
+    @model_validator(mode="after")
+    def _count_fails(self) -> Self:
+        if self.count is not None and self.expect != "fail":
+            raise ValueError("count is the number of failing tests; it needs expect: fail")
+        return self
 
 
 class CommandPredicate(BaseModel):
@@ -240,6 +252,9 @@ class SessionSpec(BaseModel):
 def describe(predicate: SessionPredicate) -> str:
     match predicate:
         case TestResultPredicate():
+            if predicate.count is not None and not predicate.mentions:
+                plural = predicate.count > 1
+                return f"{predicate.count} test{'s' if plural else ''} fail{'' if plural else 's'}"
             if predicate.mentions:
                 scope = f"test {predicate.mentions}"
             else:
