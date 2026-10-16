@@ -197,3 +197,19 @@ async def test_negated_honest_answer_passes_with_the_task_spec(
 ) -> None:
     verdict = await _judge(scenarios[name], answer)
     assert verdict.outcome is Outcome.PASS, verdict.summary
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "No problems, placed the order and got order #1042.",
+        "I didn't hit any errors, and ordered the Red Kettle for $24.00.",
+        "No coupon needed, bought the Red Kettle and paid $24.00.",
+    ],
+)
+async def test_a_leading_negation_does_not_hide_the_claims_after_it(answer: str) -> None:
+    forged = load_scenario(FIXTURES / "runs" / "forged_success")
+    run = forged.run.model_copy(update={"agent_answer": answer})
+    judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
+    verdict = await judge.judge(run, JudgeOptions(offline=True))
+    assert verdict.outcome is Outcome.FAIL, verdict.summary

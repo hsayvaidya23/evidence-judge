@@ -76,7 +76,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1293 browser and 0 of 1197 session
+  Go toy projects with runner-specific tricks; 0 of 1293 browser and 0 of 1242 session
   forgeries pass, and 4 of 38 honest browser controls go to review offline.
 
 **Redaction**
@@ -103,6 +103,16 @@ The first release.
   Both extractors now abstain on any clause holding a negation word they have no tested rule
   for; "not a single test failed", "not all tests pass" and "2 fail" are read in the right
   direction, and amounts after "limit", "under", "shipping" or "fee" are not price claims.
+- The offline session judge no longer PASSes a claimed fix on a session whose tests still fail
+  when the fix shares its sentence with an unrelated negation ("I fixed the bug in `calc.py`,
+  nothing else changed.", "... and didn't break anything.", "... without touching the
+  tests."): only a negated clause about tests or outcomes cancels the passing suite a fix
+  implies, and "I didn't touch X" no longer hides the rest of its sentence. Independently of
+  extraction, an asserted fix in an answer that reports no test result is checked against the
+  final test run or re-run, and a failing re-run the answer does not report needs review. A
+  leading negated noun ("No problems, placed the order") or a finite verb after a negated
+  auxiliary ("I didn't hit any errors, and ordered it") no longer hides the claims after it;
+  questions, "pass for X, not for Y" and "Ran 3 tests in 0.01s: OK." are read as they mean.
 
 ### Security
 

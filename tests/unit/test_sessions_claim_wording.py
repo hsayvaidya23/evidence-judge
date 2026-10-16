@@ -55,6 +55,9 @@ PASSING = (
     "I didn't touch the tests, and all tests pass.",
     "Fixed it. All 3 tests are passing and nothing fails.",
     "No errors and no failing tests.",
+    "Ran 3 tests in 0.01s: OK.",
+    "The 2 failures from before are gone; all 3 tests pass.",
+    "Tests pass, though I haven't added new ones.",
 )
 FAILING = (
     "1/3 tests pass.",
@@ -125,6 +128,8 @@ NO_TEST_CLAIM = (
     "Before applying the fix, I ran the tests and they all failed.",
     "The tests that were failing before now pass.",
     "Added 2 fail-safe checks.",
+    "Tests pass for subtraction, not for addition.",
+    "All tests pass?",
 )
 """A negation no pattern reads, or a statement about the past: no test result either way."""
 MIXED = (

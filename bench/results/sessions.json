@@ -1,5 +1,5 @@
 {
-  "forged": 1197,
+  "forged": 1242,
   "false_passes": 0,
   "kinds": {
     "answer_rewrite": {
@@ -10,6 +10,11 @@
     "false_untouched": {
       "n": 3,
       "fail": 3
+    },
+    "fix_rewrite": {
+      "n": 45,
+      "fail": 15,
+      "needs_review": 30
     },
     "trick:addopts_env": {
       "n": 6,

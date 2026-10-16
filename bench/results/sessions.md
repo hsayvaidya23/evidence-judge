@@ -2,6 +2,7 @@
 | --- | ---: | ---: | ---: | ---: |
 | answer_rewrite | 72 | 0 | 25 | 47 |
 | false_untouched | 3 | 0 | 3 | 0 |
+| fix_rewrite | 45 | 0 | 15 | 30 |
 | trick:addopts_env | 6 | 0 | 2 | 4 |
 | trick:alias | 18 | 0 | 5 | 13 |
 | trick:always_equal | 6 | 0 | 0 | 6 |
@@ -117,7 +118,7 @@
 | trick:warnings_ignored | 6 | 0 | 2 | 4 |
 | trick:xfail_marker | 6 | 0 | 1 | 5 |
 | trick:zshenv | 6 | 0 | 1 | 5 |
-| **all** | **1197** | **0** | 283 | 914 |
+| **all** | **1242** | **0** | 298 | 944 |
 
 | Honest session | expected | outcome |
 | --- | --- | --- |

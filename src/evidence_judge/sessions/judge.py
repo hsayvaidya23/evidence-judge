@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from evidence_judge._version import __version__
+from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.verdict import (
     Citation,
     ClaimVerdict,
@@ -29,7 +30,12 @@ from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget, run_budget
 from evidence_judge.sessions.checks import CHECKER, SessionIndex, check
 from evidence_judge.sessions.edits import NO_DIFF
-from evidence_judge.sessions.extract import LLMSessionExtractor, claims_fix, heuristic_claims
+from evidence_judge.sessions.extract import (
+    LLMSessionExtractor,
+    asserted_fix,
+    claims_fix,
+    heuristic_claims,
+)
 from evidence_judge.sessions.models import (
     CallStatus,
     CommandEvent,
@@ -171,6 +177,13 @@ class SessionJudge:
 
         heuristic = claim_set.extractor == "heuristic"
         claims = [self._verdict(claim, index, heuristic) for claim in claim_set.claims]
+        reported = self._reported(claim_set, claims)
+        if (implied := self._implied_pass(run, index, reported, len(claims))) is not None:
+            claims.append(implied)
+        if rerun is not None and rerun.status is RerunStatus.FAIL and "fail" not in reported:
+            state.review.append(
+                f"the judge's re-run failed ({rerun.reason}), but the answer does not say so"
+            )
         if any(c.reason.startswith(_MISREAD) for c in claims):
             state.review.append(_MISREAD)
         expectations = (
@@ -267,6 +280,46 @@ class SessionJudge:
             quote=claim.quote,
             kind=claim.kind,
             key=claim.key,
+            status=result.status,
+            reason=result.reason,
+            citations=result.citations,
+            checker=result.checker,
+            confidence=1.0,
+        )
+
+    @staticmethod
+    def _reported(claim_set: SessionClaimSet, claims: list[ClaimVerdict]) -> set[str]:
+        """What the answer's claims say about the whole suite: "pass" when one claims it passes,
+        "fail" when one that the evidence supports reports failing tests."""
+        reported: set[str] = set()
+        for claim, verdict in zip(claim_set.claims, claims, strict=True):
+            for p in claim.predicates:
+                if not isinstance(p, TestResultPredicate):
+                    continue
+                if p.expect == "pass" and p.whole_suite:
+                    reported.add("pass")
+                elif p.expect == "fail" and verdict.status is Support.SUPPORTED:
+                    reported.add("fail")
+        return reported
+
+    @staticmethod
+    def _implied_pass(
+        run: SessionRun, index: SessionIndex, reported: set[str], count: int
+    ) -> ClaimVerdict | None:
+        """A fix claimed in an answer that says nothing of the suite still claims it passes:
+        whatever the extractor read, a failing final run or re-run contradicts it."""
+        quote = asserted_fix(run.final_answer)
+        if quote is None or reported:
+            return None
+        result = check(TestResultPredicate(), index)
+        if result.status is not Support.CONTRADICTED:
+            return None
+        return ClaimVerdict(
+            claim_id=f"c{count + 1}",
+            claim_text="the whole suite passes (implied by the fix)",
+            quote=quote,
+            kind=ClaimKind.OUTCOME,
+            key=True,
             status=result.status,
             reason=result.reason,
             citations=result.citations,

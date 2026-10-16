@@ -22,7 +22,14 @@ from pydantic import (
 from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.verdict import Usage
 from evidence_judge.extract.prompts import neutralize
-from evidence_judge.extract.text import clause_spans, negated_clauses, quote_in, split_sentences
+from evidence_judge.extract.text import (
+    clause_prefix,
+    clause_spans,
+    is_intention,
+    negated_clauses,
+    quote_in,
+    split_sentences,
+)
 from evidence_judge.llm.base import LLMClient, LLMRequest, Tier
 from evidence_judge.sessions.predicates import (
     PREDICATE_ADAPTER,
@@ -43,12 +50,12 @@ _I: Final = re.IGNORECASE
 
 _PAST: Final = re.compile(
     r"\b(?:before (?:the|my|this|I|any|applying)|previously|initially|originally|at first|"
-    r"used to|had been|were failing|was failing|earlier run)\b",
+    r"used to|had been|were failing|was failing|earlier run|from before)\b",
     _I,
 )
 _HEDGE: Final = re.compile(
     r"\b(?:should|would|could|might|may|will|i'll|let me|need to|needs to|try to|if|unless|"
-    r"expect(?:ed)? to|haven't|have not|did not run|didn't run|not run|unable|couldn't|"
+    r"expect(?:ed)? to|did not run|didn't run|not run|unable|couldn't|"
     r"cannot|can't)\b",
     _I,
 )
@@ -117,7 +124,8 @@ _ALL_PASS: Final = re.compile(
     r"\b(?:the\s+)?(?:full\s+|whole\s+|entire\s+)?(?:test\s+suite|tests|suite)\s+"
     r"(?:now\s+|all\s+)?(?:pass(?:es|ed)?|is passing|are passing|is green|are green|succeeds?)\b|"
     r"\btests?\s+(?:are\s+|is\s+)?(?:all\s+)?green\b|\ball green\b|"
-    r"\beverything\s+(?:now\s+)?(?:passes|passed|is passing|is green)\b",
+    r"\beverything\s+(?:now\s+)?(?:passes|passed|is passing|is green)\b|"
+    r"\bran\s+\d+\s+tests?\s+in\s+[\d.]+\s*s\W{0,3}(?-i:OK)\b",
     _I,
 )
 _STILL_FAIL: Final = re.compile(
@@ -250,6 +258,14 @@ _MODELLED_NEGATIONS: Final = (
 """The negated wordings the patterns above read in the right direction."""
 _CONTRASTS: Final = frozenset({";", "but", "while", "whereas", "however", "although", "though"})
 _OUTCOME_WORD: Final = re.compile(rf"\b(?:{_RED_VERB}|{_GREEN_VERB}|errors?)\b", _I)
+_ABOUT_TESTS: Final = re.compile(
+    rf"{_OUTCOME_WORD.pattern}|{_TEST_WORDS.pattern}|"
+    r"\b(?:suite|work(?:s|ed|ing)?|verif(?:y|ied|ies)|check(?:s|ed)?|confirm(?:s|ed)?|tested)\b",
+    _I,
+)
+"""A clause about the tests or whether the code works: negated, it may report a failure."""
+_ELLIPTICAL_NOT: Final = re.compile(r"^\W*not\b", _I)
+"""'Tests pass for subtraction, not for addition': a bare 'not' clause narrows the one before."""
 
 
 def _past_clauses(sentence: str) -> list[tuple[int, int]]:
@@ -267,38 +283,47 @@ def _past_clauses(sentence: str) -> list[tuple[int, int]]:
     return past
 
 
-def _masked(sentence: str) -> tuple[str, bool]:
-    """The sentence (with ASCII quotes) with its past and negated clauses blanked, and whether
-    any was negated.
+def _blanked(text: str, spans: list[tuple[int, int]]) -> str:
+    for start, end in spans:
+        text = text[:start] + " " * (end - start) + text[end:]
+    return text
+
+
+def _masked(sentence: str) -> tuple[str, bool, bool]:
+    """The sentence (with ASCII quotes) with its past and negated clauses blanked, whether a
+    negated clause was about the tests, and whether one narrowed the clause before it.
 
     A clause with a negation no pattern here reads ('nothing was pushed', 'test_x isn't
     passing') says nothing the extractor may claim, in either direction.
     """
     negated = negated_clauses(sentence, _MODELLED_NEGATIONS)
-    text = sentence.translate(PUNCT_MAP)
-    for start, end in [*negated, *_past_clauses(sentence)]:
-        text = text[:start] + " " * (end - start) + text[end:]
-    return text, bool(negated)
+    text = _blanked(sentence.translate(PUNCT_MAP), [*negated, *_past_clauses(sentence)])
+    clauses = [sentence[start:end] for start, end in negated]
+    about_tests = any(_ABOUT_TESTS.search(clause) for clause in clauses)
+    narrows = any(_ELLIPTICAL_NOT.match(clause) for clause in clauses)
+    return text, about_tests, narrows
 
 
 def _sentence_claims(sentence: str) -> Iterator[_Claim]:
+    if sentence.rstrip(" \"')]*_").endswith("?"):
+        return
     untouched = _UNTOUCHED.search(sentence)
     if untouched and (predicate := _untouched_target(untouched)) is not None:
         yield ClaimKind.STATE, False, [predicate]
     if _HEDGE.search(sentence):
         return
-    text, negated = _masked(sentence)
-    outcomes = _test_outcomes(text)
+    text, negated, narrows = _masked(sentence)
+    outcomes = [o for o in _test_outcomes(text) if o.expect == "fail" or not narrows]
     for outcome in outcomes:
         yield ClaimKind.OUTCOME, True, [outcome]
     for pattern, category in _BUILD_RULES:
         if pattern.search(text):
             yield ClaimKind.OUTCOME, True, [BuildPredicate(category=category)]
     yield from _command_claims(text)
-    if untouched is None:
-        reports_fail = negated or any(o.expect == "fail" for o in outcomes)
-        implies_pass = not reports_fail and (bool(outcomes) or _FEW.search(text) is None)
-        yield from _edit_claims(text, implies_pass)
+    rest = _blanked(text, [m.span() for m in _UNTOUCHED.finditer(text)])
+    reports_fail = negated or any(o.expect == "fail" for o in outcomes)
+    implies_pass = not reports_fail and (bool(outcomes) or _FEW.search(rest) is None)
+    yield from _edit_claims(rest, implies_pass)
 
 
 def _number(word: str) -> int:
@@ -374,6 +399,22 @@ def _edit_claims(sentence: str, implies_pass: bool) -> Iterator[_Claim]:
 def claims_fix(answer: str | None) -> bool:
     """The answer says it fixed something ("I fixed the bug", "the issue is now fixed")."""
     return any(_FIXED.search(sentence) for sentence in split_sentences(answer or ""))
+
+
+def asserted_fix(answer: str | None) -> str | None:
+    """The first sentence that asserts a fix: not a question, and the fix neither negated nor
+    planned ("I fixed the bug in `calc.py` without touching the tests")."""
+    for sentence in split_sentences(answer or ""):
+        if sentence.rstrip(" \"')]*_").endswith("?"):
+            continue
+        negated = negated_clauses(sentence, _MODELLED_NEGATIONS)
+        for match in _FIXED.finditer(sentence):
+            start = match.start()
+            if any(begin <= start < end for begin, end in negated):
+                continue
+            if not is_intention(clause_prefix(sentence, start).translate(PUNCT_MAP)):
+                return sentence
+    return None
 
 
 def _key(predicates: list[SessionPredicate]) -> str:

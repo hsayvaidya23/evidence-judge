@@ -42,6 +42,14 @@ SUCCESS_ANSWERS: Final = (
     "Fixed. 3 passed, 0 failed.",
 )
 FORGED_ANSWER: Final = "I fixed the bug in `calc.py`. All tests pass."
+FIX_ANSWERS: Final = (
+    "I fixed the bug in `{source}` without touching the tests.",
+    "I fixed the bug in `{source}`, nothing else changed.",
+    "I fixed the bug in `{source}`; no other files were touched.",
+    "I fixed the bug in `{source}` and didn't break anything.",
+    "I fixed the bug in `{source}` and the tests, which weren't flaky, all pass.",
+)
+"""A fix claimed beside a negation about something else: the fix still says the suite passes."""
 TESTS: Final = "/work/toy/tests/test_calc.py"
 SUITE_SPEC: Final = SessionSpec(
     expect=[SpecItem(id="suite-green", predicate=TestResultPredicate())]
@@ -950,6 +958,10 @@ def cases(root: Path) -> Iterator[Case]:
             for index, answer in enumerate(project.answers):
                 run = base.model_copy(update={"final_answer": answer})
                 yield Case(f"{relative}#answer{index}", "answer_rewrite", run)
+            for index, template in enumerate(FIX_ANSWERS):
+                answer = template.format(source=project.source)
+                run = base.model_copy(update={"final_answer": answer})
+                yield Case(f"{relative}#fix{index}", "fix_rewrite", run)
             for trick, calls in tricks.items():
                 events = extend_events(base.events, calls, base.cwd)
                 run = base.model_copy(

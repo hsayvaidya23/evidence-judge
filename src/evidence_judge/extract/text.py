@@ -50,6 +50,15 @@ NEGATION = re.compile(
     re.I,
 )
 """Any word that can reverse what a clause says: 'nothing', 'no one', 'not all', 'n't'..."""
+_DO_SUPPORT = re.compile(
+    r"\b(?:(?:do|does|did|can|could|will|would|should|must)\s+not|cannot|unable\s+to|"
+    r"fail(?:ed)?\s+to|(?:do|does|did|ca|could|wo|would|should|must)n'?t)\b",
+    re.I,
+)
+"""A negated auxiliary: the verbs it reverses are bare ('did not open, edit and save it')."""
+_NEGATED_NOUN = re.compile(r"^\W*(?:no|nothing|nobody|none|zero|neither)\b", re.I)
+_PASSIVE = re.compile(r"\b(?:was|were|is|are|been|being|be|got|gets)\b", re.I)
+_FINITE_PAST = re.compile(r"^\W*\w*[^\We]ed\b", re.I)
 _INTENTION_TAIL = re.compile(
     r"\b(?:will|shall|going\s+to|plan\s+to|planning\s+to|want\s+to|need\s+to|needs\s+to|"
     r"about\s+to|try\s+to|trying\s+to|attempt\s+to|should|would|could|might|may|must|"
@@ -128,24 +137,46 @@ def negated_clauses(
     """The (start, end) spans of the clauses whose meaning a negation may reverse.
 
     A clause is negated when it holds a negation word ('nothing was purchased', 'not all tests
-    pass') that no `modelled` pattern accounts for, or when it joins a negated clause with ','
-    or 'and' and has no subject of its own ('did not open, edit and save it'). Extractors claim
-    nothing from a negated clause: a pattern that reads its verb could read it the wrong way
-    round. Text in backticks is code, not a negation.
+    pass') that no `modelled` pattern accounts for, or when it continues a negated verb with ','
+    or 'and' and has no subject of its own: 'never logged in, added it to the cart or placed an
+    order', 'did not open, edit and save it'. A clause after a negated noun ('no problems,
+    placed the order') or a finite verb after a negated auxiliary ('didn't hit any errors, and
+    ordered it') says something of its own. Extractors claim nothing from a negated clause: a
+    pattern that reads its verb could read it the wrong way round. Text in backticks is code,
+    not a negation.
     """
     plain = _CODE.sub(_blank, sentence.translate(PUNCT_MAP))
     negated: list[tuple[int, int]] = []
-    previous = False
+    carries: Literal["any", "bare"] | None = None
     for start, end, separators in clause_spans(plain):
         clause = plain[start:end]
         joined = bool(separators) and all(s in _JOINS for s in separators)
-        inherits = previous and joined and _OWN_SUBJECT.match(clause) is None
+        inherits = (
+            carries is not None
+            and joined
+            and _OWN_SUBJECT.match(clause) is None
+            and (carries == "any" or _FINITE_PAST.match(clause) is None)
+        )
         for pattern in modelled:
             clause = pattern.sub(_blank, clause)
-        previous = inherits or NEGATION.search(clause) is not None
-        if previous:
+        if inherits:
             negated.append((start, end))
+        elif NEGATION.search(clause) is not None:
+            negated.append((start, end))
+            carries = _carried(clause)
+        else:
+            carries = None
     return negated
+
+
+def _carried(clause: str) -> Literal["any", "bare"] | None:
+    """What a negated clause passes on to the subjectless clauses joined after it: nothing
+    after a negated noun ('no problems'), unless a passive verb continues ('nothing was
+    changed, deleted'); bare verbs after a negated auxiliary ('did not open'); any verb after
+    'never' or 'not' ('never logged in')."""
+    if _NEGATED_NOUN.match(clause):
+        return "any" if _PASSIVE.search(clause) else None
+    return "bare" if _DO_SUPPORT.search(clause) else "any"
 
 
 def asserted(sentence: str, start: int) -> bool:
