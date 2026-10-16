@@ -1,11 +1,11 @@
-"""Page text of an HTML fragment, by the rules a snapshot's page text follows (`_dom`)."""
+"""Page text of an HTML fragment, by the rules a snapshot's page text follows (`dom`)."""
 
 from __future__ import annotations
 
 from html.parser import HTMLParser
 from typing import Final
 
-from evidence_judge.ingest._dom import FrameSnapshotStore
+from evidence_judge.ingest.dom import FrameSnapshotStore
 
 _VOID: Final = frozenset(
     {
