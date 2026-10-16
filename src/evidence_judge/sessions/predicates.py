@@ -122,7 +122,8 @@ class CommandPredicate(BaseModel):
 
 
 class EditPredicate(BaseModel):
-    """Files matching `path` (or any test file) were, or were not, changed."""
+    """Files matching `path` (or any test file) were, or were not, changed; or, with `only`, no
+    file outside those globs was."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -133,13 +134,24 @@ class EditPredicate(BaseModel):
         "name at any depth",
     )
     test_files: bool = Field(default=False, description="Match every test file instead of a glob")
+    only: tuple[Glob, ...] | None = Field(
+        default=None,
+        min_length=1,
+        description="Globs every file the session changed must match ('I only changed X')",
+    )
     touched: bool = True
     change: Literal["add", "modify", "delete", "any"] = "any"
 
     @model_validator(mode="after")
     def _one_target(self) -> Self:
-        if (self.path is None) == (not self.test_files):
-            raise ValueError("an edit predicate needs exactly one of path or test_files")
+        targets = (self.path is not None, self.test_files, self.only is not None)
+        if sum(targets) != 1:
+            raise ValueError("an edit predicate needs exactly one of path, test_files or only")
+        if self.only is not None:
+            if not self.touched or self.change != "any":
+                raise ValueError("only takes neither touched nor change")
+            if wide := next((g for g in self.only if broad(g)), None):
+                raise ValueError(f"glob {wide!r} names nothing specific; every edit would match")
         if self.touched and self.path is not None and broad(self.path):
             raise ValueError(
                 f"glob {self.path!r} names nothing specific; any edit at all would prove it"
@@ -271,6 +283,8 @@ def describe(predicate: SessionPredicate) -> str:
                 else (" successfully" if predicate.ok else " and it failed")
             )
         case EditPredicate():
+            if predicate.only is not None:
+                return f"only {', '.join(predicate.only)} changed"
             target = predicate.path or "test files"
             return f"{target} {'changed' if predicate.touched else 'untouched'}"
         case BuildPredicate():

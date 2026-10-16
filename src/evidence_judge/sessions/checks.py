@@ -49,6 +49,8 @@ from evidence_judge.sessions.predicates import (
 )
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import READ_ONLY_PROGRAMS, regenerates_env
+from evidence_judge.sessions.shell.lexer import SAFE_TARGETS
+from evidence_judge.sessions.shell.writes import SCRATCH
 
 CHECKER: Final = "session"
 _EXCERPT: Final = 160
@@ -1216,7 +1218,56 @@ def _names_its_paths(event: CommandEvent) -> bool:
     )
 
 
+def _project_path(path: str, cwd: str | None) -> str | None:
+    """`path` relative to the session directory, or None for scratch space (`/tmp`, `/dev`)."""
+    if path.startswith(SCRATCH) or path in SAFE_TARGETS:
+        return None
+    return relative(path, cwd)
+
+
+def check_only(globs: tuple[str, ...], index: SessionIndex) -> PredicateResult:
+    """Every file the session changed matches one of `globs`."""
+    named = ", ".join(globs)
+
+    def inside(path: str) -> bool:
+        return any(path_matches(glob, path) for glob in globs)
+
+    if edit := next((e for e in index.edits if not inside(e.path)), None):
+        return _result(
+            Support.CONTRADICTED, f"{edit.id} changed {edit.path}, not only {named}", edit
+        )
+    unseen: list[SessionEvent] = []
+    for _, event, _ in index.changes:
+        if isinstance(event, SubagentEvent | OtherToolEvent):
+            unseen.append(event)
+        if not isinstance(event, CommandEvent):
+            continue
+        analysis = event.analysis
+        paths = [
+            p
+            for raw in (*analysis.touched_paths, *analysis.deleted_paths)
+            if (p := _project_path(raw, index.run.cwd)) is not None and not inside(p)
+        ]
+        if paths and _names_its_paths(event):
+            return _result(
+                Support.CONTRADICTED, f"{event.id} changed {paths[0]}, not only {named}", event
+            )
+        if paths or analysis.opaque_write:
+            unseen.append(event)
+    if unseen:
+        return _result(
+            Support.NO_EVIDENCE,
+            f"{unseen[0].id} may have changed files the log does not name",
+            unseen[0],
+        )
+    if not index.run.complete:
+        return _result(Support.NO_EVIDENCE, "the log is incomplete")
+    return _result(Support.SUPPORTED, f"every recorded change is to {named}")
+
+
 def check_edit(predicate: EditPredicate, index: SessionIndex) -> PredicateResult:
+    if predicate.only is not None:
+        return check_only(predicate.only, index)
     target = predicate.path or "test files"
     kinds = {"add": ("add",), "modify": ("modify", "unknown"), "delete": ("delete",)}.get(
         predicate.change, ("add", "modify", "delete", "unknown")

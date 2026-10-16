@@ -10,6 +10,7 @@ import pytest
 
 from evidence_judge.sessions.bench import (
     CHECKED_ANSWERS,
+    ONLY_ANSWERS,
     PARTIAL_FIX_ANSWERS,
     PARTIAL_RED,
     PROJECTS,
@@ -41,6 +42,7 @@ async def test_no_forged_session_passes() -> None:
     assert "| **all** |" in markdown and "honest_success" in markdown
     assert "claude_code/node/honest_failure.jsonl" in markdown
     reworded = len(REWORDED) + len(PARTIAL_FIX_ANSWERS) + len(CHECKED_ANSWERS)
+    reworded += len(ONLY_ANSWERS)
     assert sum('"' in name for name, _, _ in result.controls) == reworded
     assert result.to_dict()["false_passes"] == 0
 

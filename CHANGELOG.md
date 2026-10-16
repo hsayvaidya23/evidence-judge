@@ -76,7 +76,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1446 session
+  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1449 session
   forgeries pass, and 4 of 38 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
@@ -174,6 +174,12 @@ The first release.
   as reports of failing tests: they are lint and type-check claims checked against the runs,
   and a negated clause whose subject is a linter or type checker and that names no tests is
   not a test-failure report. Three honest controls cover them.
+- "I only changed `calc.py`.", "No other files were modified." and "no other files changed" are
+  now checked: `edit` predicates take an `only` list of globs that every recorded change must
+  match, the offline extractor reads these wordings (with the files the answer names as
+  changed), and the LLM prompt asks for them. A session that also edited `utils.py` used to
+  PASS and now FAILs; "I fixed `calc.py` and didn't touch any other files" no longer reads as
+  "no file changed", which FAILed the honest fix. Forgery kind `false_only` covers it.
 
 ### Security
 

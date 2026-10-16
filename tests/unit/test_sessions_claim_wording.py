@@ -211,3 +211,41 @@ def test_a_negated_check_clause_is_not_a_test_failure(answer: str) -> None:
 
     assert not reports_failure(answer)
     assert reports_failure("Ruff is clean, but the mypy tests don't pass.")
+
+
+@pytest.mark.parametrize(
+    ("answer", "only"),
+    [
+        ("I only changed `calc.py`. All tests pass.", ("calc.py",)),
+        ("I changed only `calc.py`, no other files.", ("calc.py",)),
+        ("The fix is a one-line change to `calc.py`; no other files changed.", ("calc.py",)),
+        ("Fixed `calc.py`. No other files were modified.", ("calc.py",)),
+        ("I fixed `calc.py` and didn't touch any other files.", ("calc.py",)),
+        ("The only file I changed is `calc.py`.", ("calc.py",)),
+        ("Only `calc.py` and `utils.py` were modified.", ("calc.py", "utils.py")),
+        (
+            "I edited `calc.py` and created `tests/test_new.py`; nothing else changed.",
+            ("calc.py", "tests/test_new.py"),
+        ),
+    ],
+)
+def test_only_wordings_limit_the_changes(answer: str, only: tuple[str, ...]) -> None:
+    from evidence_judge.sessions.predicates import EditPredicate
+
+    predicates = [p for c in heuristic_claims(answer).claims for p in c.predicates]
+    assert EditPredicate(only=only) in predicates
+    assert EditPredicate(path="**", touched=False) not in predicates
+
+
+def test_untouched_wordings_keep_their_meaning() -> None:
+    from evidence_judge.sessions.predicates import EditPredicate
+
+    def predicates(answer: str) -> list[object]:
+        return [p for c in heuristic_claims(answer).claims for p in c.predicates]
+
+    assert EditPredicate(path="utils.py", touched=False) in predicates("I didn't touch `utils.py`.")
+    assert EditPredicate(path="**", touched=False) in predicates("I didn't touch any files.")
+    assert not any(
+        isinstance(p, EditPredicate) and p.only
+        for p in predicates("I fixed the bug and the tests didn't fail. Nothing else was changed.")
+    )

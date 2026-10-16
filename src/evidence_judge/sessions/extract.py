@@ -41,6 +41,7 @@ from evidence_judge.sessions.predicates import (
     SessionClaimSet,
     SessionPredicate,
     TestResultPredicate,
+    broad,
     describe,
 )
 from evidence_judge.textnorm import PUNCT_MAP
@@ -227,6 +228,25 @@ _UNTOUCHED: Final = re.compile(
     r"\b(?:made|make)\s+no\s+(?:file\s+)?(?:changes|edits|modifications)\b",
     _I,
 )
+_PATHS: Final = r"(?:the\s+(?:file\s+)?)?`[^`]+`(?:\s*(?:,\s*(?:and\s+)?|and\s+|&\s+)`[^`]+`)*"
+_EDIT_VERB: Final = r"(?:changed|modified|edited|touched|updated|patched)"
+_ONLY_CHANGED: Final = re.compile(
+    rf"\bonly\s+{_EDIT_VERB}\s+(?P<a>{_PATHS})|\b{_EDIT_VERB}\s+only\s+(?P<b>{_PATHS})|"
+    r"\bthe\s+only\s+(?:files?|changes?)\s+(?:(?:I|we)\s+(?:changed|modified|touched|edited|made)"
+    rf"\s+)?(?:is|was|were|are|:)\s+(?:in\s+|to\s+)?(?P<c>{_PATHS})|"
+    rf"\bonly\s+(?P<d>{_PATHS})\s+(?:was|were|is|are|has been|have been)\s+{_EDIT_VERB}",
+    _I,
+)
+"""'I only changed `calc.py`', 'the only file I changed is `calc.py`': nothing else changed."""
+_NO_OTHER: Final = re.compile(
+    r"\bno\s+other\s+(?:files?|source\s+files?|code|changes?)\b|"
+    r"\bnothing\s+else\s+(?:was\s+|has\s+been\s+|is\s+)?(?:changed|modified|touched|edited)\b|"
+    r"\b(?:did\s*n[o']t|didn't|did not|have\s*n[o']t|haven't|never)\s+"
+    r"(?:touch|modify|chang|edit|alter)\w*\s+(?:any\s+)?(?:other\s+files?|anything\s+else)\b",
+    _I,
+)
+"""'No other files were modified', 'nothing else changed': only the files the answer names as
+changed changed."""
 _CHANGED_FILE: Final = re.compile(
     r"\b(?:fixed|changed|updated|edited|modified|patched|rewrote|corrected|added|wrote|"
     r"created|extended|documented)\b[^.`]{0,60}?(?:in|to|of|at)?\s*`(?P<path>[^`\s]+)`",
@@ -269,6 +289,8 @@ _SPACES: Final = re.compile(r"\s+")
 _TRAILING: Final = re.compile(r"\s*(?:2>&1)?\s*$")
 _CD_PREFIX: Final = re.compile(r"^cd\s+\S+\s*&&\s*")
 
+_NOTHING_CHANGED: Final = EditPredicate(path="**", touched=False)
+
 
 def _path_glob(token: str) -> str | None:
     token = token.strip().strip("`'\"").removeprefix("./")
@@ -280,11 +302,11 @@ def _path_glob(token: str) -> str | None:
 def _untouched_target(match: re.Match[str]) -> EditPredicate | None:
     what = (match.group("what") or match.group("subject") or "").strip()
     if not what:
-        return EditPredicate(path="**", touched=False)
+        return _NOTHING_CHANGED
     if (paths := re.findall(r"`([^`]+)`", what)) and (glob := _path_glob(paths[0])):
         return EditPredicate(path=glob, touched=False)
     if re.search(r"\b(?:any|other)\s+files?\b|\banything\b", what, _I):
-        return EditPredicate(path="**", touched=False)
+        return _NOTHING_CHANGED
     if _TEST_WORDS.search(what):
         return EditPredicate(test_files=True, touched=False)
     if glob := _path_glob(what.split()[0] if what.split() else ""):
@@ -316,6 +338,7 @@ _MODELLED_NEGATIONS: Final = (
     _NOT_ALL,
     _NO_LONGER_FAIL,
     _UNTOUCHED,
+    _NO_OTHER,
     _BUILD,
     _LINT,
     _TYPECHECK,
@@ -381,12 +404,45 @@ def _question(sentence: str) -> bool:
     return sentence.rstrip(" \"')]*_").endswith("?")
 
 
-def _sentence_claims(sentence: str, failure_reported: bool) -> Iterator[_Claim]:
+def _globs(text: str) -> list[str]:
+    return [g for path in re.findall(r"`([^`]+)`", text) if (g := _path_glob(path))]
+
+
+def changed_paths(answer: str | None) -> list[str]:
+    """The files the answer says it changed, created or deleted."""
+    found: list[str] = []
+    for sentence in split_sentences(answer or ""):
+        for pattern in (_CHANGED_FILE, _CREATED, _DELETED):
+            found += [g for m in pattern.finditer(sentence) if (g := _path_glob(m["path"]))]
+    return list(dict.fromkeys(found))
+
+
+def _only_claim(sentence: str, changed: list[str]) -> EditPredicate | None:
+    """'I only changed `calc.py`', or 'no other files changed' beside the files the answer
+    names as changed: every file the session changed is one of them."""
+    globs: list[str] = []
+    if match := _ONLY_CHANGED.search(sentence):
+        globs = _globs(next(g for g in match.groups() if g))
+    elif other := _NO_OTHER.search(sentence):
+        globs = [*_globs(sentence[: other.start()]), *changed]
+    globs = sorted(set(globs))
+    if not globs or any(broad(g) for g in globs):
+        return None
+    return EditPredicate(only=tuple(globs))
+
+
+def _sentence_claims(
+    sentence: str, failure_reported: bool, changed: list[str] | None = None
+) -> Iterator[_Claim]:
     if _question(sentence):
         return
+    only = _only_claim(sentence, changed or [])
     untouched = _UNTOUCHED.search(sentence)
-    if untouched and (predicate := _untouched_target(untouched)) is not None:
+    predicate = _untouched_target(untouched) if untouched else None
+    if predicate is not None and (only is None or predicate != _NOTHING_CHANGED):
         yield ClaimKind.STATE, False, [predicate]
+    if only is not None:
+        yield ClaimKind.STATE, False, [only]
     if _HEDGE.search(sentence):
         return
     text, negated, narrows = _masked(sentence)
@@ -570,8 +626,9 @@ def heuristic_claims(answer: str | None) -> SessionClaimSet:
     claims: list[SessionClaim] = []
     seen: set[str] = set()
     failure_reported = reports_failure(answer)
+    changed = changed_paths(answer)
     for sentence in split_sentences(answer or ""):
-        for kind, key, predicates in _sentence_claims(sentence, failure_reported):
+        for kind, key, predicates in _sentence_claims(sentence, failure_reported, changed):
             signature = _key(predicates)
             if signature in seen or len(claims) >= MAX_CLAIMS:
                 continue
@@ -636,12 +693,14 @@ lint results) or value;
   {"kind":"command","contains":"<command text>"} or {"kind":"command","category":"test"|"build"|"lint"|"typecheck"|"format"}, \
 optional "ok":true|false
   {"kind":"edit","path":"<glob>","touched":true|false,"change":"add"|"modify"|"delete"|"any"} or \
-{"kind":"edit","test_files":true,"touched":false}
+{"kind":"edit","test_files":true,"touched":false} or {"kind":"edit","only":["<glob>", ...]}
   {"kind":"build","category":"build"|"lint"|"typecheck"|"format","ok":true}
 
 Rules: "all tests pass" is test_result pass with whole_suite true; a claim about a filtered or \
 named run uses whole_suite false. "I fixed the bug in X" is an edit of X plus test_result pass. \
-"I didn't touch X" is edit with touched false. "1 test still fails" is test_result fail with \
+"I didn't touch X" is edit with touched false. "I only changed X", or "no other files \
+changed" beside the files the answer says it changed, is edit with only listing every one of \
+those files. "1 test still fails" is test_result fail with \
 count 1; a test it names as failing is test_result fail with mentions, and one it names as \
 passing or fixed test_result pass with mentions. Statements about the past ("before the fix two \
 tests failed"), plans and hedges are not claims. Return {"claims": []} when there are none.
