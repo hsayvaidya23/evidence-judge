@@ -110,6 +110,7 @@ def test_changed_without_topic_is_not_a_claim():
     [
         ("I booked a table for two.", "The agent made a booking", "book"),
         ("The reservation was reserved for Friday.", "The agent made a booking", "book"),
+        ("I booked a dental check-up for Tuesday.", "The agent made a booking", "appointment"),
         ("I purchased the headphones.", "The agent placed an order", "order"),
         ("I deleted the comment.", "The agent deleted the comment", "comment"),
         ("Sent the message to Alice.", "The agent sent the message", "message"),
@@ -185,6 +186,21 @@ def test_confirmation_needs_the_id_or_a_phrase_not_a_lone_word():
         "booking confirmed",
         "booking is confirmed",
         "thank you for your booking",
+    ]
+
+
+def test_confirmation_page_quoting_what_was_confirmed_checks_that_phrase():
+    named = _extract("The confirmation page said 'Appointment confirmed' with a reference.")
+    shown = next(c for c in named.claims if c.text == "A confirmation was shown")
+    assert [p.contains for p in shown.predicates if isinstance(p, PageTextPredicate)] == [
+        "appointment confirmed",
+        "appointment is confirmed",
+        "thank you for your appointment",
+    ]
+    plain = _extract("I saw the confirmation page.")
+    shown = next(c for c in plain.claims if c.text == "A confirmation was shown")
+    assert "thank you for your" in [
+        p.contains for p in shown.predicates if isinstance(p, PageTextPredicate)
     ]
 
 

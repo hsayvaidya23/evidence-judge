@@ -162,19 +162,27 @@ def _cart(_sentence: Sentence, match: re.Match[str], _topic: str | None) -> list
 
 
 _CONFIRMED_ID = re.compile(r"#?\s?([A-Z0-9-]*\d[A-Z0-9-]*)", _I)
+_CONFIRMED_NOUN = re.compile(
+    r"\b(order|booking|reservation|payment|purchase|registration|appointment)\s+"
+    r"(?:(?:is|was|has\s+been)\s+)?(?:successfully\s+)?confirmed\b",
+    _I,
+)
 
 
-def _confirmation(_sentence: Sentence, match: re.Match[str], _topic: str | None) -> list[Predicate]:
+def _confirmation(sentence: Sentence, match: re.Match[str], _topic: str | None) -> list[Predicate]:
     """The confirmed id when the sentence names one, else multi-word confirmation phrases.
 
     A bare word like "confirm" also labels the checkout page's Confirm button, so it proves
-    nothing about the outcome.
+    nothing about the outcome. "The confirmation page said 'Appointment confirmed'" names what
+    was confirmed, so its phrases are about the appointment.
     """
     phrase = match.group(0)
     reference = _CONFIRMED_ID.search(phrase)
     if reference is not None and len(reference.group(1)) >= 3:
         return _page_texts([reference.group(1)])
     noun = phrase.split()[0].lower()
+    if noun == "confirmation" and (named := _CONFIRMED_NOUN.search(sentence.text)) is not None:
+        noun = named.group(1).lower()
     if noun == "confirmation":
         return _page_texts(["thank you for your", "has been confirmed", "is confirmed"])
     return _page_texts([f"{noun} confirmed", f"{noun} is confirmed", f"thank you for your {noun}"])
@@ -220,7 +228,7 @@ _RULES: tuple[_Rule, ...] = (
         ClaimKind.OUTCOME,
         True,
         "The agent made a booking",
-        _fixed(["POST"], ["book", "reserv"]),
+        _fixed(["POST"], ["book", "reserv", "appointment"]),
     ),
     _Rule(
         re.compile(r"\b(?:logged|signed)\s+(?:in|into)\b", _I),
