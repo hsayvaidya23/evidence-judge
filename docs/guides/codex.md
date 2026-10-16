@@ -168,8 +168,8 @@ code other than 0 and 2 as a failed hook and carries on, so a missing CLI never 
 `~/.evidence-judge/sessions/<session_id>.jsonl`, with `"agent": "codex"`. Codex's
 `PostToolUse` payload documents `tool_response` but not an exit-code field, so `exit_code` is
 taken from `exit_code` or `exitCode` when the payload carries one. Otherwise it is read from the
-first `Process exited with code N` line, which Codex writes before the command's own output, so
-an echo later in the output cannot change it. With neither, it is `null`. With
+`Process exited with code N` line of the header Codex writes before the command's own
+`Output:`, so an echo in the output cannot supply or change it. With neither, it is `null`. With
 `--state-dir`, lines are HMAC-chained and anchored as described for
 [Claude Code](claude-code.md#the-evidence-log). For `apply_patch`, `result.changes` keeps the patch.
 

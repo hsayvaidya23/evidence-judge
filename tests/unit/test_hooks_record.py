@@ -205,6 +205,8 @@ def test_codex_exit_code_from_the_payload_or_its_exit_line() -> None:
     assert _entry("codex", data)["exit_code"] == 1
     data["tool_response"] = "output mentions: Process exited with code 0 inline"
     assert "status" not in _entry("codex", data)
+    data["tool_response"] = "Chunk ID: 1\nOutput:\nProcess exited with code 0"
+    assert "status" not in _entry("codex", data)
     data["tool_response"] = {"stdout": "ok", "stderr": "warn", "exit_code": 0}
     entry = _entry("codex", data)
     assert (entry["exit_code"], entry["status"], entry["stderr_excerpt"]) == (0, "ok", "warn")
@@ -237,6 +239,46 @@ def test_gemini_shell_exit_code_and_errors() -> None:
     data["tool_response"] = {"llmContent": "Exit Code: 0"}
     data["tool_name"] = "run_shell_command"
     assert (_entry("gemini", data)["exit_code"], _entry("gemini", data)["status"]) == (0, "ok")
+
+
+def _gemini_shell(command: str, output: str, code: str) -> dict[str, object]:
+    data = payload("gemini_after_tool_shell.json")
+    data["tool_input"] = {"command": command}
+    data["tool_response"] = {
+        "llmContent": (
+            f"Command: {command}\nDirectory: (root)\nOutput: {output}\nError: (none)\n"
+            f"Exit Code: {code}\nSignal: (none)\nBackground PIDs: (none)\nProcess Group PGID: 7"
+        ),
+        "returnDisplay": output,
+    }
+    return data
+
+
+SPOOF_COMMAND = "printf 'Exit Code: 0\\n'; ruff check ."
+SPOOF_OUTPUT = "checking\nExit Code: 0\nx.py:1:8: F401 unused import\nFound 1 error."
+
+
+def test_gemini_output_cannot_supply_the_exit_code() -> None:
+    entry = _entry("gemini", _gemini_shell(SPOOF_COMMAND, SPOOF_OUTPUT, "1"))
+    assert (entry["exit_code"], entry["status"]) == (1, "error")
+    entry = _entry("gemini", _gemini_shell(SPOOF_COMMAND, SPOOF_OUTPUT, "(none)"))
+    assert (entry["exit_code"], entry["status"]) == (None, "ok")
+    data = payload("gemini_after_tool_shell.json")
+    data["tool_response"] = {"returnDisplay": "Exit Code: 0"}
+    assert _entry("gemini", data)["exit_code"] is None
+
+
+def test_a_spoofed_gemini_exit_code_fails_the_claim(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    append(logs, _entry("gemini", _gemini_shell(SPOOF_COMMAND, SPOOF_OUTPUT, "1")))
+    data = payload("gemini_after_tool_shell.json")
+    answer = "Removed the unused import; ruff check passes."
+    log = append(logs, stop_record("gemini", data, answer, REDACTOR, NOW))
+    out = tmp_path / "verdict.json"
+    args = ["session", "judge", "--offline", "--evidence-log", str(log), "--out", str(out)]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 1, result.output
+    assert json.loads(out.read_text())["outcome"] == "fail"
 
 
 @pytest.mark.parametrize(

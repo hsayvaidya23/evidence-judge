@@ -165,7 +165,8 @@ sources, from its documentation and source:
 
 No Gemini source has a structured exit code. A shell call's output text ends with lines in a
 fixed order (`Output:`, `Error:`, `Exit Code: N`, `Signal:`, …), so the exit status is read from
-the `Exit Code:` line, and a call without one has an unknown status. The headless stream is the
+the last `Exit Code:` line (the command's output comes first and can print one), and a call
+without one has an unknown status. The headless stream is the
 planned source (the harness captures it, as with `codex exec --json`); chat recordings next.
 
 ## The evidence recorder
@@ -237,11 +238,13 @@ Optional, used when present:
 How the judge reads it:
 
 - **Exit status.** `exit_code` is used as recorded. For a Gemini `run_shell_command` with a null
-  `exit_code`, the `Exit Code: N` line of the output is used. Recorders must never guess:
+  `exit_code`, the last `Exit Code: N` line of the output is used. Recorders must never guess:
     - Claude Code: a `PostToolUse` for `Bash` without `returnCodeInterpretation` is `0`, and a
       `PostToolUseFailure` whose `error` starts `Exit code N` is `N`.
-    - Codex: the payload's `exit_code` / `exitCode`, else the first `Process exited with code N`
-      line, which Codex writes before the command's own output.
+    - Codex: the payload's `exit_code` / `exitCode`, else the `Process exited with code N` line
+      of the header Codex writes before the command's own `Output:`.
+    - Gemini CLI: the last `Exit Code: N` line of a `run_shell_command`'s `llmContent`, the
+      trailer Gemini writes after the command's output.
     - Anything else is `null`.
 - **Completeness of output.** An excerpt proves a summary only when it is the whole output:
   `output_truncated` is false, or the SHA-256 of the excerpt equals `stdout_sha256`. Otherwise

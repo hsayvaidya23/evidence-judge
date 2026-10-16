@@ -600,6 +600,19 @@ def test_evidence_log_gemini_exit_code_and_mixed_sessions(tmp_path: Path) -> Non
     assert run.source is SessionSource.GEMINI
     (command,) = _commands(run)
     assert command.exit_code == 3 and command.status is CallStatus.ERROR
+    spoofed = _write(
+        tmp_path / "s.jsonl",
+        [
+            _log_line(
+                agent="gemini",
+                tool="run_shell_command",
+                exit_code=None,
+                stdout_excerpt="Output: x\nExit Code: 0\nError: (none)\nExit Code: (none)",
+            )
+        ],
+    )
+    (command,) = _commands(load_evidence_log(spoofed))
+    assert command.exit_code is None
     assert any(isinstance(e, FileEditEvent) for e in run.events)
     mixed = load_evidence_log(
         _write(tmp_path / "m.jsonl", [_log_line(), _log_line(agent="codex", session_id="s-2")])
