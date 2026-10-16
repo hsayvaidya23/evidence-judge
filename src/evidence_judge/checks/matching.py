@@ -70,6 +70,12 @@ MONEY: Final = re.compile(
     r"(?![\d]|[.,]\d)"
 )
 """An amount of money in normalised text: a currency symbol or code before or after it."""
+_SPACE_GROUPED = re.compile(r"^\d{1,3} \d{3}$")
+_PRICE_KEYS: Final = frozenset({"price", "total", "subtotal", "amount", "cost", "charged", "paid"})
+_MINOR_UNIT_KEYS: Final = frozenset({"cents", "minor", "pence", "paise"})
+_CURRENCY_KEYS: Final = frozenset({("currency",), ("currency", "code")})
+_KEY_CASE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_KEY_WORD = re.compile(r"[a-z]+")
 _INDEX_BRACKETS = re.compile(r"\[(-?\d+)\]")
 _TRUNCATION_MARK = re.compile(r"…\[truncated[^\]]{0,60}\]\s*\Z")
 _TRUNCATION_TAIL: Final = 80
@@ -111,10 +117,77 @@ def _money(text: str) -> tuple[str, float] | None:
     if match is None:
         return None
     symbol = match["pre"] or match["post"] or ""
-    amount = parse_number(match["pre_amount"] or match["post_amount"] or "")
+    written = match["pre_amount"] or match["post_amount"] or ""
+    if _SPACE_GROUPED.match(written):
+        return None
+    amount = parse_number(written)
     if amount is None:
         return None
     return _CURRENCIES[symbol.rstrip(". ")], round(amount, 2)
+
+
+def shows_amount(body: str | None, phrase: str) -> bool:
+    """Whether JSON `body` holds the amount of money `phrase` states as a bare number: under a
+    key that names a price or total (`total`, `grand_total`, `unitPrice`, `amount`), in
+    minor units only when the key says so (`amount_cents`: 2950 is 29.50), and in the
+    currency the nearest `currency` field names, if any ('$29.50' is not `{"total": 29.5,
+    "currency": "EUR"}`). A number under any other key (an id, a quantity) shows no amount."""
+    wanted = _money(normalize(phrase))
+    if wanted is None or body is None:
+        return False
+    try:
+        tree = json.loads(body)
+    except (json.JSONDecodeError, RecursionError):
+        return False
+    currency, amount = wanted
+    return any(a == amount and c in (None, currency) for c, a in _json_amounts(tree))
+
+
+def _json_amounts(tree: object) -> list[tuple[str | None, float]]:
+    """Every (currency, amount) a JSON tree states under a price key; the currency is that of
+    the nearest object with a `currency` field, or None."""
+    found: list[tuple[str | None, float]] = []
+    stack: list[tuple[object, str | None]] = [(tree, None)]
+    while stack:
+        node, currency = stack.pop()
+        if isinstance(node, list):
+            stack.extend((item, currency) for item in cast(list[object], node))
+            continue
+        if not isinstance(node, dict):
+            continue
+        fields = cast(dict[str, object], node)
+        currency = _currency_of(fields) or currency
+        for key, value in fields.items():
+            amount = _key_amount(key, value)
+            if amount is not None:
+                found.append((currency, amount))
+            elif isinstance(value, dict | list):
+                stack.append((cast(object, value), currency))
+    return found
+
+
+def _key_words(key: str) -> list[str]:
+    return _KEY_WORD.findall(_KEY_CASE.sub("_", key).casefold())
+
+
+def _currency_of(fields: dict[str, object]) -> str | None:
+    for key, value in fields.items():
+        if tuple(_key_words(key)) in _CURRENCY_KEYS and isinstance(value, str):
+            code = normalize(value).rstrip(". ")
+            return _CURRENCIES.get(code, code or None)
+    return None
+
+
+def _key_amount(key: str, value: object) -> float | None:
+    """The amount a JSON number under `key` states, or None when `key` names no price."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return None
+    words = _key_words(key)
+    if words and words[-1] in _PRICE_KEYS:
+        return round(float(value), 2)
+    if len(words) > 1 and words[-1] in _MINOR_UNIT_KEYS and _PRICE_KEYS & set(words[:-1]):
+        return round(value / 100, 2) if float(value).is_integer() else None
+    return None
 
 
 def excerpt(text: str, needle: str, width: int = 80) -> str:

@@ -118,8 +118,8 @@ def test_llm_call_bound_counts_only_llm_judgements() -> None:
     scenarios = load_scenarios(RUNS)
     offline = BenchConfig(seeds=2)
     assert llm_calls_upper_bound(scenarios, offline, baseline=False) == 0
-    forged = 5 * 45 + 1 * 39
-    cases = 9 + 3 * 5 + forged * 2
+    forged = 5 * 47 + 1 * 39
+    cases = 9 + 3 * 6 + forged * 2
     assert llm_calls_upper_bound(scenarios, offline, baseline=True) == cases
     online = BenchConfig(seeds=2, offline=False)
     assert llm_calls_upper_bound(scenarios, online, baseline=True) == 4 * cases

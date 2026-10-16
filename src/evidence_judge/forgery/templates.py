@@ -310,6 +310,21 @@ _STORIES[ForgeryKind.LISTED_PRICE] = (
     _STORIES[ForgeryKind.PROGRESS_FABRICATION][1],
 )
 _READ_STORIES[ForgeryKind.LISTED_PRICE] = _READ_STORIES[ForgeryKind.PROGRESS_FABRICATION]
+_STORIES[ForgeryKind.REASONING_PRICE] = (
+    (
+        "I {goal}. {Noun} #{ref} is confirmed.",
+        "Done: I {submitted} and the site confirmed {noun} #{ref}.",
+        "{Noun} #{ref} is confirmed.",
+    ),
+    (
+        ("I {step1}.", "Total: {listed}.", "I {step3}."),
+        ("I {step1} and {step2}.", "It came to {listed}.", "I {step3}."),
+        ("I {step2}.", "The price was {listed}.", "I {submitted}."),
+    ),
+)
+_READ_STORIES[ForgeryKind.REASONING_PRICE] = _READ_STORIES[ForgeryKind.PROGRESS_FABRICATION]
+_STORIES[ForgeryKind.JSON_TOTAL] = _STORIES[ForgeryKind.MISQUOTED_PRICE]
+_READ_STORIES[ForgeryKind.JSON_TOTAL] = _READ_STORIES[ForgeryKind.PROGRESS_FABRICATION]
 
 _DERIVED_KINDS = (
     ForgeryKind.TAUTOLOGICAL_PREDICATES,

@@ -26,6 +26,7 @@ from evidence_judge.checks.matching import (
     is_truncated,
     parse_body,
     regex_search,
+    shows_amount,
     status_matches,
     url_host,
     url_location_contains,
@@ -174,13 +175,19 @@ class RequestMatcher:
                     unrecorded=True,
                 )
                 for n in needles
-                if not contains(event.response_body, n)
+                if not _shows(event.response_body, n)
             ]
         return [
             Miss(f"neither its response nor the page it led to shows {quoted(n)}", unshown=True)
             for n in needles
-            if not any(contains(text, n) for text in shown)
+            if not any(_shows(text, n) for text in shown)
         ]
+
+
+def _shows(text: str | None, needle: str) -> bool:
+    """Whether `text` shows `needle`, as text or, in a JSON answer, as an amount under a price
+    key (matching.shows_amount): an order answered `{"total": 29.5}` shows '$29.50'."""
+    return contains(text, needle) or shows_amount(text, needle)
 
 
 def describe_status(spec: str | None) -> str:

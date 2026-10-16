@@ -582,7 +582,12 @@ letter, right beside it (`1001` is not met by `1001A`, `A1001` or `1001-A`; `10:
 `10:00am`). A phrase that is only an amount of money (`$24`, `EUR 1.249,50`, `24 USD`) is met
 by the same amount in the same currency however the page writes it: `$24` by `USD 24.00`,
 `$ 24`, `US$24` or `24,00 $`, and `€1.249,50` by `€1,249.50`, but not by `€24` or `$24.50`. An
-amount that cannot be read unambiguously (`$1.500`: 1.5 or 1500) is matched as text. Letters without case
+amount that cannot be read unambiguously (`$1.500`: 1.5 or 1500) is matched as text, and so is
+one space between two digit groups with nothing to settle it (`$24 100` may be $24,100 or $24
+and then 100): it meets neither `$24` nor `$24,100`. A second group or a decimal part settles
+it (`$1 024 100`, `24 100,00 €`). `result_contains` also reads an amount from a JSON response
+that holds it as a bare number under a price key (see
+[what a purchase cost](concepts/claims-and-predicates.md#what-a-purchase-cost)). Letters without case
 (Chinese, Japanese) have no word boundary the judge can see, so a phrase that ends in one is
 matched as a substring at that end (`注文1001` is met by `新注文1001`, but not by `注文10012`).
 Other phrases are substrings (`confirm` is met by `confirmed`). `body_contains` and `response_contains` match the
