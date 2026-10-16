@@ -71,9 +71,13 @@ The first release.
 - `evidence-judge bench`: false-PASS rates with Wilson intervals on forged runs, accuracy on
   honest controls, and an optional transcript LLM-judge baseline. The forgery lab covers the
   four manipulation kinds from "Gaming the Judge" and evidence attacks on the recording; on the
-  recorded demo-shop runs, 0 of 711 attacks pass.
+  recorded demo-site runs, 0 of 1293 attacks pass.
 - A session forgery benchmark (`python -m evidence_judge.sessions.bench`) over recorded
   red-team and honest sessions from Claude Code and Codex.
+- Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
+  admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
+  Go toy projects with runner-specific tricks; 0 of 1293 browser and 0 of 1197 session
+  forgeries pass, and 3 of 32 honest browser controls go to review offline.
 
 **Redaction**
 

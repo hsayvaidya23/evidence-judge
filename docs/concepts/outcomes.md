@@ -136,5 +136,5 @@ Parts that are not assessable are left out and the rest re-weighted. A FAIL is c
 
 A judge that guesses when the evidence is thin produces confident wrong answers, and those are
 exactly what forged stories exploit. `NEEDS_REVIEW` is a real answer: *a human should look at
-this one*. In the [benchmark](../benchmark.md), the no-spec judge sent 473 of 711 attack runs to
-review and passed none of them. Writing a task spec is what turns abstentions into decisions.
+this one*. In the [benchmark](../benchmark.md), the no-spec judge sent 971 of 1293 attack runs
+to review and passed none of them. Writing a task spec is what turns abstentions into decisions.

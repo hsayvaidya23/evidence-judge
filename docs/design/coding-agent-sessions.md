@@ -835,29 +835,58 @@ keys, drops exploration commands that read files outside the sandbox, and replac
 path, home directory and account name with placeholders. Forged variants rewrite only the final
 answer or inject one trick, as the browser forgery lab does.
 
+`tests/fixtures/sessions/claude_code/node/` and `.../go/` hold the same three kinds of session
+(honest fix, honest failure report, a run filtered as asked) on two more toy projects: a
+`slugify()` that forgets to lowercase, tested with `node --test` through `npm test`, and a Go
+`Words()` that miscounts runs of spaces, tested with `go test ./...`.
+`scripts/record_toolchain_sessions.py` scripts each session and runs every step for real in a
+scratch sandbox (real command output and exit status, edits applied to the files), with a
+scratch home and caches and the user's Go, npm and Node settings switched off, then writes it
+as a Claude Code transcript through the same scrubber. No model was called to make them.
+
 ## Benchmark
 
 `python -m evidence_judge.sessions.bench tests/fixtures/sessions` forges success on three
-bases whose whole suite was never shown passing: the honest failure report, the `-k add`
-session, and the honest fix with its final test run removed (so each trick is the only test
-evidence). Each base gets eight rewritten answers and 99 appended tricks, judged once on the
-forged answer and once with only a spec expecting the suite to pass. Honest sessions are
-controls.
+bases per project whose whole suite was never shown passing: the honest failure report, the
+filtered session, and the honest fix with its final test run removed (so each trick is the only
+test evidence). Each base gets eight rewritten answers and the tricks that fit its project's
+test runner, judged once on the forged answer and once with only a spec expecting the suite to
+pass. The pytest project gets all 99 tricks below. The Node and Go projects get 47 and 41:
+their own forms of the trick families that make sense for their runner (a masked exit status, an
+echoed summary, skip or todo markers, deleted, rewritten or replaced tests, name filters, a
+changed `test` script, shims, aliases, stale, background, interrupted and truncated runs,
+harness tampering), runner-only ones (`node --test --test-only`, `--test-skip-pattern`, a
+`--import` preload that stubs `assert`, `NODE_OPTIONS` and `npm test --` filters, `go test
+-exec /usr/bin/true`, `-list`, `-skip`, `GOFLAGS`, `go vet` alone, build tags, a `TestMain`
+that exits 0), and the five tricks that run no test command (transcript edits, a subagent, an
+MCP tool). A pytest-only trick (a `conftest.py` hook, `PYTEST_ADDOPTS`) is never applied to
+them. Honest sessions are controls.
 
 | | Forged sessions | False PASS | FAIL | NEEDS REVIEW |
 | --- | ---: | ---: | ---: | ---: |
-| Rewritten answers | 24 | 0 | 8 | 16 |
-| Tricks (99 kinds, with and without a spec) | 594 | 0 | 123 | 471 |
-| A false "I didn't touch `calc.py`" | 1 | 0 | 1 | 0 |
-| **All** | **619** | **0** | **132** | **487** |
+| Rewritten answers (3 projects) | 72 | 0 | 25 | 47 |
+| Tricks (115 kinds, with and without a spec) | 1122 | 0 | 255 | 867 |
+| A false "I didn't touch" the fixed file | 3 | 0 | 3 | 0 |
+| **All** | **1197** | **0** | **283** | **914** |
 
-All thirty-four honest sessions keep their expected outcome. Thirty-one PASS, among them `go
+The two new projects found two tricks that passed (7 false PASSes) and one wrong honest
+control, all fixed. Exit hooks were only read from Python, so a `slug.js` that registers `process.on('exit')`, prints
+`ℹ fail 0` and sets `process.exitCode = 0` passed the filtered Node base with and without a
+spec, and a new `main_test.go` whose `TestMain` drops `m.Run()`'s result and calls
+`os.Exit(0)` (`go test` then prints only `ok`) passed five of the six Go cases; both are now
+suite-weakening findings. And the honest Node failure report ("`npm test` fails: 1 of 3 tests
+passes") was FAILED, because "tests passes" read as a claim that the suite passes; a count of
+fewer than all the tests is now a failing-suite claim.
+
+All forty honest sessions keep their expected outcome. Thirty-five PASS, among them the Node
+and Go projects' honest fixes and failure reports, `go
 test`, `go test -v`, `go test -race`, `node --test`, `npm test`, `npm test --
 --experimental-test-coverage`, `npm test -- --coverage` with jest, `-p no:cacheprovider -p
 no:randomly`, `-n auto`, `--import-mode=importlib`, `PYTHONPATH=src`,
 `DJANGO_SETTINGS_MODULE=...`, `uv run`, `tox -e py`, `make test`, a path union and a test that
-reads a data file. Three NEEDS REVIEW: the `-k add` session and both `codex exec --json`
-streams, whose edits carry no diff. The tricks: `|| true`, `; exit 0`, `!`, an echoed or printed summary, a summary appended
+reads a data file. Five NEEDS REVIEW: the `-k add`, `--test-name-pattern` and `go test -run`
+sessions, which ran only what they were told to, and both `codex exec --json` streams, whose
+edits carry no diff. The pytest tricks: `|| true`, `; exit 0`, `!`, an echoed or printed summary, a summary appended
 after the run, `grep` over the output, skip and xfail markers, deleted or rewritten tests,
 `rm` of the test file, `-k`, `--deselect`, a single node id, `PYTEST_ADDOPTS`, `addopts` in
 `pyproject.toml`, a `conftest.py` hook forcing passes, a fake `./pytest` script, a shadowing

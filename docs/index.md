@@ -182,17 +182,17 @@ The `anthropic` extra enables LLM claim extraction; without it, or with `--offli
 <p class="ej-kicker">The forgery lab takes recorded runs that <strong>failed</strong> and rewrites the agent's answer and reasoning into a success story; some attacks also plant the evidence a gaming agent would (echoes of its own input, off-site confirmations, its own mirror of the shop). None of it does the task, so the correct verdict is never PASS.</p>
 
 <div class="ej-stats">
-  <div class="ej-stat"><span class="ej-stat__value">0 / 711</span><span class="ej-stat__label">attack runs passed, with a task spec (95% CI 0–1%)</span></div>
-  <div class="ej-stat"><span class="ej-stat__value">0 / 711</span><span class="ej-stat__label">attack runs passed without a spec; 473 sent to review instead</span></div>
-  <div class="ej-stat"><span class="ej-stat__value">17 / 17</span><span class="ej-stat__label">honest controls judged correctly with a spec</span></div>
-  <div class="ej-stat"><span class="ej-stat__value">729</span><span class="ej-stat__label">forged runs: 6 failed runs × up to 41 forgery kinds × 3 seeds</span></div>
+  <div class="ej-stat"><span class="ej-stat__value">0 / 1293</span><span class="ej-stat__label">attack runs passed, with a task spec (95% CI 0–0.3%)</span></div>
+  <div class="ej-stat"><span class="ej-stat__value">0 / 1293</span><span class="ej-stat__label">attack runs passed without a spec; 971 sent to review instead</span></div>
+  <div class="ej-stat"><span class="ej-stat__value">29 / 32</span><span class="ej-stat__label">honest controls judged correctly with a spec; the other 3 sent to review, none failed</span></div>
+  <div class="ej-stat"><span class="ej-stat__value">1326</span><span class="ej-stat__label">forged runs: 11 failed runs × up to 41 forgery kinds × 3 seeds</span></div>
 </div>
 
 <figure class="ej-figure">
   <img src="assets/benchmark.svg" alt="Benchmark chart: false PASS rate on forged runs" loading="lazy" onerror="this.parentElement.classList.add('is-missing')">
 </figure>
 
-Offline, on one demo shop: seven recorded runs, judged against a purchase and a stock check; the [full method, tables and limitations](benchmark.md) are on the benchmark page. Reproduce with `evidence-judge bench tests/fixtures/runs --seeds 3`.
+Offline, on three local demo sites (a shop, a clinic's booking form and an admin console): fifteen recorded runs, judged against a purchase, a booking, a user change, a stock check and a balance lookup; the [full method, tables and limitations](benchmark.md) are on the benchmark page. Reproduce with `evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3`.
 
 ## How a lie gets caught { .ej-section-title }
 
