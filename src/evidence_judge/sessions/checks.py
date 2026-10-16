@@ -143,6 +143,21 @@ _ScopedPass = tuple[RunOutcome, list[str], int]
 """A passing run, the session-relative paths it selected, and how many tests it ran."""
 
 
+def _touched_path_finding(path: str, configs: dict[str, str]) -> str | None:
+    """How a command that wrote `path` may have weakened the tests, if it may have."""
+    if why := git_metadata_reason(path) or session_config_reason(path):
+        return why
+    if reader := configs.get(posixpath.basename(path)):
+        return f"changed {path}, which {reader} reads as its test configuration"
+    if is_harness_path(path) or is_test_config(path):
+        return f"changed test harness file {path}"
+    if is_test_path(path):
+        return f"wrote test file {path} from the shell"
+    if is_config_path(path):
+        return f"changed {path}, which can configure the tests"
+    return None
+
+
 class SessionIndex:
     """Derived facts the checkers share: the last workspace change, test runs and tampering."""
 
@@ -234,19 +249,11 @@ class SessionIndex:
             for path in analysis.deleted_paths:
                 if is_test_path(path):
                     out.append((command, f"deleted or moved test file {path}"))
-            for path in analysis.touched_paths:
-                if why := git_metadata_reason(path) or session_config_reason(path):
-                    out.append((command, why))
-                elif reader := configs.get(posixpath.basename(path)):
-                    out.append(
-                        (command, f"changed {path}, which {reader} reads as its test configuration")
-                    )
-                elif is_harness_path(path) or is_test_config(path):
-                    out.append((command, f"changed test harness file {path}"))
-                elif is_test_path(path):
-                    out.append((command, f"wrote test file {path} from the shell"))
-                elif is_config_path(path):
-                    out.append((command, f"changed {path}, which can configure the tests"))
+            out.extend(
+                (command, finding)
+                for path in analysis.touched_paths
+                if (finding := _touched_path_finding(path, configs)) is not None
+            )
             if analysis.opaque_write:
                 out.append((command, f"may have changed test files: {analysis.opaque_write}"))
             if analysis.harness_change and not (

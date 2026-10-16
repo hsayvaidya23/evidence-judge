@@ -201,6 +201,20 @@ def _call(record: JsonObject, agent: str) -> ToolCall:
     )
 
 
+def _validate_record(record: JsonObject, line: int) -> str | None:
+    """Why a record cannot be read as format version 1, or None when it can."""
+    if record.get("v") != FORMAT_VERSION:
+        return f"line {line}: unsupported version {record.get('v')!r}"
+    event = as_str(record.get("event")) or "tool"
+    required = REQUIRED if event == "tool" else _EVENT_REQUIRED
+    if missing := [name for name in required if name not in record]:
+        return f"line {line}: missing {', '.join(missing)}"
+    agent = as_str(record.get("agent")) or ""
+    if agent not in _AGENTS:
+        return f"line {line}: unknown agent {agent!r}"
+    return None
+
+
 def load_evidence_log(
     path: Path, *, key_file: Path | None = None, anchor_file: Path | None = None
 ) -> SessionRun:
@@ -222,20 +236,11 @@ def load_evidence_log(
     last_ts: datetime | None = None
     for raw, record in iter_records(path, stats):
         chain.check(raw, record)
-        line = chain.count
-        if record.get("v") != FORMAT_VERSION:
-            problems.append(f"line {line}: unsupported version {record.get('v')!r}")
+        if problem := _validate_record(record, chain.count):
+            problems.append(problem)
             continue
         event = as_str(record.get("event")) or "tool"
-        required = REQUIRED if event == "tool" else _EVENT_REQUIRED
-        missing = [key for key in required if key not in record]
-        if missing:
-            problems.append(f"line {line}: missing {', '.join(missing)}")
-            continue
         agent = as_str(record.get("agent")) or ""
-        if agent not in _AGENTS:
-            problems.append(f"line {line}: unknown agent {agent!r}")
-            continue
         agents.add(agent)
         if sid := as_str(record.get("session_id")):
             session_ids.add(sid)
