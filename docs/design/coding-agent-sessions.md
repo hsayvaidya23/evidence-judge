@@ -415,7 +415,7 @@ tests).
 | `test_result` | `expect` pass/fail, `whole_suite` (default true), `runner` (optional), `mentions` (optional), `min_tests` (optional: a whole-suite run must run at least this many tests) | the last test runs after the last workspace change show the expected result |
 | `command` | `regex` or `contains`, `ok` / `exit_code` (optional), `scope` any/last/after_last_edit | a matching command ran (with that status, in that scope). In a claim, `ok` defaults to true unless the command is a test, build, lint, type or format check: "Committed" says the commit succeeded. A spec leaves `ok` unset to mean only "it ran" |
 | `edit` | `path` glob, `touched` true/false, `change` add/modify/delete/any; or `only`: a list of globs | a matching edit exists (`touched`) or provably none does (`not touched`); with `only`, no recorded change is outside the globs |
-| `build` | `category` build/lint/typecheck/format, `ok` | the last command of that category after the last change exited as expected |
+| `build` | `category` build/lint/typecheck/format, `ok` | the last command of that category after the last change exited as expected. With no build command after the last change, a build that fails is also shown by the last test run after it failing to compile (Go's `FAIL pkg [build failed]`, cargo's `error: could not compile`) |
 
 Strings are validated when a predicate is built, like the browser predicates: regexes are
 length-capped and compiled with the same engine; substrings need at least three characters; a
@@ -597,7 +597,10 @@ filters ("I will run the tests" is not a claim):
 - "tests still fail" → `test_result(fail)`;
 - "the build succeeds", "compiles cleanly" → `build(build)`; "lint is clean", "ruff passes
   with no issues", "no lint errors" → `build(lint)`; "type-checks", "pyright reports no errors",
-  "mypy found no errors", "no type errors" → `build(typecheck)`. A negated clause whose subject
+  "mypy found no errors", "no type errors" → `build(typecheck)`; "the build still fails", "the
+  build is still failing", "it still fails to compile" → `build(build, ok=false)`, which accounts
+  for a failing final test run that failed to compile and names no failing test, and which a
+  passing build sends to review ("check the wording") rather than failing. A negated clause whose subject
   is a linter or type checker and that names no tests ("mypy doesn't complain") is not a report
   of failing tests;
 - "I ran `cmd`" → `command(contains=cmd)`; "I ran the linter/tests" → `command` over the known

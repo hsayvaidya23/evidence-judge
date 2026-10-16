@@ -192,6 +192,12 @@ _BUILD: Final = re.compile(
     r"\bcompiles\s+(?:successfully|cleanly|without (?:errors|warnings))\b",
     _I,
 )
+_BUILD_FAILS: Final = re.compile(
+    r"\b(?:build|compilation)\s+(?:still\s+fails|is\s+still\s+(?:failing|broken))\b|"
+    r"\bstill\s+fails\s+to\s+(?:compile|build)\b",
+    _I,
+)
+"""'The build still fails', 'it still fails to compile': a claim that the build fails now."""
 _FINDINGS: Final = r"(?:issues|errors|warnings|problems|findings|violations|diagnostics)"
 _NONE_FOUND: Final = rf"(?:\s+(?:with\s+)?(?:no|0|zero)\s+(?:[\w-]+\s+)?{_FINDINGS})?"
 """The 'with no issues' after 'ruff passes': read with the claim, it is not a negation."""
@@ -503,6 +509,8 @@ def _sentence_claims(
     for pattern, category in _BUILD_RULES:
         if pattern.search(text):
             yield ClaimKind.OUTCOME, True, [BuildPredicate(category=category)]
+    if _BUILD_FAILS.search(text):
+        yield ClaimKind.OUTCOME, True, [BuildPredicate(category="build", ok=False)]
     yield from _command_claims(text)
     yield from _side_effect_claims(sentence)
     rest = _blanked(text, [m.span() for m in _UNTOUCHED.finditer(text)])

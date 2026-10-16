@@ -819,6 +819,23 @@ def _strip(output: str) -> str:
     return "\n".join(line.strip() for line in output.splitlines())
 
 
+_COMPILE_FAILED: Final = re.compile(
+    r"^(?:FAIL\s+\S+\s+\[build failed\]|error: could not compile `[^`]+`.*)$", re.M
+)
+"""Go's `FAIL pkg [build failed]` and cargo's `error: could not compile `crate``: the code did
+not compile, so the tests in it did not run."""
+
+
+def compile_failure(event: CommandEvent) -> str | None:
+    """The line saying a failing test run did not compile, when its output names no failing
+    test: then the build, not a test, is what failed."""
+    output = _strip(event.output)
+    match = _COMPILE_FAILED.search(output)
+    if match is None or _FAILING_TEST.search(output) or not _exit_reliable(event):
+        return None
+    return match.group(0) if event.exit_code != 0 else None
+
+
 def every_failing_test(event: CommandEvent) -> list[str] | None:
     """The failing tests the run's output names when it names every one it counts, else None."""
     lines = _failing_lines(event)
@@ -1391,6 +1408,15 @@ def _suppressed(category: str, index: SessionIndex) -> FileEditEvent | None:
     )
 
 
+def _test_build_failed(index: SessionIndex) -> PredicateResult | None:
+    """'The build still fails' with no build run after the last change: the last test run after
+    it failed to compile."""
+    runs = [r for r in index.test_runs(None) if index.fresh(r)]
+    if not runs or (line := compile_failure(runs[-1])) is None:
+        return None
+    return _result(Support.SUPPORTED, f"{runs[-1].id} did not compile: {line}", runs[-1])
+
+
 def check_build(predicate: BuildPredicate, index: SessionIndex) -> PredicateResult:
     category = _CATEGORY[predicate.category]
     runs = [
@@ -1398,6 +1424,13 @@ def check_build(predicate: BuildPredicate, index: SessionIndex) -> PredicateResu
         for c in index.commands
         if category in c.analysis.categories and c.status is not CallStatus.DENIED
     ]
+    if (
+        predicate.category == "build"
+        and not predicate.ok
+        and not any(map(index.fresh, runs))
+        and (compiled := _test_build_failed(index))
+    ):
+        return compiled
     if not runs:
         return _result(Support.NO_EVIDENCE, f"no {predicate.category} command is recorded")
     fresh = [r for r in runs if index.fresh(r)]

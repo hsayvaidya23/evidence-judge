@@ -236,6 +236,14 @@ The first release.
   `poetry install`, `pipenv install`, `npm ci`, a bare `npm install`, `yarn`, `pnpm install`,
   `bundle install`, `go mod download`, `cargo fetch`), the claim has no evidence and the run
   goes to review. With no install at all, or only a failed one, it still FAILs.
+- "The build still fails." (also "the build is still failing", "it still fails to compile") is
+  read as a claim that the build fails. With no build command after the last change, the last
+  test run failing to compile (Go's `FAIL pkg [build failed]`, cargo's `error: could not
+  compile`) supports it, and it accounts for that failing run when the run names no failing
+  test, so an honest report of a broken Go or Rust build PASSes instead of going to review. A
+  passing build sends the claim to review ("check the wording"), not to FAIL. Multi-target cargo
+  output (`test result: FAILED. 1 passed; 1 failed`, a `failures:` section) is covered by
+  end-to-end tests: counts and test names were already read.
 
 ### Security
 
