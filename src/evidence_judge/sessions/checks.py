@@ -50,6 +50,7 @@ from evidence_judge.sessions.predicates import (
 )
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import READ_ONLY_PROGRAMS, regenerates_env
+from evidence_judge.sessions.shell.env import INSTALLERS, installs_from_manifest
 from evidence_judge.sessions.shell.lexer import SAFE_TARGETS
 from evidence_judge.sessions.shell.writes import SCRATCH
 
@@ -1153,6 +1154,28 @@ def _complete_log(index: SessionIndex) -> bool:
     return index.run.complete and not index.unseen_actors
 
 
+def _manifest_install(
+    predicate: CommandPredicate, index: SessionIndex, after: CommandEvent | None
+) -> PredicateResult | None:
+    """No evidence for a claimed install the command line does not name, when a later install
+    from a requirements or lock file succeeded: that file may list the package."""
+    if not (predicate.ok and predicate.regex and predicate.regex.startswith(INSTALLERS)):
+        return None
+    for event in reversed(index.commands):
+        if after is not None and event.seq <= after.seq:
+            return None
+        if predicate.scope == "after_last_edit" and not index.fresh(event):
+            continue
+        if _exit_reliable(event) and event.exit_code == 0 and installs_from_manifest(event.command):
+            return _result(
+                Support.NO_EVIDENCE,
+                f"{event.id} installed from a requirements or lock file the judge cannot read, "
+                "which may list the package",
+                event,
+            )
+    return None
+
+
 def check_command(predicate: CommandPredicate, index: SessionIndex) -> PredicateResult:
     matches = [
         c
@@ -1165,6 +1188,8 @@ def check_command(predicate: CommandPredicate, index: SessionIndex) -> Predicate
     if not matches:
         scope = " after the last change" if predicate.scope == "after_last_edit" else ""
         if _complete_log(index):
+            if manifest := _manifest_install(predicate, index, None):
+                return manifest
             return _result(Support.CONTRADICTED, f"no command matching {target!r} ran{scope}")
         return _result(
             Support.NO_EVIDENCE,
@@ -1186,6 +1211,8 @@ def check_command(predicate: CommandPredicate, index: SessionIndex) -> Predicate
         return _result(Support.SUPPORTED, f"{good[-1].id} exited {good[-1].exit_code}", good[-1])
     if reliable and len(reliable) == len(matches):
         last = reliable[-1]
+        if manifest := _manifest_install(predicate, index, last):
+            return manifest
         return _result(Support.CONTRADICTED, f"{last.id} exited {last.exit_code}", last)
     unknown = next(m for m in reversed(matches) if not _exit_reliable(m))
     why = unknown.analysis.exit_masked_by or "its exit status was not recorded"

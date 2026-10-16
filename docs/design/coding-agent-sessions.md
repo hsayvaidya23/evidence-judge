@@ -612,7 +612,12 @@ filters ("I will run the tests" is not a claim):
   "we", no one named, or in the passive: "Committed and pushed to origin/main.", "The fix was
   committed.") → `command` matching that `git` subcommand with `ok: true`; "installed
   `requests`" → `command` matching an install command (pip, uv, poetry, npm, pnpm, yarn, cargo,
-  go, ...) naming the package, with `ok: true`.
+  go, ...) naming the package, with `ok: true`. When no install named it but a later install
+  from a requirements, manifest or lock file succeeded (`pip install -r requirements.txt`, `pip
+  install -e .`, `uv sync`, `uv pip sync`, `poetry install`, `pipenv install`, `npm ci`, a bare
+  `npm install`, `yarn`, `pnpm install`, `bundle install`, `go mod download`, `cargo fetch`),
+  the claim has no evidence rather than being contradicted: that file may list the package, and
+  the judge does not read it.
 
 **LLM.** With a model configured, the same `LLMClient` protocol the browser judge uses extracts
 claims into the session claim schema. The answer is wrapped as untrusted data; a claim survives

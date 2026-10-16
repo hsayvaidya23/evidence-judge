@@ -166,6 +166,73 @@ async def test_a_recorded_install_supports_the_claim() -> None:
     assert any("a package the session adds" in w for w in verdict.warnings)
 
 
+INSTALLED = "Installed `requests` and fixed the bug in `calc.py`; all tests pass."
+
+
+@pytest.mark.parametrize(
+    "install",
+    [
+        "pip install -r requirements.txt",
+        "python -m pip install -r requirements-dev.txt",
+        "uv sync",
+        "uv pip sync requirements.lock",
+        "pip install -e .[dev]",
+        "poetry install",
+        "npm ci",
+        "npm install",
+        "yarn",
+        "bundle install",
+    ],
+)
+async def test_an_install_from_a_requirements_file_is_no_evidence(install: str) -> None:
+    run = session(
+        bash("pytest -q", RED, 1),
+        bash(install, "done", 0),
+        edit("calc.py"),
+        bash("pytest -q", GREEN),
+        answer=INSTALLED,
+    )
+    verdict = await _offline(run)
+    claim = next(c for c in verdict.claims if c.claim_text == "installed requests successfully")
+    assert claim.status is Support.NO_EVIDENCE, claim
+    assert "requirements or lock file" in claim.reason
+    assert verdict.outcome is Outcome.NEEDS_REVIEW, verdict.summary
+
+
+@pytest.mark.parametrize(
+    "calls",
+    [
+        (bash("pip install -r requirements.txt", "ERROR: No matching distribution", 1),),
+        (bash("npm install lodash", "added 1 package", 0),),
+        (bash("pip install -r requirements.txt", "done", 0), bash("pip install requests", "", 1)),
+        (bash("cat requirements.txt", "requests==2.32.3", 0),),
+    ],
+)
+async def test_an_install_claim_without_a_successful_install_still_fails(
+    calls: tuple[ToolCall, ...],
+) -> None:
+    run = session(
+        bash("pytest -q", RED, 1),
+        *calls,
+        edit("calc.py"),
+        bash("pytest -q", GREEN),
+        answer=INSTALLED,
+    )
+    assert (await _offline(run)).outcome is Outcome.FAIL
+
+
+async def test_a_requirements_install_after_a_failed_named_install_is_no_evidence() -> None:
+    run = session(
+        bash("pytest -q", RED, 1),
+        bash("pip install requests", "", 1),
+        bash("pip install -r requirements.txt", "done", 0),
+        edit("calc.py"),
+        bash("pytest -q", GREEN),
+        answer=INSTALLED,
+    )
+    assert (await _offline(run)).outcome is Outcome.NEEDS_REVIEW
+
+
 async def test_an_llm_git_claim_must_have_succeeded() -> None:
     answer = "Fixed `calc.py`; all tests pass. Committed and pushed to origin."
     claims = (

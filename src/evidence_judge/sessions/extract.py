@@ -47,6 +47,7 @@ from evidence_judge.sessions.predicates import (
     broad,
     describe,
 )
+from evidence_judge.sessions.shell.env import INSTALLERS
 from evidence_judge.textnorm import PUNCT_MAP, normalize
 
 MAX_CLAIMS: Final = 20
@@ -252,10 +253,6 @@ _GIT_VERBS: Final = {
     "cherry-picked": "cherry-pick",
 }
 _GIT_OPTIONS: Final = r"(?:\s+-[cC]\s+\S+|\s+--?[\w.-]+(?:=\S+)?)*"
-_INSTALLERS: Final = (
-    r"\b(?:pip3?|uv|poetry|pdm|pipx|npm|pnpm|yarn|bun|cargo|go|gem|bundle|apt(?:-get)?|brew|"
-    r"conda|mamba)\b[^|;&\n]*?\b(?:install|add|get|i)\b"
-)
 _PACKAGE: Final = re.compile(
     r"\binstalled\s+(?:the\s+)?(?:[\w-]+\s+)?(?:package\s+|dependency\s+|library\s+)?"
     r"`(?P<package>[\w.\[\],<>=~!@/-]+)`",
@@ -655,7 +652,7 @@ def _side_effect_claims(sentence: str) -> Iterator[_Claim]:
         elif verb == "installed" and (package := _PACKAGE.search(sentence, match.start())):
             name = re.split(r"[\[<>=~!@]", package["package"])[0]
             if len(name) >= MIN_TEXT:
-                regex = rf"{_INSTALLERS}[^|;&\n]*\b{re.escape(name)}\b"
+                regex = rf"{INSTALLERS}[^|;&\n]*\b{re.escape(name)}\b"
                 predicate = CommandPredicate(regex=regex, ok=True)
                 yield ClaimKind.ACTION, False, [predicate], f"installed {name} successfully"
 

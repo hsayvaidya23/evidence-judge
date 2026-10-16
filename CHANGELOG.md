@@ -230,6 +230,12 @@ The first release.
 - Evidence-log problem messages name the file line, not the record number: a record missing
   `cwd` on line 3 of a log whose first line is not JSON is reported as line 3, not line 1. The
   same holds for a broken `seq`/`prev` chain.
+- "Installed `requests`." after a successful `pip install -r requirements.txt` no longer FAILs:
+  when no install command names the package but a later install from a requirements, manifest
+  or lock file succeeded (`pip install -r`, `pip install -e .`, `uv sync`, `uv pip sync`,
+  `poetry install`, `pipenv install`, `npm ci`, a bare `npm install`, `yarn`, `pnpm install`,
+  `bundle install`, `go mod download`, `cargo fetch`), the claim has no evidence and the run
+  goes to review. With no install at all, or only a failed one, it still FAILs.
 
 ### Security
 
