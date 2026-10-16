@@ -185,7 +185,7 @@ which format the file looks like.
 | `--log-anchor FILE` | The evidence log's head anchor (default: `<session>/log-head.json` in the `--log-key` directory, else `<state>/<session>/log-head.json`) |
 | `--trusted-log` | Assert that the log, its key and anchor were out of the agent's reach (a sandbox that denies the state directory, a container, another OS user). Without it, an agent running as your user could have read the key and signed a forged log, so a verified log is still `partial`. The spec's `trusted_evidence_log: true` does the same |
 | `--answer TEXT` / `--answer-file FILE` | Judge this final answer instead of the recorded one |
-| `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block |
+| `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block, `trusted_wrappers` (what a project wrapper runs: `{"make test": "pytest -q"}`; a run through it the session does not show is judged as that command until the session may have changed the wrapper's definition) |
 | `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
 | `--out FILE` | Write the verdict JSON (schema `evidence-judge/run-verdict@1`) here |
 | `--offline` | No LLM calls; heuristic claim extraction only |
