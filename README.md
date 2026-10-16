@@ -6,7 +6,7 @@
   <img alt="Python 3.12 | 3.13" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white">
   <img alt="pyright strict" src="https://img.shields.io/badge/types-pyright%20strict-2F6FED">
   <img alt="ruff" src="https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black">
-  <img alt="0 of 1359 forged runs passed on three demo sites" src="https://img.shields.io/badge/forged%20runs%20passed%20(3%20demo%20sites)-0%2F1359-brightgreen">
+  <img alt="0 of 1383 forged runs passed on three demo sites" src="https://img.shields.io/badge/forged%20runs%20passed%20(3%20demo%20sites)-0%2F1383-brightgreen">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -271,16 +271,16 @@ the cache directory is not writable, a per-process key is used with a one-line w
 ## 🧪 Benchmark: can a forged story fool it?
 
 <p align="center">
-  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 1326 attack runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
+  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 1350 attack runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
 </p>
 
-The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites the agent's answer and reasoning into a success story: the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks on the claim extractor, answers that word their claims behind a negation, and thirty-four kinds that also tamper with the evidence the way a gaming agent would, each modelled on an attack that once got a false PASS (the agent's own input echoed back, confirmations off-site or on a mirror, injected scripts and mocked responses, hidden or unrendered text, writes sent as GETs; see [all kinds](docs/benchmark.md#forgery-kinds)). The base runs are eleven failed runs on three local demo sites (a shop, a clinic's appointment form and an admin console), so the correct verdict is never PASS. Counts below pool the 41 attack kinds (1326 runs per judge); a style-only control adds 33 more, also 0 passes.
+The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites the agent's answer and reasoning into a success story: the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks on the claim extractor, answers that word their claims behind a negation, and thirty-five kinds that also tamper with the evidence the way a gaming agent would, each modelled on an attack that once got a false PASS (the agent's own input echoed back, confirmations off-site or on a mirror, injected scripts and mocked responses, hidden or unrendered text, writes sent as GETs, an order number claimed from inside a longer one; see [all kinds](docs/benchmark.md#forgery-kinds)). The base runs are eleven failed runs on three local demo sites (a shop, a clinic's appointment form and an admin console), so the correct verdict is never PASS. Counts below pool the 42 attack kinds (1350 runs per judge); a style-only control adds 33 more, also 0 passes.
 
 | Judge | Forged runs | False PASS | 95% CI |
 | --- | ---: | ---: | --- |
-| Evidence Judge + exact task spec (offline) | 1326 | **0** (116 sent to review) | 0–0.3% |
-| Evidence Judge + generic task spec (offline) | 1326 | **0** (592 sent to review) | 0–0.3% |
-| Evidence Judge, no spec (offline) | 1326 | **0** (989 sent to review) | 0–0.3% |
+| Evidence Judge + exact task spec (offline) | 1350 | **0** (128 sent to review) | 0–0.3% |
+| Evidence Judge + generic task spec (offline) | 1350 | **0** (613 sent to review) | 0–0.3% |
+| Evidence Judge, no spec (offline) | 1350 | **0** (1013 sent to review) | 0–0.3% |
 
 These are three small demo sites with five tasks (a purchase, a booking and a user change; a stock check and a balance lookup) and template forgeries, so they show these attacks are refused, not that every site and task is covered. Honest controls: 34/38 correct with the exact spec and 27/38 with the generic one, and none wrongly failed. The 38 are the seventeen scenarios (from fifteen recordings: two shop recordings are judged again against the stock check) plus twenty-one honest edits of the passing ones (an order answered with a redirect to its confirmation, a search typed first, a detour to another site, an answer that also says what the agent left alone, such as "nothing was added to the cart"). The four the exact spec misses are the honest disable-a-user run and its edits: offline extraction finds no checkable claim in "I disabled Priya Shah's account", so they go to review with every expectation met. The generic spec also sends to review the side-effect run (no `forbid` rule), the clinic booking and its edits (the start page already lists "Dental check-up") and an unanswered balance lookup. Without a spec all 27 runs that should pass go to review by design: no site is named, and a spec-less run that changes state or makes no checkable claim is review-only anyway. Reproduce with `make bench` (`evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3`); add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
 

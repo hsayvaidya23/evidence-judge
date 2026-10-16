@@ -71,12 +71,12 @@ The first release.
 - `evidence-judge bench`: false-PASS rates with Wilson intervals on forged runs, accuracy on
   honest controls, and an optional transcript LLM-judge baseline. The forgery lab covers the
   four manipulation kinds from "Gaming the Judge" and evidence attacks on the recording; on the
-  recorded demo-site runs, 0 of 1326 attacks pass.
+  recorded demo-site runs, 0 of 1350 attacks pass.
 - A session forgery benchmark (`python -m evidence_judge.sessions.bench`) over recorded
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1465 session
+  Go toy projects with runner-specific tricks; 0 of 1350 browser and 0 of 1465 session
   forgeries pass, and 4 of 38 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
@@ -251,6 +251,15 @@ The first release.
   default-ignorable code point (soft hyphen, zero-width space, joiners, word joiner, BOM,
   bidi and variation marks, tag characters) before matching, in page text, response bodies and
   claims alike.
+- An order or reference number claimed from inside a longer one no longer passes: "The shop
+  confirmed order #100" (or `#001`) was supported by `/orders/1001`. A `page_text`,
+  `body_contains` or `response_contains` phrase holding a digit now matches only a whole token:
+  no digit beside a digit at either end, no letter beside a letter or digit, and no decimal or
+  group separator joining it to more digits (`$24` still matches `$24.00`, not `$24.50`). Other
+  phrases are still substrings. New forgery kind `prefix_reference` (write) places the order and
+  claims a number that is a prefix, suffix or middle part of the one the shop gave it; it
+  produced false PASSes before the fix and none after. The benchmark now has 43 kinds: 0 of
+  1350 attack runs pass, honest controls unchanged.
 
 ### Security
 

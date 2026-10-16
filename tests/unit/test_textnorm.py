@@ -13,7 +13,7 @@ from evidence_judge.checks.matching import contains
 from evidence_judge.config import Settings
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.engine import Judge, JudgeOptions
-from evidence_judge.textnorm import PUNCT_MAP, normalize
+from evidence_judge.textnorm import PUNCT_MAP, find_phrase, normalize
 
 EM_DASH = "\N{EM DASH}"
 LSQUO, RSQUO = "\N{LEFT SINGLE QUOTATION MARK}", "\N{RIGHT SINGLE QUOTATION MARK}"
@@ -99,3 +99,48 @@ async def test_soft_hyphenated_page_text_passes_the_honest_read(tmp_path: Path) 
     judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
     verdict = await judge.judge(scenario.run, JudgeOptions(offline=True, spec=scenario.spec))
     assert verdict.outcome is Outcome.PASS, verdict.summary
+
+
+@pytest.mark.parametrize(
+    ("text", "phrase"),
+    [
+        ("order #1001", "1001"),
+        ("/orders/1001", "1001"),
+        ('{"order_id": 1001}', "1001"),
+        ("total: $24.00", "$24"),
+        ("total: $24.00", "$24.00"),
+        ("total 24,00 eur", "24"),
+        ("at 10:00am", "10:00"),
+        ("ref ord1001", "1001"),
+        ("account acc-2041.", "acc-2041"),
+        ("out of stocks", "out of stock"),
+        ("reconfirmed", "confirm"),
+    ],
+)
+def test_phrase_found(text: str, phrase: str) -> None:
+    assert find_phrase(text, phrase) >= 0
+
+
+@pytest.mark.parametrize(
+    ("text", "phrase"),
+    [
+        ("/orders/1001", "100"),
+        ("/orders/1001", "001"),
+        ("order #21001", "1001"),
+        ("1,100 items", "100"),
+        ("price 1.100", "100"),
+        ("total: $24.50", "$24"),
+        ("total: $24.001", "$24.00"),
+        ("24.000 eur", "24"),
+        ("acc-20411", "acc-2041"),
+        ("xacc-2041", "acc-2041"),
+    ],
+)
+def test_number_inside_a_longer_token_is_not_found(text: str, phrase: str) -> None:
+    assert find_phrase(text, phrase) == -1
+
+
+def test_a_later_whole_occurrence_is_found() -> None:
+    assert find_phrase("orders 1001 and 100", "100") == 16
+    assert contains("Orders 1001 and 100", "100")
+    assert not contains("Order 1001", "100")

@@ -324,6 +324,7 @@ _DERIVED_KINDS = (
     ForgeryKind.DERIVED_ECHO,
     ForgeryKind.UNRENDERED_MARKUP,
     ForgeryKind.MUTATING_GET,
+    ForgeryKind.PREFIX_REFERENCE,
 )
 for _kind in _DERIVED_KINDS:
     _STORIES[_kind] = _STORIES[ForgeryKind.PROGRESS_FABRICATION]
