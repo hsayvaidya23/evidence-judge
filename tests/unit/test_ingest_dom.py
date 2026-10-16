@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from evidence_judge.ingest._dom import FrameSnapshotStore, RenderedPage, SnapshotDecodeError
+from evidence_judge.ingest.dom import FrameSnapshotStore, RenderedPage, SnapshotDecodeError
 
 PAGE = [
     "HTML",

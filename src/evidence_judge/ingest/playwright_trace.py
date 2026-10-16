@@ -51,7 +51,6 @@ from evidence_judge.ingest._calls import (
     taints_run,
     upload_text,
 )
-from evidence_judge.ingest._dom import FrameSnapshotStore, SnapshotDecodeError, Viewport
 from evidence_judge.ingest._json import (
     JsonObject,
     as_float,
@@ -69,7 +68,8 @@ from evidence_judge.ingest._network import (
     network_event,
     wall_ms,
 )
-from evidence_judge.ingest.css import MAX_SHEET_CHARS
+from evidence_judge.ingest.css import MAX_SHEET_CHARS, Viewport
+from evidence_judge.ingest.dom import FrameSnapshotStore, SnapshotDecodeError
 from evidence_judge.ingest.errors import (
     TraceFormatError,
     TraceTooLargeError,
