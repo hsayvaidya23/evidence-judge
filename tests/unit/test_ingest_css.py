@@ -340,6 +340,30 @@ def test_values_the_reader_cannot_read_leave_text_unsure(css: str, state: int) -
 @pytest.mark.parametrize(
     ("css", "state"),
     [
+        (".in{--\\64:none;display:var(--d)}", HIDDEN),
+        (":root{--\\63:transparent}.in{color:var(--c)}", UNSURE),
+        (":root{--\\63:transparent}.in{color:var(--\\63)}", UNSURE),
+        (":root{--c:transparent}.in{color:var(--\\63)}", UNSURE),
+        (":root{--\\000063 :transparent}.in{color:var(--c)}", UNSURE),
+        (":root{--a\\:b:transparent}.in{color:var(--a\\:b)}", UNSURE),
+        (":root{--\\63:#000}.in{color:var(--c)}", SHOWN),
+        (".in{co\\6cor:transparent}", UNSURE),
+        (".in{di\\73 play:none}", HIDDEN),
+        (".in{color:transparent!\\69mportant}.in{color:#000}", UNSURE),
+        (
+            "@property --\\63{syntax:'<color>';inherits:true;initial-value:transparent}"
+            ".in{color:var(--c)}",
+            UNSURE,
+        ),
+    ],
+)
+def test_escaped_property_names_read_as_the_browser_reads_them(css: str, state: int) -> None:
+    assert _state(css, BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
         (".in{mask-image:linear-gradient(transparent,transparent)}", UNSURE),
         (".in{-webkit-mask-image:url(m.svg)}", UNSURE),
         (".in{-webkit-mask:none;mask:none}", SHOWN),

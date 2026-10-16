@@ -36,6 +36,9 @@ _SPECIAL = re.compile(r"[{};\"'\\]")
 _ESCAPE = re.compile(r"\\([0-9a-fA-F]{1,6}[ \t\n]?|.)", re.DOTALL)
 
 
+_ESCAPED_NAME = re.compile(r"((?:[^:\\]|\\.)*):", re.DOTALL)
+
+
 def blocks(text: str) -> Iterator[tuple[str, str | None]]:
     """The items of one level of `text`: ``(prelude, body)`` for a ``prelude { body }`` block,
     ``(declaration, None)`` for text that ends with ``;`` or the end of the level."""
@@ -101,19 +104,22 @@ def declarations(text: str) -> Iterator[tuple[str, str | None, bool]]:
 
 
 def parse_declaration(text: str) -> Iterator[tuple[str, str | None, bool]]:
-    prop, colon, raw = text.partition(":")
-    prop = prop.strip()
+    if "\\" in text and (named := _ESCAPED_NAME.match(text)) is not None:
+        prop, colon, raw = unescape(named.group(1)).strip(), ":", text[named.end() :]
+    else:
+        prop, colon, raw = text.partition(":")
+        prop = prop.strip()
     custom = prop.startswith("--")
     if not custom:
         prop = prop.lower()
     if not colon or not (custom or prop in TRACKED or prop in SHORTHANDS):
         return
+    if "\\" in raw:
+        raw = unescape(raw)
     value = _lowered(" ".join(raw.split()))
     important = re.search(r"!\s*important$", value)
     if important is not None:
         value = value[: important.start()].strip()
-    if "\\" in value:
-        value = " ".join(unescape(value).split())
     flag = important is not None
     if custom:
         yield prop, (value or " ") if "attr(" not in value else None, flag

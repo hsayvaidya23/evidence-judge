@@ -48,6 +48,7 @@ from evidence_judge.ingest.css.syntax import (
     generates_text,
     parse_declaration,
     split_commas,
+    unescape,
 )
 from evidence_judge.ingest.css.values import (
     closing_paren,
@@ -389,13 +390,14 @@ class StyleSheets:
 
     def _register(self, name: str, body: str, context: _Context) -> None:
         """Read an ``@property`` rule (one with a missing or invalid descriptor is ignored)."""
+        name = unescape(name).strip() if "\\" in name else name
         if not name.startswith("--"):
             return
         descriptors: dict[str, str] = {}
         for declaration, nested in blocks(body):
             key, colon, value = declaration.partition(":")
             if nested is None and colon:
-                descriptors[key.strip().lower()] = " ".join(value.split())
+                descriptors[unescape(key).strip().lower()] = " ".join(unescape(value).split())
         syntax = descriptors.get("syntax", "").strip("\"'").strip()
         inherits = descriptors.get("inherits", "").lower()
         initial = descriptors.get("initial-value")

@@ -285,6 +285,12 @@ The first release.
   name. `unmodelled_hiding` forgeries now render their page through the reader with 15
   variants covering these, so a reader regression becomes a false PASS in the benchmark. A
   full-page opaque overlay painted over the text is still not modelled (it needs layout).
+- The page-text reader unescapes property names as a browser does. `--\63: transparent` with
+  `color: var(--c)`, `--\64: none` with `display: var(--d)`, and `co\6cor: transparent` hid
+  text the reader showed: it unescaped values but not names, so `--\63` never matched `--c`.
+  A declaration now splits at its first unescaped colon (`--a\:b` is one name), escapes in
+  `@property` names and descriptors are read, and `!\69mportant` counts as `!important`. New
+  `unmodelled_hiding` variant `escaped_custom_property`; it was a false SHOWN before the fix.
 - A test run through a project wrapper (`make test`, `npm test`, `yarn test`, `pnpm test`,
   `tox`, `nox`, `just test`, `poetry run task test`) is no longer taken as a whole run to the
   end when the session does not show what the wrapper ran: its pass or fail still counts, but
