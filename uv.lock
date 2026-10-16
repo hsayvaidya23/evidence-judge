@@ -817,6 +817,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "anthropic" },
+    { name = "anyio" },
     { name = "arize-phoenix-client" },
     { name = "inspect-ai" },
     { name = "langfuse" },
@@ -835,6 +836,7 @@ langfuse = [
     { name = "langfuse" },
 ]
 mcp = [
+    { name = "anyio" },
     { name = "mcp" },
 ]
 otel = [
@@ -872,6 +874,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.69" },
+    { name = "anyio", marker = "extra == 'mcp'", specifier = ">=4" },
     { name = "arize-phoenix-client", marker = "extra == 'phoenix'", specifier = ">=1.0" },
     { name = "evidence-judge", extras = ["anthropic", "otel", "langfuse", "phoenix", "inspect", "mcp"], marker = "extra == 'all'" },
     { name = "inspect-ai", marker = "extra == 'inspect'", specifier = ">=0.3.100" },

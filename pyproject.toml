@@ -36,7 +36,7 @@ otel = [
 langfuse = ["langfuse>=3.0"]
 phoenix = ["arize-phoenix-client>=1.0"]
 inspect = ["inspect-ai>=0.3.100"]
-mcp = ["mcp>=2.3,<3"]
+mcp = ["mcp>=2.3,<3", "anyio>=4"]
 all = ["evidence-judge[anthropic,otel,langfuse,phoenix,inspect,mcp]"]
 
 [project.scripts]
