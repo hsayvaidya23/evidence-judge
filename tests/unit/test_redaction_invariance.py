@@ -177,7 +177,7 @@ def _case(seed: int) -> _Case:
 
 def _judge(case: _Case) -> RunVerdict:
     settings = Settings.model_validate({"anthropic_api_key": None, "cache_dir": None})
-    options = JudgeOptions(offline=True, spec=case.spec, claims=case.claims)
+    options = JudgeOptions(offline=True, spec=case.spec, claims=case.claims, redact=False)
     return asyncio.run(Judge(settings).judge(case.run, options))
 
 

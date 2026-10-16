@@ -37,7 +37,7 @@ from evidence_judge.mcp.models import (
 from evidence_judge.mcp.models import Injection as InjectionOut
 from evidence_judge.mcp.paths import PathNotAllowedError, Roots, walk
 from evidence_judge.mcp.specs import SpecCheck, describe, parse_spec
-from evidence_judge.redact import RedactionReport, Redactor, redactor_for
+from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import summarize_evidence
 from evidence_judge.report.html_report import write_html
 from evidence_judge.report.json_report import write_json
@@ -279,15 +279,7 @@ async def judge(config: ServerConfig, req: JudgeRequest, prepared: PreparedJudge
     run, spec, settings = prepared.run, prepared.spec, prepared.settings
     site = _site(req.site)
     llm = _llm(config, settings, req.offline)
-    report: RedactionReport | None = None
-    if settings.redact:
-        try:
-            redactor = redactor_for(settings, persistent=llm is not None)
-        except ValueError as e:
-            raise ToolInputError(f"redaction key: {e}") from e
-        run, report = redactor.redact_run(run)
-        if spec is not None:
-            spec, _ = redactor.redact_model(spec)
+    evidence_judge = engine.Judge(settings, llm)
     options = engine.JudgeOptions(
         offline=llm is None,
         spec=spec,
@@ -295,7 +287,11 @@ async def judge(config: ServerConfig, req: JudgeRequest, prepared: PreparedJudge
         require_tamper_evidence=req.require_tamper_evidence,
     )
     try:
-        verdict = await engine.Judge(settings, llm).judge(run, options)
+        run, options, report = evidence_judge.redact(run, options)
+    except ValueError as e:
+        raise ToolInputError(f"redaction key: {e}") from e
+    try:
+        verdict = await evidence_judge.judge(run, options)
     except LLMConfigError as e:
         raise ToolInputError(f"{e} (judge with offline=true to skip the model)") from e
     except LLMError as e:

@@ -444,5 +444,9 @@ The first release.
   report uploaded as an artifact) or `EVJ_REVIEW_COVERAGE_THRESHOLD=0` (a needs-review run
   passing); the CLI and MCP server read it the same way. The Action also warns when its
   workflow sets `EVJ_REDACT=false`.
+- The Python API now redacts: `Judge.judge` redacts the run, spec and claims before claim
+  extraction and any LLM call when `EVJ_REDACT` is on, as SECURITY.md says. The CLI, MCP server
+  and Inspect scorer go through the same `Judge.redact`, so redaction happens once and the same
+  way everywhere; `JudgeOptions(redact=False)` marks inputs that are already redacted.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main

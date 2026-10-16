@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from evidence_judge.config import Settings, read_settings, stable_redaction_key
+from evidence_judge.config import Settings, read_settings
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
@@ -27,7 +27,6 @@ from evidence_judge.engine import Judge, JudgeOptions
 from evidence_judge.ingest import load_run
 from evidence_judge.integrations._common import MissingExtraError
 from evidence_judge.llm.factory import build_llm
-from evidence_judge.redact import Redactor
 
 try:
     from inspect_ai.scorer import (
@@ -105,17 +104,6 @@ def _load(
     return run, spec
 
 
-def _redact(
-    settings: Settings, run: Run, spec: TaskSpec | None, *, persistent: bool
-) -> tuple[Run, TaskSpec | None]:
-    key = stable_redaction_key(settings) if persistent else None
-    redactor = Redactor(key) if key is not None else Redactor.from_settings(settings)
-    run, _ = redactor.redact_run(run)
-    if spec is not None:
-        spec, _ = redactor.redact_model(spec)
-    return run, spec
-
-
 def to_score(
     verdict: RunVerdict,
     run: Run,
@@ -164,9 +152,10 @@ def evidence_judge_scorer(
         run, spec = await asyncio.to_thread(
             _load, state.metadata, state.input_text, state.output.completion, root, active_settings
         )
-        if redact and active_settings.redact:
-            run, spec = _redact(active_settings, run, spec, persistent=not offline)
-        verdict = await active_judge.judge(run, JudgeOptions(offline=offline, spec=spec))
+        run, options, _ = active_judge.redact(
+            run, JudgeOptions(offline=offline, spec=spec, redact=redact)
+        )
+        verdict = await active_judge.judge(run, options)
         return to_score(verdict, run, value=value, needs_review=needs_review)
 
     return score

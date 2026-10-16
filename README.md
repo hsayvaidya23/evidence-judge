@@ -227,15 +227,12 @@ Full references: [docs/cli.md](docs/cli.md) (every command and option) and
 ```python
 import asyncio
 
-from evidence_judge import Judge, JudgeOptions, Redactor, Settings, TaskSpec, build_llm, load_run
+from evidence_judge import Judge, JudgeOptions, Settings, TaskSpec, build_llm, load_run
 
 settings = Settings()
 run = load_run(trace="trace.zip", har="run.har", answer_file="answer.txt")
-redactor = Redactor.from_settings(settings)  # Judge does not redact; the CLI does
-run, _ = redactor.redact_run(run)
-spec, _ = redactor.redact_model(TaskSpec.load("spec.yaml"))  # same key, so predicates match
-judge = Judge(settings, build_llm(settings))
-verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=spec)))
+judge = Judge(settings, build_llm(settings))  # redacts run, spec and claims, like the CLI
+verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yaml"))))
 print(verdict.outcome, verdict.summary)
 ```
 

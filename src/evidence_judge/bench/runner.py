@@ -310,6 +310,7 @@ class BenchmarkRunner:
                     offline=self.config.offline or self.llm is None,
                     spec=specs.get(judge),
                     claims=prepared.claims,
+                    redact=False,
                 )
                 verdict = await evidence_judge.judge(prepared.run, options)
                 outcome, summary = verdict.outcome, verdict.summary

@@ -21,11 +21,13 @@ from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
 from evidence_judge.llm.base import LLMError
+from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.json_report import schema_to_json
 from tests.unit.test_report_fixtures import make_run, make_verdict
 
 runner = CliRunner()
 EMAIL = "alice@example.com"
+RealJudge = evidence_judge.engine.Judge
 
 
 @dataclass
@@ -35,6 +37,7 @@ class JudgeOptions:
     claims: ClaimSet | None = None
     site: str | None = None
     require_tamper_evidence: bool = False
+    redact: bool = True
 
 
 @dataclass
@@ -80,8 +83,16 @@ def install(
         return llm
 
     class Judge:
-        def __init__(self, settings: Settings, llm: object | None = None) -> None:
+        def __init__(
+            self, settings: Settings, llm: object | None = None, *, redactor: Redactor | None = None
+        ) -> None:
             calls.llm = llm
+            self._real = RealJudge(settings, redactor=redactor)
+
+        def redact(
+            self, run: Run, options: JudgeOptions
+        ) -> tuple[Run, JudgeOptions, RedactionReport | None]:
+            return self._real.redact(run, options)  # pyright: ignore[reportArgumentType, reportReturnType]
 
         async def judge(self, run: Run, options: JudgeOptions) -> RunVerdict:
             calls.run = run

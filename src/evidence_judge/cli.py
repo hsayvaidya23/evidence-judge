@@ -50,7 +50,7 @@ from evidence_judge.integrations import exporters
 from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget
-from evidence_judge.redact import RedactionReport, Redactor
+from evidence_judge.redact import Redactor
 from evidence_judge.report.console import (
     StdoutConsole,
     guard_std_streams,
@@ -164,26 +164,9 @@ def _load_run(**kwargs: Any) -> Run:
         raise CliError(f"could not load evidence: {e}", ExitCode.USAGE) from e
 
 
-def _run_judge(
-    settings: Settings,
-    llm: LLMClient | None,
-    run: Run,
-    *,
-    offline: bool,
-    spec: TaskSpec | None,
-    claims: ClaimSet | None,
-    site: str | None = None,
-    require_tamper_evidence: bool = False,
-) -> RunVerdict:
-    options = engine.JudgeOptions(
-        offline=offline,
-        spec=spec,
-        claims=claims,
-        site=site,
-        require_tamper_evidence=require_tamper_evidence,
-    )
+def _run_judge(judge: engine.Judge, run: Run, options: engine.JudgeOptions) -> RunVerdict:
     try:
-        return asyncio.run(engine.Judge(settings, llm).judge(run, options))
+        return asyncio.run(judge.judge(run, options))
     except LLMConfigError as e:
         raise CliError(f"{e} (use --offline to judge without a model)", ExitCode.INTERNAL) from e
     except LLMError as e:
@@ -218,17 +201,6 @@ def _check_exporters(otel: bool, langfuse_trace_id: str | None) -> None:
         raise CliError(str(e), ExitCode.USAGE) from e
 
 
-def _redact_inputs(
-    redactor: Redactor, run: Run, spec: TaskSpec | None, claims: ClaimSet | None
-) -> tuple[Run, TaskSpec | None, ClaimSet | None, RedactionReport]:
-    run, report = redactor.redact_run(run)
-    if spec is not None:
-        spec, _ = redactor.redact_model(spec)
-    if claims is not None:
-        claims, _ = redactor.redact_model(claims)
-    return run, spec, claims, report
-
-
 def _warn_about_model(
     err: Console, settings: Settings, llm: LLMClient | None, *, offline: bool
 ) -> None:
@@ -246,25 +218,17 @@ def _warn_about_model(
 
 
 def _redact_for_judging(
-    err: Console | None,
-    settings: Settings,
-    run: Run,
-    spec: TaskSpec | None,
-    claims: ClaimSet | None,
-    *,
-    redact: bool,
-    persistent: bool,
-) -> tuple[Run, TaskSpec | None, ClaimSet | None]:
-    """Redact the inputs unless disabled, telling `err` (None when quiet) what happened."""
-    if not redact:
-        if err is not None:
-            err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
-        return run, spec, claims
-    redactor = load_redactor(settings, persistent=persistent)
-    run, spec, claims, report = _redact_inputs(redactor, run, spec, claims)
+    err: Console | None, judge: engine.Judge, run: Run, options: engine.JudgeOptions
+) -> tuple[Run, engine.JudgeOptions]:
+    """Redact the inputs the way `judge` would, telling `err` (None when quiet) what happened;
+    the redacted run is also what the reports show."""
+    run, options, report = judge.redact(run, options)
     if err is not None:
-        err.print(Text(report.describe(), style="dim"))
-    return run, spec, claims
+        if report is None:
+            err.print(Text("redaction disabled: reports may contain secrets", style="yellow"))
+        else:
+            err.print(Text(report.describe(), style="dim"))
+    return run, options
 
 
 def _write_reports(verdict: RunVerdict, run: Run, *, out: Path | None, html: Path | None) -> None:
@@ -408,27 +372,25 @@ def judge(
         )
 
         llm = None if offline else build_llm(settings)
-        run, task_spec, claim_set = _redact_for_judging(
+        if no_redact:
+            settings = settings.model_copy(update={"redact": False})
+        redactor = load_redactor(settings, persistent=llm is not None) if settings.redact else None
+        engine_judge = engine.Judge(settings, llm, redactor=redactor)
+        run, options = _redact_for_judging(
             err if not quiet else None,
-            settings,
+            engine_judge,
             run,
-            task_spec,
-            claim_set,
-            redact=settings.redact and not no_redact,
-            persistent=llm is not None,
+            engine.JudgeOptions(
+                offline=offline or llm is None,
+                spec=task_spec,
+                claims=claim_set,
+                site=site_name,
+                require_tamper_evidence=require_tamper_evidence,
+            ),
         )
         if not quiet:
             _warn_about_model(err, settings, llm, offline=offline)
-        verdict = _run_judge(
-            settings,
-            llm,
-            run,
-            offline=offline or llm is None,
-            spec=task_spec,
-            claims=claim_set,
-            site=site_name,
-            require_tamper_evidence=require_tamper_evidence,
-        )
+        verdict = _run_judge(engine_judge, run, options)
 
         _write_reports(verdict, run, out=out, html=html)
         export_warnings = exporters.export(verdict, otel=otel, langfuse_trace_id=langfuse_trace_id)

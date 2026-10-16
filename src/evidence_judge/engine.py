@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import re
 from collections.abc import Sequence
@@ -44,6 +45,7 @@ from evidence_judge.llm.base import (
     T,
 )
 from evidence_judge.llm.budget import Budget, run_budget
+from evidence_judge.redact import RedactionReport, Redactor, redactor_for
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +63,9 @@ class JudgeOptions:
     require_tamper_evidence: bool = False
     """Cap the run at NEEDS_REVIEW unless its source can fully show tampering (`tamper_detection`);
     also set by the spec's `require_tamper_evidence`."""
+    redact: bool = True
+    """Redact the run, spec and claims before judging when `settings.redact` is on. `Judge.redact`
+    returns options with it off, so inputs it already redacted are not redacted twice."""
 
 
 @dataclass(slots=True)
@@ -192,19 +197,41 @@ class Judge:
         *,
         registry: CheckerRegistry | None = None,
         extractor: ClaimExtractor | None = None,
+        redactor: Redactor | None = None,
     ) -> None:
         self._settings = settings
         self._llm = llm
+        self._redactor = redactor
         self._registry = registry or default_registry(
             screenshots_enabled=settings.screenshots_to_llm
         )
         self._extractor = extractor
 
     async def judge(self, run: Run, options: JudgeOptions | None = None) -> RunVerdict:
-        """Judge one run. Every LLM call made for it shares one fresh `settings.max_cost_usd`
-        budget, so a Judge reused across runs, or judging runs concurrently, caps each run."""
+        """Judge one run, redacted first (see `redact`). Every LLM call made for it shares one
+        fresh `settings.max_cost_usd` budget, so a Judge reused across runs, or judging runs
+        concurrently, caps each run."""
+        run, opts, _ = self.redact(run, options)
         with run_budget(Budget(self._settings.max_cost_usd)):
-            return await self._judge(run, options or JudgeOptions())
+            return await self._judge(run, opts)
+
+    def redact(
+        self, run: Run, options: JudgeOptions | None = None
+    ) -> tuple[Run, JudgeOptions, RedactionReport | None]:
+        """The run, spec and claims as `judge` sees them: redacted when `settings.redact` and
+        `options.redact` are on, with the redactor given to the Judge or else `redactor_for`
+        (persistent when the Judge has an LLM). Returns the options with `redact` off, and what
+        was redacted (None when nothing was). A corrupt redaction key file raises ValueError."""
+        opts = options or JudgeOptions()
+        if not (opts.redact and self._settings.redact):
+            return run, opts, None
+        if self._redactor is None:
+            self._redactor = redactor_for(self._settings, persistent=self._llm is not None)
+        redactor = self._redactor
+        run, report = redactor.redact_run(run)
+        spec = None if opts.spec is None else redactor.redact_model(opts.spec)[0]
+        claims = None if opts.claims is None else redactor.redact_model(opts.claims)[0]
+        return run, dataclasses.replace(opts, spec=spec, claims=claims, redact=False), report
 
     async def _judge(self, run: Run, opts: JudgeOptions) -> RunVerdict:
         if opts.spec is not None:
