@@ -123,7 +123,7 @@ def tamper_detection(run: SessionRun, trusted_log: bool = False) -> TamperDetect
     )
 
 
-def _guard_tamper(event: SessionEvent) -> str | None:
+def _event_guard_tamper(event: SessionEvent) -> str | None:
     """How a command that ran, or an edit, turned off the judge's own guard."""
     if isinstance(event, CommandEvent) and event.status is not CallStatus.DENIED:
         return event.analysis.guard_tamper
@@ -306,7 +306,7 @@ class SessionJudge:
         state.review.extend(
             f"{_HARNESS_TAMPERING}: {event.id} {guard}"
             for event in run.events
-            if (guard := _guard_tamper(event))
+            if (guard := _event_guard_tamper(event))
         )
         for source, finding in index.tampering:
             label = "code not checkable" if NO_DIFF in finding else "test suite weakened"
