@@ -331,6 +331,16 @@ uv run python -m scripts.record_fixtures      # re-record with Playwright
 uv run pytest tests/unit/test_golden_runs.py
 ```
 
+Two more demo sites back the [benchmark](docs/benchmark.md): `demo/clinic` (Harbour Dental, an appointment form with a date picker and a booking reference) and `demo/ledger` (Ledgerly Admin, a back-office console where disabling a user asks for confirmation and a balance shows only on its account's page). Their eight recorded runs, each with its spec and expected verdict, are in `tests/fixtures/sites/` (re-record with `uv run python -m scripts.record_site_fixtures`):
+
+```bash
+uv run evidence-judge judge --offline \
+  --trace tests/fixtures/sites/clinic_booked/trace.zip \
+  --answer-file tests/fixtures/sites/clinic_booked/answer.txt \
+  --spec tests/fixtures/sites/clinic_booked/spec.yaml
+# PASS  score 100/100: 2 key claims and 4 spec checks were verified against recorded evidence
+```
+
 ## 🛠️ Development
 
 ```bash

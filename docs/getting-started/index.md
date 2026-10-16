@@ -49,3 +49,17 @@ needs an API key.
     `tests/fixtures/runs/`: an honest success, an honest failure, a forged success, a constraint
     violation, a side effect, a click loop and a do-nothing agent. Every page in this section
     works on them, so you can follow along before wiring up your own agent.
+
+    Two more demo sites, `demo/clinic` (an appointment form) and `demo/ledger` (an admin
+    console), have eight recorded runs in `tests/fixtures/sites/`, each with its spec. A booking
+    the clinic confirmed:
+
+    ```bash
+    evidence-judge judge --offline \
+      --trace tests/fixtures/sites/clinic_booked/trace.zip \
+      --answer-file tests/fixtures/sites/clinic_booked/answer.txt \
+      --spec tests/fixtures/sites/clinic_booked/spec.yaml
+    ```
+
+    It passes: both key claims (the booking request and the reference HD-1001 on the
+    confirmation page) and all four spec checks are verified against the recording.
