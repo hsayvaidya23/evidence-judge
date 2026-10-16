@@ -36,7 +36,7 @@ from evidence_judge.ingest.css.model import (
     faint,
     words,
 )
-from evidence_judge.ingest.css.syntax import TRACKED
+from evidence_judge.ingest.css.syntax import EXTENTS, TRACKED
 from evidence_judge.ingest.css.values import (
     FAINT,
     FAR,
@@ -145,7 +145,12 @@ _DEPTH: Final = words("transform rotate scale backface-visibility perspective")
 
 
 _TEXT: Final = (
-    TRACKED - _REMOVERS - _BOX - _DEPTH - words("visibility z-index animation animation-name")
+    TRACKED
+    - _REMOVERS
+    - _BOX
+    - _DEPTH
+    - EXTENTS
+    - words("visibility z-index animation animation-name")
 )
 
 
@@ -440,6 +445,109 @@ def _obscured(cascade: Cascade, viewport: Viewport | None) -> bool:
         if clipped and any(_tiny(v, viewport) for p in sizes for v in cascade.values(p)):
             return True
     return False
+
+
+def stowed(values: dict[str, str], viewport: Viewport | None) -> bool:
+    """Whether a box's own certain `values` certainly put it out of sight: a clip path that
+    keeps almost none of it, a ``transform``, ``rotate`` and ``scale`` that squash it to
+    nothing, or, when nothing paints past its edges or keeps it from shrinking, a size of at
+    most a pixel or a single translation by its whole size (a closed drawer, accordion or
+    modal). A value the reader cannot read does not."""
+    clip = functions(values.get("clip-path", "")) or []
+    if len(clip) == 1 and clip[0][0] in ("inset", "circle", "ellipse", "polygon") and viewport:
+        width, height = float(viewport[0]), float(viewport[1])
+        kept = _clip_area(clip[0][0], clip[0][1], width, height)
+        if kept is not None and kept <= FAINT * width * height:
+            return True
+    try:
+        matrix = _multiply(
+            _rotate_property(_plain(values.get("rotate"))),
+            _multiply(
+                _scale_property(_plain(values.get("scale"))),
+                _transform_matrix(_plain(values.get("transform")), None),
+            ),
+        )
+    except _UnreadableError:
+        matrix = _IDENTITY
+    if _degenerate(matrix):
+        return True
+    if any(not _no_extent(prop, value) for prop, value in values.items() if prop in EXTENTS):
+        return False
+    for prop in _SIZES:
+        value = values.get(prop, "")
+        share = parse_percent(value)
+        px = length_px(value, viewport, 16.0, viewport[1] if viewport else None)
+        if share == 0 or (share is None and px is not None and px <= 1):
+            return True
+    return _translated_off(values, viewport)
+
+
+def _no_extent(prop: str, value: str) -> bool:
+    """Whether a value of an `EXTENTS` property certainly adds next to nothing to a box's size
+    or paint: no shadow, no minimum size or padding, and borders and outlines a few pixels wide
+    at most."""
+    if value in _WIDE or value == "none" or (prop.startswith("min-") and value == "auto"):
+        return True
+    if prop == "box-shadow":
+        return False
+    edge = prop.startswith(("border", "outline"))
+    for token in tokens(value):
+        if edge and (token in _EDGE_WORDS or parse_color(token) is not None):
+            continue
+        px = length_px(token, None) if "(" not in token else None
+        if px is None or px > (_EDGE_PX if edge else 0):
+            return False
+    return True
+
+
+_EDGE_WORDS: Final = words(
+    "none hidden solid dashed dotted double groove ridge inset outset auto thin medium thick "
+    "currentcolor"
+)
+
+
+_EDGE_PX: Final = 5.0
+
+
+def _translated_off(values: dict[str, str], viewport: Viewport | None) -> bool:
+    """Whether a box at its containing block's edges is moved by its whole width or height by
+    a single translation (a ``transform`` of one ``translate`` function, or the ``translate``
+    property) and nothing else moves it."""
+    if any(_plain(values.get(prop)) for prop in ("rotate", "scale")):
+        return False
+    for prop in (*_MARGINS, "top", "left", "right", "bottom"):
+        value = values.get(prop, "auto")
+        if value not in _WIDE and value != "auto" and length_px(value, None) != 0:
+            return False
+    transform, translate = _plain(values.get("transform")), _plain(values.get("translate"))
+    found = functions(transform) or []
+    if translate and not transform:
+        moves = tokens(translate)[:2]
+    elif transform and not translate and len(found) == 1 and found[0][0] in _MOVES:
+        name, args = found[0]
+        moves = split_args(args)[:2]
+        if name == "translatey":
+            moves = ["0", *moves[:1]]
+    else:
+        return False
+    return any(_moved_off(move, viewport) for move in moves)
+
+
+_MOVES: Final = words("translate translatex translatey translate3d")
+
+
+def _plain(value: str | None) -> str:
+    return "" if value is None or value in _WIDE or value == "none" else value
+
+
+def _moved_off(value: str, viewport: Viewport | None) -> bool:
+    """Whether a translation certainly moves a box by its own size, or more."""
+    fixed = length_px(value, viewport, 16.0, 0.0)
+    scaled = length_px(value, viewport, 16.0, 100.0)
+    if fixed is None or scaled is None:
+        return False
+    share = scaled - fixed
+    return abs(share) >= 100 and fixed * share >= 0
 
 
 def _offset_far(value: str | None, viewport: Viewport | None, sign: int, side: int | None) -> bool:

@@ -20,9 +20,24 @@ TRACKED: Final = words(
     "background-clip "
     "-webkit-background-clip fill fill-opacity offset offset-path mask mask-image mask-border "
     "mask-border-source -webkit-mask -webkit-mask-image -webkit-mask-box-image z-index "
-    "backface-visibility perspective animation animation-name"
+    "backface-visibility perspective animation animation-name "
+    "min-width min-height min-block-size min-inline-size padding padding-top padding-right "
+    "padding-bottom padding-left padding-block padding-inline padding-block-start "
+    "padding-block-end padding-inline-start padding-inline-end border border-width border-top "
+    "border-right border-bottom border-left border-top-width border-right-width "
+    "border-bottom-width border-left-width border-block border-inline border-block-width "
+    "border-inline-width border-block-start border-block-end border-inline-start "
+    "border-inline-end border-block-start-width border-block-end-width "
+    "border-inline-start-width border-inline-end-width outline outline-width box-shadow"
 )
 """The properties the reader applies: what removes an element, and what can hide its text."""
+
+
+EXTENTS: Final = frozenset(
+    prop for prop in TRACKED if prop.startswith(("min-", "padding", "border", "outline", "box-"))
+)
+"""What paints beyond a box's width and height, or keeps it from shrinking: a minimum size,
+padding, borders, an outline and shadows. Only overlays read them (`visibility.stowed`)."""
 
 
 SHORTHANDS: Final = words(

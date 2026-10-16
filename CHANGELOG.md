@@ -517,6 +517,16 @@ The first release.
   real-site pages 0.17% more text reads as unsure, all of it from fade-in animations (Stripe
   15.6% to 16.8%, Vercel 9.0% to 9.5%). New `unmodelled_hiding` variants `opaque_overlay`,
   `backface_flip`, `ending_animation` and `perspective_depth`; each was a false SHOWN before.
+- A full-screen opaque box its own styles put out of sight no longer makes the text under it
+  unsure: a closed cart drawer (`transform: translateX(-100%)` or the `translate` property), a
+  modal scaled to nothing, a clip path that keeps almost none of it, or a box at most a pixel
+  wide or high (`width: 0`, `max-height: 0`). Before, an honest order confirmation on a
+  storefront with such a box went to NEEDS_REVIEW. The size and translation cases hold only when
+  nothing paints past the box or keeps it from shrinking (a `box-shadow`, an `outline`, padding,
+  a `min-height`, a border wider than 5px), when the translation is the box's only move (no
+  second translation, offset, margin, `rotate` or `scale`), and never for a value the reader
+  cannot read. New honest control `closed_overlays` (49 honest controls: 44 right with the
+  exact spec, 36 with the generic one; none failed).
 
 ### Security
 

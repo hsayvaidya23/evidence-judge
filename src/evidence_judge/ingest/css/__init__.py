@@ -44,8 +44,9 @@ fully model:
 
 Each element's positioned ancestors and their ``z-index`` ride on its `Computed` (``boxes``),
 and `StyleSheets.covers` says whether a fixed or absolute box has an opaque background over the
-whole viewport or its containing block; the page renderer makes the text such a box may paint
-over unsure. It does not lay the page out: a smaller box painted over the text, or one sized
+whole viewport or its containing block, and is not put out of sight by its own styles (moved by
+its whole size, scaled to nothing, clipped away or collapsed: a closed drawer or modal); the
+page renderer makes the text such a box may paint over unsure. It does not lay the page out: a smaller box painted over the text, or one sized
 some other way, is not seen. Nor does it see images: a background ``url()`` (or
 ``image-set()``, ...) over a solid ``background-color`` is taken to look like that colour, so
 white text over a white picture on a dark colour shows.

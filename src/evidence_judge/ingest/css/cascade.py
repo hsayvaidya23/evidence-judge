@@ -68,7 +68,7 @@ from evidence_judge.ingest.css.variables import (
     references,
     resolve_rule,
 )
-from evidence_judge.ingest.css.visibility import Cascade, compute
+from evidence_judge.ingest.css.visibility import Cascade, compute, stowed
 
 _NAMESPACES: Final = {
     "http://www.w3.org/1999/xhtml": HTML,
@@ -266,6 +266,8 @@ class StyleSheets:
         if colour is None or colour[3] < 1:
             return False
         viewport = self._viewport
+        if stowed(values, viewport):
+            return False
         return all(
             _flush(values.get(start), viewport)
             and (_flush(values.get(end), viewport) or _full(values.get(size), viewport, side))

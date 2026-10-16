@@ -785,3 +785,76 @@ def test_an_opaque_box_over_the_page_leaves_the_text_under_it_unsure(
     page = _rendered(*children)
 
     assert (page.text, page.unsure_text) == (shown, unsure)
+
+
+@pytest.mark.parametrize(
+    ("style", "covers"),
+    [
+        ("transform:translateX(-100%)", False),
+        ("transform:translate(0,100%)", False),
+        ("translate:100%", False),
+        ("transform:scale(0)", False),
+        ("scale:0", False),
+        ("clip-path:inset(100%)", False),
+        ("clip-path:circle(0)", False),
+        ("width:0", False),
+        ("height:0;overflow:hidden", False),
+        ("max-height:0;overflow:hidden;padding:0;border:0 solid #eee", False),
+        ("transform:translateX(-100%);border-top:1px solid #eee;box-shadow:none", False),
+        ("transform:translateX(-50%)", True),
+        ("transform:translateX(-100%) translateX(100%)", True),
+        ("transform:translateX(-100%);translate:100%", True),
+        ("transform:translateX(-100%);rotate:180deg", True),
+        ("transform:translateX(-100%);margin-left:100%;width:100%", True),
+        ("left:-100%;width:100%;transform:translateX(100%)", True),
+        ("transform:translateX(-100%);box-shadow:0 0 0 100vmax #fff", True),
+        ("transform:translateX(-100%);outline:100vmax solid #fff", True),
+        ("transform:translateX(var(--x))", True),
+        ("height:0;min-height:100%", True),
+        ("height:0;padding-bottom:100vh", True),
+        ("height:0;padding-bottom:var(--p)", True),
+        ("width:0;border-left:100vw solid #fff", True),
+        ("width:0;border-left:thick solid #fff", False),
+        ("width:0;border-left:6px solid #fff", True),
+        ("clip-path:inset(10%)", True),
+        ("transform:scale(.5)", True),
+    ],
+)
+def test_a_full_screen_box_its_own_styles_put_out_of_sight_covers_nothing(
+    style: str, covers: bool
+) -> None:
+    box = ["DIV", {"style": f"{_COVER};{style}"}]
+    page = _rendered(["P", {}, "Order confirmed"], box)
+
+    assert (page.unsure_text == "Order confirmed") is covers
+
+
+@pytest.mark.parametrize(
+    "children",
+    [
+        (
+            ["P", {}, "Order confirmed"],
+            ["ASIDE", {"class": "cart-drawer"}, ["P", {}, "Your cart"]],
+        ),
+        (
+            ["P", {}, "Order confirmed"],
+            ["DIV", {"class": "accordion"}, ["P", {}, "Shipping details"]],
+        ),
+        (
+            ["P", {}, "Order confirmed"],
+            ["DIV", {"class": "modal"}, ["P", {}, "Sign up for news"]],
+        ),
+    ],
+)
+def test_closed_storefront_drawers_accordions_and_modals_cover_nothing(
+    children: tuple[object, ...],
+) -> None:
+    css = (
+        ".cart-drawer{position:fixed;inset:0 0 0 auto;width:100%;background:#fff;"
+        "transform:translateX(100%);transition:transform .3s}"
+        ".accordion{position:absolute;inset:0;background:#fff;max-height:0;overflow:hidden}"
+        ".modal{position:fixed;inset:0;background:#fff;transform:scale(0)}"
+    )
+    page = _rendered(["STYLE", {}, css], *children)
+
+    assert "Order confirmed" in page.text
