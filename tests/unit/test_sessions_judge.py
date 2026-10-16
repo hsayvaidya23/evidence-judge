@@ -308,6 +308,11 @@ async def test_given_claims_are_used_as_is() -> None:
         ("Fixed the bug in `calc.py`.", [EditPredicate(path="calc.py"), TestResultPredicate()]),
         ("Fixed.", [TestResultPredicate()]),
         (
+            "`npm test` fails: 1 of 3 tests passes.",
+            [TestResultPredicate(expect="fail", whole_suite=False)],
+        ),
+        ("3 of 3 tests pass.", [TestResultPredicate()]),
+        (
             "I fixed the bug in `calc.py`, added a test in `tests/test_r.py`, and updated "
             "`README.md`.",
             [

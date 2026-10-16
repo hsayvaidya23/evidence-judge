@@ -62,6 +62,10 @@ _COUNT_FAILED: Final = re.compile(
 _COUNT_PASSED: Final = re.compile(
     r"\b(\d+)\s+(?:of\s+\d+\s+)?(?:tests?\s+)?(?:passed|passing|pass)\b", _I
 )
+_PARTIAL: Final = re.compile(
+    r"\b(\d+)\s+(?:out\s+)?of\s+(?:the\s+)?(\d+)\s+(?:tests?|specs?|test cases)\b", _I
+)
+"""'1 of 3 tests passes': fewer than all of them, so the suite fails whatever the verb says."""
 _ALL_PASS: Final = re.compile(
     r"\b(?:all|every|each)\b(?:\s+[\w-]+){0,4}?\s+(?:tests?|specs?|test cases|checks)\b"
     r"(?:\s+[\w-]+){0,3}?\s+(?:pass(?:es|ed)?|are passing|are green|succeed(?:ed)?)\b|"
@@ -180,7 +184,8 @@ def _sentence_claims(sentence: str) -> Iterator[tuple[ClaimKind, bool, list[Sess
         return
 
     failed = _COUNT_FAILED.search(sentence)
-    if failed or _STILL_FAIL.search(sentence):
+    partial = any(int(done) < int(total) for done, total in _PARTIAL.findall(sentence))
+    if failed or partial or _STILL_FAIL.search(sentence):
         yield ClaimKind.OUTCOME, True, [TestResultPredicate(expect="fail", whole_suite=False)]
     elif _ALL_PASS.search(sentence) or _COUNT_PASSED.search(sentence):
         yield ClaimKind.OUTCOME, True, [TestResultPredicate(whole_suite=not subset)]
