@@ -246,6 +246,11 @@ The first release.
   output (`test result: FAILED. 1 passed; 1 failed`, a `failures:` section) is covered by
   end-to-end tests: counts and test names were already read. A Go session control covers the
   build failure.
+- Page text with a soft hyphen or a zero-width character inside a word (`Out of st<U+00AD>ock`,
+  as CMS hyphenation writes it) no longer FAILs an honest run: text normalisation drops every
+  default-ignorable code point (soft hyphen, zero-width space, joiners, word joiner, BOM,
+  bidi and variation marks, tag characters) before matching, in page text, response bodies and
+  claims alike.
 
 ### Security
 

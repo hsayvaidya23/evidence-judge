@@ -15,6 +15,11 @@ PUNCT_MAP: dict[int, str] = {
     0x00A0: " ",
 }
 _WS = re.compile(r"\s+")
+_IGNORABLE = re.compile(
+    "[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e"
+    "\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8"
+    "\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e0fff]"
+)
 _PUNCT_PAIRS = tuple((chr(code), ascii_) for code, ascii_ in PUNCT_MAP.items())
 
 
@@ -26,6 +31,8 @@ def _ascii_punctuation(text: str) -> str:
 
 
 def normalize(text: str) -> str:
-    """NFKC fold, ASCII punctuation, case-fold and collapse whitespace."""
-    folded = _ascii_punctuation(unicodedata.normalize("NFKC", text)).casefold()
+    """Drop default-ignorable code points, NFKC fold, ASCII punctuation, case-fold and collapse
+    whitespace."""
+    visible = _IGNORABLE.sub("", text)
+    folded = _ascii_punctuation(unicodedata.normalize("NFKC", visible)).casefold()
     return _WS.sub(" ", folded).strip()
