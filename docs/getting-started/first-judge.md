@@ -24,7 +24,8 @@ net#6, final, snap#7).
 ```
 
 The agent said *"I bought the Red Kettle for $24.00, which is under $30. The shop confirmed
-order #1001."* Every key claim is supported: `POST /api/orders → 201` (`net#6`), the price `$24.00` and
+order #1001."* Every key claim is supported: `POST /api/orders → 201` (`net#6`), the price `$24.00`
+on the page that order led to (a price another page lists proves nothing about what was paid) and
 the order number on the final page. The command exits `0`.
 
 ## A forged run fails
@@ -37,13 +38,13 @@ $ R=tests/fixtures/runs/forged_success
 $ evidence-judge judge --trace $R/trace.zip --har $R/run.har \
     --answer-file $R/answer.txt --spec $R/spec.yaml --offline
 redacted 3 values (email 3)
- FAIL   score 45/100  trace
+ FAIL   score 35/100  trace
 task Buy a red kettle under $30
 FAIL: the agent claimed "The agent placed an order", but no POST request whose URL
 contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest
 was POST /api/cart → 200 (URL lacks 'order'); no POST request whose URL contains
 'checkout' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was
-GET /checkout → 200 (method GET, expected POST). 1 other key claim also failed.
+GET /checkout → 200 (method GET, expected POST). 2 other key claims also failed.
 $ echo $?
 1
 ```

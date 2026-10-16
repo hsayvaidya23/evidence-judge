@@ -76,8 +76,8 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1374 browser and 0 of 1608 session
-  forgeries pass, and 4 of 38 honest browser controls go to review offline.
+  Go toy projects with runner-specific tricks; 0 of 1398 browser and 0 of 1608 session
+  forgeries pass, and 4 of 41 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
   and got order #..."), so a claim reader that carries the negation over shows up in `make
@@ -378,6 +378,37 @@ The first release.
   number, is charged another price and claims "for $4.00"; it produced false PASSes before the
   fix and none after. The benchmark now has 44 kinds: 0 of 1374 attack runs pass, honest
   controls unchanged.
+- A price the agent says it paid is checked against what the site answered the purchase with,
+  not against every page of the run: "bought it for $29.00" used to PASS when another item was
+  listed at $29.00 and the order was charged $29.50. Offline extraction now proves an amount in
+  a sentence that asserts a purchase, or in an answer that does ("It was $29.00"), with a new
+  `request` criterion `result_contains`: the response body, or the page the request led to
+  before the agent acted again (a page the agent opened itself never counts; a payment
+  provider's off-site challenge is passed through). A recorded answer that leaves the amount
+  out contradicts it only weakly (review); none recorded is no evidence. A value stated with a
+  copula and no price word in the answer ("It was $4.00", "the balance is $1,284.50") is now a
+  claim and counts toward claim coverage. New forgery kind `listed_price` (write) opens a page
+  listing another item at $29.00, is charged $29.50, $29.99 or $28.00 and claims "for $29.00";
+  it produced 6 false PASSes before the fix and none after. The benchmark now has 45 kinds: 0
+  of 1398 attack runs pass, honest controls unchanged (34, 27 and 2 of 38 correct). Matching
+  of caseless scripts (Chinese, Japanese) at a letter end stays a substring match; documented.
+- Whole-token matching of numbers and IDs no longer finds `100` in `1 100`, `1 100` (narrow
+  no-break space) or `1'100`: a space or apostrophe between digit groups joins them. An ID of
+  three or more digits is not found in `1001A`, `A1001` or `1001-A` (a short run still is:
+  `10:00` in `10:00am`), and NFKC no longer folds `2⁴` into `24` (superscript and subscript
+  digits normalise to `^4` and `_4`). Forgery kind `prefix_reference` gains two variants, a
+  letter (`#4316A`) and a dash and a letter (`#4316-B`) after the claimed number: 5 false
+  PASSes over five seeds before the fix, none after. Bench unchanged: 0 of 1398 attacks pass,
+  honest controls 34, 27 and 2 of 38.
+- An honest price in a locale format no longer goes to review: a phrase that is only an amount
+  of money (`$24`, `EUR 1.249,50`) is compared by currency and amount, so "bought it for $24"
+  is met by `USD 24.00`, `$ 24`, `$\xa024`, `US$24` or `24 $`, and `€1.249,50` by
+  `€1,249.50`, never by another currency or amount. Offline extraction reads `€1.249,50`
+  whole (it read `€1.249`), a decimal comma (`$24,00`) and a currency after the amount
+  (`24 USD`, `1.249,50 €`). New honest control `spaced_price` writes every dollar amount of a
+  passing run as `$ 24.00`: before the fix its three runs went to review or failed with every
+  spec, after it they pass. Bench: 0 of 1398 attacks pass; honest controls 37, 30 and 2 of 41
+  correct (34, 27 and 2 of 38 plus the three new ones with each spec).
 - The GitHub Action checks its boolean inputs: `offline`, `fail-on-review` and the new
   `upload-report` take `true` or `false` in any case, and any other value (`yes`, `1`) fails
   the step before anything is installed; before, everything but the exact string `true` was

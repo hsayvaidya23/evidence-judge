@@ -109,13 +109,27 @@ def test_an_amount_no_claim_checks_leaves_its_sentence_uncovered():
         "I bought the Red Kettle, $6 under the $30 budget.",
         "I bought the Red Kettle (shipping $5.00).",
         "I bought the Red Kettle and saved $5 off the list price.",
-        "The balance of account ACC-2041 is $1,284.50.",
         "I could not buy the Red Kettle for $24.00.",
     ],
 )
 def test_bounds_differences_and_unasserted_amounts_need_no_claim(answer: str) -> None:
     placed = _claim("Placed order", answer)
     assert coverage([placed], answer, []) == 1.0
+
+
+@pytest.mark.parametrize(
+    "answer", ["It was $4.00.", "The balance of account ACC-2041 is $1,284.50."]
+)
+def test_a_stated_value_needs_a_claim_that_checks_it(answer: str) -> None:
+    assert coverage([], answer, []) == 0.0
+    shown = answer.split("$")[1].rstrip(".")
+    checked = _claim(
+        "Amount",
+        answer,
+        kind=ClaimKind.VALUE,
+        predicates=[PageTextPredicate(contains=f"${shown}")],
+    )
+    assert coverage([checked], answer, []) == 1.0
 
 
 def test_coverage_is_full_when_nothing_asserted():

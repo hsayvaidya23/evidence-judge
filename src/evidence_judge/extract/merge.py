@@ -6,10 +6,17 @@ import re
 from collections.abc import Iterable, Sequence
 from difflib import SequenceMatcher
 
+from evidence_judge.checks.matching import parse_number
 from evidence_judge.core.claims import Claim, ClaimSet
 from evidence_judge.core.predicates import Predicate
 from evidence_judge.extract.base import MAX_CLAIMS
-from evidence_judge.extract.text import is_claim_like, normalize, sentences, stated_amounts
+from evidence_judge.extract.text import (
+    amount_text,
+    is_claim_like,
+    normalize,
+    sentences,
+    stated_amounts,
+)
 
 _NEAR_DUPLICATE_RATIO = 0.9
 _COVERAGE_WORD_OVERLAP = 0.6
@@ -130,7 +137,7 @@ def coverage(claims: Sequence[Claim], answer: str | None, reasoning: list[str]) 
         if not is_claim_like(sentence.text):
             continue
         total += 1
-        amounts = [_amount(m.group(1)) for m in stated_amounts(sentence.text)]
+        amounts = [_amount(amount_text(m)) for m in stated_amounts(sentence.text)]
         if all(a in checked for a in amounts):
             norm = normalize(sentence.text)
             covered += any(_covers(q, norm) for q in quotes)
@@ -138,6 +145,10 @@ def coverage(claims: Sequence[Claim], answer: str | None, reasoning: list[str]) 
 
 
 def _amount(number: str) -> float | None:
+    """`number` as an amount: as parse_number reads prices ('1.249,50' is 1249.5), else with
+    commas before three digits read as grouping and any other comma as a decimal point."""
+    if (parsed := parse_number(number)) is not None:
+        return round(parsed, 2)
     try:
         return round(float(_GROUPING.sub("", number).replace(",", ".")), 2)
     except ValueError:

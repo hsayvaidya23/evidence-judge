@@ -197,11 +197,21 @@ def asserted(sentence: str, start: int) -> bool:
 
 
 CURRENCY = re.escape(chr(0x24) + chr(0x20AC) + chr(0xA3) + chr(0x20B9))
+_AMOUNT = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:\.\d+|,\d{1,2})?"
 PRICE = re.compile(
-    rf"(?:[{CURRENCY}]|\b(?:USD|EUR|GBP|INR)\s?)\s?"
-    r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)",
+    rf"(?:[{CURRENCY}]|\b(?:USD|EUR|GBP|INR)\s?)\s?({_AMOUNT})(?!\d)"
+    rf"|(?<![\w.,])({_AMOUNT})\s?(?:[{CURRENCY}](?!\s?\d)|(?:USD|EUR|GBP|INR)\b)",
     re.I,
 )
+"""An amount with a currency symbol or code before it ('$24.00', 'EUR 19', '€1.249,50') or
+after it ('24 USD', '1.249,50 €'); `amount_text` is its number."""
+
+
+def amount_text(match: re.Match[str]) -> str:
+    """The number a PRICE match states, as written ('1.249,50')."""
+    return match.group(1) or match.group(2)
+
+
 PRICE_BOUND = re.compile(
     r"\b(?:limit|budget|under|below|max(?:imum)?|up\s+to|at\s+most|less\s+than|over|above|"
     r"shipping|delivery|postage|tax(?:es)?|vat|fees?|tip)\b(?:\W+\w+){0,2}\W*$",
@@ -218,6 +228,11 @@ _PAID_LEAD = re.compile(r"\b(?:for|at|paid|spent|costing)\s+(?:only\s+|just\s+)?
 _PURCHASE = re.compile(
     r"\b(?:bought|purchased|ordered|orders?|paid|spent|booked|reserved|rented|checked\s+out|"
     r"placed|got)\b",
+    re.I,
+)
+_COPULA = re.compile(
+    r"\b(?:is|was|were|are|be|been|came\s+to|comes?\s+to|totall?(?:ed|s)|amounted\s+to)\s+"
+    r"(?:only\s+|just\s+|exactly\s+)?$",
     re.I,
 )
 _EXTRAS = re.compile(
@@ -259,5 +274,20 @@ def paid_amount(sentence: str, amount: re.Match[str]) -> bool:
     return _PAID_LEAD.search(before + " ") is not None and _PURCHASE.search(sentence) is not None
 
 
+def names_purchase(sentence: str) -> bool:
+    """Whether `sentence` asserts a purchase ('bought', 'ordered', 'paid', 'order #1001'), so an
+    amount it states is what that purchase cost."""
+    return any(asserted(sentence, m.start()) for m in _PURCHASE.finditer(sentence))
+
+
+def stated_value(sentence: str, amount: re.Match[str]) -> bool:
+    """Whether `amount` completes a copula or a total ('It was $4.00', 'the balance is
+    $1,284.50', 'it came to $26.40'): a value the sentence states, whatever names it."""
+    return _COPULA.search(sentence[: amount.start()]) is not None
+
+
 def is_claim_like(sentence: str) -> bool:
-    return any(asserted(sentence, m.start()) for m in COMPLETION_VERBS.finditer(sentence))
+    """Whether `sentence` asserts a completed action, or states a value ('It was $4.00')."""
+    if any(asserted(sentence, m.start()) for m in COMPLETION_VERBS.finditer(sentence)):
+        return True
+    return any(stated_value(sentence, m) for m in stated_amounts(sentence))

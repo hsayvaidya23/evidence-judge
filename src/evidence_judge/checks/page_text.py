@@ -13,12 +13,12 @@ from evidence_judge.checks._common import (
     state_id,
 )
 from evidence_judge.checks.base import CheckContext, EvidenceScope
-from evidence_judge.checks.matching import excerpt, url_host, url_path
+from evidence_judge.checks.matching import excerpt, find_text, url_host, url_path
 from evidence_judge.core.evidence import Channel
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.predicates import PageTextPredicate, Predicate, Scope
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
-from evidence_judge.textnorm import find_phrase, normalize
+from evidence_judge.textnorm import normalize
 
 KIND = "page_text"
 MAY_HIDE: Final = "text the page may hide"
@@ -69,14 +69,14 @@ def _check_final(
             KIND,
             [Citation(evidence_id=FINAL_ID, excerpt=state.url[:80])],
         )
-    if find_phrase(index.normalized_text(state), normalize(predicate.contains)) >= 0:
+    if find_text(index.normalized_text(state), normalize(predicate.contains)) >= 0:
         return result(
             Support.SUPPORTED,
             f"Final page ({url_path(state.url)}) contains {phrase}",
             KIND,
             [Citation(evidence_id=FINAL_ID, excerpt=excerpt(state.text, predicate.contains))],
         )
-    if find_phrase(normalize(state.unsure_text), normalize(predicate.contains)) >= 0:
+    if find_text(normalize(state.unsure_text), normalize(predicate.contains)) >= 0:
         return result(
             Support.NO_EVIDENCE,
             f"The final page ({url_path(state.url)}) holds {phrase} only in {MAY_HIDE}: its "
@@ -107,7 +107,7 @@ def _check_any(
     phrase = quoted(predicate.contains)
     states = [s for s in index.page_states() if off_site(s.url, scope) is None]
     needle = normalize(predicate.contains)
-    hits = [s for s in states if find_phrase(index.normalized_text(s), needle) >= 0]
+    hits = [s for s in states if find_text(index.normalized_text(s), needle) >= 0]
     if hits:
         cited = list(reversed(hits[-MAX_CITATIONS:]))
         return result(
@@ -122,7 +122,7 @@ def _check_any(
                 for s in cited
             ],
         )
-    unsure = [s for s in states if find_phrase(normalize(s.unsure_text), needle) >= 0]
+    unsure = [s for s in states if find_text(normalize(s.unsure_text), needle) >= 0]
     if unsure:
         cited = list(reversed(unsure[-MAX_CITATIONS:]))
         return result(

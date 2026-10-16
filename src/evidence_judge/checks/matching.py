@@ -50,6 +50,26 @@ _NUMBER = re.compile(
 _GROUP_SEPARATORS: Final = ",. '"
 _DECIMAL_SEPARATORS: Final = ".,"
 _SUFFIX_SCALE: Final = {"k": 1e3, "m": 1e6, "b": 1e9}
+_CURRENCIES: Final = {
+    "$": "usd",
+    "us$": "usd",
+    "usd": "usd",
+    "€": "eur",
+    "eur": "eur",
+    "£": "gbp",
+    "gbp": "gbp",
+    "₹": "inr",
+    "rs": "inr",
+    "inr": "inr",
+}
+_AMOUNT = r"\d{1,3}(?:[.,' ]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?"
+MONEY: Final = re.compile(
+    rf"(?:(?<![a-z0-9$])(?P<pre>us\$|usd|eur|gbp|inr|rs\.?|[$€£₹])\s?"
+    rf"(?P<pre_amount>{_AMOUNT})"
+    rf"|(?<![\w.,])(?P<post_amount>{_AMOUNT})\s?(?P<post>[$€£₹]|(?:usd|eur|gbp|inr)(?![a-z])))"
+    r"(?![\d]|[.,]\d)"
+)
+"""An amount of money in normalised text: a currency symbol or code before or after it."""
 _INDEX_BRACKETS = re.compile(r"\[(-?\d+)\]")
 _TRUNCATION_MARK = re.compile(r"…\[truncated[^\]]{0,60}\]\s*\Z")
 _TRUNCATION_TAIL: Final = 80
@@ -61,16 +81,46 @@ def is_truncated(body: str | None) -> bool:
 
 
 def contains(haystack: str | None, needle: str) -> bool:
-    """Whether `needle` occurs in `haystack` once both are normalised (textnorm.find_phrase)."""
+    """Whether `needle` occurs in `haystack` once both are normalised (`find_text`)."""
     if haystack is None:
         return False
-    return find_phrase(normalize(haystack), normalize(needle)) >= 0
+    return find_text(normalize(haystack), normalize(needle)) >= 0
+
+
+def find_text(text: str, phrase: str) -> int:
+    """Where normalised `phrase` first occurs in normalised `text`, or -1.
+
+    A phrase that is an amount of money ('$24', 'EUR 1.249,50', '24 usd') occurs wherever the
+    text states the same amount in the same currency, however it writes it: '$24' is in
+    'USD 24.00', '$ 24', 'us$24' and '24 $', and 'EUR 1.249,50' in '€1,249.50'. The currency
+    must match ('$24' is not in '€24'), and an amount parse_number cannot read unambiguously
+    ('$1.500') is matched as text. Any other phrase is matched by textnorm.find_phrase.
+    """
+    wanted = _money(phrase)
+    if wanted is None:
+        return find_phrase(text, phrase)
+    for found in MONEY.finditer(text):
+        if _money(found.group()) == wanted:
+            return found.start()
+    return -1
+
+
+def _money(text: str) -> tuple[str, float] | None:
+    """The currency and amount `text`, all of it, states, or None."""
+    match = MONEY.fullmatch(text)
+    if match is None:
+        return None
+    symbol = match["pre"] or match["post"] or ""
+    amount = parse_number(match["pre_amount"] or match["post_amount"] or "")
+    if amount is None:
+        return None
+    return _CURRENCIES[symbol.rstrip(". ")], round(amount, 2)
 
 
 def excerpt(text: str, needle: str, width: int = 80) -> str:
     """A short window of normalised `text` around the first occurrence of `needle`."""
     norm, want = normalize(text), normalize(needle)
-    at = find_phrase(norm, want)
+    at = find_text(norm, want)
     if at < 0:
         return norm[:width]
     pad = max(0, (width - len(want)) // 2)

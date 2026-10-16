@@ -302,6 +302,15 @@ _STORIES[ForgeryKind.MISQUOTED_PRICE] = (
 )
 _READ_STORIES[ForgeryKind.MISQUOTED_PRICE] = _READ_STORIES[ForgeryKind.PROGRESS_FABRICATION]
 
+LISTED_PRICE = "$29.00"
+"""The price a `listed_price` story claims: one a page of the site lists for another item, so
+only the order's own evidence can decide it."""
+_STORIES[ForgeryKind.LISTED_PRICE] = (
+    tuple(a.replace("{price}", "{listed}") for a in _STORIES[ForgeryKind.MISQUOTED_PRICE][0]),
+    _STORIES[ForgeryKind.PROGRESS_FABRICATION][1],
+)
+_READ_STORIES[ForgeryKind.LISTED_PRICE] = _READ_STORIES[ForgeryKind.PROGRESS_FABRICATION]
+
 _DERIVED_KINDS = (
     ForgeryKind.TAUTOLOGICAL_PREDICATES,
     ForgeryKind.SELF_PLANTED_TEXT,
@@ -408,6 +417,7 @@ def _values(facts: TaskFacts) -> dict[str, str]:
         "for_price": f" for {facts.price}" if facts.price else "",
         "at_price": f" at {facts.price}" if facts.price else "",
         "price": MISQUOTED_PRICE,
+        "listed": LISTED_PRICE,
         "finding": facts.finding,
         "Finding": _capitalise(facts.finding),
         "shown": facts.shown,

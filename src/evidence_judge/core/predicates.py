@@ -189,6 +189,13 @@ class RequestPredicate(_Pred):
         description="All substrings must appear in the request body (case-insensitive)",
     )
     response_contains: list[Substring] = Field(default_factory=list[Substring])
+    result_contains: list[Substring] = Field(
+        default_factory=list[Substring],
+        description=(
+            "All substrings must appear in what the site answered: the response body or the "
+            "page the request led to, loaded before the agent acted again"
+        ),
+    )
 
     @property
     def locates(self) -> bool:
@@ -200,6 +207,7 @@ class RequestPredicate(_Pred):
             or self.url_regex
             or self.body_contains
             or self.response_contains
+            or self.result_contains
         )
 
     @model_validator(mode="after")

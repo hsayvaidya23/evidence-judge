@@ -16,13 +16,13 @@ JSON, and `--html` writes a self-contained HTML report.
 ## The headline
 
 ```text
- FAIL   score 45/100  trace
+ FAIL   score 35/100  trace
 task Buy a red kettle under $30
 FAIL: the agent claimed "The agent placed an order", but no POST request whose URL
 contains 'order' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest
 was POST /api/cart → 200 (URL lacks 'order'); no POST request whose URL contains
 'checkout' with a 2xx or 3xx status among 5 captured requests (1 mutation); closest was
-GET /checkout → 200 (method GET, expected POST). 1 other key claim also failed.
+GET /checkout → 200 (method GET, expected POST). 2 other key claims also failed.
 ```
 
 Outcome

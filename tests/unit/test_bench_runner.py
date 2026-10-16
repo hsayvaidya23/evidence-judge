@@ -41,7 +41,7 @@ WRITE_BASES, READ_BASES = 8, 3
 FORGED_PER_SEED = WRITE_BASES * len(ForgeryKind) + READ_BASES * (
     len(ForgeryKind) - len(WRITE_ONLY_KINDS)
 )
-CONTROLS = 21
+CONTROLS = 24
 """Four controls on each of honest_success, loop and clinic_booked; three on read_stock,
 ledger_balance_read and admin_user_disabled (whose disable request loads no page after it),
 which have no request to redirect."""
@@ -151,8 +151,8 @@ def test_results_round_trip_and_render(offline_result: BenchResult) -> None:
     assert BenchResult.model_validate_json(to_json(offline_result)) == offline_result
     report = to_markdown(offline_result)
     assert "## False PASS on forged runs" in report
-    assert "- Scenarios: 17 scenarios (from 15 recordings) and 21 honest edits" in report
-    assert "| `evidence-judge+spec` | **all manipulations** | 1374 | 0 | 0% |" in report
+    assert "- Scenarios: 17 scenarios (from 15 recordings) and 24 honest edits" in report
+    assert "| `evidence-judge+spec` | **all manipulations** | 1398 | 0 | 0% |" in report
     assert "`evidence-judge+generic-spec` grades with `spec.generic.yaml`" in report
     assert "## Accuracy on honest controls" in report
     assert "| honest_success | PASS | PASS |" in report
