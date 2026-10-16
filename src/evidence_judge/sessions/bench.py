@@ -1056,6 +1056,11 @@ async def run_benchmark(root: Path) -> BenchResult:
     return result
 
 
+def _cell(text: str) -> str:
+    """`text` as one Markdown table cell: a pipe would end the cell and a newline the row."""
+    return text.replace("|", "\\|").replace("\r\n", "\n").replace("\n", "<br>")
+
+
 def to_markdown(result: BenchResult) -> str:
     lines = [
         "| Forgery | n | false PASS | fail | needs review |",
@@ -1072,7 +1077,7 @@ def to_markdown(result: BenchResult) -> str:
         f"{sum(k.outcomes['needs_review'] for k in result.forgeries.values())} |"
     )
     lines += ["", "| Honest session | expected | outcome |", "| --- | --- | --- |"]
-    lines += [f"| {name} | {expected} | {got} |" for name, expected, got in result.controls]
+    lines += [f"| {_cell(name)} | {expected} | {got} |" for name, expected, got in result.controls]
     return "\n".join(lines) + "\n"
 
 

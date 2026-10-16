@@ -154,6 +154,8 @@ The first release.
   tests fail must count or name them, or the tests failing at the end must be a strict subset
   of those failing before the first change, and a runner it names must be the one that failed.
   Anything else needs review.
+- The session benchmark's Markdown report keeps an honest control whose answer holds a newline
+  or a pipe on one table row: both are escaped in the cell.
 
 ### Security
 

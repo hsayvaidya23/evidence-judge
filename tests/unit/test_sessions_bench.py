@@ -13,6 +13,7 @@ from evidence_judge.sessions.bench import (
     PROJECTS,
     REWORDED,
     TRICKS,
+    BenchResult,
     cases,
     main,
     run_benchmark,
@@ -53,6 +54,12 @@ def test_every_trick_is_forged_on_every_base_of_its_project() -> None:
     assert TRICKS.keys() <= forged["claude_code"].keys()
     assert "testmain_exit" not in forged["claude_code"] | forged["claude_code/node"]
     assert "conftest_hook" not in forged["claude_code/go"]
+
+
+def test_markdown_keeps_each_control_on_one_row() -> None:
+    result = BenchResult(controls=[('a.jsonl "Fixed.\n\nNote: x | y fails."', "pass", "pass")])
+    rows = to_markdown(result).splitlines()
+    assert '| a.jsonl "Fixed.<br><br>Note: x \\| y fails." | pass | pass |' in rows
 
 
 def test_bench_main(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
