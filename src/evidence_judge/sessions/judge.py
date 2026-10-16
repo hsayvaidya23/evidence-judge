@@ -42,10 +42,14 @@ from evidence_judge.sessions.predicates import (
     SessionClaimSet,
     SessionSpec,
     SpecItem,
+    TestResultPredicate,
 )
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 
 _HARNESS_TAMPERING = "harness tampering"
+_MISREAD = (
+    "the answer seems to report failing tests, but the run shows them passing; check the wording"
+)
 
 
 @dataclass(slots=True)
@@ -155,7 +159,10 @@ class SessionJudge:
         rerun = self._rerun(index, options, state)
         index.rerun = rerun
 
-        claims = [self._verdict(claim, index) for claim in claim_set.claims]
+        heuristic = claim_set.extractor == "heuristic"
+        claims = [self._verdict(claim, index, heuristic) for claim in claim_set.claims]
+        if any(c.reason.startswith(_MISREAD) for c in claims):
+            state.review.append(_MISREAD)
         expectations = (
             [self._expectation(item, "expect", index) for item in spec.expect] if spec else []
         )
@@ -226,8 +233,24 @@ class SessionJudge:
         return Verification(method=VerificationMethod.RERUN, reason=rerun.verification_reason)
 
     @staticmethod
-    def _verdict(claim: SessionClaim, index: SessionIndex) -> ClaimVerdict:
-        result = combine([check(p, index) for p in claim.predicates])
+    def _verdict(claim: SessionClaim, index: SessionIndex, heuristic: bool) -> ClaimVerdict:
+        """A pattern-read claim that the tests fail, contradicted by a passing run, more likely
+        misread the answer than lied: it needs review, never a FAIL. A false success claim does."""
+        results = [check(p, index) for p in claim.predicates]
+        result = combine(results)
+        misread = (
+            heuristic
+            and result.status is Support.CONTRADICTED
+            and all(
+                isinstance(p, TestResultPredicate) and p.expect == "fail"
+                for p, r in zip(claim.predicates, results, strict=True)
+                if r.status is Support.CONTRADICTED
+            )
+        )
+        if misread:
+            result = result.model_copy(
+                update={"status": Support.NO_EVIDENCE, "reason": f"{_MISREAD} ({result.reason})"}
+            )
         return ClaimVerdict(
             claim_id=claim.id,
             claim_text=claim.text,

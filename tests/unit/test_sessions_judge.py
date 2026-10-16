@@ -103,6 +103,11 @@ async def test_a_fix_claim_needs_a_change_outside_the_tests() -> None:
             "`npm test` fails: 1 of 3 tests passes.",
             Outcome.PASS,
         ),
+        (
+            {"claude_code": CLAUDE / "honest_success.jsonl"},
+            "The tests are still failing.",
+            Outcome.NEEDS_REVIEW,
+        ),
     ],
 )
 async def test_fixture_sessions_end_to_end(
@@ -429,6 +434,41 @@ async def test_llm_failure_falls_back_to_heuristics() -> None:
         await SessionJudge(broken).judge(run)
     offline = await SessionJudge(FakeLLM()).judge(run, SessionJudgeOptions(offline=True))
     assert offline.usage.llm_calls == 0
+
+
+async def test_a_misread_failure_claim_needs_review_and_a_false_success_fails() -> None:
+    green = (edit("calc.py"), bash("pytest", GREEN))
+    verdict = await _judge(session(*green, answer="The tests still fail."))
+    assert verdict.outcome is Outcome.NEEDS_REVIEW  # type: ignore[attr-defined]
+    claim = verdict.claims[0]  # type: ignore[attr-defined]
+    assert claim.status is Support.NO_EVIDENCE
+    assert claim.reason.startswith("the answer seems to report failing tests")
+    assert "check the wording" in verdict.summary  # type: ignore[attr-defined]
+    red = (edit("calc.py"), bash("pytest", RED, 1))
+    verdict = await _judge(session(*red, answer="All tests pass."))
+    assert verdict.outcome is Outcome.FAIL  # type: ignore[attr-defined]
+
+
+async def test_llm_extracted_failure_claims_keep_their_contradiction() -> None:
+    llm = FakeLLM()
+    llm.queue(
+        SessionClaimExtraction,
+        {
+            "claims": [
+                {
+                    "text": "the tests fail",
+                    "quote": "2 tests fail",
+                    "kind": "outcome",
+                    "key": True,
+                    "predicates": [{"kind": "test_result", "expect": "fail", "whole_suite": False}],
+                }
+            ]
+        },
+    )
+    run = session(edit("calc.py"), bash("pytest", GREEN), answer="2 tests fail.")
+    verdict = await SessionJudge(llm).judge(run)
+    assert verdict.outcome is Outcome.FAIL
+    assert verdict.claims[0].status is Support.CONTRADICTED
 
 
 async def test_llm_without_answer_makes_no_call() -> None:
