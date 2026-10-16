@@ -111,6 +111,10 @@ The first release.
   Code, Codex CLI and Gemini CLI guides' descriptions, the README, the docs home page and the
   site description mention coding-agent sessions and the independent test re-run, not only
   browser traces.
+- **Breaking:** no `.env` file is read implicitly any more. Name a dotenv file with the global
+  `--env-file PATH` option or `EVJ_ENV_FILE=PATH`; real environment variables still win over
+  it. Anyone who kept settings in a `.env` next to where they run the CLI must pass it
+  explicitly.
 - Every install command in the docs (the MCP client snippets for Claude Code, Codex CLI and
   Gemini CLI, and the `pip install` lines in the CLI and integrations pages) installs from the
   GitHub repository until v0.1.0 is on PyPI, so none of them runs whatever is published under
@@ -127,6 +131,9 @@ The first release.
 
 ### Fixed
 
+- `judge --llm anthropic` without `ANTHROPIC_API_KEY` now exits `4` and names the missing key,
+  like the CLI backends do when their CLI is missing, instead of judging offline and exiting
+  `0`. Without `--llm`, a missing key still judges offline.
 - An evidence log with no valid record now says "no valid evidence-log records were found"
   (with the first line's problem, such as "no version field") instead of "unsupported version
   None"; it is still bad input (exit 3).
@@ -490,5 +497,14 @@ The first release.
   recorded fixtures and benchmark forgery kinds, and the judge was changed until none of them
   passed. [docs/security-history.md](docs/security-history.md) has the full record, and
   [SECURITY.md](SECURITY.md) the threat model and its limits.
+- A `.env` in the working directory can no longer change settings. The GitHub Action runs in
+  `$GITHUB_WORKSPACE`, so a pull request's `.env` could set `EVJ_REDACT=false` (an unredacted
+  report uploaded as an artifact) or `EVJ_REVIEW_COVERAGE_THRESHOLD=0` (a needs-review run
+  passing); the CLI and MCP server read it the same way. The Action also warns when its
+  workflow sets `EVJ_REDACT=false`.
+- The Python API now redacts: `Judge.judge` redacts the run, spec and claims before claim
+  extraction and any LLM call when `EVJ_REDACT` is on, as SECURITY.md says. The CLI, MCP server
+  and Inspect scorer go through the same `Judge.redact`, so redaction happens once and the same
+  way everywhere; `JudgeOptions(redact=False)` marks inputs that are already redacted.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main

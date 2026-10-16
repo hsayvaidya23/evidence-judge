@@ -76,8 +76,11 @@ heuristic claim extraction and deterministic checks only. See
 ## Optional: an API key
 
 ```bash
-export ANTHROPIC_API_KEY=...   # or put it in a .env file next to where you run the CLI
+export ANTHROPIC_API_KEY=...
 ```
+
+Or keep it in a dotenv file and name that file with `evidence-judge --env-file PATH ...` (or
+`EVJ_ENV_FILE=PATH`). A `.env` in the working directory is not read on its own.
 
 That is the only credential the judge itself reads. The OpenTelemetry, Langfuse and Phoenix
 integrations read their own (`OTEL_*`, `LANGFUSE_*`, `PHOENIX_*`; see

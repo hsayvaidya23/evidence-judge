@@ -75,6 +75,9 @@ class _FakeJudge:
     def __init__(self, settings: Settings, llm: object) -> None:
         self.llm = llm
 
+    def redact(self, run: Run, options: Any) -> tuple[Run, Any, None]:
+        return run, options, None
+
     async def judge(self, run: Run, options: Any) -> Any:
         assert self.error is not None
         raise self.error

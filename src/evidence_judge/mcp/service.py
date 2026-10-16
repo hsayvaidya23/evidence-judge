@@ -15,7 +15,7 @@ from typing import Any, Final, Literal, cast
 from pydantic import ValidationError
 
 from evidence_judge import engine, ingest
-from evidence_judge.config import Settings, describe_settings_error
+from evidence_judge.config import EnvFileError, Settings, describe_settings_error, read_settings
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
 from evidence_judge.core.taskspec import TaskSpec
@@ -37,7 +37,7 @@ from evidence_judge.mcp.models import (
 from evidence_judge.mcp.models import Injection as InjectionOut
 from evidence_judge.mcp.paths import PathNotAllowedError, Roots, walk
 from evidence_judge.mcp.specs import SpecCheck, describe, parse_spec
-from evidence_judge.redact import RedactionReport, Redactor, redactor_for
+from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import summarize_evidence
 from evidence_judge.report.html_report import write_html
 from evidence_judge.report.json_report import write_json
@@ -58,7 +58,7 @@ class ServerConfig:
     """What every tool call shares: the allowed roots and how settings are read."""
 
     roots: Roots
-    settings: Callable[[], Settings] = Settings
+    settings: Callable[[], Settings] = read_settings
     allow_llm: bool = True
     """False makes every judge_run offline whatever the client asks."""
 
@@ -102,6 +102,8 @@ def settings_of(config: ServerConfig) -> Settings:
         raise ToolInputError(
             f"invalid evidence-judge settings: {describe_settings_error(e)}"
         ) from e
+    except EnvFileError as e:
+        raise ToolInputError(f"invalid evidence-judge settings: {e}") from e
 
 
 def _opt(roots: Roots, value: str | None, what: str, *, directory_ok: bool = False) -> Path | None:
@@ -277,15 +279,7 @@ async def judge(config: ServerConfig, req: JudgeRequest, prepared: PreparedJudge
     run, spec, settings = prepared.run, prepared.spec, prepared.settings
     site = _site(req.site)
     llm = _llm(config, settings, req.offline)
-    report: RedactionReport | None = None
-    if settings.redact:
-        try:
-            redactor = redactor_for(settings, persistent=llm is not None)
-        except ValueError as e:
-            raise ToolInputError(f"redaction key: {e}") from e
-        run, report = redactor.redact_run(run)
-        if spec is not None:
-            spec, _ = redactor.redact_model(spec)
+    evidence_judge = engine.Judge(settings, llm)
     options = engine.JudgeOptions(
         offline=llm is None,
         spec=spec,
@@ -293,7 +287,11 @@ async def judge(config: ServerConfig, req: JudgeRequest, prepared: PreparedJudge
         require_tamper_evidence=req.require_tamper_evidence,
     )
     try:
-        verdict = await engine.Judge(settings, llm).judge(run, options)
+        run, options, report = evidence_judge.redact(run, options)
+    except ValueError as e:
+        raise ToolInputError(f"redaction key: {e}") from e
+    try:
+        verdict = await evidence_judge.judge(run, options)
     except LLMConfigError as e:
         raise ToolInputError(f"{e} (judge with offline=true to skip the model)") from e
     except LLMError as e:

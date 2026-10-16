@@ -13,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 from rich.console import Console
 from rich.text import Text
 
-from evidence_judge.config import Settings, describe_settings_error
+from evidence_judge.config import EnvFileError, Settings, describe_settings_error, read_settings
 from evidence_judge.core.spec_errors import json_syntax_problem
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.llm import factory
@@ -79,11 +79,27 @@ def internal(e: Exception) -> typer.Exit:
     return typer.Exit(int(ExitCode.INTERNAL))
 
 
+class _EnvFile:
+    """The global ``--env-file`` option, set once per invocation by the app callback."""
+
+    path: Path | None = None
+
+
+def use_env_file(path: Path | None) -> None:
+    _EnvFile.path = path
+
+
+def chosen_env_file() -> Path | None:
+    return _EnvFile.path
+
+
 def load_settings(llm: LLMChoice | None = None) -> Settings:
     try:
-        loaded = Settings()
+        loaded = read_settings(_EnvFile.path)
     except ValidationError as e:
         raise CliError(f"invalid settings: {describe_settings_error(e)}", ExitCode.USAGE) from e
+    except EnvFileError as e:
+        raise CliError(str(e), ExitCode.USAGE) from e
     if llm is None:
         return loaded
     return loaded.model_copy(update={"llm_backend": llm.value})

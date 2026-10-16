@@ -19,8 +19,10 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 
 v0.1.0 is not released yet, so install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. Add `@<sha>` to the URL to pin a commit.
 
-Settings (models, budget, redaction, cache) come from environment variables or a `.env` file;
-see the [configuration reference](reference/configuration.md).
+Settings (models, budget, redaction, cache) come from environment variables, plus a dotenv file
+only when you name one with the global `--env-file PATH` option (before the command) or
+`EVJ_ENV_FILE`; a `.env` in the working directory is never read on its own. See the
+[configuration reference](reference/configuration.md).
 
 Exit codes are the same for every command: `0` pass, `1` fail, `2` needs review, `3` bad input
 (missing or unreadable evidence, an invalid spec, claims file or setting, a corrupt redaction key
@@ -70,7 +72,7 @@ At least one of `--trace`, `--har` or `--browser-use` is required.
 | `--out FILE` | Write the verdict JSON here (schema: `evidence-judge schema`) |
 | `--html FILE` | Write the self-contained HTML report here. Screenshots are embedded unredacted |
 | `--offline` | No LLM calls; heuristic claim extraction and no screenshot checks. Also never reads or creates the redaction key file. Default: off, but runs offline anyway on the `anthropic` backend when no `ANTHROPIC_API_KEY` is set |
-| `--llm BACKEND` | Where LLM calls go for this run: `anthropic` (the API, with `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to run that CLI headless on your existing login, with its tools off. Default: `EVJ_LLM_BACKEND`. A CLI that is missing or not logged in exits `4`. `--offline` wins over it |
+| `--llm BACKEND` | Where LLM calls go for this run: `anthropic` (the API, with `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to run that CLI headless on your existing login, with its tools off. Default: `EVJ_LLM_BACKEND`. A CLI that is missing or not logged in, or `anthropic` without `ANTHROPIC_API_KEY`, exits `4`; without `--llm`, a missing key judges offline. `--offline` wins over it |
 | `--no-redact` | Keep secrets and PII in evidence, prompts and reports. Use only on synthetic data |
 | `--quiet`, `-q` | Print nothing; only set the exit code |
 | `--debug` | Re-raise internal errors with a traceback instead of exiting `4` |

@@ -481,3 +481,57 @@ async def test_transient_llm_errors_still_fall_back(settings: Settings) -> None:
     verdict = await Judge(settings, llm).judge(_with_answer(honest_run(), HONEST_ANSWER))
 
     assert any("used heuristic extraction" in w for w in verdict.warnings)
+
+
+_COOKIE = "sid=c00k1e5ecretvalue42"
+_BEARER = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSJ9.s1gnatureValue123"
+_PASSWORD = "hunter2-Correct-Horse"
+
+
+def _secret_run() -> Run:
+    run = honest_run()
+    login = act(90, "fill", "#password", value=_PASSWORD)
+    request = net(91, "GET", "/api/me").model_copy(
+        update={"request_headers": {"Cookie": _COOKIE, "Authorization": f"Bearer {_BEARER}"}}
+    )
+    return run.model_copy(
+        update={
+            "task": f"Log in with password={_PASSWORD} and buy a red kettle",
+            "actions": [login, *run.actions],
+            "network": [request, *run.network],
+            "agent_answer": (
+                f"I sent Authorization: Bearer {_BEARER}, logged in with password={_PASSWORD} "
+                "and placed the order."
+            ),
+            "agent_reasoning": [f"use password: {_PASSWORD}", f"Authorization: Bearer {_BEARER}"],
+        }
+    )
+
+
+async def test_the_api_path_redacts_before_any_llm_call(settings: Settings) -> None:
+    llm = FakeLLM(handler=lambda _req, _schema: ClaimExtraction())
+    judge = Judge(settings, llm)
+    verdict = await judge.judge(_secret_run(), JudgeOptions(spec=shop_spec()))
+    assert llm.calls
+    sent = " ".join(c.request.system + c.request.prompt for c in llm.calls)
+    for secret in (_BEARER, _PASSWORD):
+        assert secret not in sent
+        assert secret not in verdict.model_dump_json()
+
+
+async def test_redact_is_applied_once_and_reported(settings: Settings) -> None:
+    judge = Judge(settings)
+    run, options, report = judge.redact(_secret_run(), JudgeOptions(spec=shop_spec()))
+    assert report is not None and report.total > 0
+    assert options.redact is False
+    for secret in ("c00k1e5ecretvalue42", _BEARER, _PASSWORD):
+        assert secret not in run.model_dump_json()
+    again, same, nothing = judge.redact(run, options)
+    assert (again, same, nothing) == (run, options, None)
+
+
+async def test_redaction_follows_settings(settings: Settings) -> None:
+    llm = FakeLLM(handler=lambda _req, _schema: ClaimExtraction())
+    off = settings.model_copy(update={"redact": False})
+    await Judge(off, llm).judge(_secret_run())
+    assert any(_PASSWORD in c.request.prompt for c in llm.calls)

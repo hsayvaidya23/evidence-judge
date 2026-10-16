@@ -4,15 +4,19 @@ description: Every Evidence Judge setting - EVJ_* environment variables and ANTH
 
 # Configuration
 
-Settings come from environment variables or a `.env` file in the working directory (see
-`.env.example` in the repository), never from code. The one command-line override is `--llm`
-on `judge` and `bench`, which picks `EVJ_LLM_BACKEND` for that run. Every variable except
+Settings come from environment variables, never from code. A dotenv file is read only when you
+name it: the global `--env-file PATH` option (`evidence-judge --env-file ci.env judge ...`) or
+`EVJ_ENV_FILE=PATH`. Real environment variables win over the file. A `.env` in the working
+directory is never read on its own, so a checked-out repository (say, a pull request in the
+GitHub Action) cannot turn off redaction or lower the review threshold; `.env.example` in the
+repository lists every variable. The one other command-line override is `--llm` on `judge` and
+`bench`, which picks `EVJ_LLM_BACKEND` for that run. Every variable except
 `ANTHROPIC_API_KEY` has the `EVJ_` prefix. An invalid value exits with code `3`.
 
 | Variable | Type | Default | Purpose |
 | --- | --- | --- | --- |
 | `EVJ_LLM_BACKEND` | `anthropic`, `claude-code`, `codex`, `gemini` | `anthropic` | Where LLM calls go. `anthropic` calls the API with `ANTHROPIC_API_KEY`; the others run that CLI headless on your existing login, with its tools off. See [LLM backends](../guides/llm-backends.md). The `--llm` option of `judge` and `bench` overrides it |
-| `ANTHROPIC_API_KEY` | secret | – | Enables LLM claim extraction (and screenshot checks, if allowed) on the `anthropic` backend. Without it, that backend judges offline |
+| `ANTHROPIC_API_KEY` | secret | – | Enables LLM claim extraction (and screenshot checks, if allowed) on the `anthropic` backend. Without it, that backend judges offline, unless `--llm anthropic` asked for it, which exits `4` |
 | `EVJ_MODEL_FAST` | string | `claude-haiku-5-5` | Model for claim extraction |
 | `EVJ_MODEL_STRONG` | string | `claude-sonnet-5-5` | Model for screenshot checks and the benchmark's transcript baseline |
 | `EVJ_CLI_MODEL_FAST` | string | – | Model for claim extraction on a CLI backend. Unset: `claude-code` uses `EVJ_MODEL_FAST`; `codex` and `gemini` use the CLI's default |

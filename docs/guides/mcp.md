@@ -171,7 +171,9 @@ pass `site` so a run can pass; see [Task specs](../task-specs.md).
   environment). `--offline-only` refuses such calls outright.
 - **Redaction** follows `EVJ_REDACT` (on by default): evidence, answers and specs are redacted
   before judging, so the verdict a client sees holds HMAC fingerprints, not secrets. A tool
-  argument cannot turn it off. The HTML report embeds screenshots unredacted, as in the CLI.
+  argument cannot turn it off, and neither can a `.env` in the project: the server reads its
+  environment and the file given with `evidence-judge --env-file PATH mcp` (or `EVJ_ENV_FILE`)
+  only. The HTML report embeds screenshots unredacted, as in the CLI.
 - **HTTP** binds to `127.0.0.1` only and has no authentication; any local process can call it.
   Prefer stdio, which only the launching client can reach.
 
