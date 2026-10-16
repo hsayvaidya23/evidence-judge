@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from typing import Final
 
 from evidence_judge.ingest.css.backgrounds import (
+    MAX_BACKDROP,
     Backdrop,
     UnreadableError,
     background_colour,
@@ -26,11 +27,13 @@ from evidence_judge.ingest.css.model import (
     SHOWN,
     UNSET,
     UNSURE,
+    WHITE,
     YES,
     Computed,
     Rgba,
     Rule,
     Viewport,
+    faint,
     words,
 )
 from evidence_judge.ingest.css.syntax import TRACKED
@@ -138,7 +141,12 @@ _BOX: Final = (
 )
 
 
-_TEXT: Final = TRACKED - _REMOVERS - _BOX - {"visibility"}
+_DEPTH: Final = words("transform rotate scale backface-visibility perspective")
+
+
+_TEXT: Final = (
+    TRACKED - _REMOVERS - _BOX - _DEPTH - words("visibility z-index animation animation-name")
+)
 
 
 def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Computed:
@@ -159,25 +167,51 @@ def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Co
     alpha = parent.alpha
     if cascade.sets("opacity", "filter"):
         alpha = alpha * _opacity(cascade)
+    flipped, deep = parent.flipped, parent.deep
+    if not present.isdisjoint(_DEPTH):
+        flips, lifted = _depth(cascade) if cascade.sets(*_TRANSFORMS) else (False, False)
+        flipped = flipped or flips
+        backface = any(v is None or v == "hidden" for v in cascade.values("backface-visibility"))
+        unsure = unsure or (backface and flipped) or (deep and lifted)
+        deep = deep or any(
+            v is None or (v not in _WIDE and v != "none") for v in cascade.values("perspective")
+        )
     if present.isdisjoint(_TEXT):
-        if unsure == parent.unsure and visibility == parent.visibility and alpha == parent.alpha:
+        if (unsure, visibility, alpha, flipped, deep) == (
+            parent.unsure,
+            parent.visibility,
+            parent.alpha,
+            parent.flipped,
+            parent.deep,
+        ):
             return parent
-        return replace(parent, removed=False, unsure=unsure, visibility=visibility, alpha=alpha)
+        return replace(
+            parent,
+            removed=False,
+            unsure=unsure,
+            visibility=visibility,
+            alpha=alpha,
+            flipped=flipped,
+            deep=deep,
+        )
     font_px, font_tiny = parent.font_px, parent.font_tiny
     if cascade.sets("font-size"):
         font_px, font_tiny = _font(cascade.values("font-size"), parent, viewport)
+    rest, states = _states(cascade) if cascade.maybe and cascade.sets(*_GROUNDS) else (cascade, [])
     colors, clear, paints = parent.colors, parent.clear, parent.paints
-    if cascade.sets("color", "-webkit-text-fill-color"):
-        colors, clear, paints = _paint(cascade, parent)
+    if cascade.sets(*_INKS):
+        colors, clear, paints = _paint(rest, parent)
     background = parent.background
-    if cascade.sets("background-color", "background-image", "background-size"):
-        background, unreadable = _backdrop(cascade, parent.background, colors)
+    if cascade.sets(*_GROUNDS):
+        background, unreadable = _backdrop(rest, parent.background, colors)
         unsure = unsure or unreadable
     clip_text = parent.clip_text or any(
         v is not None and "text" in v.split()
         for p in ("background-clip", "-webkit-background-clip")
         for v in cascade.values(p)
     )
+    if not clip_text and not unsure:
+        unsure = any(_state_faint(state, parent, alpha) for state in states)
     indent_far = parent.indent_far
     if cascade.sets("text-indent"):
         indent_far = any(
@@ -203,10 +237,67 @@ def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Co
         fill_faint=_inherits(cascade, "fill-opacity", parent.fill_faint, _faint),
         fills=fills,
         alpha=alpha,
+        flipped=flipped,
+        deep=deep,
+        boxes=parent.boxes,
         svg=parent.svg,
         custom=parent.custom,
         registered=parent.registered,
     )
+
+
+_INKS: Final = ("color", "-webkit-text-fill-color")
+
+
+_GROUNDS: Final = ("background-color", "background-image", "background-size")
+
+
+def _states(cascade: Cascade) -> tuple[Cascade, list[Cascade]]:
+    """`cascade` split by the states in which rules that may apply set both the text colour and
+    the background (``:hover`` rules that swap them): the cascade without those rules, and the
+    cascade in each such state. Rules make one state when the same selector state decides them:
+    the same selector but for the classes, id and tag of the element itself."""
+    groups: dict[tuple[object, ...], dict[str, list[Rule]]] = {}
+    for prop in (*_INKS, *_GROUNDS):
+        for rule in cascade.maybe.get(prop, ()):
+            if rule.maybe or rule.selector.maybe:
+                continue
+            *before, last = rule.selector.parts
+            key = (*before, rule.selector.combinators, last.pseudos, last.host, last.host_args)
+            groups.setdefault(key, {}).setdefault(prop, []).append(rule)
+    paired = [
+        group
+        for group in groups.values()
+        if not group.keys().isdisjoint(_INKS) and not group.keys().isdisjoint(_GROUNDS)
+    ]
+    if not paired:
+        return cascade, []
+    taken = {id(rule) for group in paired for rules in group.values() for rule in rules}
+    rest = Cascade(
+        cascade.best,
+        {prop: [r for r in rules if id(r) not in taken] for prop, rules in cascade.maybe.items()},
+        cascade.present,
+    )
+    states: list[Cascade] = []
+    for group in paired:
+        best = dict(cascade.best)
+        for prop, rules in group.items():
+            top = max(rules, key=lambda rule: rule.rank)
+            winner = best.get(prop)
+            if winner is None or top.rank >= winner.rank:
+                best[prop] = top
+        states.append(Cascade(best, rest.maybe, cascade.present))
+    return rest, states
+
+
+def _state_faint(state: Cascade, parent: Computed, alpha: float) -> bool:
+    """Whether text may be unreadable in `state`: a colour the reader cannot read, or one that
+    barely stands out from the background the state paints."""
+    colors, clear, paints = _paint(state, parent)
+    background, unreadable = _backdrop(state, parent.background, colors)
+    if clear or unreadable:
+        return True
+    return background is not None and faint(paints or colors, alpha, background)
 
 
 def _inherits(cascade: Cascade, prop: str, inherited: bool, test: Callable[[str], bool]) -> bool:
@@ -494,6 +585,54 @@ def _transformed_away(cascade: Cascade) -> bool:
                     return True
                 if _degenerate(matrix):
                     return True
+    return False
+
+
+def _depth(cascade: Cascade) -> tuple[bool, bool]:
+    """Whether ``rotate``, ``scale`` and ``transform`` together may turn the box to show its
+    back, and whether they may move it out of the page's plane (which an ancestor's
+    ``perspective`` turns into a change of size and place the reader does not measure); both
+    when it cannot read them."""
+    candidates = [
+        [v for v in cascade.values(p) if v is not None and v not in _WIDE and v != "none"] or [""]
+        for p in _TRANSFORMS
+    ]
+    flips = lifted = False
+    for transform in candidates[0][:_MAX_COMBINATIONS]:
+        for rotate in candidates[1][:_MAX_COMBINATIONS]:
+            for scale in candidates[2][:_MAX_COMBINATIONS]:
+                try:
+                    matrix = _multiply(
+                        _rotate_property(rotate),
+                        _multiply(_scale_property(scale), _transform_matrix(transform, None)),
+                    )
+                    moved = _moved_in_depth(transform)
+                except _UnreadableError:
+                    return True, True
+                flips = flips or matrix[2][2] < 0
+                lifted = lifted or moved or not _planar(matrix)
+    return flips, lifted
+
+
+def _planar(matrix: Matrix) -> bool:
+    """Whether a linear map keeps the box in the plane of the page."""
+    return all(abs(c) <= 1e-9 for c in (matrix[0][2], matrix[1][2], matrix[2][0], matrix[2][1]))
+
+
+def _moved_in_depth(value: str) -> bool:
+    """Whether a ``transform`` translates the box in depth."""
+    for name, args in functions(value) or []:
+        values = split_args(args)
+        if name in ("translatez", "translate3d"):
+            depth = length_px(values[-1], None)
+        elif name == "matrix3d" and len(values) == 16:
+            depth = parse_amount(values[14])
+        else:
+            continue
+        if depth is None:
+            raise _UnreadableError
+        if depth != 0:
+            return True
     return False
 
 
@@ -818,17 +957,32 @@ def _fills(
 def _backdrop(
     cascade: Cascade, behind: Backdrop | None, colors: tuple[Rgba, ...]
 ) -> tuple[Backdrop | None, bool]:
-    """The colours an element's background paints behind its text, and whether it paints a
-    gradient the reader cannot read."""
-    found = {background_colour(v, behind) for v in cascade.values("background-color")}
-    base = found.pop() if len(found) == 1 else None
-    images = set(cascade.values("background-image"))
-    if len(images) != 1:
-        unknown = any(v not in _WIDE and v != "none" for v in images)
-        return (None if unknown else base), False
+    """The colours an element's background may paint behind its text (those of every
+    background a rule that may apply sets), and whether it paints a gradient the reader cannot
+    read."""
+    colours = cascade.values("background-color")
+    base = _either(background_colour(v, behind) for v in colours)
+    solid = all((c := parse_color(v or "")) is not None and c[3] >= 1 for v in colours)
+    pictures = base if solid and base is not None else (WHITE, BLACK)
     current = colors[0] if len(colors) == 1 else None
+    sizes = cascade.values("background-size")
     try:
-        painted = background_images(images.pop(), cascade.values("background-size"), base, current)
+        painted = _either(
+            background_images(image, sizes, base, current, pictures)
+            for image in dict.fromkeys(cascade.values("background-image"))
+        )
     except UnreadableError:
         return None, True
+    if painted is not None and len(painted) > MAX_BACKDROP:
+        return None, True
     return painted, False
+
+
+def _either(backdrops: Iterable[Backdrop | None]) -> Backdrop | None:
+    """The colours any of `backdrops` paints, None when one of them is not known."""
+    found: dict[Rgba, None] = {}
+    for backdrop in backdrops:
+        if backdrop is None:
+            return None
+        found.update(dict.fromkeys(backdrop))
+    return tuple(found)

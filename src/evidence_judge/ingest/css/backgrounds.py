@@ -1,5 +1,5 @@
 """What an element's background paints behind its text: its colour over what is behind it, and
-the colours of the gradients its ``background-image`` layers paint over that."""
+the colours of the gradients and images its ``background-image`` layers paint over that."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from evidence_judge.ingest.css.values import (
 
 Backdrop = tuple[Rgba, ...]
 """The opaque colours text may sit over (each stop of a gradient); None where the reader cannot
-tell (an image it cannot see)."""
+tell."""
 
 
 MAX_BACKDROP: Final = 64
@@ -66,46 +66,45 @@ def background_images(
     sizes: Sequence[str | None],
     base: Backdrop | None,
     current: Rgba | None,
+    pictures: Backdrop,
 ) -> Backdrop | None:
     """The colours a ``background-image`` paints over `base`, its ``background-size`` any of
-    `sizes`: those of each gradient stop, and `base` where a layer may cover nothing. None when
-    a layer is an image the reader cannot see (a ``url()``, ``image-set()``, ...); raises
-    `UnreadableError` for a gradient it cannot read or one that paints too many colours."""
+    `sizes`, each layer over the ones listed after it: those of each gradient stop, `pictures`
+    for an image the reader cannot see (a ``url()``, ``image-set()``, ...), and what is beneath
+    where a layer may cover nothing. Raises `UnreadableError` for a gradient it cannot read or
+    one that paints too many colours."""
     if image is None:
         return None
     if image in _WIDE or image == "none":
         return base
-    found: dict[Rgba, None] = {}
-    bare = False
     listed = [split_commas(size) if size else [] for size in sizes]
-    for at, layer in enumerate(split_commas(image)):
+    painted = base
+    for at, layer in reversed(list(enumerate(split_commas(image)))):
         stops = _layer(layer, current)
         if stops is None:
-            return None
+            stops = list(pictures)
         covers = [_covers(each[at % len(each)] if each else None) for each in listed]
         if not stops or not any(covers):
             continue
-        bare = bare or not all(covers)
+        bare = not all(covers)
+        found: dict[Rgba, None] = {}
         for stop in stops:
             if stop[3] <= FAINT:
                 bare = True
             elif stop[3] >= 1:
                 found[stop] = None
-            elif base is None:
+            elif painted is None:
                 return None
             else:
-                found.update(dict.fromkeys(over(stop, b) for b in base))
-            if len(found) > MAX_BACKDROP:
-                raise UnreadableError
-    if not found:
-        return base
-    if bare:
-        if base is None:
-            return None
-        found.update(dict.fromkeys(base))
-    if len(found) > MAX_BACKDROP:
-        raise UnreadableError
-    return tuple(found)
+                found.update(dict.fromkeys(over(stop, b) for b in painted))
+        if bare:
+            if painted is None:
+                return None
+            found.update(dict.fromkeys(painted))
+        if len(found) > MAX_BACKDROP:
+            raise UnreadableError
+        painted = tuple(found)
+    return painted
 
 
 def _layer(layer: str, current: Rgba | None) -> list[Rgba] | None:

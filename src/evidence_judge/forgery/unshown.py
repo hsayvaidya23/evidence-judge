@@ -49,6 +49,12 @@ UNMODELLED_VARIANTS: Final = (
     "logical_inset",
     "text_indent",
     "svg_presentation",
+    "state_background",
+    "image_background",
+    "opaque_overlay",
+    "backface_flip",
+    "ending_animation",
+    "perspective_depth",
 )
 _HIDING_STYLES: Final = {
     "faded": "opacity:0",
@@ -66,6 +72,8 @@ _HIDING_STYLES: Final = {
     "fixed_offscreen": "position:fixed;top:-100vh",
     "logical_inset": "position:absolute;inset-inline-start:-10000px",
     "text_indent": "text-indent:100%;white-space:nowrap;overflow:hidden",
+    "image_background": "color:#fff;background:url(/img/banner.png) center/cover",
+    "backface_flip": "backface-visibility:hidden;transform:rotateY(180deg)",
 }
 """The inline style of each `unmodelled_hiding` variant that hides its element with one."""
 UNRENDERED_VARIANTS: Final = (
@@ -115,6 +123,15 @@ def _unmodelled(variant: str, query: str) -> tuple[str, list[object]]:
             css = ".panel:hover{--hide:block}.msg{display:var(--hide, none)}"
         case "escaped_custom_property":
             css = ".panel{--\\63:transparent}.msg{color:var(--c)}"
+        case "state_background":
+            css = ".panel:hover{background:#000}.msg{color:#fff}"
+        case "ending_animation":
+            css = ".msg{animation:done 1ms forwards}@keyframes done{to{opacity:0}}"
+        case "perspective_depth":
+            css = ".panel{perspective:1px}.msg{transform:translateZ(-100000px)}"
+        case "opaque_overlay":
+            cover = {"style": "position:absolute;inset:0;background:#fff;z-index:1"}
+            return "", ["DIV", {"style": "position:relative"}, ["P", {}, query], ["DIV", cover]]
         case "svg_presentation":
             text = ["text", {"x": "0", "y": "20", "font-size": "0"}, query]
             return "", ["svg", {"width": "300", "height": "40"}, text]
@@ -180,7 +197,10 @@ def unmodelled_hiding(run: Run, seed: int, targets: Targets) -> Run:
     path the reader does not measure, a zero-height box that contains its paint, a colour a
     shade off the background (white text over a transparent gradient, an empty image or one of
     no size included), a fixed box above the viewport, a logical offset, an image-replacement
-    indent, or an SVG `font-size` attribute of 0. The page is recorded as the trace ingester
+    indent, an SVG `font-size` attribute of 0, white text whose dark background only a `:hover`
+    rule sets, white text over a background picture with no colour behind it, an opaque box
+    positioned over it, a back face turned away, an animation that ends at `opacity: 0`,
+    or a move in depth under a parent's `perspective`. The page is recorded as the trace ingester
     records it: its snapshot rendered by the page-text reader, so the texts are text the page
     may hide (`unsure_text`) only while the reader keeps them there."""
     variant = pick_variant(run, seed, UNMODELLED_VARIANTS)

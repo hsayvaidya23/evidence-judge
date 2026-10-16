@@ -19,7 +19,8 @@ TRACKED: Final = words(
     "-webkit-text-fill-color text-indent background-color background-image background-size "
     "background-clip "
     "-webkit-background-clip fill fill-opacity offset offset-path mask mask-image mask-border "
-    "mask-border-source -webkit-mask -webkit-mask-image -webkit-mask-box-image"
+    "mask-border-source -webkit-mask -webkit-mask-image -webkit-mask-box-image z-index "
+    "backface-visibility perspective animation animation-name"
 )
 """The properties the reader applies: what removes an element, and what can hide its text."""
 

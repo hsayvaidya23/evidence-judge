@@ -111,6 +111,9 @@ class Pseudo:
     nth: tuple[int, int] | None = None
     maybe: bool = False
     """An argument could not be read: the pseudo-class may match where it says it does not."""
+    state: str = ""
+    """What a pseudo-class the reader cannot evaluate says (``hover``, ``has(.x)``): rules that
+    name the same one apply in the same state."""
 
     @property
     def specificity(self) -> tuple[int, int, int]:
@@ -274,6 +277,11 @@ def contrast(colour: Rgba, behind: Rgba) -> float:
     return (max(one, two) + 0.05) / (min(one, two) + 0.05)
 
 
+Box = tuple[Element, int | None, str]
+"""A positioned element, its ``z-index`` (0 for ``auto``, None when the reader cannot read it)
+and its ``position``."""
+
+
 @dataclass(frozen=True, slots=True)
 class Computed:
     """What the cascade decides for an element, with what its children inherit."""
@@ -306,6 +314,13 @@ class Computed:
     """The colours its SVG ``fill`` may be."""
     alpha: float = 1.0
     """The least its own and its ancestors' ``opacity`` multiply to."""
+    flipped: bool = False
+    """It or an ancestor may be turned in 3D to show its back."""
+    deep: bool = False
+    """An ancestor sets ``perspective``: a 3D transform of its own is one the reader does not
+    measure."""
+    boxes: tuple[Box, ...] = field(default=(), compare=False)
+    """It and its positioned ancestors, outermost first."""
     svg: bool = False
     """It is an SVG element, whose text its ``fill`` paints."""
     custom: Mapping[str, tuple[str, ...] | None] = field(default=NO_CUSTOM, compare=False)
@@ -340,11 +355,11 @@ class Computed:
         behind = self.background
         if behind is None:
             return False
-        return _faint(paints, self.alpha, behind)
+        return faint(paints, self.alpha, behind)
 
 
 @lru_cache(maxsize=4096)
-def _faint(paints: tuple[Rgba, ...], alpha: float, behind: tuple[Rgba, ...]) -> bool:
+def faint(paints: tuple[Rgba, ...], alpha: float, behind: tuple[Rgba, ...]) -> bool:
     """Whether a paint barely stands out from any of the colours behind it: under a gradient,
     text faint against one stop may be hidden there."""
     return any(

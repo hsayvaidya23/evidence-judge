@@ -478,7 +478,8 @@ def test_hiding_the_reader_did_not_model_leaves_text_unsure(css: str, state: int
         (".wrap{opacity:0.5}.in{opacity:0.5}", SHOWN),
         (".wrap{color:#000}.wrap:hover{color:#fefefe}", UNSURE),
         (".wrap{color:#000}.x:hover{color:#fefefe}", SHOWN),
-        (".wrap{background-image:url(x.png)}.in{color:#fff}", SHOWN),
+        (".wrap{background-image:url(x.png)}.in{color:#fff}", UNSURE),
+        (".wrap{background-image:url(x.png)}.in{color:#777}", SHOWN),
     ],
 )
 def test_faint_text_through_its_ancestors(css: str, state: int) -> None:
@@ -509,14 +510,110 @@ def test_faint_text_through_its_ancestors(css: str, state: int) -> None:
             ".in{color:#fff;background:linear-gradient(#0008,#0008),url(hero.jpg) center/cover}",
             SHOWN,
         ),
-        (".in{color:#fff;background:url(hero.jpg) center/cover}", SHOWN),
-        (".in{color:#fff;background-image:image-set('x.png' 1x)}", SHOWN),
+        (".in{color:#fff;background:url(hero.jpg) center/cover}", UNSURE),
+        (".in{color:#000;background:url(hero.jpg) center/cover}", UNSURE),
+        (".in{color:#fff;background:#222 url(hero.jpg) center/cover}", SHOWN),
+        (".in{color:#fff;background:#fff url(hero.jpg) center/cover}", UNSURE),
+        (".in{color:#fff;background:rgb(0 0 0/50%) url(hero.jpg)}", UNSURE),
+        (".in{color:#c33;background:url(hero.jpg) center/cover}", SHOWN),
+        (".in{color:#fff;background:linear-gradient(#000,#000),url(hero.jpg)}", SHOWN),
+        (".in{color:#fff;background:url(hero.jpg),linear-gradient(#000,#000)}", UNSURE),
+        (".in{color:#fff;background-image:image-set('x.png' 1x)}", UNSURE),
         (".in{background:linear-gradient(#fff,#eee)}", SHOWN),
         (".wrap{background:#000}.in{color:#fff;background-image:url(data:,)}", SHOWN),
     ],
 )
 def test_background_images_the_text_sits_on(css: str, state: int) -> None:
     assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{backface-visibility:hidden;transform:rotateY(180deg)}", UNSURE),
+        (".in{backface-visibility:hidden;rotate:x 150deg}", UNSURE),
+        (".in{backface-visibility:hidden;transform:rotateY(30deg)}", SHOWN),
+        (".in{transform:rotateY(180deg)}", SHOWN),
+        (".wrap{transform:rotateY(180deg)}.in{backface-visibility:hidden}", UNSURE),
+        (".wrap:hover{transform:rotateY(180deg)}.in{backface-visibility:hidden}", UNSURE),
+        (".wrap{transform:rotate(180deg)}.in{backface-visibility:hidden}", SHOWN),
+        (".wrap{perspective:1px}.in{transform:translateZ(-100000px)}", UNSURE),
+        (".wrap{perspective:10px}.in{transform:rotateX(70deg)}", UNSURE),
+        (".wrap:hover{perspective:10px}.in{transform:rotateY(10deg)}", UNSURE),
+        (".wrap{perspective:1000px}.in{transform:translateZ(0)}", SHOWN),
+        (".wrap{perspective:1000px}.in{transform:translate3d(10px,0,0) rotate(5deg)}", SHOWN),
+        (
+            ".wrap{perspective:1000px}.in{transform:matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)}",
+            SHOWN,
+        ),
+        (".in{transform:rotateX(70deg)}", SHOWN),
+    ],
+)
+def test_backfaces_and_perspective(css: str, state: int) -> None:
+    assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{animation:gone 1ms forwards}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".in{animation-name:gone}@keyframes gone{from,to{visibility:hidden}}", UNSURE),
+        (".in{animation:1s gone}@-webkit-keyframes gone{50%{transform:scale(0)}}", UNSURE),
+        (
+            ".in{animation:1s a,2s gone}@keyframes a{to{color:red}}@keyframes gone{to{color:#fff}}",
+            UNSURE,
+        ),
+        ('.in{animation-name:"gone"}@keyframes "gone"{to{display:none}}', UNSURE),
+        (".in{--a:gone 1s;animation:var(--a)}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".in{animation:Gone 1s}@keyframes Gone{to{opacity:0}}", UNSURE),
+        (".in:hover{animation:gone 1s}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".wrap{animation:gone 1s}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".in{animation:spin 1s infinite}@keyframes spin{to{transform:rotate(360deg)}}", SHOWN),
+        (".in{animation:pulse 1s}@keyframes pulse{50%{opacity:.5}}", SHOWN),
+        (".in{animation:gone 1s}@keyframes other{to{opacity:0}}", SHOWN),
+        (".in{animation:none}@keyframes gone{to{opacity:0}}", SHOWN),
+        (".in{transition:opacity 1s}", SHOWN),
+    ],
+)
+def test_animations_whose_keyframes_may_hide_text(css: str, state: int) -> None:
+    assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{color:#fff}.wrap:hover{background:#000}", UNSURE),
+        (".in{color:#fff}.wrap:hover .in{background:#000}", UNSURE),
+        (".wrap{background:#000}.in{color:#fff}.wrap:hover{background:#fff}", UNSURE),
+        (".wrap{background:#000}.in{color:#fff}.wrap:focus-within{background:#fffffe}", UNSURE),
+        (".in{color:#fff;background:#000}.in:hover{color:#000;background:#fff}", SHOWN),
+        (
+            ".in{color:#fff;background:#000}"
+            ".hover\\:bg-white:hover{background:#fff}.hover\\:text-black:hover{color:#000}",
+            SHOWN,
+        ),
+        (".in{color:#fff;background:#000}.in:hover{color:#000}.in:focus{background:#fff}", UNSURE),
+        (".in{color:#fff;background:#000}.in:hover{color:#fff;background:#fff}", UNSURE),
+        (
+            ".in{color:#fff;background:#000}"
+            ".wrap:hover .in{background:#fff}.x:hover .in{color:#000}",
+            UNSURE,
+        ),
+        (
+            ".in{color:#fff;background:#000}"
+            "@media (min-resolution:2dppx){.in:hover{background:#fff}}.in:hover{color:#000}",
+            UNSURE,
+        ),
+        (".in{color:#fff;background:#000}.in:hover{color:#777;background:#333}", SHOWN),
+        (
+            ".in{color:#fff;background:#000}.in:hover{background-image:linear-gradient(#fff,#fff)}",
+            UNSURE,
+        ),
+    ],
+)
+def test_backgrounds_rules_that_may_apply_set(css: str, state: int) -> None:
+    attrs = {"class": "in hover:bg-white hover:text-black"}
+    assert _state(css, ("DIV", {"class": "wrap"}), ("SPAN", attrs)) == state
 
 
 @pytest.mark.parametrize(
@@ -580,7 +677,8 @@ def test_the_last_inline_declaration_wins(style: str, state: int) -> None:
         (".wrap{color:transparent}.in{color:black}", SHOWN),
         (".wrap{background:#000}.in{color:#000}", UNSURE),
         (".wrap{background:#000;color:#fff}", SHOWN),
-        (".wrap{background:url(x.png)}.in{color:#fff}", SHOWN),
+        (".wrap{background:url(x.png)}.in{color:#fff}", UNSURE),
+        (".wrap{background:#123 url(x.png)}.in{color:#fff}", SHOWN),
         (".wrap{text-indent:-9999px}", UNSURE),
         (".wrap{text-indent:-9999px}.in{text-indent:0}", SHOWN),
         (".wrap{height:0;overflow:hidden}", UNSURE),
