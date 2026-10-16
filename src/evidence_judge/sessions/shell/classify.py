@@ -52,10 +52,11 @@ from evidence_judge.sessions.shell.programs import (
     READ_ONLY_PROGRAMS,
     VERSION_FLAGS,
 )
-from evidence_judge.sessions.shell.runners.lint import lint_scope
+from evidence_judge.sessions.shell.runners.lint import lint_scope, pre_commit_scope
 from evidence_judge.sessions.shell.runners.stop import stop_early
 from evidence_judge.sessions.shell.writes import (
     written_code,
+    written_suppressions,
 )
 
 MAX_COMMAND_CHARS: Final = 100_000
@@ -136,6 +137,8 @@ def _classify_program(
         result.stop_early = stop_early(result.runner, call.args)
     if result is not None and result.category in (Category.LINT, Category.TYPECHECK):
         result.check_filters, result.check_masked = lint_scope(call.prog, call.args)
+        if call.prog == "pre-commit":
+            result.check_filters = pre_commit_scope(call.args, env)
     return result if result is not None else _fallback(call)
 
 
@@ -267,6 +270,7 @@ class _Walk:
     check_masked: str | None = None
     test_wrapper: str | None = None
     check_wrapper: str | None = None
+    suppressions: list[str] = field(default_factory=list[str])
 
 
 def _note(
@@ -314,6 +318,7 @@ def _take_nested(
     walk.opaque = walk.opaque or nested.opaque_write
     walk.lasting = walk.lasting or nested.lasting_mutation
     walk.written.extend(nested.source_findings)
+    walk.suppressions.extend(nested.suppressions)
     walk.nested_store = walk.nested_store or nested.session_store
     walk.nested_guard = walk.nested_guard or nested.guard_tamper
     if nested.runners:
@@ -503,6 +508,9 @@ def _analysis(
         guard_tamper=walk.nested_guard
         or guard_tamper(pipelines, command, walk.touched, walk.deleted, walk.opaque),
         source_findings=list(dict.fromkeys([*walk.written, *written_code(pipelines, command)])),
+        suppressions=sorted(
+            {*walk.suppressions, *written_suppressions(pipelines, command, walk.opaque is not None)}
+        ),
     )
 
 

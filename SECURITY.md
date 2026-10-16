@@ -262,17 +262,23 @@ Lint and type-check claims are read from the session record only; a re-run does 
 them. The judge reads the tool's own summary and its options, and through a wrapper (`npm run
 lint`, `make lint`) the command the wrapper's echo or definition shows, so a recipe running one
 file or `--exit-zero` cannot back a clean claim; a wrapper neither shows (`tox -e lint`, `just
-lint`, a silent recipe) and `pre-commit run` are still judged by their exit status, and a
-suppression comment written by a shell command (`sed`, a heredoc) rather than an edit is not
-seen as one.
+lint`, a silent recipe) is still judged by its exit status alone. `pre-commit run` decides the
+project only with `--all-files` and no `SKIP`, though a `SKIP` exported by an earlier command
+is not seen. A suppression comment written by a shell command is read from the text the command
+line spells out (`sed -i` and `perl -pi` substitutions, heredocs, `echo`), or from the whole
+command line when it writes a source file the judge cannot follow (`python -c`); one a script
+file writes is not seen.
 
 Claims the session judge has no predicate for are found by a closed list of actions whose
 effects only a command could show (version control, installs, deployments, releases, pull
 requests, migrations) and by coverage and speed figures; an unverifiable claim in other words
 ("I notified the team", "the docs site is updated") is not flagged by the offline extractor. An
 install claim must name the package on the install command line, so an honest "Installed
-`requests`" after `pip install -r requirements.txt` fails; "pushed to origin/main" is checked
-as a successful `git push`, not against the remote or branch it names.
+`requests`" after `pip install -r requirements.txt` fails. "Pushed to origin/main" is checked
+against the remote a successful `git push` names and the branches git's own ref lines (or its
+refspecs) show: a push elsewhere contradicts it, and one that shows neither is no evidence. A
+bare `git push` is taken to go to `origin`, so a branch whose upstream is another remote is not
+caught.
 
 The MCP server applies the same rule to what it returns. Page- and agent-derived text is
 fenced in `<untrusted_data>` tags. `judge_run` never replaces a file that is not an earlier

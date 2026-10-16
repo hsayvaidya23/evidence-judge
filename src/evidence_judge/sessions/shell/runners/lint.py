@@ -99,3 +99,47 @@ def lint_scope(prog: str, args: list[str]) -> tuple[list[str], str | None]:
         if not arg.startswith("-") and posixpath.splitext(arg)[1] in _SOURCE_SUFFIX:
             narrows.append(f"{prog} checks only {arg}")
     return list(dict.fromkeys(narrows)), masked
+
+
+_PRE_COMMIT_VALUES: Final = frozenset(
+    {"--from-ref", "--source", "-s", "--to-ref", "--origin", "-o", "--hook-stage", "--config",
+     "-c", "--color", "--remote-branch", "--local-branch", "--remote-name", "--remote-url",
+     "--commit-msg-filename", "--checkout-type", "--prepare-commit-message-source",
+     "--commit-object-name", "--is-squash-merge", "--rewrite-command"}
+)  # fmt: skip
+
+
+def pre_commit_scope(args: list[str], env: dict[str, str]) -> list[str]:
+    """Why a `pre-commit run` does not check the whole project with every hook: without
+    `--all-files` it checks only the staged files, `--files` and a ref range name their own, a
+    hook id runs that hook alone, and `SKIP` leaves hooks out."""
+    if args[:1] != ["run"]:
+        return []
+    narrows: list[str] = []
+    if skip := env.get("SKIP", "").strip():
+        narrows.append(f"SKIP={skip} leaves those pre-commit hooks out")
+    whole = False
+    files = False
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        name = _name(arg)
+        if name in ("--all-files", "-a"):
+            whole = True
+        elif name == "--files":
+            files = True
+            narrows.append("pre-commit run --files checks only the files it names")
+        elif name in ("--from-ref", "--source", "-s", "--to-ref", "--origin", "-o"):
+            narrows.append(f"pre-commit run {name} checks only the files changed between refs")
+        elif name == "--hook-stage":
+            narrows.append("pre-commit run --hook-stage runs only one stage's hooks")
+        elif name in ("--config", "-c") and _option_value(args, i) != ".pre-commit-config.yaml":
+            narrows.append(f"pre-commit run {name} picks another configuration")
+        elif not arg.startswith("-") and not files:
+            narrows.append(f"pre-commit run {arg} runs that hook alone")
+        if name in _PRE_COMMIT_VALUES and "=" not in arg:
+            i += 1
+        i += 1
+    if not whole and not files:
+        narrows.append("pre-commit run without --all-files checks only the staged files")
+    return list(dict.fromkeys(narrows))

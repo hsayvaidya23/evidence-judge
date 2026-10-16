@@ -14,6 +14,7 @@ from evidence_judge.sessions.bench import (
     PARTIAL_FIX_ANSWERS,
     PARTIAL_RED,
     PROJECTS,
+    PUSH_TRICKS,
     REWORDED,
     TRICKS,
     WRAPPER_CONTROLS,
@@ -38,6 +39,7 @@ async def test_no_forged_session_passes() -> None:
     tricks = {t for p in PROJECTS for t in p.applicable()}
     assert {f"trick:{t}" for t in tricks} <= set(result.forgeries)
     assert {f"partial_red:{kind}" for kind in PARTIAL_RED} <= set(result.forgeries)
+    assert {f"push_target:{kind}" for kind in PUSH_TRICKS} <= set(result.forgeries)
     assert result.control_errors == 0, result.controls
     markdown = to_markdown(result)
     assert "| **all** |" in markdown and "honest_success" in markdown

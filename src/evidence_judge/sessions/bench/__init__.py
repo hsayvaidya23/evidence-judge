@@ -18,6 +18,7 @@ from evidence_judge.sessions.bench.controls import (
     CONTROLS,
     ONLY_ANSWERS,
     PARTIAL_FIX_ANSWERS,
+    PUSH_TRICKS,
     REWORDED,
     WRAPPER_CONTROLS,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "PARTIAL_FIX_ANSWERS",
     "PARTIAL_RED",
     "PROJECTS",
+    "PUSH_TRICKS",
     "REWORDED",
     "TRICKS",
     "WRAPPER_CONTROLS",

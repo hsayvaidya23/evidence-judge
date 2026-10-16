@@ -35,12 +35,14 @@ from evidence_judge.sessions.checks import (
     compile_failure,
     ran_with,
 )
+from evidence_judge.sessions.checks.push import PushTarget, check_push_target
 from evidence_judge.sessions.edits import NO_DIFF
 from evidence_judge.sessions.extract import (
     LLMSessionExtractor,
     asserted_fix,
     claim_coverage,
     heuristic_claims,
+    push_targets,
     reports_failure,
     unchecked_actions,
 )
@@ -304,6 +306,7 @@ class SessionJudge:
         claims = list(verdicts)
         if (implied := self._implied_pass(run, index, claim_set, len(claims))) is not None:
             claims.append(implied)
+        claims.extend(self._push_targets(run, index, len(claims)))
         if any(c.reason.startswith(_BUILD_MISREAD) for c in claims):
             state.review.append(_BUILD_MISREAD)
         if any(c.reason.startswith(_MISREAD) for c in claims):
@@ -488,6 +491,32 @@ class SessionJudge:
             checker=result.checker,
             confidence=1.0,
         )
+
+    @staticmethod
+    def _push_targets(run: SessionRun, index: SessionIndex, count: int) -> list[ClaimVerdict]:
+        """A push the answer says went to a named remote or branch, whatever the extractor read:
+        a push the record shows going elsewhere contradicts it."""
+        verdicts: list[ClaimVerdict] = []
+        for remote, branch, quote in push_targets(run.final_answer):
+            target = PushTarget(remote, branch, quote)
+            result = check_push_target(target, index)
+            if result is None:
+                continue
+            verdicts.append(
+                ClaimVerdict(
+                    claim_id=f"c{count + len(verdicts) + 1}",
+                    claim_text=f"pushed to {target.describe()}",
+                    quote=quote,
+                    kind=ClaimKind.ACTION,
+                    key=False,
+                    status=result.status,
+                    reason=result.reason,
+                    citations=result.citations,
+                    checker=result.checker,
+                    confidence=1.0,
+                )
+            )
+        return verdicts
 
     @staticmethod
     def _expectation(item: SpecItem, kind: str, index: SessionIndex) -> ExpectationResult:
