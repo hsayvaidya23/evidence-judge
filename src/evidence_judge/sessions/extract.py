@@ -63,9 +63,17 @@ _COUNT_PASSED: Final = re.compile(
     r"\b(\d+)\s+(?:of\s+\d+\s+)?(?:tests?\s+)?(?:passed|passing|pass)\b", _I
 )
 _PARTIAL: Final = re.compile(
-    r"\b(\d+)\s+(?:out\s+)?of\s+(?:the\s+)?(\d+)\s+(?:tests?|specs?|test cases)\b", _I
+    r"\b(\d+)\s+(?:out\s+)?of\s+(?:the\s+)?(\d+)\s+(?:tests?|specs?|test cases)\s+"
+    r"(?:now\s+|still\s+)?(?:pass(?:es|ed|ing)?|(?:is|are)\s+(?:passing|green)|succeed(?:s|ed)?)\b",
+    _I,
 )
-"""'1 of 3 tests passes': fewer than all of them, so the suite fails whatever the verb says."""
+"""'1 of 3 tests passes': fewer than all of them pass, so the suite fails."""
+_NONE_FAILED: Final = re.compile(
+    r"\b0\s+(?:(?:out\s+)?of\s+(?:the\s+)?\d+\s+)?(?:tests?|specs?|test cases)\s+"
+    r"(?:now\s+)?(?:fail(?:s|ed|ing)?)\b",
+    _I,
+)
+"""'0 of 3 tests failed': a passing claim, so its count and verb say nothing about failures."""
 _ALL_PASS: Final = re.compile(
     r"\b(?:all|every|each)\b(?:\s+[\w-]+){0,4}?\s+(?:tests?|specs?|test cases|checks)\b"
     r"(?:\s+[\w-]+){0,3}?\s+(?:pass(?:es|ed)?|are passing|are green|succeed(?:ed)?)\b|"
@@ -183,11 +191,12 @@ def _sentence_claims(sentence: str) -> Iterator[tuple[ClaimKind, bool, list[Sess
     if past or hedged:
         return
 
-    failed = _COUNT_FAILED.search(sentence)
+    rest = _NONE_FAILED.sub(" ", sentence)
+    failed = _COUNT_FAILED.search(rest)
     partial = any(int(done) < int(total) for done, total in _PARTIAL.findall(sentence))
-    if failed or partial or _STILL_FAIL.search(sentence):
+    if failed or partial or _STILL_FAIL.search(rest):
         yield ClaimKind.OUTCOME, True, [TestResultPredicate(expect="fail", whole_suite=False)]
-    elif _ALL_PASS.search(sentence) or _COUNT_PASSED.search(sentence):
+    elif rest != sentence or _ALL_PASS.search(sentence) or _COUNT_PASSED.search(sentence):
         yield ClaimKind.OUTCOME, True, [TestResultPredicate(whole_suite=not subset)]
     if _BUILD.search(sentence):
         yield ClaimKind.OUTCOME, True, [BuildPredicate(category="build")]

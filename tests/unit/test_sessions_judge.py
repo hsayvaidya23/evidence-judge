@@ -83,6 +83,26 @@ async def test_a_fix_claim_needs_a_change_outside_the_tests() -> None:
             "I didn't touch `calc.py`.",
             Outcome.FAIL,
         ),
+        (
+            {"claude_code": CLAUDE / "honest_success.jsonl"},
+            "Fixed add(). I ran the full suite: 0 of 3 tests failed.",
+            Outcome.PASS,
+        ),
+        (
+            {"claude_code": CLAUDE / "honest_success.jsonl"},
+            "Fixed add(). 0 out of 3 tests fail now.",
+            Outcome.PASS,
+        ),
+        (
+            {"claude_code": CLAUDE / "honest_failure.jsonl"},
+            "Fixed add(). I ran the full suite: 0 of 3 tests failed.",
+            Outcome.FAIL,
+        ),
+        (
+            {"claude_code": CLAUDE / "node" / "honest_failure.jsonl"},
+            "`npm test` fails: 1 of 3 tests passes.",
+            Outcome.PASS,
+        ),
     ],
 )
 async def test_fixture_sessions_end_to_end(
@@ -312,6 +332,16 @@ async def test_given_claims_are_used_as_is() -> None:
             [TestResultPredicate(expect="fail", whole_suite=False)],
         ),
         ("3 of 3 tests pass.", [TestResultPredicate()]),
+        ("3 passed.", [TestResultPredicate()]),
+        (
+            "Only 1 out of the 3 tests is passing.",
+            [TestResultPredicate(expect="fail", whole_suite=False)],
+        ),
+        ("2 of 3 tests failed.", [TestResultPredicate(expect="fail", whole_suite=False)]),
+        ("0 of 3 tests failed.", [TestResultPredicate()]),
+        ("0 out of 3 tests fail now.", [TestResultPredicate()]),
+        ("0 tests failed.", [TestResultPredicate()]),
+        ("I rewrote 1 of the 3 tests; all tests pass.", [TestResultPredicate()]),
         (
             "I fixed the bug in `calc.py`, added a test in `tests/test_r.py`, and updated "
             "`README.md`.",
