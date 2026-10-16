@@ -127,6 +127,9 @@ The first release.
   shared definition. Honest answers that report a failure in another sentence than the fix
   ("I fixed `test_add`. `test_add_negative` still fails.") or count both sides ("2 tests pass
   and 1 fails.") are no longer FAILed.
+- With the LLM claim extractor, a red session no longer PASSes when the extracted claim that
+  tests fail drops the count or test name the answer states ("1 test still fails" against two);
+  the answer's own count and names are checked against the run, and a mismatch needs review.
 
 ### Security
 

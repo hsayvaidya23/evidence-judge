@@ -313,8 +313,9 @@ class SessionJudge:
         """Why the run cannot pass whatever the extractor read, or None. Deny by default when
         the final test evidence (the re-run, else the test runs after the last change) is not a
         passing suite: a failing one needs a supported claim that tests fail, which holds only
-        if the run failed as many tests as it counts and every test it names; failures the
-        answer reports need such a claim too; and code changed after the last deciding run, in
+        if the run failed as many tests as it counts and every test it names, and an LLM
+        extractor that drops a count or name the answer states does not excuse a wrong one;
+        failures the answer reports need such a claim too; and code changed after the last deciding run, in
         a session that runs tests, needs a test claim the evidence supports."""
         final = check(TestResultPredicate(), index)
         held = [
@@ -334,6 +335,18 @@ class SessionJudge:
                 else f"the final test run failed ({final.reason})"
             )
             return f"{red}, but no supported claim in the answer accounts for the failures"
+        if final.status is Support.CONTRADICTED and claim_set.extractor != "heuristic":
+            stated = [
+                p
+                for claim in heuristic_claims(run.final_answer).claims
+                for p in claim.predicates
+                if isinstance(p, TestResultPredicate) and p.expect == "fail"
+            ]
+            wrong = next(
+                (r for p in stated if (r := check(p, index)).status is Support.CONTRADICTED), None
+            )
+            if wrong is not None:
+                return f"{_MISCOUNT} ({wrong.reason})"
         if not accounted and reports_failure(run.final_answer):
             return "the answer reports failing tests, but no claim that the evidence supports says which"
         untested = final.status is Support.NO_EVIDENCE and index.source_changed
