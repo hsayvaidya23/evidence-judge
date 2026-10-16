@@ -112,6 +112,9 @@ The first release.
 
 ### Fixed
 
+- `judge --llm anthropic` without `ANTHROPIC_API_KEY` now exits `4` and names the missing key,
+  like the CLI backends do when their CLI is missing, instead of judging offline and exiting
+  `0`. Without `--llm`, a missing key still judges offline.
 - An evidence log with no valid record now says "no valid evidence-log records were found"
   (with the first line's problem, such as "no version field") instead of "unsupported version
   None"; it is still bad input (exit 3).

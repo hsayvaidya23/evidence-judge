@@ -16,7 +16,7 @@ repository lists every variable. The one other command-line override is `--llm` 
 | Variable | Type | Default | Purpose |
 | --- | --- | --- | --- |
 | `EVJ_LLM_BACKEND` | `anthropic`, `claude-code`, `codex`, `gemini` | `anthropic` | Where LLM calls go. `anthropic` calls the API with `ANTHROPIC_API_KEY`; the others run that CLI headless on your existing login, with its tools off. See [LLM backends](../guides/llm-backends.md). The `--llm` option of `judge` and `bench` overrides it |
-| `ANTHROPIC_API_KEY` | secret | – | Enables LLM claim extraction (and screenshot checks, if allowed) on the `anthropic` backend. Without it, that backend judges offline |
+| `ANTHROPIC_API_KEY` | secret | – | Enables LLM claim extraction (and screenshot checks, if allowed) on the `anthropic` backend. Without it, that backend judges offline, unless `--llm anthropic` asked for it, which exits `4` |
 | `EVJ_MODEL_FAST` | string | `claude-haiku-5-5` | Model for claim extraction |
 | `EVJ_MODEL_STRONG` | string | `claude-sonnet-5-5` | Model for screenshot checks and the benchmark's transcript baseline |
 | `EVJ_CLI_MODEL_FAST` | string | – | Model for claim extraction on a CLI backend. Unset: `claude-code` uses `EVJ_MODEL_FAST`; `codex` and `gemini` use the CLI's default |

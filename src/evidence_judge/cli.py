@@ -372,6 +372,12 @@ def judge(
         )
 
         llm = None if offline else build_llm(settings)
+        if llm is None and not offline and llm_backend is not None:
+            raise CliError(
+                f"--llm {llm_backend.value} needs ANTHROPIC_API_KEY, which is not set "
+                "(set it, or pass --offline to judge without a model)",
+                ExitCode.INTERNAL,
+            )
         if no_redact:
             settings = settings.model_copy(update={"redact": False})
         redactor = load_redactor(settings, persistent=llm is not None) if settings.redact else None

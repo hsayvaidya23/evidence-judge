@@ -72,7 +72,7 @@ At least one of `--trace`, `--har` or `--browser-use` is required.
 | `--out FILE` | Write the verdict JSON here (schema: `evidence-judge schema`) |
 | `--html FILE` | Write the self-contained HTML report here. Screenshots are embedded unredacted |
 | `--offline` | No LLM calls; heuristic claim extraction and no screenshot checks. Also never reads or creates the redaction key file. Default: off, but runs offline anyway on the `anthropic` backend when no `ANTHROPIC_API_KEY` is set |
-| `--llm BACKEND` | Where LLM calls go for this run: `anthropic` (the API, with `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to run that CLI headless on your existing login, with its tools off. Default: `EVJ_LLM_BACKEND`. A CLI that is missing or not logged in exits `4`. `--offline` wins over it |
+| `--llm BACKEND` | Where LLM calls go for this run: `anthropic` (the API, with `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to run that CLI headless on your existing login, with its tools off. Default: `EVJ_LLM_BACKEND`. A CLI that is missing or not logged in, or `anthropic` without `ANTHROPIC_API_KEY`, exits `4`; without `--llm`, a missing key judges offline. `--offline` wins over it |
 | `--no-redact` | Keep secrets and PII in evidence, prompts and reports. Use only on synthetic data |
 | `--quiet`, `-q` | Print nothing; only set the exit code |
 | `--debug` | Re-raise internal errors with a traceback instead of exiting `4` |
