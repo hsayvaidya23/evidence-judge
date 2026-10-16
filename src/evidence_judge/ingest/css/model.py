@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Final
 
@@ -211,9 +212,7 @@ class Element:
     keys: frozenset[str] = field(init=False)
     """What a rule is indexed by: its tag, ``.class`` for each class and ``#id``."""
     _lineage: frozenset[str] | None = field(init=False, default=None)
-    matched: dict[tuple[int, int], tuple[Selector, int]] = field(
-        init=False, default_factory=dict[tuple[int, int], tuple["Selector", int]]
-    )
+    matched: dict[tuple[int, int], tuple[Selector, int]] | None = field(init=False, default=None)
     """What `matching` has worked out for this element, by selector and compound."""
 
     def __post_init__(self) -> None:
@@ -341,9 +340,12 @@ class Computed:
         behind = self.background
         if behind is None:
             return False
-        return any(
-            contrast((r, g, b, a * self.alpha), behind) < MIN_CONTRAST for r, g, b, a in paints
-        )
+        return _faint(paints, self.alpha, behind)
+
+
+@lru_cache(maxsize=4096)
+def _faint(paints: tuple[Rgba, ...], alpha: float, behind: Rgba) -> bool:
+    return any(contrast((r, g, b, a * alpha), behind) < MIN_CONTRAST for r, g, b, a in paints)
 
 
 REMOVED: Final = Computed(removed=True)

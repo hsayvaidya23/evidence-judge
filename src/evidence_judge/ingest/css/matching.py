@@ -18,10 +18,15 @@ class _BudgetSpentError(Exception):
 def matches(selector: Selector, element: Element) -> int:
     if not selector.ancestors <= element.ancestry:
         return NO
-    try:
-        found = _Matcher(selector).match(len(selector.parts) - 1, element)
-    except _BudgetSpentError:
-        return MAYBE
+    last = len(selector.parts) - 1
+    found = _compound_match(selector.parts[last], element)
+    if found == NO:
+        return NO
+    if last > 0:
+        try:
+            found = _Matcher(selector).top(last, element, found)
+        except _BudgetSpentError:
+            return MAYBE
     return min(found, MAYBE) if selector.maybe else found
 
 
@@ -38,9 +43,15 @@ class _Matcher:
         self._id = id(selector)
         self._steps = 0
 
+    def top(self, index: int, element: Element, found: int) -> int:
+        """The match of the last compound, which only a fresh `matches` asks about: its own
+        answer `found` combined with the rest, not kept."""
+        self._steps += 1
+        return min(found, self._left(index, element))
+
     def match(self, index: int, element: Element) -> int:
         key = (self._id, index)
-        known = element.matched.get(key)
+        known = _known(element, key)
         if known is not None and known[0] is self._selector:
             return known[1]
         self._steps += 1
@@ -49,7 +60,7 @@ class _Matcher:
         found = _compound_match(self._selector.parts[index], element)
         if found != NO and index > 0:
             found = min(found, self._left(index, element))
-        element.matched[key] = (self._selector, found)
+        _keep(element, key, (self._selector, found))
         return found
 
     def _left(self, index: int, element: Element) -> int:
@@ -68,7 +79,7 @@ class _Matcher:
         tail = NO
         other = element.parent if up else element.previous
         while other is not None:
-            known = other.matched.get(key)
+            known = _known(other, key)
             if known is not None and known[0] is self._selector:
                 tail = known[1]
                 break
@@ -79,8 +90,18 @@ class _Matcher:
             other = other.parent if up else other.previous
         for item, found in reversed(walked):
             tail = max(tail, found)
-            item.matched[key] = (self._selector, tail)
+            _keep(item, key, (self._selector, tail))
         return tail
+
+
+def _known(element: Element, key: tuple[int, int]) -> tuple[Selector, int] | None:
+    return None if element.matched is None else element.matched.get(key)
+
+
+def _keep(element: Element, key: tuple[int, int], answer: tuple[Selector, int]) -> None:
+    if element.matched is None:
+        element.matched = {}
+    element.matched[key] = answer
 
 
 def _compound_match(part: Compound, element: Element) -> int:

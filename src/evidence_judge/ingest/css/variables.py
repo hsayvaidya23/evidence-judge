@@ -177,7 +177,9 @@ def _choose(
 
 
 def references(value: str | None) -> bool:
-    return value is not None and _REFERENCE.search(value) is not None
+    if value is None or ("var(" not in value and "env(" not in value):
+        return False
+    return _REFERENCE.search(value) is not None
 
 
 def resolve(value: str, custom: Custom, local: Custom, registered: Registered) -> Values | None:

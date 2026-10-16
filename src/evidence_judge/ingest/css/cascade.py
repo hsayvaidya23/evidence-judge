@@ -582,6 +582,8 @@ def _substitute(
             best[prop] = first
             if rest:
                 maybe.setdefault(prop, []).extend(rest)
+    if SHORTHANDS.isdisjoint(best) and SHORTHANDS.isdisjoint(maybe):
+        return custom
     for prop in SHORTHANDS.intersection(best).union(SHORTHANDS.intersection(maybe)):
         waiting = [(r, YES) for r in ([best.pop(prop)] if prop in best else [])]
         waiting += [(r, MAYBE) for r in maybe.pop(prop, [])]
