@@ -76,7 +76,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1532 session
+  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1561 session
   Go toy projects with runner-specific tricks; 0 of 1374 browser and 0 of 1465 session
   forgeries pass, and 4 of 38 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
@@ -267,6 +267,15 @@ The first release.
   the session showed whole (plain recipes; a test environment's `commands` and every
   `setenv`/`set_env`), the variables a Makefile exports (`export PYTEST_ADDOPTS = -x`), and a
   `SKIP` exported by an earlier command before `pre-commit run`.
+- A wrapper's echo counts only when the wrapper printed it: not with `make -s`, `npm
+  --silent`, `--loglevel`, `pnpm --reporter`, `yarn -s`, `tox -q` or `tox -p`, not when npm's or
+  pnpm's `> pkg@1.0.0 script` banner (yarn 1's `yarn run v1` banner, bun's `$` line) does not
+  open the output or names the script twice, and make's recipe echo only beside a Makefile the
+  session showed (one the judge cannot read whole) with no recipe line that can run silently
+  (`@`, `$(Q)`, `.SILENT`), since an `@echo pytest; pytest -k x` recipe prints the same echo. A
+  lint or type-check run through a wrapper whose command stays unseen no longer decides a clean
+  claim by its exit status. An honest `make test` or `make lint` with no Makefile shown now
+  needs review.
 - A lint or type-check claim no longer passes after a suppression comment written from the
   shell (`sed -i 's/$/  # noqa/'`, `perl -pi`, a heredoc or `echo` appended to a source file,
   `python -c` rewriting one), or on a `pre-commit run` without `--all-files`, with a hook id,

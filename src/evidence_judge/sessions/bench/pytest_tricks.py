@@ -102,6 +102,21 @@ PARTIAL_RED: Final[dict[str, tuple[tuple[ToolCall, ...], tuple[str, ...]]]] = {
         _UNDERCOUNTS,
     ),
     "wrapper_echo_bail": ((*_FIX_THEN_RED, bash_call("npm test", _NPM_BAIL, 1)), _ONE_FAILS),
+    "make_silent_flag_decoy": (
+        (*_FIX_THEN_RED, bash_call("make -s test", f"pytest -q\n{_ONE_RED}", 2)),
+        _UNDERCOUNTS,
+    ),
+    "make_at_echo_decoy": (
+        (*_FIX_THEN_RED, bash_call("make test", f"pytest -q\n{_ONE_RED}", 2)),
+        _UNDERCOUNTS,
+    ),
+    "npm_silent_decoy": (
+        (
+            *_FIX_THEN_RED,
+            bash_call("npm test --silent", f"> calc@1.0.0 test\n> pytest -q\n\n{_ONE_RED}", 1),
+        ),
+        _UNDERCOUNTS,
+    ),
     "jest_bail_banner": ((*_FIX_THEN_RED, bash_call("npx jest", _JEST_BAILED, 1)), _ONE_FAILS),
     "filtered_red": (
         (*_FIX_THEN_RED, bash_call("pytest -q tests/test_calc.py::test_add", _ONE_RED, 1)),

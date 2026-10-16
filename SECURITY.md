@@ -248,8 +248,11 @@ Without a re-run, how many tests a session left failing, and which, is read from
 output, and only from a whole-suite run that ran to the end. A run through a wrapper (`make
 test`, `npm test`, `tox`) counts as whole and run to the end only when the session shows what
 the wrapper ran: the wrapper's own echo of its command (npm's `> jest` header, tox's
-`commands[0]>` line, make's echo of a recipe line) or a `Makefile` or `package.json` the session
-read whole; otherwise its pass or fail still counts, but it backs no count of failing tests and
+`commands[0]>` line, make's echo of a recipe line beside a shown Makefile with no silent
+recipe line) or a `Makefile`, `package.json`, justfile or `tox.ini` the session read whole; an
+echo counts only when the wrapper itself printed it (no `--silent`, `-s`, `tox -q`, and the
+package manager's banner opens the output), though a `loglevel=silent` set in an `.npmrc` or an
+exported `npm_config_loglevel` is not seen, so a script could then print a decoy banner; otherwise its pass or fail still counts, but it backs no count of failing tests and
 no "`test_x` is not among the failures", and its green run proves the whole suite passes only
 when it passed at least as many tests as an earlier whole-suite run of the same framework whose
 command the session showed (plus the tests the session added since). Gaps remain there: a
@@ -264,8 +267,8 @@ count and the end of that comparison come from the judge's own run of the whole 
 Lint and type-check claims are read from the session record only; a re-run does not repeat
 them. The judge reads the tool's own summary and its options, and through a wrapper (`npm run
 lint`, `make lint`) the command the wrapper's echo or definition shows, so a recipe running one
-file or `--exit-zero` cannot back a clean claim; a wrapper neither shows (`tox -e lint`, `just
-lint`, a silent recipe) is still judged by its exit status alone. `pre-commit run` decides the
+file or `--exit-zero` cannot back a clean claim; a wrapper neither shows (`tox -e lint`, a
+silent recipe) cannot back one either. `pre-commit run` decides the
 project only with `--all-files` and no `SKIP`, whether set on its command line or exported by
 an earlier command (a `SKIP` set in a sourced file or the agent's own environment is not seen). A suppression comment written by a shell command is read from the text the command
 line spells out (`sed -i` and `perl -pi` substitutions, heredocs, `echo`), or from the whole

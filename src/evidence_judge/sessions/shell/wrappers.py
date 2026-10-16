@@ -43,6 +43,25 @@ _MAX_LINES: Final = 400
 _MAX_DEPTH: Final = 5
 
 _NPM_HEADER: Final = re.compile(r"^> (?:\S*@\S* )?(?P<script>\S+)(?: \S.*)?$")
+_YARN_BANNER: Final = re.compile(r"^yarn run v1\.\d+\.\d+$")
+_PM_NOISE: Final = re.compile(r"^npm (?:warn|WARN|notice|NOTICE)\b")
+_SILENCING: Final[dict[str, frozenset[str]]] = {
+    "npm": frozenset({"-s", "--silent", "-q", "--quiet", "--loglevel"}),
+    "pnpm": frozenset({"-s", "--silent", "--reporter", "--loglevel"}),
+    "yarn": frozenset({"-s", "--silent"}),
+    "bun": frozenset({"--silent"}),
+    "make": frozenset({"--silent", "--quiet"}),
+    "gmake": frozenset({"--silent", "--quiet"}),
+    "tox": frozenset({"-q", "-qq", "--quiet", "-p", "--parallel"}),
+    "nox": frozenset({"-q", "--quiet"}),
+}
+"""Options that keep a wrapper from echoing what it runs (`tox -p` prints no command lines)."""
+_MAKE_QUIET: Final = re.compile(
+    r"^\t[\s+\-]*[@$]|\.SILENT|MAKEFLAGS|^\s*-?s?include\b|^[^\t#]*\$[({]", re.M
+)
+"""A Makefile whose recipe lines may run silently: a line starting with `@` or a variable
+(`$(Q)pytest`), `.SILENT`, `MAKEFLAGS`, an include, or a variable reference outside a recipe
+(a variable can hold an `@`)."""
 _TOX_ECHO: Final = re.compile(
     r"^\s*\S+:? (?:commands\[\d+\]> |run-test: commands\[\d+\] \| )(?P<command>.+)$"
 )
@@ -100,26 +119,59 @@ def _lines(output: str) -> list[str]:
     return [line.rstrip() for line in output.splitlines()[:_MAX_LINES]]
 
 
+def _silenced(prog: str, words: list[str]) -> bool:
+    """The wrapper was told not to print its own echo (`npm --silent`, `make -s`, `tox -q`),
+    so any echo in its output is the script's own."""
+    for word in words[1:]:
+        if word == "--":
+            break
+        name = word.partition("=")[0]
+        if name in _SILENCING.get(prog, ()):
+            return True
+        if prog in _MAKES and re.fullmatch(r"-[A-Za-z]*s\w*", word):
+            return True
+    return False
+
+
 def _pm_echo(words: list[str], output: str) -> list[_Step] | None:
-    """npm and pnpm print `> pkg@1.0.0 test` then `> jest` before the script runs; yarn 1 and
-    bun print `$ jest`."""
+    """npm and pnpm print `> pkg@1.0.0 test` then `> jest` before the script runs, yarn 1 its
+    `yarn run v1.22.19` banner then `$ jest`, bun `$ jest`. The echo counts only when the output
+    starts with the package manager's own banner and names the script once: a script, or a
+    `pretest` before it, can print a decoy header of its own."""
     called = _script(words)
-    if called is None:
+    lines = [line for line in _lines(output) if line.strip() and not _PM_NOISE.match(line)]
+    if called is None or not lines:
         return None
-    lines = _lines(output)
-    for i, line in enumerate(lines[:-1]):
-        header = _NPM_HEADER.match(line)
-        if header and header["script"] == called[0] and lines[i + 1].startswith("> "):
-            return [_Step(lines[i + 1][2:])]
-    leading = [line for line in lines if line.strip()][:3]
-    echo = next((line[2:] for line in leading if line.startswith("$ ")), None)
-    return [_Step(echo)] if echo else None
+    prog = program_name(words[0])
+    if prog in ("npm", "pnpm"):
+        if not _NPM_HEADER.match(lines[0]):
+            return None
+        found = [
+            lines[i + 1][2:]
+            for i, line in enumerate(lines[:-1])
+            if (header := _NPM_HEADER.match(line))
+            and header["script"] == called[0]
+            and lines[i + 1].startswith("> ")
+        ]
+        return [_Step(found[0])] if len(found) == 1 else None
+    if prog == "yarn":
+        if not _YARN_BANNER.match(lines[0]):
+            return None
+        lines = lines[1:]
+    echoes = [line for line in lines if line.startswith("$ ")]
+    if not lines or not lines[0].startswith("$ ") or len(echoes) > 1:
+        return None
+    return [_Step(lines[0][2:])]
 
 
-def _make_echo(output: str) -> list[_Step] | None:
-    """make echoes each recipe line before running it, unless the line starts with `@`. The
-    recipe counts as shown only when the output starts with such an echo; a recipe that starts
-    silently could print a decoy later."""
+def _make_echo(output: str, files: Mapping[str, str]) -> list[_Step] | None:
+    """make echoes each recipe line before running it, unless the line starts with `@`, so a
+    recipe `@echo pytest; pytest -k x` prints what looks like an echo. The echo counts only
+    when the session showed a Makefile (one the judge cannot read whole) none of whose recipe
+    lines can be silent, and the output starts with it."""
+    text = next((files[name] for name in _MAKE_FILES if name in files), None)
+    if text is None or _MAKE_QUIET.search(text):
+        return None
     lines = [
         line for line in _lines(output) if line.strip() and not _MAKE_NOISE.match(line.strip())
     ]
@@ -133,14 +185,16 @@ def _command_like(line: str) -> bool:
     return bool(analysis.runners) or bool(_CHECKS & set(analysis.categories))
 
 
-def echoed(wrapper: str, output: str) -> list[_Step] | None:
+def echoed(wrapper: str, output: str, files: Mapping[str, str] | None = None) -> list[_Step] | None:
     """The commands the wrapper's own output says it ran, or None."""
     words = _words(wrapper)
     prog = program_name(words[0]) if words else ""
+    if _silenced(prog, words):
+        return None
     if prog in _PMS:
         return _pm_echo(words, output)
     if prog in _MAKES:
-        return _make_echo(output)
+        return _make_echo(output, files or {})
     pattern = {"tox": _TOX_ECHO, "nox": _NOX_ECHO}.get(prog)
     if pattern is None:
         return None
@@ -532,8 +586,10 @@ def resolve(
         )
     if analysis.wrapper_unseen is None:
         return analysis
-    if prog == "tox":
+    if prog in _PMS and any(n.casefold().startswith("npm_config_") for n in analysis.run_env):
+        steps = defined(wrapper, files)
+    elif prog == "tox":
         steps = defined(wrapper, files) or _tox_echoed(words, output, files)
     else:
-        steps = defined(wrapper, files) or echoed(wrapper, output)
+        steps = defined(wrapper, files) or echoed(wrapper, output, files)
     return _merge(analysis, steps, cwd) if steps else analysis
