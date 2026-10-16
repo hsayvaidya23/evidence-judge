@@ -28,8 +28,10 @@ fully model:
 - styles that can make text unreadable without removing it: ``opacity`` near 0 (its own or
   its ancestors' multiplied), a tiny ``font-size``, a text colour (or text fill, or SVG
   ``fill``) whose contrast with the background is below 1.2 (with any stop of a background
-  gradient; an empty or zero-size image paints nothing, and a gradient whose colours it cannot
-  tell is unsure), any ``mask``, a ``filter`` other
+  gradient, and any background a rule it cannot evaluate may set, but for a rule that sets the
+  text colour in the same state; an empty or zero-size image paints nothing, and a gradient
+  whose colours it cannot tell is unsure), a near-white or near-black text colour over a
+  background picture with no solid colour beneath it, any ``mask``, a ``filter`` other
   than slight or luminance-keeping ones, a motion path, ``clip`` or a ``clip-path`` that cuts
   most of a line of text or the viewport away (or a shape it does not measure), a
   ``transform``, ``rotate`` or ``scale`` that squashes, stretches or turns the box edge-on
@@ -40,8 +42,8 @@ fully model:
 
 It does not model a box painted over the text (a full-page opaque overlay with a higher
 ``z-index``): that needs layout. Nor does it see images: a background ``url()`` (or
-``image-set()``, ...) is taken to give the text contrast, so white text over a white picture
-shows.
+``image-set()``, ...) over a solid ``background-color`` is taken to look like that colour, so
+white text over a white picture on a dark colour shows.
 
 Utility hiding classes (`UTILITY_CSS`) whose stylesheet is not in the recording make an element
 unsure, not hidden: the site may not load the framework that defines them.

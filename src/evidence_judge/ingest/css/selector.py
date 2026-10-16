@@ -222,6 +222,7 @@ def foreign(name: str) -> bool:
 
 def _pseudo_class(name: str, args: str | None, found: _Builder) -> int:
     """Add pseudo-class `name` (with `args`) to `found`; how sure the reader is it is valid."""
+    unknown = Pseudo("maybe", state=name if args is None else f"{name}({args})")
     if args is None:
         if name in ("root", "scope"):
             found.pseudos.append(Pseudo("root"))
@@ -230,18 +231,18 @@ def _pseudo_class(name: str, args: str | None, found: _Builder) -> int:
         elif name == "host":
             found.host = True
         elif name in _STATE_PSEUDOS:
-            found.pseudos.append(Pseudo("maybe"))
+            found.pseudos.append(unknown)
         elif foreign(name):
             return INVALID
         else:
-            found.pseudos.append(Pseudo("maybe"))
+            found.pseudos.append(unknown)
             return UNKNOWN
         return _VALID
     if too_deep(args, MAX_NESTING - 1):
         if name == "host":
             found.host, found.host_maybe = True, True
             return _VALID
-        found.pseudos.append(Pseudo("maybe"))
+        found.pseudos.append(unknown)
         return UNKNOWN
     if name in ("not", "is", "where", "matches", "-webkit-any"):
         forgiving = name != "not"
@@ -264,7 +265,7 @@ def _pseudo_class(name: str, args: str | None, found: _Builder) -> int:
         nth = _nth(formula)
         if nth is None:
             return INVALID
-        found.pseudos.append(Pseudo("maybe") if of.strip() else Pseudo(name, nth=nth))
+        found.pseudos.append(unknown if of.strip() else Pseudo(name, nth=nth))
         return _VALID
     if name == "host":
         found.host = True
@@ -278,11 +279,11 @@ def _pseudo_class(name: str, args: str | None, found: _Builder) -> int:
         found.host, found.host_maybe = True, True
         return _VALID
     if name in ("has", "lang", "dir", "state", "active-view-transition-type"):
-        found.pseudos.append(Pseudo("maybe"))
+        found.pseudos.append(unknown)
         return _VALID
     if foreign(name):
         return INVALID
-    found.pseudos.append(Pseudo("maybe"))
+    found.pseudos.append(unknown)
     return UNKNOWN
 
 

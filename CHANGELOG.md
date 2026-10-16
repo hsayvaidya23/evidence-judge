@@ -428,6 +428,19 @@ The first release.
   `git push origin fix` whose hook prints a `main` ref line PASSed before. New forgery kinds
   `push_target:echo_after_rejected` and `push_target:echo_other_branch` (0 false PASS; 1503
   session forgeries); `git push origin main || true` now needs review.
+- A background that only a rule the reader cannot evaluate sets (a `:hover`, `:focus` or
+  `:checked` rule, one under an unknown `@media`) no longer switches off the colour comparison:
+  `.panel:hover{background:#000}` with white text on a white page read as shown. Every
+  background such a rule may paint now counts, and the text is unsure when it is faint against
+  any; rules for the same state of the same element (a `:hover` rule, or Tailwind's
+  `hover:bg-*` and `hover:text-*`, that swaps the colour and the background) are compared with
+  each other only, so honest buttons stay shown. Text over a background picture (`url()`,
+  `image-set()`) the reader cannot see is unsure when it is near white or near black and no
+  solid `background-color` under the picture contrasts with it; a gradient scrim painted over
+  the picture counts. On ten saved real-site pages 0.1% more text reads as unsure (Tailwind's
+  docs 5.4% to 7.0%, mostly white captions over `from-transparent` gradients; the others
+  unchanged or within 0.1%). New `unmodelled_hiding` variants `state_background` and
+  `image_background`; each was a false SHOWN before the fix.
 
 ### Security
 

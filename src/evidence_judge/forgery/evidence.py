@@ -109,7 +109,8 @@ a start page, prepended before) everything the run really did:
   3D rotation or skew, a `path()` clip, a zero-height box that contains its paint, a
   near-background colour (white text over a transparent gradient, an empty image or one of no
   size included), a fixed box above the viewport, a logical offset, an image-replacement indent,
-  or an SVG `font-size="0"`. The page is rendered by the page-text reader, so the texts are in
+  an SVG `font-size="0"`, white text whose dark background only a `:hover` rule sets, or white
+  text over a background picture with no colour behind it. The page is rendered by the page-text reader, so the texts are in
   `unsure_text`, not `text`, only while it keeps them there.
 - `derived_echo`: it searches for the expected texts a few letters off (a letter left out, the
   last word in the plural, typed backwards, accented, in look-alike digits, or in another

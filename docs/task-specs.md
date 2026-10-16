@@ -610,8 +610,11 @@ piece of text three ways:
   set or one an `@property` rule outside the document registers); `opacity` near 0 (its own
   and its ancestors' multiplied), a tiny `font-size`, a text colour, text fill or SVG `fill`
   with a contrast ratio below 1.2 against the background (against any stop of a background
-  gradient; an empty or zero-size image paints nothing, and a gradient whose colours the judge
-  cannot tell counts as unreadable), any `mask`, a `filter` other than a
+  gradient, and any background a rule it cannot evaluate may set; an empty or zero-size image
+  paints nothing, and a gradient whose colours the judge cannot tell counts as unreadable), a
+  near-white or near-black text colour over a background picture (`url()`, `image-set()`)
+  with no solid background colour beneath it that contrasts with the text, any `mask`, a
+  `filter` other than a
   slight or luminance-keeping one, a motion path, `clip` or a `clip-path` that cuts most of a
   line of text or the viewport away (or a `path()`, `url()` or other shape the judge does not
   measure), a `transform`, `rotate` or `scale` that squashes, stretches or turns the text
@@ -627,8 +630,8 @@ piece of text three ways:
   `clamp()` and `abs()`; a percentage offset counts as a share of the viewport. It does not
   model a box painted over the text, such as a full-page opaque overlay with a higher
   `z-index`: that needs layout, so such text still reads as shown. Nor does it see images: a
-  background `url()` or `image-set()` is taken to give the text contrast, so white text over a
-  white picture reads as shown. Values, `var()` chains, selectors and blocks nested more than 32
+  background picture over a solid colour is taken to look like that colour, so white text over
+  a white picture on a dark `background-color` reads as shown. Values, `var()` chains, selectors and blocks nested more than 32
   deep count as unreadable.
 
 Text the page may hide never meets a `page_text` predicate, and it keeps its absence from

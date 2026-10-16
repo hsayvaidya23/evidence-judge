@@ -478,7 +478,8 @@ def test_hiding_the_reader_did_not_model_leaves_text_unsure(css: str, state: int
         (".wrap{opacity:0.5}.in{opacity:0.5}", SHOWN),
         (".wrap{color:#000}.wrap:hover{color:#fefefe}", UNSURE),
         (".wrap{color:#000}.x:hover{color:#fefefe}", SHOWN),
-        (".wrap{background-image:url(x.png)}.in{color:#fff}", SHOWN),
+        (".wrap{background-image:url(x.png)}.in{color:#fff}", UNSURE),
+        (".wrap{background-image:url(x.png)}.in{color:#777}", SHOWN),
     ],
 )
 def test_faint_text_through_its_ancestors(css: str, state: int) -> None:
@@ -509,14 +510,58 @@ def test_faint_text_through_its_ancestors(css: str, state: int) -> None:
             ".in{color:#fff;background:linear-gradient(#0008,#0008),url(hero.jpg) center/cover}",
             SHOWN,
         ),
-        (".in{color:#fff;background:url(hero.jpg) center/cover}", SHOWN),
-        (".in{color:#fff;background-image:image-set('x.png' 1x)}", SHOWN),
+        (".in{color:#fff;background:url(hero.jpg) center/cover}", UNSURE),
+        (".in{color:#000;background:url(hero.jpg) center/cover}", UNSURE),
+        (".in{color:#fff;background:#222 url(hero.jpg) center/cover}", SHOWN),
+        (".in{color:#fff;background:#fff url(hero.jpg) center/cover}", UNSURE),
+        (".in{color:#fff;background:rgb(0 0 0/50%) url(hero.jpg)}", UNSURE),
+        (".in{color:#c33;background:url(hero.jpg) center/cover}", SHOWN),
+        (".in{color:#fff;background:linear-gradient(#000,#000),url(hero.jpg)}", SHOWN),
+        (".in{color:#fff;background:url(hero.jpg),linear-gradient(#000,#000)}", UNSURE),
+        (".in{color:#fff;background-image:image-set('x.png' 1x)}", UNSURE),
         (".in{background:linear-gradient(#fff,#eee)}", SHOWN),
         (".wrap{background:#000}.in{color:#fff;background-image:url(data:,)}", SHOWN),
     ],
 )
 def test_background_images_the_text_sits_on(css: str, state: int) -> None:
     assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{color:#fff}.wrap:hover{background:#000}", UNSURE),
+        (".in{color:#fff}.wrap:hover .in{background:#000}", UNSURE),
+        (".wrap{background:#000}.in{color:#fff}.wrap:hover{background:#fff}", UNSURE),
+        (".wrap{background:#000}.in{color:#fff}.wrap:focus-within{background:#fffffe}", UNSURE),
+        (".in{color:#fff;background:#000}.in:hover{color:#000;background:#fff}", SHOWN),
+        (
+            ".in{color:#fff;background:#000}"
+            ".hover\\:bg-white:hover{background:#fff}.hover\\:text-black:hover{color:#000}",
+            SHOWN,
+        ),
+        (".in{color:#fff;background:#000}.in:hover{color:#000}.in:focus{background:#fff}", UNSURE),
+        (".in{color:#fff;background:#000}.in:hover{color:#fff;background:#fff}", UNSURE),
+        (
+            ".in{color:#fff;background:#000}"
+            ".wrap:hover .in{background:#fff}.x:hover .in{color:#000}",
+            UNSURE,
+        ),
+        (
+            ".in{color:#fff;background:#000}"
+            "@media (min-resolution:2dppx){.in:hover{background:#fff}}.in:hover{color:#000}",
+            UNSURE,
+        ),
+        (".in{color:#fff;background:#000}.in:hover{color:#777;background:#333}", SHOWN),
+        (
+            ".in{color:#fff;background:#000}.in:hover{background-image:linear-gradient(#fff,#fff)}",
+            UNSURE,
+        ),
+    ],
+)
+def test_backgrounds_rules_that_may_apply_set(css: str, state: int) -> None:
+    attrs = {"class": "in hover:bg-white hover:text-black"}
+    assert _state(css, ("DIV", {"class": "wrap"}), ("SPAN", attrs)) == state
 
 
 @pytest.mark.parametrize(
@@ -580,7 +625,8 @@ def test_the_last_inline_declaration_wins(style: str, state: int) -> None:
         (".wrap{color:transparent}.in{color:black}", SHOWN),
         (".wrap{background:#000}.in{color:#000}", UNSURE),
         (".wrap{background:#000;color:#fff}", SHOWN),
-        (".wrap{background:url(x.png)}.in{color:#fff}", SHOWN),
+        (".wrap{background:url(x.png)}.in{color:#fff}", UNSURE),
+        (".wrap{background:#123 url(x.png)}.in{color:#fff}", SHOWN),
         (".wrap{text-indent:-9999px}", UNSURE),
         (".wrap{text-indent:-9999px}.in{text-indent:0}", SHOWN),
         (".wrap{height:0;overflow:hidden}", UNSURE),
