@@ -69,6 +69,11 @@ def test_is_claim_like(sentence: str, expected: bool):
         ("Next I clicked the buy button.", True),
         ("I couldn\u2019t submit the form.", False),
         ("No order was placed.", False),
+        ("Nothing was purchased.", False),
+        ("The kettle is out of stock; nothing was ordered and nothing was added.", False),
+        ("I never logged in, added it to the cart or placed an order.", False),
+        ("I bought the kettle, and nothing else was changed.", True),
+        ("Ran `grep -v not` and saved the file.", True),
     ],
 )
 def test_is_claim_like_edge_cases(sentence: str, expected: bool):

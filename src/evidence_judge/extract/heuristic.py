@@ -3,9 +3,11 @@
 Recognises common completion phrases ("placed the order", "added to cart", "changed the email",
 "changed the display name to Jane Doe", "order #1042", "the price was $24") and maps them to
 request / page_text / value predicates.
-Negated ("could not place") and intended ("will place") phrases are skipped. Predicates too weak
-to prove a claim (core.predicates.vacuity_reason: a request without a URL or body criterion,
-page text of a single word such as "confirm") are dropped and counted in the coverage note.
+Intended ("will place") phrases are skipped, and so is every clause a negation word may reverse
+("could not place", "nothing was purchased"): rather than guess its direction, the extractor
+abstains (`text.negated_clauses`). Predicates too weak to prove a claim
+(core.predicates.vacuity_reason: a request without a URL or body criterion, page text of a single
+word such as "confirm") are dropped and counted in the coverage note.
 """
 
 from __future__ import annotations
@@ -28,7 +30,13 @@ from evidence_judge.core.predicates import (
 from evidence_judge.core.verdict import Usage
 from evidence_judge.extract.base import MAX_CLAIMS, MAX_PREDICATES_PER_CLAIM
 from evidence_judge.extract.merge import cap_claims, dedupe_claims, renumber
-from evidence_judge.extract.text import Sentence, asserted, normalize, sentences
+from evidence_judge.extract.text import (
+    Sentence,
+    asserted,
+    clause_before,
+    normalize,
+    sentences,
+)
 
 _I = re.IGNORECASE
 
@@ -75,6 +83,12 @@ _PRICE = re.compile(
 _PRICE_FIELD = re.compile(
     r"\b(total|subtotal|price|priced|cost|costs|paid|charged|fee|amount)\b", _I
 )
+_PRICE_BOUND = re.compile(
+    r"\b(?:limit|budget|under|below|max(?:imum)?|up\s+to|at\s+most|less\s+than|over|above|"
+    r"shipping|delivery|postage|tax(?:es)?|vat|fees?|tip)\b(?:\W+\w+){0,2}\W*$",
+    _I,
+)
+"""'under $30', '(shipping $0.00)', 'limit $30.00': a bound or a surcharge, not the price."""
 _TOTAL_WORDS = frozenset({"total", "subtotal", "paid", "charged", "amount"})
 _PRICE_TASK = re.compile(rf"[{_CURRENCY}]|\b(?:price|cost|cheap|cheapest|under|budget|total)\b", _I)
 _REFERENCE = re.compile(
@@ -442,7 +456,9 @@ def _price_claims(sentence: Sentence, task_norm: str, tally: _Tally) -> None:
     name = "total" if field_match.group(1).lower() in _TOTAL_WORDS else "price"
     key = _PRICE_TASK.search(task_norm) is not None
     for match in _PRICE.finditer(sentence.text):
-        if not asserted(sentence.text, match.start()):
+        if not asserted(sentence.text, match.start()) or _PRICE_BOUND.search(
+            clause_before(sentence.text, match.start())
+        ):
             continue
         raw = match.group(1)
         shown = match.group(0).strip()
