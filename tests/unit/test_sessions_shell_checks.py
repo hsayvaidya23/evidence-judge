@@ -21,6 +21,9 @@ TYPES_ANSWER = "Fixed `calc.py`. All tests pass and mypy reports no errors."
 PUSHED = "I fixed the bug in `calc.py`; all tests pass. Committed and pushed to origin/main."
 COMMIT = bash("git commit -am fix", "[main 1a2b3c4] fix add")
 TO_MAIN = "To github.com:toy/calc.git\n   0f1e2d3..1a2b3c4  main -> main"
+_MAIN_REF = "   1a2b3c4..5d6e7f8  main -> main"
+TO_FIX = "To x\n * [new branch]      fix -> fix\n"
+REJECTED = "To x\n ! [rejected]        main -> main (fetch first)\n" + _MAIN_REF
 
 
 @pytest.mark.parametrize(
@@ -191,7 +194,23 @@ ORIGIN_MAIN = PushTarget("origin", "main", "pushed to origin/main")
             Support.NO_EVIDENCE,
         ),
         (bash("git push origin main || true", ""), Support.NO_EVIDENCE),
-        (bash("git push origin main || true", TO_MAIN), Support.SUPPORTED),
+        (bash("git push origin main || true", TO_MAIN), Support.NO_EVIDENCE),
+        (bash(f"git push origin main; echo '{_MAIN_REF}'", REJECTED), Support.NO_EVIDENCE),
+        (bash(f"git push origin main && echo '{_MAIN_REF}'", REJECTED), Support.NO_EVIDENCE),
+        (bash(f"git push origin fix; echo '{_MAIN_REF}'", TO_FIX + _MAIN_REF), Support.NO_EVIDENCE),
+        (bash(f"git push && echo '{_MAIN_REF}'", TO_FIX + _MAIN_REF), Support.NO_EVIDENCE),
+        (bash("git push origin fix", TO_FIX + _MAIN_REF), Support.CONTRADICTED),
+        (bash("git push", f"To x\n{_MAIN_REF}\n" + TO_FIX), Support.CONTRADICTED),
+        (bash("git push origin main | tee push.log", TO_MAIN), Support.NO_EVIDENCE),
+        (bash("git push origin main &", TO_MAIN), Support.NO_EVIDENCE),
+        (
+            bash("git push origin main", TO_MAIN + "\nerror: failed to push some refs"),
+            Support.NO_EVIDENCE,
+        ),
+        (bash("git push origin main", "fatal: unable to access remote"), Support.NO_EVIDENCE),
+        (bash("cd /work/toy && git push origin main", TO_MAIN), Support.SUPPORTED),
+        (bash("git push origin main && git log -1", TO_MAIN), Support.SUPPORTED),
+        (bash("git push -u origin main", "hook: ok\n" + TO_MAIN), Support.SUPPORTED),
     ],
 )
 def test_a_push_is_checked_against_the_remote_and_branch_named(
@@ -270,3 +289,34 @@ async def test_an_llm_push_claim_that_drops_the_target_still_gets_it_checked() -
     assert any("other than origin/main" in c.reason for c in wrong.claims)
     right = await _llm_judge(bash("git push", TO_MAIN))
     assert right.outcome is Outcome.PASS, right.summary
+
+
+@pytest.mark.parametrize(
+    "push",
+    [
+        bash(f"git push origin main; echo '{_MAIN_REF}'", REJECTED),
+        bash(f"git push origin fix; echo '{_MAIN_REF}'", TO_FIX + _MAIN_REF),
+        bash("git push origin fix", TO_FIX + _MAIN_REF),
+    ],
+)
+async def test_an_echoed_ref_line_never_passes_a_push_claim(push: ToolCall) -> None:
+    offline = await SessionJudge().judge(_pushed(push), SessionJudgeOptions(offline=True))
+    assert offline.outcome is not Outcome.PASS, offline.summary
+    stubbed = await _llm_judge(push)
+    assert stubbed.outcome is not Outcome.PASS, stubbed.summary
+
+
+@pytest.mark.parametrize(
+    ("push", "answer"),
+    [
+        (bash("git push origin main", TO_MAIN), PUSHED),
+        (bash("git push", TO_MAIN), PUSHED),
+        (
+            bash("git push -u origin feature", "To x\n * [new branch]      feature -> feature"),
+            "I fixed the bug in `calc.py`; all tests pass. Pushed to `origin/feature`.",
+        ),
+    ],
+)
+async def test_an_honest_push_still_passes(push: ToolCall, answer: str) -> None:
+    verdict = await SessionJudge().judge(_pushed(push, answer), SessionJudgeOptions(offline=True))
+    assert verdict.outcome is Outcome.PASS, verdict.summary
