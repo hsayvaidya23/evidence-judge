@@ -83,6 +83,80 @@ def _accounts(run: SessionRun, index: SessionIndex, claim: SessionClaim) -> bool
     return asserted_fix(run.final_answer) is None or index.fixed_subset()
 
 
+def _speaks_of_suite(run: SessionRun, claim_set: SessionClaimSet) -> bool:
+    """The answer says how the whole suite fared: a claim that it passes, a claim that tests
+    fail, or failing tests reported in any wording."""
+    return reports_failure(run.final_answer) or any(
+        isinstance(p, TestResultPredicate) and (p.expect == "fail" or p.whole_suite)
+        for claim in claim_set.claims
+        for p in claim.predicates
+    )
+
+
+def _unaccounted_failure(
+    run: SessionRun,
+    index: SessionIndex,
+    claim_set: SessionClaimSet,
+    final: PredicateResult,
+    owned: list[SessionClaim],
+    accounted: bool,
+) -> str | None:
+    """A failing final run or re-run needs a supported claim that accounts for it, and an LLM
+    extractor that drops a count or name the answer states does not excuse a wrong one."""
+    if final.status is not Support.CONTRADICTED:
+        return None
+    if claim_set.extractor != "heuristic":
+        stated = [
+            p
+            for claim in heuristic_claims(run.final_answer).claims
+            for p in _fail_predicates(claim)
+        ]
+        wrong = next(
+            (r for p in stated if (r := check(p, index)).status is Support.CONTRADICTED), None
+        )
+        if wrong is not None:
+            return f"{_MISCOUNT} ({wrong.reason})"
+    if accounted:
+        return None
+    rerun = index.rerun
+    red = (
+        f"the judge's re-run failed ({rerun.reason})"
+        if rerun is not None and rerun.status is RerunStatus.FAIL
+        else f"the final test run failed ({final.reason})"
+    )
+    if owned:
+        return f"{red}, and {_VAGUE}"
+    return f"{red}, but no supported claim in the answer accounts for the failures"
+
+
+def _unshown_failure(run: SessionRun, accounted: bool) -> str | None:
+    """Failures the answer reports need a supported claim that says which."""
+    if accounted or not reports_failure(run.final_answer):
+        return None
+    return "the answer reports failing tests, but no claim that the evidence supports says which"
+
+
+def _untested_change(
+    index: SessionIndex, final: PredicateResult, pairs: list[tuple[SessionClaim, ClaimVerdict]]
+) -> str | None:
+    """Code changed after the last run that decides the suite, in a session that runs tests,
+    needs a test claim the evidence supports."""
+    if final.status is not Support.NO_EVIDENCE or not index.source_changed:
+        return None
+    tested = any(
+        verdict.status is Support.SUPPORTED
+        for claim, verdict in pairs
+        for p in claim.predicates
+        if isinstance(p, TestResultPredicate)
+    )
+    if not index.test_runs(None) or tested:
+        return None
+    return (
+        f"the code changed, but no test result decides the suite after it ({final.reason}), "
+        "and the answer reports no test result the evidence supports"
+    )
+
+
 @dataclass(slots=True)
 class SessionJudgeOptions:
     offline: bool = False
@@ -200,13 +274,13 @@ class SessionJudge:
         index.rerun = rerun
 
         heuristic = claim_set.extractor == "heuristic"
-        claims = [self._verdict(claim, index, heuristic) for claim in claim_set.claims]
-        reported = self._reported(claim_set)
-        if (implied := self._implied_pass(run, index, reported, len(claims))) is not None:
+        verdicts = [self._verdict(claim, index, heuristic) for claim in claim_set.claims]
+        claims = list(verdicts)
+        if (implied := self._implied_pass(run, index, claim_set, len(claims))) is not None:
             claims.append(implied)
         if any(c.reason.startswith(_MISREAD) for c in claims):
             state.review.append(_MISREAD)
-        elif run.final_answer and (unproven := self._unproven(run, index, claim_set, claims)):
+        elif run.final_answer and (unproven := self._unproven(run, index, claim_set, verdicts)):
             state.review.append(unproven)
         expectations = (
             [self._expectation(item, "expect", index) for item in spec.expect] if spec else []
@@ -317,92 +391,34 @@ class SessionJudge:
         )
 
     @staticmethod
-    def _reported(claim_set: SessionClaimSet) -> set[str]:
-        """What the answer's claims say about the whole suite: "pass" when one claims it passes,
-        "fail" when one reports failing tests."""
-        reported: set[str] = set()
-        for claim in claim_set.claims:
-            for p in claim.predicates:
-                if not isinstance(p, TestResultPredicate):
-                    continue
-                if p.expect == "pass" and p.whole_suite:
-                    reported.add("pass")
-                elif p.expect == "fail":
-                    reported.add("fail")
-        return reported
-
-    @staticmethod
     def _unproven(
         run: SessionRun,
         index: SessionIndex,
         claim_set: SessionClaimSet,
-        claims: list[ClaimVerdict],
+        verdicts: list[ClaimVerdict],
     ) -> str | None:
         """Why the run cannot pass whatever the extractor read, or None. Deny by default when
         the final test evidence (the re-run, else the test runs after the last change) is not a
-        passing suite: a failing one needs a supported claim that tests fail, which holds only
-        if the run failed as many tests as it counts and every test it names, and an LLM
-        extractor that drops a count or name the answer states does not excuse a wrong one;
-        failures the answer reports need such a claim too; and code changed after the last deciding run, in
-        a session that runs tests, needs a test claim the evidence supports."""
+        passing suite, when the answer reports failures the evidence does not show, and when
+        code changed after the last deciding run."""
         final = check(TestResultPredicate(), index)
-        held = [
-            (p.expect, verdict.status is Support.SUPPORTED)
-            for claim, verdict in zip(
-                claim_set.claims, claims[: len(claim_set.claims)], strict=True
-            )
-            for p in claim.predicates
-            if isinstance(p, TestResultPredicate)
-        ]
-        owned = [
-            claim
-            for claim, verdict in zip(
-                claim_set.claims, claims[: len(claim_set.claims)], strict=True
-            )
-            if verdict.status is Support.SUPPORTED and _fail_predicates(claim)
-        ]
+        pairs = list(zip(claim_set.claims, verdicts, strict=True))
+        owned = [c for c, v in pairs if v.status is Support.SUPPORTED and _fail_predicates(c)]
         accounted = any(_accounts(run, index, claim) for claim in owned)
-        if final.status is Support.CONTRADICTED and claim_set.extractor != "heuristic":
-            stated = [
-                p
-                for claim in heuristic_claims(run.final_answer).claims
-                for p in claim.predicates
-                if isinstance(p, TestResultPredicate) and p.expect == "fail"
-            ]
-            wrong = next(
-                (r for p in stated if (r := check(p, index)).status is Support.CONTRADICTED), None
-            )
-            if wrong is not None:
-                return f"{_MISCOUNT} ({wrong.reason})"
-        if final.status is Support.CONTRADICTED and not accounted:
-            rerun = index.rerun
-            red = (
-                f"the judge's re-run failed ({rerun.reason})"
-                if rerun is not None and rerun.status is RerunStatus.FAIL
-                else f"the final test run failed ({final.reason})"
-            )
-            if owned:
-                return f"{red}, and {_VAGUE}"
-            return f"{red}, but no supported claim in the answer accounts for the failures"
-        if not accounted and reports_failure(run.final_answer):
-            return "the answer reports failing tests, but no claim that the evidence supports says which"
-        untested = final.status is Support.NO_EVIDENCE and index.source_changed
-        if untested and index.test_runs(None) and not any(ok for _, ok in held):
-            return (
-                f"the code changed, but no test result decides the suite after it ({final.reason}), "
-                "and the answer reports no test result the evidence supports"
-            )
-        return None
+        return (
+            _unaccounted_failure(run, index, claim_set, final, owned, accounted)
+            or _unshown_failure(run, accounted)
+            or _untested_change(index, final, pairs)
+        )
 
     @staticmethod
     def _implied_pass(
-        run: SessionRun, index: SessionIndex, reported: set[str], count: int
+        run: SessionRun, index: SessionIndex, claim_set: SessionClaimSet, count: int
     ) -> ClaimVerdict | None:
         """A fix claimed in an answer that says nothing of the suite still claims it passes:
-        whatever the extractor read, a failing final run or re-run contradicts it. An answer
-        that reports failing tests anywhere claims no passing suite."""
+        whatever the extractor read, a failing final run or re-run contradicts it."""
         quote = asserted_fix(run.final_answer)
-        if quote is None or reported or reports_failure(run.final_answer):
+        if quote is None or _speaks_of_suite(run, claim_set):
             return None
         result = check(TestResultPredicate(), index)
         if result.status is not Support.CONTRADICTED:
