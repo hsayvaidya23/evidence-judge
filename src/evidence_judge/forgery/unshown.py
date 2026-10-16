@@ -42,6 +42,9 @@ UNMODELLED_VARIANTS: Final = (
     "clip_path_shape",
     "contain_paint",
     "near_colour",
+    "transparent_gradient",
+    "empty_image",
+    "zero_size_image",
     "fixed_offscreen",
     "logical_inset",
     "text_indent",
@@ -57,6 +60,9 @@ _HIDING_STYLES: Final = {
     "clip_path_shape": "clip-path:path('M0 0')",
     "contain_paint": "height:0;contain:paint",
     "near_colour": "color:#fefefe",
+    "transparent_gradient": "color:#fff;background-image:linear-gradient(transparent,transparent)",
+    "empty_image": "color:#fff;background-image:url(data:,)",
+    "zero_size_image": "color:#fff;background:linear-gradient(#000,#000) 0 0/0 0 no-repeat",
     "fixed_offscreen": "position:fixed;top:-100vh",
     "logical_inset": "position:absolute;inset-inline-start:-10000px",
     "text_indent": "text-indent:100%;white-space:nowrap;overflow:hidden",
@@ -172,10 +178,11 @@ def unmodelled_hiding(run: Run, seed: int, targets: Targets) -> Run:
     property it sets), a transparent colour through a custom property whose name is escaped, a
     math function, a mask, a blur, a 3D rotation or a skew that turns the text edge-on, a clip
     path the reader does not measure, a zero-height box that contains its paint, a colour a
-    shade off the background, a fixed box above the viewport, a logical offset, an
-    image-replacement indent, or an SVG `font-size` attribute of 0. The page is recorded as the
-    trace ingester records it: its snapshot rendered by the page-text reader, so the texts are
-    text the page may hide (`unsure_text`) only while the reader keeps them there."""
+    shade off the background (white text over a transparent gradient, an empty image or one of
+    no size included), a fixed box above the viewport, a logical offset, an image-replacement
+    indent, or an SVG `font-size` attribute of 0. The page is recorded as the trace ingester
+    records it: its snapshot rendered by the page-text reader, so the texts are text the page
+    may hide (`unsure_text`) only while the reader keeps them there."""
     variant = pick_variant(run, seed, UNMODELLED_VARIANTS)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"

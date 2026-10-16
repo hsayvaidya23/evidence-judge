@@ -16,7 +16,8 @@ TRACKED: Final = words(
     "inset-block-start inset-block-end margin-left margin-top margin-inline-start "
     "margin-block-start height max-height width max-width block-size max-block-size "
     "inline-size max-inline-size overflow-x overflow-y contain font-size color "
-    "-webkit-text-fill-color text-indent background-color background-image background-clip "
+    "-webkit-text-fill-color text-indent background-color background-image background-size "
+    "background-clip "
     "-webkit-background-clip fill fill-opacity offset offset-path mask mask-image mask-border "
     "mask-border-source -webkit-mask -webkit-mask-image -webkit-mask-box-image"
 )
@@ -165,15 +166,7 @@ def expand(prop: str, value: str) -> Iterator[tuple[str, str]]:
         case "font":
             yield "font-size", _font_size(value)
         case "background":
-            if "url(" in value or "gradient(" in value or "image(" in value:
-                yield "background-color", "image"
-            else:
-                yield (
-                    "background-color",
-                    next((t for t in tokens(value) if parse_color(t) is not None), "transparent"),
-                )
-            if "text" in value.split():
-                yield "background-clip", "text"
+            yield from _background(value)
         case "inset":
             top, right, bottom, left = _sides(value)
             yield from (("top", top), ("right", right), ("bottom", bottom), ("left", left))
@@ -191,6 +184,44 @@ def expand(prop: str, value: str) -> Iterator[tuple[str, str]]:
             yield from (("overflow-x", first), ("overflow-y", rest[0] if rest else first))
         case _:
             yield prop, value
+
+
+def _background(value: str) -> Iterator[tuple[str, str]]:
+    """The ``background`` shorthand's colour (from its last layer), images and sizes."""
+    layers = split_commas(value) or ["none"]
+    images: list[str] = []
+    sizes: list[str] = []
+    colour = "transparent"
+    for at, layer in enumerate(layers):
+        found = [t for t in tokens(layer) if "(" in t and parse_color(t) is None]
+        images.append(found[0] if found else "none")
+        sizes.append(_layer_size(layer))
+        if at == len(layers) - 1:
+            colour = next((t for t in tokens(layer) if parse_color(t) is not None), colour)
+    yield "background-color", colour
+    yield "background-image", ", ".join(images)
+    yield "background-size", ", ".join(sizes)
+    if "text" in value.split():
+        yield "background-clip", "text"
+
+
+_SIZE_WORDS: Final = frozenset({"auto", "cover", "contain"})
+
+
+def _layer_size(layer: str) -> str:
+    """The size a ``background`` layer gives after ``/`` ("auto" when it gives none)."""
+    parts = tokens(layer)
+    for at, part in enumerate(parts):
+        if "/" in part and "(" not in part:
+            after = part.split("/", 1)[1]
+            following = ([after] if after else []) + parts[at + 1 : at + 3]
+            size: list[str] = []
+            for token in following[:2]:
+                if token not in _SIZE_WORDS and parse_number(token) is None and "(" not in token:
+                    break
+                size.append(token)
+            return " ".join(size) or "auto"
+    return "auto"
 
 
 def _sides(value: str) -> tuple[str, str, str, str]:

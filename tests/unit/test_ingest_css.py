@@ -486,6 +486,40 @@ def test_faint_text_through_its_ancestors(css: str, state: int) -> None:
 
 
 @pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{color:#fff;background-image:linear-gradient(transparent,transparent)}", UNSURE),
+        (".in{color:#fff;background-image:url(data:,)}", UNSURE),
+        (".in{color:#fff;background-image:url('')}", UNSURE),
+        (".in{color:#fff;background:linear-gradient(#000,#000) 0 0/0 0 no-repeat}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(#000,#000);background-size:0}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(#000,#fff)}", UNSURE),
+        (".in{color:#fff;background-image:radial-gradient(circle,#fefefe 0,#fff 90%)}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(currentcolor,currentcolor)}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(rgb(from red r g b),#000)}", UNSURE),
+        (
+            ".in{color:#fff;background-image:"
+            "-webkit-gradient(linear,left top,left bottom,from(#fff),to(#fff))}",
+            UNSURE,
+        ),
+        (".wrap{background:linear-gradient(#fff,#fff)}.in{color:#fff}", UNSURE),
+        (".in{color:#fff;background-image:linear-gradient(#000,#333)}", SHOWN),
+        (".in{color:#fff;background:linear-gradient(to right,#1e3c72 0%,#2a5298 100%)}", SHOWN),
+        (
+            ".in{color:#fff;background:linear-gradient(#0008,#0008),url(hero.jpg) center/cover}",
+            SHOWN,
+        ),
+        (".in{color:#fff;background:url(hero.jpg) center/cover}", SHOWN),
+        (".in{color:#fff;background-image:image-set('x.png' 1x)}", SHOWN),
+        (".in{background:linear-gradient(#fff,#eee)}", SHOWN),
+        (".wrap{background:#000}.in{color:#fff;background-image:url(data:,)}", SHOWN),
+    ],
+)
+def test_background_images_the_text_sits_on(css: str, state: int) -> None:
+    assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
     ("attrs", "state"),
     [
         ({}, SHOWN),

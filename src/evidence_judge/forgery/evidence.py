@@ -107,9 +107,10 @@ a start page, prepended before) everything the run really did:
   fully model: `opacity: 0`, a `:hover` rule (directly or through a custom property), a
   transparent colour through an escaped custom property name, a math function, a mask, a blur, a
   3D rotation or skew, a `path()` clip, a zero-height box that contains its paint, a
-  near-background colour, a fixed box above the viewport, a logical offset, an image-replacement
-  indent, or an SVG `font-size="0"`. The page is rendered by the page-text reader, so the texts
-  are in `unsure_text`, not `text`, only while it keeps them there.
+  near-background colour (white text over a transparent gradient, an empty image or one of no
+  size included), a fixed box above the viewport, a logical offset, an image-replacement indent,
+  or an SVG `font-size="0"`. The page is rendered by the page-text reader, so the texts are in
+  `unsure_text`, not `text`, only while it keeps them there.
 - `derived_echo`: it searches for the expected texts a few letters off (a letter left out, the
   last word in the plural, typed backwards, accented, in look-alike digits, or in another
   language) and the site shows them: "Did you mean: ...?", a results page that stems the plural

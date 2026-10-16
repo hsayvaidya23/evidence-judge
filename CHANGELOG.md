@@ -291,6 +291,16 @@ The first release.
   A declaration now splits at its first unescaped colon (`--a\:b` is one name), escapes in
   `@property` names and descriptors are read, and `!\69mportant` counts as `!important`. New
   `unmodelled_hiding` variant `escaped_custom_property`; it was a false SHOWN before the fix.
+- A `background-image` no longer switches off the colour comparison. `color: #fff` over
+  `linear-gradient(transparent, transparent)` or `url(data:,)` read as shown (it was unsure
+  before the colour comparison learnt about images). The reader now works out the colours a
+  gradient paints (each stop over what is behind it, `-webkit-gradient()` too) and finds text
+  unsure when it is faint against any of them; an empty image (`url()`, a `data:` URL with no
+  data), a fully transparent gradient and a layer of zero `background-size` paint nothing; a
+  gradient whose colours it cannot tell (relative colour syntax, too many colours) is unsure.
+  An image it cannot see (`url()` with content, `image-set()`) is still taken to give the text
+  contrast, as documented. New `unmodelled_hiding` variants `transparent_gradient`,
+  `empty_image` and `zero_size_image`; each was a false SHOWN before the fix.
 - Adversarial CSS no longer crashes the judge. `color: lab(1e308 1e308 1e308)` raised
   OverflowError, and a `var()` chain 400 deep, `calc()` nested 3000 deep, `color-mix()` nested
   500 deep, deep `var()` fallbacks, `:is()` / `:not()`, `@supports` conditions and nested blocks
