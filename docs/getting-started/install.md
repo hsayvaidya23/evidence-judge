@@ -79,7 +79,9 @@ heuristic claim extraction and deterministic checks only. See
 export ANTHROPIC_API_KEY=...   # or put it in a .env file next to where you run the CLI
 ```
 
-That is the only credential Evidence Judge reads. Every other setting is an `EVJ_*` environment
-variable with a safe default; see [Configuration](../reference/configuration.md).
+That is the only credential the judge itself reads. The OpenTelemetry, Langfuse and Phoenix
+integrations read their own (`OTEL_*`, `LANGFUSE_*`, `PHOENIX_*`; see
+[Integrations](../integrations.md)), and only when you use them. Every other setting is an `EVJ_*` environment variable with a safe default; see
+[Configuration](../reference/configuration.md).
 
 Next: [record a run](record-a-run.md).

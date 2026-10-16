@@ -12,7 +12,7 @@ You need [uv](https://docs.astral.sh/uv/) and Python 3.12 or 3.13.
 git clone https://github.com/hsayvaidya23/evidence-judge
 cd evidence-judge
 make install          # uv sync --locked + Playwright chromium
-pre-commit install    # optional: ruff on every commit
+uv run pre-commit install   # optional: ruff and file checks on every commit
 make ci               # ruff, format check, pyright strict, unit tests
 make e2e              # end-to-end tests against a real browser
 ```
@@ -100,7 +100,10 @@ a `.dev` version whose docs say otherwise.
 A maintainer cuts releases from `main`:
 
 1. Set `version` in `pyproject.toml` to the release (`0.1.0`, without the `.dev0` suffix) and
-   run `uv lock`.
+   run `uv lock`. The Claude Code plugin's `plugin.json` and the Gemini CLI extension's
+   `gemini-extension.json` (under `plugins/`) carry the release version without the suffix;
+   when the next release changes, change them with it. `tests/unit/test_plugin_manifests.py`
+   fails while they differ from `pyproject.toml`.
 2. In `CHANGELOG.md`, rename `[Unreleased]` to a dated section (`## [0.1.0] - 2026-11-02`),
    add a new empty `[Unreleased]` above it, and update the link references at the bottom.
    `release.yml` takes the release notes from the `## [X.Y.Z]` section and fails when there is

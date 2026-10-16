@@ -113,6 +113,11 @@ The first release.
   1398 runs per judge, 37 evidence-tampering kinds, 37/41 honest controls), and a test fails
   when they drift. The architecture page covers the session judge, hooks and MCP server, and a
   new getting-started page walks through judging a Claude Code session.
+- `pre-commit` is a dev dependency, so the `pre-commit install` step in CONTRIBUTING works after
+  `make install`; the configuration reference lists every `EVJ_HOOK_*` variable; the verdict
+  schema example imports `RunVerdict` from `evidence_judge`; the install page says the
+  integrations read their own credentials; the sdist ships `Makefile` and `uv.lock`, and the
+  package declares the operating systems it is tested on (Linux and macOS).
 
 ### Fixed
 

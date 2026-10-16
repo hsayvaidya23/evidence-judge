@@ -21,6 +21,8 @@ keywords = [
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Testing",
@@ -78,6 +80,7 @@ dev = [
   "arize-phoenix-client>=1.0",
   "inspect-ai>=0.3.100",
   "mcp>=2.3,<3",
+  "pre-commit>=4.0",
 ]
 docs = [
     "mkdocs-material>=9.6",
@@ -128,6 +131,8 @@ include = [
   "mkdocs.yml",
   "Dockerfile",
   ".github",
+  "Makefile",
+  "uv.lock",
 ]
 exclude = ["docs/assets/*.png", "docs/assets/*.webp"]
 
