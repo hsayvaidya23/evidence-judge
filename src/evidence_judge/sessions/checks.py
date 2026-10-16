@@ -139,6 +139,10 @@ def _result(status: Support, reason: str, *events: SessionEvent) -> PredicateRes
     return PredicateResult(status=status, reason=reason, citations=citations, checker=CHECKER)
 
 
+_ScopedPass = tuple[RunOutcome, list[str], int]
+"""A passing run, the session-relative paths it selected, and how many tests it ran."""
+
+
 class SessionIndex:
     """Derived facts the checkers share: the last workspace change, test runs and tampering."""
 
@@ -444,52 +448,25 @@ class SessionIndex:
         ran exactly the tests of an earlier whole-suite run, when no change since that run can
         have added a test it cannot count: then they ran every test of it. When several paths
         are combined and the session added tests or test files since, that run's output must
-        name every test file it ran, or a new file could stand in for one left out. Overlapping paths could count a
-        test twice, and a new test could stand in for one left out, so either rules it out."""
-        candidates = [
-            (o, scopes, total)
-            for o in reversed(outcomes)
-            if o.result is Result.PASS
-            and not self.run_env(o.event)
-            and (scopes := self.scopes(o.event)) is not None
-            and (total := suite_size(o.event)) is not None
-        ]
+        name every test file it ran, or a new file could stand in for one left out. Overlapping
+        paths could count a test twice, and a new test could stand in for one left out, so
+        either rules it out."""
+        candidates = self._scoped_passes(outcomes)
         if not candidates:
             return None
         newest = candidates[0][0].event
-        key = tuple(sorted(set(newest.analysis.runners)))
-        baselines = [
-            (suite_size(e) or 0, e)
-            for e in self.test_runs(None)
-            if e.seq < newest.seq
-            and tuple(sorted(set(e.analysis.runners))) == key
-            and self._scoped(e).whole
-        ]
-        if not baselines:
+        key = _runner_key(newest)
+        found = self._largest_baseline(newest, key)
+        if found is None:
             return None
-        size, baseline = max(baselines, key=lambda b: b[0])
+        size, baseline = found
         added = self._tests_added(baseline.seq)
         if size < (minimum or 1) or added is None:
             return None
-        chosen: list[tuple[RunOutcome, list[str], int]] = []
-        taken: list[str] = []
-        for outcome, scopes, total in candidates:
-            if tuple(sorted(set(outcome.event.analysis.runners))) != key:
-                continue
-            if _overlapping(scopes, taken):
-                continue
-            chosen.append((outcome, scopes, total))
-            taken.extend(scopes)
+        chosen, taken = _disjoint(candidates, key)
         if sum(total for _, _, total in chosen) != size + added:
             return None
-        changed = added or self._new_test_files(baseline.seq)
-        if len(taken) > 1 and changed and _every_file(baseline, size) is None:
-            return None
-        skipped = sum(o.event.summary.skipped for o, _, _ in chosen if o.event.summary)
-        if baseline.summary is not None and skipped > baseline.summary.skipped:
-            return None
-        named = [relative(path, self.run.cwd) for path in _NAMED_TEST_FILE.findall(baseline.output)]
-        if not all(any(_inside(path, scope) for scope in taken) for path in named):
+        if not self._accounts_for(baseline, size, added, chosen, taken):
             return None
         ids = ", ".join(o.event.id for o, _, _ in reversed(chosen))
         where = ", ".join(sorted(taken))
@@ -503,6 +480,51 @@ class SessionIndex:
             f"whole-suite run {baseline.id}, {since}"
         )
         return RunOutcome(chosen[0][0].event, Result.PASS, reason, None)
+
+    def _scoped_passes(self, outcomes: list[RunOutcome]) -> list[_ScopedPass]:
+        """Passing runs selected only by plain paths, in a clean environment, whose size is
+        known, newest first."""
+        return [
+            (o, scopes, total)
+            for o in reversed(outcomes)
+            if o.result is Result.PASS
+            and not self.run_env(o.event)
+            and (scopes := self.scopes(o.event)) is not None
+            and (total := suite_size(o.event)) is not None
+        ]
+
+    def _largest_baseline(
+        self, newest: CommandEvent, key: tuple[str, ...]
+    ) -> tuple[int, CommandEvent] | None:
+        """The largest whole-suite run of the same runners before `newest`, and its size."""
+        baselines = [
+            (suite_size(e) or 0, e)
+            for e in self.test_runs(None)
+            if e.seq < newest.seq and _runner_key(e) == key and self._scoped(e).whole
+        ]
+        if not baselines:
+            return None
+        return max(baselines, key=lambda b: b[0])
+
+    def _accounts_for(
+        self,
+        baseline: CommandEvent,
+        size: int,
+        added: int,
+        chosen: list[_ScopedPass],
+        taken: list[str],
+    ) -> bool:
+        """The chosen runs, whose sizes add up to the baseline's, ran its tests and no others:
+        a new test file cannot stand in for one left out, they skipped no more tests than it,
+        and every test file its output names lies under one of their paths."""
+        changed = added or self._new_test_files(baseline.seq)
+        if len(taken) > 1 and changed and _every_file(baseline, size) is None:
+            return False
+        skipped = sum(o.event.summary.skipped for o, _, _ in chosen if o.event.summary)
+        if baseline.summary is not None and skipped > baseline.summary.skipped:
+            return False
+        named = [relative(path, self.run.cwd) for path in _NAMED_TEST_FILE.findall(baseline.output)]
+        return all(any(_inside(path, scope) for scope in taken) for path in named)
 
     def largest_whole_suite(self) -> tuple[int, CommandEvent] | None:
         """The most tests a passing whole-suite run in the session ran, and that run."""
@@ -533,6 +555,27 @@ _NAMED_TEST_FILE: Final = re.compile(r"([\w./-]+\.\w+)(?:::|:\d+:)")
 
 _NODE_ID: Final = re.compile(r"([\w./-]+\.\w+)::\S+")
 _PROGRESS: Final = re.compile(r"^([\w./-]+\.\w+) ([.FEsxX]+)\s*(?:\[\s*\d+%\])?\s*$", re.M)
+
+
+def _runner_key(event: CommandEvent) -> tuple[str, ...]:
+    return tuple(sorted(set(event.analysis.runners)))
+
+
+def _disjoint(
+    candidates: list[_ScopedPass], key: tuple[str, ...]
+) -> tuple[list[_ScopedPass], list[str]]:
+    """The newest runs of the `key` runners whose paths overlap none taken before, and those
+    paths."""
+    chosen: list[_ScopedPass] = []
+    taken: list[str] = []
+    for outcome, scopes, total in candidates:
+        if _runner_key(outcome.event) != key:
+            continue
+        if _overlapping(scopes, taken):
+            continue
+        chosen.append((outcome, scopes, total))
+        taken.extend(scopes)
+    return chosen, taken
 
 
 def _every_file(event: CommandEvent, size: int) -> set[str] | None:
