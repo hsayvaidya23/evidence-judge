@@ -28,7 +28,7 @@ from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.ingest import attach_har, load_playwright_trace
 
 BUDGET_S = 2.0
-TRACE_BUDGET_S = 10.0
+TRACE_BUDGET_S = 3.0
 NETWORK_EVENTS = 20_000
 ACTIONS = 5_000
 FRAMES = 2_000
@@ -204,7 +204,7 @@ def test_large_trace_loads_within_budget(large_trace: Path) -> None:
 
 STYLED_SNAPSHOTS = 100
 STYLED_ELEMENTS = 2_000
-STYLED_BUDGET_S = 20.0
+STYLED_BUDGET_S = 12.0
 STYLE_RULES = 10_000
 
 

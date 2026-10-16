@@ -184,7 +184,7 @@ shape the pipeline:
 | `ingest/_calls.py` | Recorded Playwright calls: user actions, the deny-by-default INJECT allowlist, action values, route handler calls |
 | `ingest/har.py`, `ingest/_network.py` | HAR logs and HAR entries → network events |
 | `ingest/browser_use.py` | browser-use histories → `Run` |
-| `ingest/_dom.py` | Playwright frame snapshots → page text (shown), text the page may hide, and what they show hidden; shadow roots and slots |
+| `ingest/dom/` | Playwright frame snapshots → page text (shown), text the page may hide, and what they show hidden; shadow roots and slots. `store.py` keeps each frame's snapshots and resolves back-references, `render.py` walks one snapshot with its tree scopes, slots, form controls and frames, `nodes.py` reads node shapes, tags and attributes, and `model.py` holds the types they share |
 | `ingest/css/` | The cascade of a tree scope's stylesheets: whether each element shows, is hidden for certain, or may be hidden by styles the reader does not fully model. `cascade.py` reads and indexes the rules (layers, `@import`, nesting) and picks each property's value, `selector.py` and `matching.py` parse and match selectors, `visibility.py` decides what the winning values hide, `conditions.py` evaluates `@media` and `@supports`, `variables.py` substitutes custom properties into `var()`, `colors.py` reads colours, and `syntax.py`, `values.py` (with the `calc()` evaluator) and `model.py` hold the CSS text, value and data types they share |
 | `core/evidence.py` | `Run` and its events |
 | `core/index.py` | `EvidenceIndex`, the read side every checker uses |

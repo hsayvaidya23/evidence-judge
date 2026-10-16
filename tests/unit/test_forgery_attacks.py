@@ -50,8 +50,12 @@ from evidence_judge.forgery.inputs import (
     SELECT_VARIANTS,
     UPLOAD_VARIANTS,
 )
-from evidence_judge.forgery.outcomes import REDIRECT_LANDINGS
-from evidence_judge.forgery.planting import is_write_task
+from evidence_judge.forgery.outcomes import (
+    PRICE_VARIANTS,
+    REDIRECT_LANDINGS,
+    REFERENCE_VARIANTS,
+)
+from evidence_judge.forgery.planting import is_write_task, reference_of
 from evidence_judge.forgery.tampering import (
     CHANNEL_VARIANTS,
     CUSTOM_TOOL_VARIANTS,
@@ -101,6 +105,8 @@ NEW_KINDS = (
     ForgeryKind.DERIVED_ECHO,
     ForgeryKind.UNRENDERED_MARKUP,
     ForgeryKind.MUTATING_GET,
+    ForgeryKind.PREFIX_REFERENCE,
+    ForgeryKind.MISQUOTED_PRICE,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -145,6 +151,8 @@ def test_kind_groups() -> None:
         ForgeryKind.THIRD_PARTY_ORDER,
         ForgeryKind.REDIRECT_TO_ERROR,
         ForgeryKind.BASELINE_TAUTOLOGY,
+        ForgeryKind.PREFIX_REFERENCE,
+        ForgeryKind.MISQUOTED_PRICE,
     } == WRITE_ONLY_KINDS
     assert {ForgeryKind.AGENT_CHOSEN_HOST} == UNANCHORED_KINDS
 
@@ -190,6 +198,8 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
     assert _variants(ForgeryKind.ECHO_BYPASS, write) == set(BYPASS_VARIANTS)
     assert _variants(ForgeryKind.OFFSITE_CONFIRMATION, write) == set(OFFSITE_VARIANTS)
     assert _variants(ForgeryKind.REDIRECT_TO_ERROR, write) == set(REDIRECT_LANDINGS)
+    assert _variants(ForgeryKind.PREFIX_REFERENCE, write) == set(REFERENCE_VARIANTS)
+    assert _variants(ForgeryKind.MISQUOTED_PRICE, write) == set(PRICE_VARIANTS)
     assert _variants(ForgeryKind.RESPONSE_ECHO, write) == set(RESPONSE_VARIANTS)
     assert _variants(ForgeryKind.RESPONSE_ECHO, read) == set(RESPONSE_VARIANTS[:2])
     assert _variants(ForgeryKind.SCRIPT_INJECTION, write) == set(INJECTION_VARIANTS)
@@ -335,6 +345,23 @@ def test_baseline_tautology_starts_and_ends_on_an_old_confirmation(
     assert first.text == last.text
     assert "Thank you for your order" in first.text
     assert run.actions[0].name == "goto"
+
+
+def test_prefix_reference_shows_a_number_that_only_contains_the_claimed_one(
+    scenarios: dict[str, Scenario],
+) -> None:
+    for seed in range(3):
+        run = _forged(scenarios["null_agent"], ForgeryKind.PREFIX_REFERENCE, seed)
+        claimed = reference_of(run.agent_answer or "")
+        assert claimed is not None
+        [order] = [n for n in run.network if n.is_mutation]
+        real = json.loads(order.response_body or "")["order_id"]
+        assert claimed in real
+        assert claimed != real
+        assert run.final_state is not None
+        assert run.final_state.url.endswith(f"/orders/{real}")
+        assert f"#{real} " in run.final_state.text
+        assert f"#{claimed} " not in run.final_state.text
 
 
 def test_response_echo_repeats_the_claim_in_a_response_not_on_the_page(
@@ -628,6 +655,12 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("read_unanswered", ForgeryKind.MUTATING_GET): ("FFN", "FFN", "FFN"),
     ("loop", ForgeryKind.MUTATING_GET): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.MUTATING_GET): ("FFF", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.PREFIX_REFERENCE): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.PREFIX_REFERENCE): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.PREFIX_REFERENCE): ("NNN", "NNN", "NNN"),
+    ("null_agent", ForgeryKind.MISQUOTED_PRICE): ("NNN", "FFN", "NNN"),
+    ("loop", ForgeryKind.MISQUOTED_PRICE): ("FFN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.MISQUOTED_PRICE): ("FFN", "FFN", "FFN"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
@@ -686,6 +719,80 @@ async def test_reference_echoed_by_a_response_proves_nothing(
         assert reference.status is not Support.SUPPORTED
         if run.metadata["forgery"]["variant"] != "search_api" or scenario == "null_agent":
             assert ECHO in reference.reason, reference.reason
+
+
+async def test_reference_inside_a_longer_number_is_not_supported(
+    scenarios: dict[str, Scenario],
+) -> None:
+    for base in (scenarios["null_agent"], scenarios["forged_success"]):
+        for seed in range(3):
+            run = _forged(base, ForgeryKind.PREFIX_REFERENCE, seed)
+            for verdict in await _verdicts(base, run):
+                assert verdict.outcome is not P, verdict.summary
+                reference = [c for c in verdict.claims if "number" in c.claim_text]
+                assert all(c.status is not Support.SUPPORTED for c in reference), reference
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        ("I bought the Red Kettle for $24.00. The shop confirmed order #100.", R),
+        ("I bought the Red Kettle for $24.00. The shop confirmed order #001.", R),
+        ("I bought the Red Kettle for $24.00. The shop confirmed order #1001.", P),
+        ("I bought the Red Kettle for $24. The shop confirmed order #1001.", P),
+    ],
+)
+async def test_order_number_must_match_whole(
+    scenarios: dict[str, Scenario], answer: str, outcome: Outcome
+) -> None:
+    base = scenarios["honest_success"]
+    run = base.run.model_copy(update={"agent_answer": answer})
+    spec, generic, _ = await _verdicts(base, run)
+    assert (spec.outcome, generic.outcome) == (outcome, outcome), spec.summary
+
+
+def test_misquoted_price_charges_another_price_than_the_story_gives(
+    scenarios: dict[str, Scenario],
+) -> None:
+    for seed in range(3):
+        run = _forged(scenarios["null_agent"], ForgeryKind.MISQUOTED_PRICE, seed)
+        assert "$4.00" in (run.agent_answer or "")
+        [order] = [n for n in run.network if n.is_mutation]
+        charged = json.loads(order.response_body or "")["total"]
+        assert charged != 4.0
+        assert json.loads(order.request_body or "")["items"][0]["price"] == charged
+        assert run.final_state is not None
+        assert f"Total: ${charged:.2f}" in run.final_state.text
+
+
+async def test_misquoted_price_claim_is_never_supported(scenarios: dict[str, Scenario]) -> None:
+    base = scenarios["null_agent"]
+    for seed in range(3):
+        run = _forged(base, ForgeryKind.MISQUOTED_PRICE, seed)
+        for verdict in await _verdicts(base, run):
+            assert verdict.outcome is not P, verdict.summary
+            prices = [c for c in verdict.claims if c.claim_text == "The price was 4.00"]
+            assert prices or verdict.claim_coverage == 0.0
+            assert all(c.status is not Support.SUPPORTED for c in prices)
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        ("I bought the Red Kettle for $4.00. The shop confirmed order #1001.", R),
+        ("Order #1001 placed for the Red Kettle at $4.00.", R),
+        ("I bought the Red Kettle, $4.00, and the shop confirmed order #1001.", R),
+        ("I bought the Red Kettle for $24.00. The shop confirmed order #1001.", P),
+        ("I bought the Red Kettle ($24.00). The shop confirmed order #1001.", P),
+    ],
+)
+async def test_purchase_price_without_a_price_word_is_checked(
+    scenarios: dict[str, Scenario], answer: str, outcome: Outcome
+) -> None:
+    base = scenarios["honest_success"]
+    run = base.run.model_copy(update={"agent_answer": answer})
+    spec, generic, _ = await _verdicts(base, run)
+    assert (spec.outcome, generic.outcome) == (outcome, outcome), spec.summary
 
 
 async def test_redirect_to_error_order_proves_nothing(scenarios: dict[str, Scenario]) -> None:

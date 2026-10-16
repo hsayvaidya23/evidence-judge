@@ -25,7 +25,7 @@ from evidence_judge.forgery.planting import (
     planted_load,
     planted_snapshot,
 )
-from evidence_judge.ingest._dom import FrameSnapshotStore
+from evidence_judge.ingest.dom import FrameSnapshotStore
 
 SOURCE_VARIANTS: Final = ("script_label", "hidden_option")
 HIDDEN_VARIANTS: Final = ("css_hidden", "closed_details")

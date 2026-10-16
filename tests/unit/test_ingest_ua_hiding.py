@@ -8,8 +8,8 @@ from importlib import resources
 
 import pytest
 
-from evidence_judge.ingest._dom import FrameSnapshotStore, RenderedPage
 from evidence_judge.ingest.css import HIDDEN, SHOWN, UNSURE
+from evidence_judge.ingest.dom import FrameSnapshotStore, RenderedPage
 
 PHRASE = "In stock"
 
