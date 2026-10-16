@@ -4,19 +4,31 @@ from __future__ import annotations
 
 import asyncio
 import json
-from enum import IntEnum
 from pathlib import Path
 from textwrap import indent
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
-from pydantic import ValidationError
-from rich.console import Console
 from rich.text import Text
 
+from evidence_judge._cli_common import (
+    IN_FILE,
+    OUT_FILE,
+    OUTCOME_EXIT,
+    CliError,
+    Debug,
+    ExitCode,
+    build_llm,
+    fail,
+    internal,
+    load_claims,
+    load_settings,
+    stderr,
+    write_output,
+)
 from evidence_judge._version import __version__
-from evidence_judge.config import Settings, describe_settings_error, stable_redaction_key
-from evidence_judge.core.spec_errors import SpecError, json_syntax_problem, load_yaml
+from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.core.spec_errors import SpecError, load_yaml
 from evidence_judge.core.verdict import (
     Citation,
     ExpectationResult,
@@ -25,10 +37,9 @@ from evidence_judge.core.verdict import (
     Verification,
     VerificationMethod,
 )
-from evidence_judge.llm import factory
-from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
+from evidence_judge.llm.base import LLMConfigError, LLMError
 from evidence_judge.redact import Redactor
-from evidence_judge.report.console import StderrConsole, StdoutConsole, print_verdict
+from evidence_judge.report.console import StdoutConsole, print_verdict
 from evidence_judge.report.json_report import write_json
 from evidence_judge.sessions.ingest import load_session, locate
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
@@ -38,43 +49,12 @@ from evidence_judge.sessions.redaction import redact_claims, redact_session, red
 from evidence_judge.sessions.report import print_session, summarize
 from evidence_judge.sessions.rerun import RerunResult, RerunSpec, RerunStatus, execute
 
-
-class _Exit(IntEnum):
-    """The same exit codes as `evidence-judge judge`."""
-
-    PASS = 0
-    FAIL = 1
-    NEEDS_REVIEW = 2
-    USAGE = 3
-    INTERNAL = 4
-
-
-_OUTCOME_EXIT = {
-    Outcome.PASS: _Exit.PASS,
-    Outcome.FAIL: _Exit.FAIL,
-    Outcome.NEEDS_REVIEW: _Exit.NEEDS_REVIEW,
-}
-
 session_app = typer.Typer(
     name="session",
     help="Grade coding-agent sessions (Claude Code, Codex) against their tool-call log.",
     no_args_is_help=True,
 )
 
-
-class _Error(Exception):
-    def __init__(self, message: str, code: _Exit) -> None:
-        super().__init__(message)
-        self.code = code
-
-
-_IN_FILE: dict[str, Any] = {
-    "exists": True,
-    "dir_okay": False,
-    "readable": True,
-    "resolve_path": True,
-}
-_OUT_FILE: dict[str, Any] = {"dir_okay": False, "writable": True, "resolve_path": True}
 
 _ClaudeCode = Annotated[
     str | None,
@@ -124,16 +104,16 @@ _RerunBaseline = Annotated[
 ]
 _Codex = Annotated[
     Path | None,
-    typer.Option(help="Codex `exec --json` output or rollout .jsonl", **_IN_FILE),
+    typer.Option(help="Codex `exec --json` output or rollout .jsonl", **IN_FILE),
 ]
 _EvidenceLog = Annotated[
     Path | None,
-    typer.Option("--evidence-log", help="Evidence-recorder log (session-evidence v1)", **_IN_FILE),
+    typer.Option("--evidence-log", help="Evidence-recorder log (session-evidence v1)", **IN_FILE),
 ]
 _LogKey = Annotated[
     Path | None,
     typer.Option(
-        "--log-key", help="Evidence-log key (default: the hooks' state dir log-key)", **_IN_FILE
+        "--log-key", help="Evidence-log key (default: the hooks' state dir log-key)", **IN_FILE
     ),
 ]
 _LogAnchor = Annotated[
@@ -142,14 +122,9 @@ _LogAnchor = Annotated[
         "--log-anchor",
         help="Evidence-log head anchor (default: by session, in --log-key's directory, else "
         "the hooks' state dir)",
-        **_IN_FILE,
+        **IN_FILE,
     ),
 ]
-_Debug = Annotated[bool, typer.Option("--debug", help="Show tracebacks for internal errors")]
-
-
-def _stderr() -> Console:
-    return StderrConsole()
 
 
 def _load(
@@ -162,9 +137,11 @@ def _load(
     log_anchor: Path | None = None,
 ) -> SessionRun:
     if not (claude_code or codex or evidence_log):
-        raise _Error("provide a session with --claude-code, --codex or --evidence-log", _Exit.USAGE)
+        raise CliError(
+            "provide a session with --claude-code, --codex or --evidence-log", ExitCode.USAGE
+        )
     if claude_code and codex:
-        raise _Error("use either --claude-code or --codex, not both", _Exit.USAGE)
+        raise CliError("use either --claude-code or --codex, not both", ExitCode.USAGE)
     try:
         transcript = locate(claude_code, project=project) if claude_code else None
         return load_session(
@@ -176,14 +153,7 @@ def _load(
             log_anchor=log_anchor,
         )
     except (OSError, ValueError) as e:
-        raise _Error(f"could not load the session: {e}", _Exit.USAGE) from e
-
-
-def _settings() -> Settings:
-    try:
-        return Settings()
-    except ValidationError as e:
-        raise _Error(f"invalid settings: {describe_settings_error(e)}", _Exit.USAGE) from e
+        raise CliError(f"could not load the session: {e}", ExitCode.USAGE) from e
 
 
 def _redactor(settings: Settings, *, persistent: bool) -> Redactor:
@@ -204,69 +174,27 @@ def _spec(path: Path | None) -> SessionSpec | None:
         return load_yaml(path.read_text(encoding="utf-8"), SessionSpec)
     except SpecError as e:
         if any(p.location == "id" and p.type == "extra_forbidden" for p in e.problems):
-            raise _Error(
+            raise CliError(
                 f"invalid session spec {path}: this looks like a browser task spec; use "
                 "evidence-judge judge --spec",
-                _Exit.USAGE,
+                ExitCode.USAGE,
             ) from e
-        raise _Error(f"invalid session spec {path}:\n{indent(str(e), '  ')}", _Exit.USAGE) from e
+        raise CliError(
+            f"invalid session spec {path}:\n{indent(str(e), '  ')}", ExitCode.USAGE
+        ) from e
     except (OSError, ValueError) as e:
-        raise _Error(f"invalid session spec {path}: {e}", _Exit.USAGE) from e
-
-
-def _claims(path: Path | None) -> SessionClaimSet | None:
-    if path is None:
-        return None
-    try:
-        data = path.read_bytes()
-    except OSError as e:
-        raise _Error(f"cannot read claims file {path}: {e.strerror}", _Exit.USAGE) from e
-    if (problem := json_syntax_problem(data)) is not None:
-        raise _Error(f"--claims: not valid JSON ({problem})", _Exit.USAGE)
-    try:
-        return SessionClaimSet.model_validate_json(data)
-    except ValidationError as e:
-        problems = "; ".join(
-            f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['type']}"
-            for err in e.errors(include_url=False, include_input=False, include_context=False)
-        )
-        raise _Error(f"invalid claims file {path}: {problems}", _Exit.USAGE) from e
+        raise CliError(f"invalid session spec {path}: {e}", ExitCode.USAGE) from e
 
 
 def _answer(answer: str | None, answer_file: Path | None) -> str | None:
     if answer is not None and answer_file is not None:
-        raise _Error("use either --answer or --answer-file, not both", _Exit.USAGE)
+        raise CliError("use either --answer or --answer-file, not both", ExitCode.USAGE)
     if answer_file is None:
         return answer
     try:
         return answer_file.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        raise _Error(f"cannot read answer file {answer_file}: {e}", _Exit.USAGE) from e
-
-
-def _llm(settings: Settings, offline: bool) -> LLMClient | None:
-    if offline:
-        return None
-    try:
-        return factory.build_llm(settings)
-    except LLMError as e:
-        raise _Error(f"could not initialise the LLM client: {e}", _Exit.INTERNAL) from e
-
-
-def _fail(e: _Error) -> typer.Exit:
-    _stderr().print(Text.assemble(("error: ", "bold red"), str(e)))
-    return typer.Exit(int(e.code))
-
-
-def _internal(e: Exception) -> typer.Exit:
-    _stderr().print(
-        Text.assemble(
-            ("internal error: ", "bold red"),
-            f"{type(e).__name__}: {e}",
-            ("  (re-run with --debug for a traceback)", "dim"),
-        )
-    )
-    return typer.Exit(int(_Exit.INTERNAL))
+        raise CliError(f"cannot read answer file {answer_file}: {e}", ExitCode.USAGE) from e
 
 
 @session_app.command("judge")
@@ -287,14 +215,14 @@ def judge_command(
     ] = False,
     answer: Annotated[str | None, typer.Option(help="Use this as the agent's final answer")] = None,
     answer_file: Annotated[
-        Path | None, typer.Option(help="File with the agent's final answer", **_IN_FILE)
+        Path | None, typer.Option(help="File with the agent's final answer", **IN_FILE)
     ] = None,
-    spec: Annotated[Path | None, typer.Option(help="Session spec YAML", **_IN_FILE)] = None,
+    spec: Annotated[Path | None, typer.Option(help="Session spec YAML", **IN_FILE)] = None,
     claims: Annotated[
-        Path | None, typer.Option(help="Pre-extracted session claims JSON", **_IN_FILE)
+        Path | None, typer.Option(help="Pre-extracted session claims JSON", **IN_FILE)
     ] = None,
     out: Annotated[
-        Path | None, typer.Option(help="Write the verdict JSON here", **_OUT_FILE)
+        Path | None, typer.Option(help="Write the verdict JSON here", **OUT_FILE)
     ] = None,
     offline: Annotated[
         bool, typer.Option("--offline", help="No LLM calls; heuristic claim extraction only")
@@ -328,16 +256,16 @@ def judge_command(
     rerun_baseline: _RerunBaseline = None,
     run_id: Annotated[str | None, typer.Option(help="Override the run id")] = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
-    debug: _Debug = False,
+    debug: Debug = False,
 ) -> None:
     """Judge a coding-agent session.
 
     Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
-    err = _stderr()
+    err = stderr()
     try:
-        settings = _settings()
+        settings = load_settings()
         session_spec = _spec(spec)
-        claim_set = _claims(claims)
+        claim_set = load_claims(claims, SessionClaimSet) if claims else None
         run = _load(
             claude_code,
             project,
@@ -352,7 +280,7 @@ def judge_command(
             if rerun
             else None
         )
-        llm = _llm(settings, offline)
+        llm = None if offline else build_llm(settings)
         if settings.redact and not no_redact:
             redactor = _redactor(settings, persistent=llm is not None)
             run, report = redact_session(redactor, run)
@@ -376,30 +304,27 @@ def judge_command(
         )
         verdict = _run(SessionJudge(llm, max_cost_usd=settings.max_cost_usd), run, options)
         if out:
-            try:
-                write_json(verdict, out)
-            except OSError as e:
-                raise _Error(f"cannot write {out}: {e.strerror or e}", _Exit.USAGE) from e
-    except _Error as e:
-        raise _fail(e) from None
+            write_output(out, lambda p: write_json(verdict, p))
+    except CliError as e:
+        raise fail(e) from None
     except Exception as e:
         if debug:
             raise
-        raise _internal(e) from None
+        raise internal(e) from None
     if not quiet:
         print_verdict(verdict, StdoutConsole())
         if out:
             err.print(Text.assemble(("wrote json ", "dim"), str(out)))
-    raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
+    raise typer.Exit(int(OUTCOME_EXIT[verdict.outcome]))
 
 
 def _rerun_spec(spec: SessionSpec | None) -> RerunSpec:
     if spec is None:
-        raise _Error("--rerun needs a session spec (--spec) with a rerun: block", _Exit.USAGE)
+        raise CliError("--rerun needs a session spec (--spec) with a rerun: block", ExitCode.USAGE)
     if spec.rerun is None:
-        raise _Error(
+        raise CliError(
             "the spec has no rerun: block (session rerun and session judge --rerun need one)",
-            _Exit.USAGE,
+            ExitCode.USAGE,
         )
     return spec.rerun
 
@@ -414,7 +339,7 @@ def _rerun(
 ) -> RerunResult:
     root = (project or Path.cwd()).resolve()
     if not quiet:
-        _stderr().print(
+        stderr().print(
             Text(f"re-running {' '.join(spec.command)} on a copy of {root}", style="dim")
         )
     return execute(spec, root, base=base or spec.base, session_cwd=session_cwd, baseline=baseline)
@@ -463,15 +388,15 @@ def rerun_verdict(
 
 @session_app.command("rerun")
 def rerun_command(
-    spec: Annotated[Path, typer.Option(help="Session spec YAML with a rerun: block", **_IN_FILE)],
+    spec: Annotated[Path, typer.Option(help="Session spec YAML with a rerun: block", **IN_FILE)],
     project: _RerunProject = None,
     rerun_base: _RerunBase = None,
     rerun_baseline: _RerunBaseline = None,
     out: Annotated[
-        Path | None, typer.Option(help="Write the verdict JSON here", **_OUT_FILE)
+        Path | None, typer.Option(help="Write the verdict JSON here", **OUT_FILE)
     ] = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
-    debug: _Debug = False,
+    debug: Debug = False,
 ) -> None:
     """Re-run the spec's tests on a clean copy of the project and judge the runner's report.
 
@@ -485,30 +410,27 @@ def rerun_command(
             task=session_spec.task if session_spec else None,
         )
         if out:
-            try:
-                write_json(verdict, out)
-            except OSError as e:
-                raise _Error(f"cannot write {out}: {e.strerror or e}", _Exit.USAGE) from e
-    except _Error as e:
-        raise _fail(e) from None
+            write_output(out, lambda p: write_json(verdict, p))
+    except CliError as e:
+        raise fail(e) from None
     except Exception as e:
         if debug:
             raise
-        raise _internal(e) from None
+        raise internal(e) from None
     if not quiet:
         print_verdict(verdict, StdoutConsole(), claims=False)
         if out:
-            _stderr().print(Text.assemble(("wrote json ", "dim"), str(out)))
-    raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
+            stderr().print(Text.assemble(("wrote json ", "dim"), str(out)))
+    raise typer.Exit(int(OUTCOME_EXIT[verdict.outcome]))
 
 
 def _run(judge: SessionJudge, run: SessionRun, options: SessionJudgeOptions) -> RunVerdict:
     try:
         return asyncio.run(judge.judge(run, options))
     except LLMConfigError as e:
-        raise _Error(f"{e} (use --offline to judge without a model)", _Exit.INTERNAL) from e
+        raise CliError(f"{e} (use --offline to judge without a model)", ExitCode.INTERNAL) from e
     except LLMError as e:
-        raise _Error(f"LLM error: {e}", _Exit.INTERNAL) from e
+        raise CliError(f"LLM error: {e}", ExitCode.INTERNAL) from e
 
 
 @session_app.command("inspect")
@@ -521,20 +443,20 @@ def inspect_command(
     no_redact: Annotated[
         bool, typer.Option("--no-redact", help="Show commands unredacted")
     ] = False,
-    debug: _Debug = False,
+    debug: Debug = False,
 ) -> None:
     """Summarise a coding-agent session (commands, edits, test runs) without judging it."""
     try:
-        settings = _settings()
+        settings = load_settings()
         run = _load(claude_code, project, codex, evidence_log)
         if settings.redact and not no_redact:
             run, _ = redact_session(_redactor(settings, persistent=False), run)
-    except _Error as e:
-        raise _fail(e) from None
+    except CliError as e:
+        raise fail(e) from None
     except Exception as e:
         if debug:
             raise
-        raise _internal(e) from None
+        raise internal(e) from None
     if as_json:
         typer.echo(json.dumps(summarize(run), indent=2, ensure_ascii=False))
     else:

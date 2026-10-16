@@ -3,14 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import zipfile
-from collections.abc import Callable
-from enum import IntEnum, StrEnum
 from pathlib import Path
 from textwrap import indent
 from typing import Annotated, Any
 
 import typer
-from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 from typer._click.core import Context  # pyright: ignore[reportPrivateUsage]
@@ -18,15 +15,32 @@ from typer._click.exceptions import UsageError  # pyright: ignore[reportPrivateU
 from typer.core import TyperGroup
 
 from evidence_judge import engine, ingest
+from evidence_judge._cli_common import (
+    IN_FILE,
+    OUT_FILE,
+    OUTCOME_EXIT,
+    CliError,
+    Debug,
+    ExitCode,
+    FileOpt,
+    LLMChoice,
+    build_llm,
+    fail,
+    internal,
+    load_claims,
+    load_settings,
+    stderr,
+    write_output,
+)
 from evidence_judge._extras import needs_extra
 from evidence_judge._version import __version__
-from evidence_judge.config import Settings, describe_settings_error, stable_redaction_key
+from evidence_judge.config import Settings, stable_redaction_key
 from evidence_judge.core.claims import ClaimSet
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
-from evidence_judge.core.spec_errors import SpecError, json_syntax_problem, load_yaml
+from evidence_judge.core.spec_errors import SpecError, load_yaml
 from evidence_judge.core.taskspec import TaskSpec
-from evidence_judge.core.verdict import Outcome, RunVerdict
+from evidence_judge.core.verdict import RunVerdict
 from evidence_judge.hooks.cli import hook_app
 from evidence_judge.ingest import MismatchedEvidenceError
 from evidence_judge.integrations import exporters
@@ -35,7 +49,6 @@ from evidence_judge.llm.base import LLMClient, LLMConfigError, LLMError
 from evidence_judge.llm.budget import Budget
 from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import (
-    StderrConsole,
     StdoutConsole,
     guard_std_streams,
     print_evidence_summary,
@@ -46,27 +59,7 @@ from evidence_judge.report.html_report import write_html
 from evidence_judge.report.json_report import export_schema, schema_to_json, write_json
 from evidence_judge.sessions.cli import session_app
 
-
-class ExitCode(IntEnum):
-    PASS = 0
-    FAIL = 1
-    NEEDS_REVIEW = 2
-    USAGE = 3
-    INTERNAL = 4
-
-
-_OUTCOME_EXIT = {
-    Outcome.PASS: ExitCode.PASS,
-    Outcome.FAIL: ExitCode.FAIL,
-    Outcome.NEEDS_REVIEW: ExitCode.NEEDS_REVIEW,
-}
 _INPUT_ERRORS: tuple[type[Exception], ...] = (OSError, ValueError, zipfile.BadZipFile)
-
-
-class CliError(Exception):
-    def __init__(self, message: str, code: ExitCode) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 class InputUsageError(UsageError):
@@ -156,13 +149,6 @@ def _load_run(**kwargs: Any) -> Run:
         raise CliError(f"could not load evidence: {e}", ExitCode.USAGE) from e
 
 
-def _build_llm(settings: Settings) -> LLMClient | None:
-    try:
-        return factory.build_llm(settings)
-    except LLMError as e:
-        raise CliError(f"could not initialise the LLM client: {e}", ExitCode.INTERNAL) from e
-
-
 def _run_judge(
     settings: Settings,
     llm: LLMClient | None,
@@ -189,26 +175,6 @@ def _run_judge(
         raise CliError(f"LLM error: {e}", ExitCode.INTERNAL) from e
 
 
-def _stderr() -> Console:
-    return StderrConsole()
-
-
-def _fail(e: CliError) -> typer.Exit:
-    _stderr().print(Text.assemble(("error: ", "bold red"), str(e)))
-    return typer.Exit(int(e.code))
-
-
-def _internal(e: Exception) -> typer.Exit:
-    _stderr().print(
-        Text.assemble(
-            ("internal error: ", "bold red"),
-            f"{type(e).__name__}: {e}",
-            ("  (re-run with --debug for a traceback)", "dim"),
-        )
-    )
-    return typer.Exit(int(ExitCode.INTERNAL))
-
-
 def _redactor(settings: Settings, *, persistent: bool = True) -> Redactor:
     """The run's redactor. Only a ``persistent`` one (an LLM cache will be used) reads or creates
     the key file in the cache directory; an unwritable cache falls back to a per-process key."""
@@ -219,22 +185,12 @@ def _redactor(settings: Settings, *, persistent: bool = True) -> Redactor:
     except ValueError as e:
         raise CliError(f"redaction key: {e}", ExitCode.USAGE) from e
     except OSError as e:
-        _stderr().print(
+        stderr().print(
             Text(f"warning: redaction key unavailable ({e}); using a per-process key", "yellow"),
             soft_wrap=True,
         )
         key = None
     return Redactor(key) if key is not None else Redactor.from_settings(settings)
-
-
-def _settings(llm: LLMChoice | None = None) -> Settings:
-    try:
-        settings = Settings()
-    except ValidationError as e:
-        raise CliError(f"invalid settings: {describe_settings_error(e)}", ExitCode.USAGE) from e
-    if llm is None:
-        return settings
-    return settings.model_copy(update={"llm_backend": llm.value})
 
 
 def _load_spec(path: Path) -> TaskSpec:
@@ -251,34 +207,6 @@ def _site(value: str) -> str:
         return str(Site.parse(value, what="--site"))
     except ValueError as e:
         raise CliError(str(e), ExitCode.USAGE) from e
-
-
-def _load_claims(path: Path) -> ClaimSet:
-    """Load a ClaimSet. Errors name the field and error type but never echo the file's content,
-    which is not redacted yet."""
-    try:
-        data = path.read_bytes()
-    except OSError as e:
-        reason = e.strerror or type(e).__name__
-        raise CliError(f"cannot read claims file {path}: {reason}", ExitCode.USAGE) from e
-    if (problem := json_syntax_problem(data)) is not None:
-        raise CliError(f"--claims: not valid JSON ({problem})", ExitCode.USAGE)
-    try:
-        return ClaimSet.model_validate_json(data)
-    except ValidationError as e:
-        problems = "; ".join(
-            f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['type']}"
-            for err in e.errors(include_url=False, include_input=False, include_context=False)
-        )
-        raise CliError(f"invalid claims file {path}: {problems}", ExitCode.USAGE) from e
-
-
-def _write_output(path: Path, write: Callable[[Path], object]) -> None:
-    try:
-        write(path)
-    except OSError as e:
-        reason = e.strerror or str(e)
-        raise CliError(f"cannot write {path}: {reason}", ExitCode.USAGE) from e
 
 
 def _require_evidence(trace: Path | None, har: Path | None, browser_use: Path | None) -> None:
@@ -344,9 +272,9 @@ def _redact_for_judging(
 
 def _write_reports(verdict: RunVerdict, run: Run, *, out: Path | None, html: Path | None) -> None:
     if out:
-        _write_output(out, lambda p: write_json(verdict, p))
+        write_output(out, lambda p: write_json(verdict, p))
     if html:
-        _write_output(html, lambda p: write_html(verdict, run, p))
+        write_output(html, lambda p: write_html(verdict, run, p))
 
 
 def _print_written(err: Console, outputs: tuple[tuple[str, Path | None], ...]) -> None:
@@ -355,18 +283,14 @@ def _print_written(err: Console, outputs: tuple[tuple[str, Path | None], ...]) -
             err.print(Text.assemble((f"wrote {label} ", "dim"), str(path)))
 
 
-_FileOpt = dict[str, Any]
-_IN_FILE: _FileOpt = {"exists": True, "dir_okay": False, "readable": True, "resolve_path": True}
-_IN_ANY: _FileOpt = {"exists": True, "readable": True, "resolve_path": True}
-_OUT_FILE: _FileOpt = {"dir_okay": False, "writable": True, "resolve_path": True}
+_IN_ANY: FileOpt = {"exists": True, "readable": True, "resolve_path": True}
 
-_Trace = Annotated[Path | None, typer.Option(help="Playwright trace .zip", **_IN_FILE)]
-_Har = Annotated[Path | None, typer.Option(help="HAR file", **_IN_FILE)]
+_Trace = Annotated[Path | None, typer.Option(help="Playwright trace .zip", **IN_FILE)]
+_Har = Annotated[Path | None, typer.Option(help="HAR file", **IN_FILE)]
 _BrowserUse = Annotated[
     Path | None,
     typer.Option("--browser-use", help="browser-use history JSON or run directory", **_IN_ANY),
 ]
-_Debug = Annotated[bool, typer.Option("--debug", help="Show tracebacks for internal errors")]
 _AllowMismatch = Annotated[
     bool,
     typer.Option("--allow-mismatch", help="Accept a HAR that does not appear to match the trace"),
@@ -386,15 +310,6 @@ _Otel = Annotated[
 _LangfuseTraceId = Annotated[
     str | None, typer.Option(help="Push scores to this Langfuse trace (LANGFUSE_* env)")
 ]
-
-
-class LLMChoice(StrEnum):
-    """The values of `--llm`; the same as `Settings.llm_backend`."""
-
-    ANTHROPIC = "anthropic"
-    CLAUDE_CODE = "claude-code"
-    CODEX = "codex"
-    GEMINI = "gemini"
 
 
 _Llm = Annotated[
@@ -418,12 +333,12 @@ def judge(
     task: Annotated[str | None, typer.Option(help="Task given to the agent")] = None,
     answer: Annotated[str | None, typer.Option(help="The agent's final answer")] = None,
     answer_file: Annotated[
-        Path | None, typer.Option(help="File with the agent's final answer", **_IN_FILE)
+        Path | None, typer.Option(help="File with the agent's final answer", **IN_FILE)
     ] = None,
     reasoning_file: Annotated[
-        Path | None, typer.Option(help="File with the agent's reasoning", **_IN_FILE)
+        Path | None, typer.Option(help="File with the agent's reasoning", **IN_FILE)
     ] = None,
-    spec: Annotated[Path | None, typer.Option(help="Task spec YAML", **_IN_FILE)] = None,
+    spec: Annotated[Path | None, typer.Option(help="Task spec YAML", **IN_FILE)] = None,
     site: Annotated[
         str | None,
         typer.Option(
@@ -446,13 +361,13 @@ def judge(
         ),
     ] = False,
     claims: Annotated[
-        Path | None, typer.Option(help="Pre-extracted ClaimSet JSON", **_IN_FILE)
+        Path | None, typer.Option(help="Pre-extracted ClaimSet JSON", **IN_FILE)
     ] = None,
     out: Annotated[
-        Path | None, typer.Option(help="Write the verdict JSON here", **_OUT_FILE)
+        Path | None, typer.Option(help="Write the verdict JSON here", **OUT_FILE)
     ] = None,
     html: Annotated[
-        Path | None, typer.Option(help="Write the HTML report here", **_OUT_FILE)
+        Path | None, typer.Option(help="Write the HTML report here", **OUT_FILE)
     ] = None,
     offline: Annotated[
         bool, typer.Option("--offline", help="No LLM calls; heuristic claim extraction only")
@@ -465,7 +380,7 @@ def judge(
     allow_mismatch: _AllowMismatch = False,
     screenshot_root: _ScreenshotRoot = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
-    debug: _Debug = False,
+    debug: Debug = False,
     otel: _Otel = False,
     langfuse_trace_id: _LangfuseTraceId = None,
 ) -> None:
@@ -474,13 +389,13 @@ def judge(
     if answer is not None and answer_file is not None:
         raise InputUsageError("use either --answer or --answer-file, not both")
 
-    err = _stderr()
+    err = stderr()
     try:
         _check_exporters(otel, langfuse_trace_id)
-        settings = _settings(llm_backend)
+        settings = load_settings(llm_backend)
         task_spec = _load_spec(spec) if spec else None
         site_name = _site(site) if site is not None else None
-        claim_set = _load_claims(claims) if claims else None
+        claim_set = load_claims(claims, ClaimSet) if claims else None
         run = _load_run(
             trace=trace,
             har=har,
@@ -495,7 +410,7 @@ def judge(
             screenshot_root=screenshot_root,
         )
 
-        llm = None if offline else _build_llm(settings)
+        llm = None if offline else build_llm(settings)
         run, task_spec, claim_set = _redact_for_judging(
             err if not quiet else None,
             settings,
@@ -521,18 +436,18 @@ def judge(
         _write_reports(verdict, run, out=out, html=html)
         export_warnings = exporters.export(verdict, otel=otel, langfuse_trace_id=langfuse_trace_id)
     except CliError as e:
-        raise _fail(e) from None
+        raise fail(e) from None
     except Exception as e:
         if debug:
             raise
-        raise _internal(e) from None
+        raise internal(e) from None
 
     if not quiet:
         print_verdict(verdict, StdoutConsole())
         _print_written(err, (("json", out), ("html", html)))
         for warning in export_warnings:
             err.print(Text(warning, style="yellow"))
-    raise typer.Exit(int(_OUTCOME_EXIT[verdict.outcome]))
+    raise typer.Exit(int(OUTCOME_EXIT[verdict.outcome]))
 
 
 @app.command()
@@ -542,12 +457,12 @@ def inspect(
     browser_use: _BrowserUse = None,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable JSON")] = False,
     no_redact: Annotated[bool, typer.Option("--no-redact", help="Show raw URLs")] = False,
-    debug: _Debug = False,
+    debug: Debug = False,
 ) -> None:
     """Summarise the evidence in a trace, HAR or browser-use run without judging it."""
     _require_evidence(trace, har, browser_use)
     try:
-        settings = _settings()
+        settings = load_settings()
         run = _load_run(
             trace=trace, har=har, browser_use=browser_use, max_body_chars=settings.max_body_chars
         )
@@ -555,11 +470,11 @@ def inspect(
             run, _ = _redactor(settings, persistent=False).redact_run(run)
         summary = summarize_evidence(run)
     except CliError as e:
-        raise _fail(e) from None
+        raise fail(e) from None
     except Exception as e:
         if debug:
             raise
-        raise _internal(e) from None
+        raise internal(e) from None
     if as_json:
         typer.echo(json.dumps(summary.to_dict(), indent=2, ensure_ascii=False))
     else:
@@ -570,16 +485,16 @@ def inspect(
 def schema(
     out: Annotated[
         Path | None,
-        typer.Option(help="Write the schema to this file instead of stdout", **_OUT_FILE),
+        typer.Option(help="Write the schema to this file instead of stdout", **OUT_FILE),
     ] = None,
 ) -> None:
     """Print the JSON Schema of the verdict format."""
     if out:
         try:
-            _write_output(out, export_schema)
+            write_output(out, export_schema)
         except CliError as e:
-            raise _fail(e) from None
-        _stderr().print(Text.assemble(("wrote ", "dim"), str(out)))
+            raise fail(e) from None
+        stderr().print(Text.assemble(("wrote ", "dim"), str(out)))
     else:
         typer.echo(schema_to_json(), nl=False)
 
@@ -621,7 +536,7 @@ def mcp_server(
     try:
         from evidence_judge.mcp import Roots, ServerConfig, serve
     except ImportError as e:
-        _stderr().print(
+        stderr().print(
             Text.assemble(
                 ("error: ", "bold red"),
                 f"the MCP server is not installed ({e}); {needs_extra('mcp')}",
@@ -668,10 +583,10 @@ def bench(
         int, typer.Option(min=1, metavar="<n>", help="Forgeries per failed run and kind")
     ] = 3,
     out: Annotated[
-        Path | None, typer.Option(help="Write the results JSON here", **_OUT_FILE)
+        Path | None, typer.Option(help="Write the results JSON here", **OUT_FILE)
     ] = None,
     markdown: Annotated[
-        Path | None, typer.Option(help="Write the Markdown report here", **_OUT_FILE)
+        Path | None, typer.Option(help="Write the Markdown report here", **OUT_FILE)
     ] = None,
     with_llm_baseline: Annotated[
         bool,
@@ -692,7 +607,7 @@ def bench(
         bool, typer.Option("--no-redact", help="Judge unredacted evidence and agent text")
     ] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Do not print the report")] = False,
-    debug: _Debug = False,
+    debug: Debug = False,
 ) -> None:
     """Benchmark judges on forged runs: false-PASS rates and accuracy on honest controls."""
     from evidence_judge.baselines import TranscriptLLMJudge
@@ -707,7 +622,7 @@ def bench(
     )
 
     try:
-        settings = _settings(llm_backend)
+        settings = load_settings(llm_backend)
         try:
             scenarios = load_scenarios(runs_dir, max_body_chars=settings.max_body_chars)
         except ValueError as e:
@@ -732,16 +647,16 @@ def bench(
         )
         result = asyncio.run(runner.run(scenarios))
         if out:
-            _write_output(out, lambda p: write_json(result, p))
+            write_output(out, lambda p: write_json(result, p))
         if markdown:
-            _write_output(markdown, lambda p: write_markdown(result, p))
+            write_output(markdown, lambda p: write_markdown(result, p))
     except CliError as e:
-        raise _fail(e) from None
+        raise fail(e) from None
     except Exception as e:
         if debug:
             raise
-        raise _internal(e) from None
+        raise internal(e) from None
 
     if not quiet:
         typer.echo(to_markdown(result), nl=False)
-        _print_written(_stderr(), (("json", out), ("markdown", markdown)))
+        _print_written(stderr(), (("json", out), ("markdown", markdown)))
