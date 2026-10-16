@@ -4,7 +4,7 @@ description: The red-team record behind Evidence Judge v0.1.0, attack by attack,
 
 # Security history
 
-Evidence Judge was red-teamed in eighteen rounds before its first release. In each round,
+Evidence Judge was red-teamed in repeated rounds before its first release. In each round,
 reviewers tried to make a false story pass: forged evidence, weakened tests, a hook switched
 off. Every attack that worked became a recorded fixture or a benchmark forgery kind, and the
 judge was changed until it no longer passed. The [changelog](../CHANGELOG.md) summarises the
