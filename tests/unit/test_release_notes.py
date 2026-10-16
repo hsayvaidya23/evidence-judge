@@ -47,3 +47,25 @@ def test_pre_release_notes_use_the_shared_marker() -> None:
         if STALE.search(line)
     ]
     assert not stale, f"say {MARKER!r} so the release check finds these: {stale}"
+
+
+PYPI_REQUIREMENT = re.compile(
+    r"""evidence-judge\[[a-z,]*\]["']|(?:pip|pipx|uv tool|uv pip) install +["']?evidence-judge\b(?![\[-])|uvx +evidence-judge\b"""
+)
+
+
+def test_pre_release_snippets_install_from_the_repository() -> None:
+    if ".dev" not in _version():
+        return
+    pages = [
+        *_pages(),
+        ROOT / "CONTRIBUTING.md",
+        *sorted(path for path in (ROOT / "plugins").rglob("*") if path.is_file()),
+    ]
+    bare = [
+        f"{page.relative_to(ROOT)}:{number}"
+        for page in pages
+        for number, line in enumerate(page.read_text(encoding="utf-8").splitlines(), 1)
+        if PYPI_REQUIREMENT.search(line)
+    ]
+    assert not bare, f"evidence-judge is not on PyPI; install it from git+https://... in {bare}"

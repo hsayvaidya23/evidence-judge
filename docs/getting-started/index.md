@@ -43,6 +43,12 @@ needs an API key.
 
 </div>
 
+!!! tip "Judging a coding agent instead?"
+
+    [Judge a coding-agent session](judge-a-session.md) does the same for a Claude Code or Codex
+    session: it checks the agent's answer against the commands it ran, their output and the
+    files it edited, on a transcript that ships with the repository.
+
 !!! tip "No agent yet? Use the recorded demo runs"
 
     The repository ships a small shop app and seven recorded agent runs in

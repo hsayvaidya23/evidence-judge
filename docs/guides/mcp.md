@@ -10,12 +10,12 @@ Judge and get a verdict back as a tool result, instead of trusting its own accou
 
 !!! info "Not released yet"
 
-    v0.1.0 is not released yet, so install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install` and `uvx --from "evidence-judge[mcp]"` forms on this page work
-    once it is on PyPI; until then, give `uvx` the same GitHub requirement:
-    `uvx --python 3.12 --from "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`.
+    v0.1.0 is not released yet, so every command on this page installs from GitHub, not PyPI.
+    To pin what your client runs, add a commit SHA to the URL:
+    `git+https://github.com/hsayvaidya23/evidence-judge@<sha>`.
 
 ```bash
-pip install "evidence-judge[mcp]"
+pip install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
 evidence-judge mcp                  # stdio, files under the working directory
 evidence-judge mcp --root ./runs --root ./specs
 evidence-judge mcp --http --port 8000   # streamable HTTP on http://127.0.0.1:8000/mcp
@@ -27,14 +27,14 @@ serves streamable HTTP on `127.0.0.1` only, with DNS-rebinding protection. See t
 
 ## Connect a client
 
-Each snippet runs the PyPI package with `uvx`. To run a checkout instead, replace the
+Each snippet runs the package from GitHub with `uvx`. To run a checkout instead, replace the
 command with `uv run --directory /path/to/evidence-judge --extra mcp evidence-judge mcp --root
 "$PWD"`; `--directory` changes the working directory, so name the root explicitly.
 
 === "Claude Code"
 
     ```bash
-    claude mcp add evidence-judge -- uvx --from "evidence-judge[mcp]" evidence-judge mcp
+    claude mcp add evidence-judge -- uvx --python 3.12 --from "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge" evidence-judge mcp
     ```
 
     `--scope project` writes the entry to `.mcp.json` at the project root so the whole team
@@ -45,7 +45,7 @@ command with `uv run --directory /path/to/evidence-judge --extra mcp evidence-ju
       "mcpServers": {
         "evidence-judge": {
           "command": "uvx",
-          "args": ["--from", "evidence-judge[mcp]", "evidence-judge", "mcp"]
+          "args": ["--python", "3.12", "--from", "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge", "evidence-judge", "mcp"]
         }
       }
     }
@@ -60,12 +60,12 @@ command with `uv run --directory /path/to/evidence-judge --extra mcp evidence-ju
     ```toml title="~/.codex/config.toml"
     [mcp_servers.evidence-judge]
     command = "uvx"
-    args = ["--from", "evidence-judge[mcp]", "evidence-judge", "mcp"]
-    startup_timeout_sec = 30   # the first uvx run downloads the package
+    args = ["--python", "3.12", "--from", "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge", "evidence-judge", "mcp"]
+    startup_timeout_sec = 30   # the first uvx run clones and builds the package
     tool_timeout_sec = 120     # judging a large trace can take a while
     ```
 
-    Or `codex mcp add evidence-judge -- uvx --from "evidence-judge[mcp]" evidence-judge mcp`.
+    Or `codex mcp add evidence-judge -- uvx --python 3.12 --from "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge" evidence-judge mcp`.
     A trusted project's `.codex/config.toml` takes the same table. Over HTTP:
     `url = "http://127.0.0.1:8000/mcp"` instead of `command` and `args`.
     Reference: [Codex MCP docs](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
@@ -77,7 +77,7 @@ command with `uv run --directory /path/to/evidence-judge --extra mcp evidence-ju
       "mcpServers": {
         "evidence-judge": {
           "command": "uvx",
-          "args": ["--from", "evidence-judge[mcp]", "evidence-judge", "mcp"],
+          "args": ["--python", "3.12", "--from", "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge", "evidence-judge", "mcp"],
           "timeout": 120000
         }
       }
@@ -88,7 +88,7 @@ command with `uv run --directory /path/to/evidence-judge --extra mcp evidence-ju
     `.gemini/settings.json`; `--` keeps `--from` away from Gemini's own options):
 
     ```bash
-    gemini mcp add -s user evidence-judge uvx -- --from "evidence-judge[mcp]" evidence-judge mcp
+    gemini mcp add -s user evidence-judge uvx -- --python 3.12 --from "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge" evidence-judge mcp
     ```
 
     Over HTTP: `"httpUrl": "http://127.0.0.1:8000/mcp"`. `includeTools` and `excludeTools`

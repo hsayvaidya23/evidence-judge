@@ -38,6 +38,20 @@ right. It turns the answer into checkable claims and checks each one against evi
 The CLI (`cli.py`) wires the stages together and maps the outcome to an exit code:
 `0` pass, `1` fail, `2` needs review, `3` bad input, `4` internal or LLM error.
 
+## Coding-agent sessions
+
+`evidence-judge session judge` runs the same idea over a coding agent's session: ingest a Claude
+Code transcript, a Codex stream or an evidence-recorder log into a `SessionRun` of commands and
+edits (`sessions/ingest/`), redact it, extract claims from the final answer
+(`sessions/extract/`), read each command with a conservative shell parser (`sessions/shell/`),
+check claims and the session spec with deterministic checkers (`sessions/checks/`), and,
+with `--rerun`, run the project's tests again on a copy (`sessions/rerun/`). It returns the
+same `RunVerdict`, so reports, exit codes and integrations are shared. The hooks (`hooks/`)
+record the evidence log and judge an agent's answer when it stops, and the MCP server (`mcp/`)
+exposes judging as tools. [Coding-agent sessions](design/coding-agent-sessions.md) is the full
+design: transcript formats, the evidence log, the predicates and their soundness rules, the
+re-run and the limits.
+
 ## Design rules
 
 1. **Rules before LLMs.** Anything that can be decided from a request, a status code, a URL or
@@ -207,6 +221,16 @@ shape the pipeline:
 | `forgery/tampering.py` | Kinds that tamper with the browser: scripts, routes, storage, CDP, WebSockets |
 | `forgery/controls.py` | Honest controls with the same shapes as the evidence-altering kinds |
 | `bench/` | The forged-run benchmark |
+| `sessions/` | The coding-agent session judge (`evidence-judge session`); the [design](design/coding-agent-sessions.md) explains it in full. `models.py` holds `SessionRun`, `normalize.py` turns recorded tool calls into its events, `predicates.py` the session predicates and specs, `judge.py` the pipeline, `redaction.py` redacts commands, outputs and answers with the browser judge's `Redactor`, `summaries.py` parses test runners' own summaries, `fingerprint.py` fingerprints `.venv` and `node_modules`, `cli.py` and `report.py` the `session judge` and `session inspect` commands |
+| `sessions/ingest/` | Claude Code transcripts, Codex `exec --json` streams and rollouts, and evidence-recorder logs → `SessionRun` |
+| `sessions/extract/` | Claims from the agent's final answer: heuristic (`heuristic.py`) and LLM (`llm.py`) |
+| `sessions/shell/` | A small, conservative shell parser: `lexer.py` splits command lines and unwraps launchers, `classify.py` and `classified.py` say what each simple command is, `programs.py` what a program does by name, `writes.py` which files a command writes, `env.py` the environment a test run sees, `wrappers.py` what `make test`, `npm test` or `tox` runs, `guard_paths.py` what could switch off the hooks; `handlers/` reads commands by family (files, packages, checkers, toolchains, tests) and `runners/` each test runner's arguments and output (pytest, unittest, tox, Node, Go, Cargo, make, linters and a generic fallback) |
+| `sessions/checks/` | Deterministic checkers for session predicates: test results, commands, builds, edits, pushes, runs and re-runs, over a session index |
+| `sessions/edits/` | What an edit does to the test suite: diffs, skipped or deleted tests, suppressed failures, exit-code tricks |
+| `sessions/rerun/` | The independent re-run: copy the project, run the spec's test command in a clean environment and read the runner's own report |
+| `sessions/bench/` | The session forgery benchmark (`make bench-sessions`) |
+| `hooks/` | `evidence-judge hook ...`, the entry points coding agents run as hooks: `adapters.py` (each agent's hook I/O), `core.py` and `judge.py` (the stop hook: find the turn's traces, judge them in a child process, decide), `record.py` (the evidence recorder), `guard.py` (the pre-tool guard), `state.py` (spec snapshots, log key and anchors outside the workspace), `traces.py`, `transcripts.py` and `settings.py` (`EVJ_HOOK_*`) |
+| `mcp/` | The MCP server (`evidence-judge mcp`): `server.py` registers the tools, `service.py` does their work independent of the protocol, `paths.py` keeps file names inside the allowed roots, `specs.py` validates specs with YAML positions, `models.py` the tools' output schemas |
 
 ## Key types
 

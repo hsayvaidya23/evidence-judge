@@ -4,7 +4,9 @@ A wrapper's definition can pass the runner options its command line does not sho
 -x`, `jest --bail`, a filter. The judge reads the command the wrapper ran from the wrapper's own
 output (npm's `> jest` header, tox's `commands[0]> pytest`, make's echo of a recipe line) or
 from a `package.json`, `Makefile`, justfile or `tox.ini` the session showed, with the variables
-a Makefile exports or a tox.ini sets, and analyses it like a direct run. A wrapper neither shows
+a Makefile exports or a tox configuration sets (in a tox.ini, setup.cfg or pyproject.toml), and
+analyses it like a direct run. A spec's `trusted_wrappers` can declare what a wrapper runs
+when the session shows neither. A wrapper none of these shows
 stays unseen: its run cannot back a failure count or an inference that a test is not among the
 failures, and its pass is the whole suite's only when it passed as many tests as an earlier
 whole-suite run the session showed.
@@ -14,23 +16,35 @@ from __future__ import annotations
 
 import configparser
 import json
+import posixpath
 import re
 import shlex
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from evidence_judge.ingest._json import as_object
-from evidence_judge.sessions.models import Category, CommandAnalysis
-from evidence_judge.sessions.shell.classify import analyse
+from evidence_judge.ingest._json import as_list, as_object
+from evidence_judge.sessions.edits.paths import is_code_path
+from evidence_judge.sessions.models import (
+    CallStatus,
+    Category,
+    CommandAnalysis,
+    CommandEvent,
+    FileEditEvent,
+    OtherToolEvent,
+    SessionEvent,
+    SubagentEvent,
+)
+from evidence_judge.sessions.shell.classify import analyse, unseen_reason
 from evidence_judge.sessions.shell.lexer import program_name
 from evidence_judge.sessions.shell.runners.make import make_args
 
 DEFINITION_FILES: Final = frozenset(
     {"Makefile", "makefile", "GNUmakefile", "package.json", "justfile", "Justfile", ".justfile",
-     "tox.ini"}
+     "tox.ini", "setup.cfg", "pyproject.toml", ".npmrc"}
 )  # fmt: skip
-"""The files that define the wrappers the judge can read."""
+"""The files that define the wrappers the judge can read, or change what they print."""
 
 
 _MAKE_FILES: Final = ("GNUmakefile", "makefile", "Makefile")
@@ -39,6 +53,8 @@ _MAKES: Final = frozenset({"make", "gmake"})
 _PMS: Final = frozenset({"npm", "pnpm", "yarn", "bun"})
 _PM_FLAGS: Final = frozenset({"--silent", "-s", "--if-present", "-w", "--workspaces"})
 _CHECKS: Final = frozenset({Category.LINT, Category.TYPECHECK})
+_ENV_NAME: Final = re.compile(r"[A-Za-z_]\w*")
+_PROSE: Final = re.compile(r"\.(?:md|rst|txt)$")
 _MAX_LINES: Final = 400
 _MAX_DEPTH: Final = 5
 
@@ -94,6 +110,9 @@ _JUST_RECIPE: Final = re.compile(r"^@?([A-Za-z_][\w-]*)\s*:(?!=)\s*((?:[A-Za-z_]
 _TOX_ENV_OPTIONS: Final = frozenset({"-e", "--env"})
 _TOX_POSARGS: Final = re.compile(r"\{posargs(?::([^{}]*))?\}")
 _TOX_FACTOR: Final = re.compile(r"^[\w,!.-]+:\s")
+_NPMRC_QUIET: Final = re.compile(r"^\s*(?:loglevel|silent|quiet|reporter)\s*=", re.M | re.I)
+"""An `.npmrc` setting that may stop npm and pnpm from printing their `> pkg@1.0.0 test` header,
+so a header in the output may be the script's own."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -477,9 +496,10 @@ def _tox_envs(words: list[str]) -> list[str]:
     return envs
 
 
-def _tox_setenv(config: configparser.ConfigParser) -> str | None:
-    """Every variable a `setenv` or `set_env` of the tox.ini's test environments sets (a factor-conditional
-    one too), as a command-line prefix; None for one the judge cannot read (a `file|` line)."""
+def _tox_setenv(config: configparser.ConfigParser) -> list[str] | None:
+    """Every variable a `setenv` or `set_env` of the config's test environments sets (a
+    factor-conditional one too), as command-line prefixes; None for one the judge cannot read (a
+    `file|` line)."""
     parts: list[str] = []
     for section in config.sections():
         if section != "testenv" and not section.startswith("testenv:"):
@@ -490,10 +510,74 @@ def _tox_setenv(config: configparser.ConfigParser) -> str | None:
             if not line or line.startswith("#"):
                 continue
             name, eq, value = line.partition("=")
-            if not eq or not re.fullmatch(r"[A-Za-z_]\w*", name.strip()):
+            if not eq or not _ENV_NAME.fullmatch(name.strip()):
                 return None
-            value = value.strip().replace("{toxinidir}", ".")
-            parts.append(f"{name.strip()}={shlex.quote(value)} ")
+            parts.append(_tox_assign(name.strip(), value.strip()))
+    return parts
+
+
+def _tox_assign(name: str, value: str) -> str:
+    return f"{name}={shlex.quote(value.replace('{toxinidir}', '.'))} "
+
+
+def _toml_setenv(table: object) -> list[str] | None:
+    """The variables every `set_env` table of a native `[tool.tox]` sets; None for one the
+    judge cannot read (a `file` entry, a substitution table)."""
+    parts: list[str] = []
+    items = list(as_object(table).items()) or [("", item) for item in as_list(table)]
+    for key, value in items:
+        if key in ("set_env", "setenv"):
+            env = as_object(value)
+            if env is not value:
+                return None
+            for name, text in env.items():
+                if not isinstance(text, str) or name == "file" or not _ENV_NAME.fullmatch(name):
+                    return None
+                parts.append(_tox_assign(name, text))
+            continue
+        found = _toml_setenv(value)
+        if found is None:
+            return None
+        parts.extend(found)
+    return parts
+
+
+def _pyproject_setenv(text: str) -> list[str] | None:
+    """The variables the `[tool.tox]` of a pyproject.toml sets, in its `legacy_tox_ini` or as
+    native tables; None for one the judge cannot read."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return None if "tox" in text else []
+    tox = as_object(as_object(data.get("tool")).get("tox"))
+    legacy = tox.pop("legacy_tox_ini", None)
+    found: list[str] | None = []
+    if isinstance(legacy, str):
+        config = _tox_config(legacy)
+        found = _tox_setenv(config) if config is not None else None
+    native = _toml_setenv(tox)
+    return None if found is None or native is None else [*found, *native]
+
+
+def _tox_env(files: Mapping[str, str]) -> str | None:
+    """Every variable a tox configuration the session showed sets for its test environments (a
+    tox.ini, the tox sections of a setup.cfg, the `[tool.tox]` of a pyproject.toml), as a
+    command-line prefix; None for one the judge cannot read. Which of them tox reads depends on
+    files the session may not show, so the variables of every one count."""
+    parts: list[str] = []
+    for name in ("tox.ini", "setup.cfg"):
+        if name not in files:
+            continue
+        config = _tox_config(files[name])
+        found = _tox_setenv(config) if config is not None else None
+        if found is None and (name == "tox.ini" or "testenv" in files[name]):
+            return None
+        parts.extend(found or [])
+    if "pyproject.toml" in files:
+        found = _pyproject_setenv(files["pyproject.toml"])
+        if found is None:
+            return None
+        parts.extend(found)
     return "".join(dict.fromkeys(parts))
 
 
@@ -543,19 +627,19 @@ def defined(wrapper: str, files: Mapping[str, str]) -> list[_Step] | None:
         return _just_recipe(words, files)
     if prog == "tox" and "tox.ini" in files and (config := _tox_config(files["tox.ini"])):
         commands = _tox_commands(config, words)
-        env = _tox_setenv(config)
+        env = _tox_env(files)
         return _with_env(commands, env) if commands and env is not None else None
     return None
 
 
 def _tox_echoed(words: list[str], output: str, files: Mapping[str, str]) -> list[_Step] | None:
-    """What tox's output says it ran, with the variables a tox.ini the session showed sets."""
+    """What tox's output says it ran, with the variables a tox configuration the session
+    showed sets."""
     steps = echoed(shlex.join(words), output)
-    config = _tox_config(files["tox.ini"]) if "tox.ini" in files else None
-    if steps is None or config is None:
-        return steps
-    env = _tox_setenv(config)
-    return None if env is None else _with_env(steps, env)
+    env = _tox_env(files)
+    if steps is None or env is None:
+        return None
+    return _with_env(steps, env)
 
 
 def _merge(analysis: CommandAnalysis, steps: list[_Step], cwd: str | None) -> CommandAnalysis:
@@ -645,7 +729,9 @@ def resolve(
 ) -> CommandAnalysis:
     """`analysis` of a wrapper run, with the options of the command the wrapper ran when its
     output or a definition the session showed names it (the definition first: make does not echo
-    a recipe line marked `@`), and with make's `(ignored)` errors as a masked exit status."""
+    a recipe line marked `@`), and with make's `(ignored)` errors as a masked exit status. A
+    package manager's header counts only when neither the run's variables nor an `.npmrc` the
+    session showed may have silenced the real one."""
     wrapper = analysis.wrapper
     if wrapper is None:
         return analysis
@@ -657,10 +743,70 @@ def resolve(
         )
     if analysis.wrapper_unseen is None:
         return analysis
-    if prog in _PMS and any(n.casefold().startswith("npm_config_") for n in analysis.run_env):
+    if prog in _PMS and (
+        any(n.casefold().startswith("npm_config_") for n in analysis.run_env)
+        or _NPMRC_QUIET.search(files.get(".npmrc", ""))
+    ):
         steps = defined(wrapper, files)
     elif prog == "tox":
         steps = defined(wrapper, files) or _tox_echoed(words, output, files)
     else:
         steps = defined(wrapper, files) or echoed(wrapper, output, files)
     return _merge(analysis, steps, cwd) if steps else analysis
+
+
+def _redefines(path: str) -> bool:
+    """A change to `path` may change what a wrapper runs: anything but source code or prose
+    (a Makefile, a file it includes, a package manager's settings)."""
+    name = posixpath.basename(path)
+    return name in DEFINITION_FILES or not (is_code_path(name) or _PROSE.search(name))
+
+
+def _may_redefine(event: SessionEvent) -> bool:
+    """The event may have changed a wrapper's definition, its settings, how the shell runs it,
+    or the directory it runs in."""
+    if isinstance(event, FileEditEvent):
+        return event.status is not CallStatus.DENIED and _redefines(event.path)
+    if isinstance(event, SubagentEvent):
+        return not event.transcript_loaded
+    if isinstance(event, OtherToolEvent):
+        return event.may_mutate
+    if not isinstance(event, CommandEvent) or event.status is CallStatus.DENIED:
+        return False
+    analysis = event.analysis
+    paths = [*analysis.touched_paths, *analysis.deleted_paths]
+    return bool(
+        analysis.opaque_write
+        or analysis.lasting_mutation
+        or analysis.parse_error
+        or analysis.harness_change
+        or analysis.cd_targets
+        or (analysis.mutation and not paths)
+        or any(_redefines(path) for path in paths)
+    )
+
+
+def trust(
+    events: list[SessionEvent], trusted: Mapping[str, str], cwd: str | None
+) -> list[SessionEvent]:
+    """`events`, with each run of a wrapper the spec's `trusted_wrappers` declares, which the
+    session does not show, analysed as the declared command; not once the session may have
+    changed what the wrapper runs, nor a run in another directory."""
+    declared = {shlex.join(_words(k)): v for k, v in trusted.items()}
+    out: list[SessionEvent] = []
+    changed = False
+    for event in events:
+        if (
+            not changed
+            and isinstance(event, CommandEvent)
+            and (wrapper := event.analysis.wrapper) is not None
+            and (command := declared.get(shlex.join(_words(wrapper)))) is not None
+            and event.analysis.wrapper_unseen == unseen_reason(wrapper)
+            and not event.analysis.run_cds
+            and (event.cwd or cwd) == cwd
+        ):
+            analysis = _merge(event.analysis, [_Step(command)], event.cwd or cwd)
+            event = event.model_copy(update={"analysis": analysis})
+        changed = changed or _may_redefine(event)
+        out.append(event)
+    return out

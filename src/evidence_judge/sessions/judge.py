@@ -63,6 +63,7 @@ from evidence_judge.sessions.predicates import (
     TestResultPredicate,
 )
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
+from evidence_judge.sessions.shell.wrappers import trust
 
 _HARNESS_TAMPERING = "harness tampering"
 _MISREAD = (
@@ -297,6 +298,9 @@ class SessionJudge:
         spec = options.spec
         with run_budget(Budget(self._max_cost_usd)):
             claim_set = await self._claims(run, options, state)
+        if spec and spec.trusted_wrappers:
+            events = trust(run.events, spec.trusted_wrappers, run.cwd)
+            run = run.model_copy(update={"events": events})
         index = SessionIndex(run, ignore_edits=spec.ignore_edits if spec else None)
         rerun = self._rerun(index, options, state)
         index.rerun = rerun
