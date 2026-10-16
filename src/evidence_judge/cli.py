@@ -555,6 +555,7 @@ def bench(
         list[Path],
         typer.Argument(
             help="Directories of labelled runs, one sub-directory per scenario",
+            metavar="RUNS_DIR...",
             exists=True,
             file_okay=False,
             dir_okay=True,

@@ -113,12 +113,16 @@ Benchmarks judges on forged runs: false-PASS rates and accuracy on honest contro
 [benchmark.md](benchmark.md).
 
 ```bash
-evidence-judge bench RUNS_DIR [--seeds 3] [--out results.json] [--markdown results.md]
+evidence-judge bench RUNS_DIR... [--seeds 3] [--out results.json] [--markdown results.md]
+
+# make bench: the shop runs and the clinic and console runs, judged together
+evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3 \
+  --out bench/results/offline-fixtures.json --markdown bench/results/offline-fixtures.md
 ```
 
 | Option | Description |
 | --- | --- |
-| `RUNS_DIR` | Directory of labelled runs, one sub-directory per scenario (`trace.zip`, optional `run.har`, `answer.txt`, `reasoning.txt`, `spec.yaml`, `expected.json`) |
+| `RUNS_DIR...` | One or more directories of labelled runs, one sub-directory per scenario (`trace.zip`, optional `run.har`, `answer.txt`, `reasoning.txt`, `spec.yaml`, `expected.json`); a scenario name may appear in only one of them |
 | `--seeds N` | Forgeries per failed run and forgery kind (default 3) |
 | `--out FILE` | Write the results JSON here |
 | `--markdown FILE` | Write the Markdown report here |
