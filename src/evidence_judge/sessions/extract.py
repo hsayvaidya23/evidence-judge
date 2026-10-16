@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from typing import Any, Final, cast
+from typing import Any, Final, Literal, cast
 
 from pydantic import (
     BaseModel,
@@ -180,67 +180,78 @@ def _command_text(text: str) -> str | None:
     return command if len(command) >= 3 else None
 
 
-def _sentence_claims(sentence: str) -> Iterator[tuple[ClaimKind, bool, list[SessionPredicate]]]:
-    past = _PAST.search(sentence) is not None
-    hedged = _HEDGE.search(sentence) is not None
-    subset = _SUBSET.search(sentence) is not None
+_Claim = tuple[ClaimKind, bool, list[SessionPredicate]]
+_BUILD_RULES: Final[tuple[tuple[re.Pattern[str], Literal["build", "lint", "typecheck"]], ...]] = (
+    (_BUILD, "build"),
+    (_LINT, "lint"),
+    (_TYPECHECK, "typecheck"),
+)
+_FILE_RULES: Final[tuple[tuple[re.Pattern[str], Literal["add", "delete"]], ...]] = (
+    (_CREATED, "add"),
+    (_DELETED, "delete"),
+)
 
+
+def _sentence_claims(sentence: str) -> Iterator[_Claim]:
     untouched = _UNTOUCHED.search(sentence)
     if untouched and (predicate := _untouched_target(untouched)) is not None:
         yield ClaimKind.STATE, False, [predicate]
-    if past or hedged:
+    if _PAST.search(sentence) or _HEDGE.search(sentence):
         return
-
-    rest = _NONE_FAILED.sub(" ", sentence)
-    failed = _COUNT_FAILED.search(rest)
-    partial = any(int(done) < int(total) for done, total in _PARTIAL.findall(sentence))
-    if failed or partial or _STILL_FAIL.search(rest):
-        yield ClaimKind.OUTCOME, True, [TestResultPredicate(expect="fail", whole_suite=False)]
-    elif rest != sentence or _ALL_PASS.search(sentence) or _COUNT_PASSED.search(sentence):
-        yield ClaimKind.OUTCOME, True, [TestResultPredicate(whole_suite=not subset)]
-    if _BUILD.search(sentence):
-        yield ClaimKind.OUTCOME, True, [BuildPredicate(category="build")]
-    if _LINT.search(sentence):
-        yield ClaimKind.OUTCOME, True, [BuildPredicate(category="lint")]
-    if _TYPECHECK.search(sentence):
-        yield ClaimKind.OUTCOME, True, [BuildPredicate(category="typecheck")]
-
-    for match in _RAN_CMD.finditer(sentence):
-        if (command := _command_text(match.group(1))) is not None:
-            yield ClaimKind.ACTION, False, [CommandPredicate(contains=command)]
-    if not _RAN_CMD.search(sentence):
-        for match in _RAN_CATEGORY.finditer(sentence):
-            category = _CATEGORY_WORDS.get(_SPACES.sub(" ", match.group(1).casefold()))
-            if category is not None:
-                yield (
-                    ClaimKind.ACTION,
-                    False,
-                    [CommandPredicate.model_validate({"category": category})],
-                )
-
+    if (outcome := _test_outcome(sentence)) is not None:
+        yield ClaimKind.OUTCOME, True, [outcome]
+    for pattern, category in _BUILD_RULES:
+        if pattern.search(sentence):
+            yield ClaimKind.OUTCOME, True, [BuildPredicate(category=category)]
+    yield from _command_claims(sentence)
     if untouched is None:
-        named: set[str] = set()
-        for match in _CREATED.finditer(sentence):
+        yield from _edit_claims(sentence)
+
+
+def _test_outcome(sentence: str) -> TestResultPredicate | None:
+    """The test result a sentence's counts and verbs claim. A count of failures, a passing count
+    below the total or "still fail" is a failing suite; "0 of 3 tests failed" is not."""
+    rest = _NONE_FAILED.sub(" ", sentence)
+    partial = any(int(done) < int(total) for done, total in _PARTIAL.findall(sentence))
+    if _COUNT_FAILED.search(rest) or partial or _STILL_FAIL.search(rest):
+        return TestResultPredicate(expect="fail", whole_suite=False)
+    if rest != sentence or _ALL_PASS.search(sentence) or _COUNT_PASSED.search(sentence):
+        return TestResultPredicate(whole_suite=_SUBSET.search(sentence) is None)
+    return None
+
+
+def _command_claims(sentence: str) -> Iterator[_Claim]:
+    if _RAN_CMD.search(sentence):
+        for match in _RAN_CMD.finditer(sentence):
+            if (command := _command_text(match.group(1))) is not None:
+                yield ClaimKind.ACTION, False, [CommandPredicate(contains=command)]
+        return
+    for match in _RAN_CATEGORY.finditer(sentence):
+        category = _CATEGORY_WORDS.get(_SPACES.sub(" ", match.group(1).casefold()))
+        if category is not None:
+            yield ClaimKind.ACTION, False, [CommandPredicate.model_validate({"category": category})]
+
+
+def _edit_claims(sentence: str) -> Iterator[_Claim]:
+    named: set[str] = set()
+    for pattern, change in _FILE_RULES:
+        for match in pattern.finditer(sentence):
             if glob := _path_glob(match.group("path")):
                 named.add(glob)
-                yield ClaimKind.ACTION, False, [EditPredicate(path=glob, change="add")]
-        for match in _DELETED.finditer(sentence):
-            if glob := _path_glob(match.group("path")):
-                named.add(glob)
-                yield ClaimKind.ACTION, False, [EditPredicate(path=glob, change="delete")]
-        changed = [
-            g
-            for m in _CHANGED_FILE.finditer(sentence)
-            if (g := _path_glob(m.group("path"))) and g not in named
-        ]
-        fixed = _FIXED.search(sentence) is not None
-        for index, path in enumerate(dict.fromkeys(changed)):
-            predicates: list[SessionPredicate] = [EditPredicate(path=path)]
-            if fixed and index == 0:
-                predicates.append(TestResultPredicate())
-            yield ClaimKind.ACTION, fixed and index == 0, predicates
-        if fixed and not changed:
-            yield ClaimKind.OUTCOME, True, [TestResultPredicate()]
+                yield ClaimKind.ACTION, False, [EditPredicate(path=glob, change=change)]
+    changed = [
+        g
+        for m in _CHANGED_FILE.finditer(sentence)
+        if (g := _path_glob(m.group("path"))) and g not in named
+    ]
+    fixed = _FIXED.search(sentence) is not None
+    for index, path in enumerate(dict.fromkeys(changed)):
+        predicates: list[SessionPredicate] = [EditPredicate(path=path)]
+        if fixed and index == 0:
+            predicates.append(TestResultPredicate())
+        yield ClaimKind.ACTION, fixed and index == 0, predicates
+    if fixed and not changed:
+        yield ClaimKind.OUTCOME, True, [TestResultPredicate()]
 
 
 def claims_fix(answer: str | None) -> bool:
