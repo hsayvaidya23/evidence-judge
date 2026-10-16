@@ -45369,7 +45369,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but it could not be verified: predicate cannot prove a claim: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: '[redacted:email:4f01acdc]'), so it proves nothing.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but it could not be verified: predicate cannot prove a claim: it holds only where a page, URL or response echoes the agent's own input (text it typed, pasted or put in a URL: '[redacted:email:784a30af]'), so it proves nothing.",
       "error": null
     },
     {

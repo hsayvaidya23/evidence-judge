@@ -132,6 +132,8 @@ evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3 \
 | `--llm BACKEND` | The LLM backend for `--online` and `--with-llm-baseline`: `anthropic`, `claude-code`, `codex` or `gemini`. Default: `EVJ_LLM_BACKEND` |
 | `--no-redact` | Judge unredacted evidence and agent text |
 | `--quiet`, `-q` | Do not print the report |
+
+Offline, redaction tokens are keyed by a digest of the files in the run directories, so the same runs give byte-identical results (`EVJ_REDACTION_KEY` overrides it); see [benchmark.md](benchmark.md#running-it).
 | `--debug` | Show tracebacks for internal errors |
 
 ## `evidence-judge mcp`

@@ -604,6 +604,7 @@ def bench(
         write_json,
         write_markdown,
     )
+    from evidence_judge.bench.dataset import redaction_key
 
     try:
         settings = load_settings(llm_backend)
@@ -614,6 +615,13 @@ def bench(
         config = BenchConfig(seeds=seeds, offline=offline)
         calls = llm_calls_upper_bound(scenarios, config, baseline=with_llm_baseline)
         llm = _bench_llm(settings, calls)
+        redactor = None
+        if settings.redact and not no_redact:
+            redactor = (
+                Redactor(redaction_key(*runs_dirs))
+                if llm is None and settings.redaction_key is None
+                else load_redactor(settings, persistent=llm is not None)
+            )
         runner = BenchmarkRunner(
             settings,
             config,
@@ -623,11 +631,7 @@ def bench(
                 if with_llm_baseline and llm is not None
                 else None
             ),
-            redactor=(
-                load_redactor(settings, persistent=llm is not None)
-                if settings.redact and not no_redact
-                else None
-            ),
+            redactor=redactor,
         )
         result = asyncio.run(runner.run(scenarios))
         if out:

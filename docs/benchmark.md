@@ -193,6 +193,14 @@ The exit code is 0 on success, 3 on bad input (no labelled scenarios, unreadable
 (`EVJ_MAX_COST_USD`) applies per judgement: the benchmark's cap is that amount times the number
 of judgements that may call a model.
 
+The offline bench is byte-reproducible: the same runs give the same JSON on every run. Redaction
+tokens are keyed with a key derived from the recorded runs themselves (a SHA-256 over every file
+in the run directories), not the per-process key an offline `judge` uses, so a redacted value
+gets the same token each time while only someone who already holds the unredacted runs can
+recompute the key.
+`EVJ_REDACTION_KEY` still wins when set, and a bench that calls a model uses the same key as
+`judge` (see [the redaction key](reference/configuration.md#the-redaction-key)).
+
 From Python:
 
 ```python

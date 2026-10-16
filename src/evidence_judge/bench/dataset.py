@@ -18,6 +18,7 @@ Directories without ``expected.json`` are skipped.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import zipfile
 from dataclasses import dataclass
@@ -66,6 +67,18 @@ def load_scenarios(*runs_dirs: Path, max_body_chars: int = 20_000) -> list[Scena
     if duplicate := next((n for n in names if names.count(n) > 1), None):
         raise BenchInputError(f"scenario {duplicate} is in more than one directory")
     return [load_scenario(folder, max_body_chars=max_body_chars) for folder in folders]
+
+
+def redaction_key(*runs_dirs: Path) -> bytes:
+    """A redaction key derived from the recorded files: the same runs get the same tokens on
+    every offline bench, so its results are byte-reproducible, and only a reader who already
+    holds the unredacted runs can recompute it."""
+    digest = hashlib.sha256(b"evidence-judge bench redaction key\0")
+    for runs_dir in runs_dirs:
+        for path in sorted(p for p in runs_dir.rglob("*") if p.is_file()):
+            digest.update(path.relative_to(runs_dir).as_posix().encode("utf-8") + b"\0")
+            digest.update(path.read_bytes())
+    return digest.digest()
 
 
 def load_scenario(folder: Path, *, max_body_chars: int = 20_000) -> Scenario:

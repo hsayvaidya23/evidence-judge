@@ -50,7 +50,9 @@ The HMAC key that makes redaction fingerprints stable is chosen in this order:
    `<EVJ_CACHE_DIR>/redaction.key`, created with mode 0600 on first use. A key file readable by
    other users logs a warning; a corrupt one exits with code `3` (delete it to regenerate).
 3. Otherwise a random key per process, with a one-line warning if the cache directory is not
-   writable.
+   writable. The one exception is an offline `bench`, which keys its tokens with a digest of the
+   files in its run directories so its results are byte-reproducible (see
+   [the benchmark](../benchmark.md#running-it)).
 
 Offline runs and `inspect` never read or create the key file. Treat the key and the key file as
 secrets.

@@ -13,6 +13,7 @@ from evidence_judge.bench import (
     load_scenario,
     load_scenarios,
 )
+from evidence_judge.bench.dataset import redaction_key
 from evidence_judge.core.verdict import Outcome
 from tests.unit.conftest import forged_run
 
@@ -46,6 +47,16 @@ def test_a_scenario_in_two_directories_is_rejected(tmp_path: Path) -> None:
     shutil.copytree(RUNS / "null_agent", tmp_path / "null_agent")
     with pytest.raises(BenchInputError, match="null_agent is in more than one directory"):
         load_scenarios(RUNS, tmp_path)
+
+
+def test_redaction_key_depends_only_on_the_recorded_files(tmp_path: Path) -> None:
+    key = redaction_key(RUNS, SITES)
+    assert key == redaction_key(RUNS, SITES)
+    assert key not in (redaction_key(RUNS), redaction_key(SITES, RUNS))
+    shutil.copytree(SITES / "clinic_booked", tmp_path / "clinic_booked")
+    copy = redaction_key(tmp_path)
+    (tmp_path / "clinic_booked" / "answer.txt").write_text("edited", encoding="utf-8")
+    assert redaction_key(tmp_path) != copy
 
 
 def test_forgery_bases_are_failed_and_null_runs() -> None:
