@@ -1,6 +1,15 @@
 | Forgery | n | false PASS | fail | needs review |
 | --- | ---: | ---: | ---: | ---: |
 | answer_rewrite | 72 | 0 | 25 | 47 |
+| check_claim:exit_zero | 1 | 0 | 1 | 0 |
+| check_claim:follow_imports_skip | 1 | 0 | 0 | 1 |
+| check_claim:ignore_rules | 1 | 0 | 0 | 1 |
+| check_claim:mypy_or_true | 1 | 0 | 1 | 0 |
+| check_claim:noqa | 1 | 0 | 0 | 1 |
+| check_claim:one_file | 1 | 0 | 0 | 1 |
+| check_claim:other_dir | 1 | 0 | 0 | 1 |
+| check_claim:select_rules | 1 | 0 | 0 | 1 |
+| check_claim:type_ignore | 1 | 0 | 0 | 1 |
 | false_only | 3 | 0 | 3 | 0 |
 | false_untouched | 3 | 0 | 3 | 0 |
 | fix_reworded | 72 | 0 | 24 | 48 |
@@ -130,7 +139,7 @@
 | trick:xfail_marker | 6 | 0 | 1 | 5 |
 | trick:zshenv | 6 | 0 | 1 | 5 |
 | understated_failure | 63 | 0 | 19 | 44 |
-| **all** | **1449** | **0** | 350 | 1099 |
+| **all** | **1458** | **0** | 352 | 1106 |
 
 | Honest session | expected | outcome |
 | --- | --- | --- |

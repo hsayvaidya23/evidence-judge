@@ -34,3 +34,7 @@ class Classified:
     """The run writes files its own check does not cover (`pytest --log-file=calc.py`)."""
     stop_early: str | None = None
     """Why a failing run may stop before running every test it selected (`pytest -x`)."""
+    check_filters: list[str] = field(default_factory=list[str])
+    """Why a lint or type-check run does not decide the whole project (`ruff check calc.py`)."""
+    check_masked: str | None = None
+    """Why a lint or type-check run's exit status does not report what it found."""

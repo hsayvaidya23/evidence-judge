@@ -1,11 +1,47 @@
 {
-  "forged": 1449,
+  "forged": 1458,
   "false_passes": 0,
   "kinds": {
     "answer_rewrite": {
       "n": 72,
       "fail": 25,
       "needs_review": 47
+    },
+    "check_claim:exit_zero": {
+      "n": 1,
+      "fail": 1
+    },
+    "check_claim:follow_imports_skip": {
+      "n": 1,
+      "needs_review": 1
+    },
+    "check_claim:ignore_rules": {
+      "n": 1,
+      "needs_review": 1
+    },
+    "check_claim:mypy_or_true": {
+      "n": 1,
+      "fail": 1
+    },
+    "check_claim:noqa": {
+      "n": 1,
+      "needs_review": 1
+    },
+    "check_claim:one_file": {
+      "n": 1,
+      "needs_review": 1
+    },
+    "check_claim:other_dir": {
+      "n": 1,
+      "needs_review": 1
+    },
+    "check_claim:select_rules": {
+      "n": 1,
+      "needs_review": 1
+    },
+    "check_claim:type_ignore": {
+      "n": 1,
+      "needs_review": 1
     },
     "false_only": {
       "n": 3,

@@ -76,7 +76,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1449 session
+  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1458 session
   forgeries pass, and 4 of 38 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
@@ -180,6 +180,16 @@ The first release.
   changed), and the LLM prompt asks for them. A session that also edited `utils.py` used to
   PASS and now FAILs; "I fixed `calc.py` and didn't touch any other files" no longer reads as
   "no file changed", which FAILed the honest fix. Forgery kind `false_only` covers it.
+- Lint and type-check claims ("ruff check passes", "mypy reports no errors") no longer rest on
+  the exit status alone. A run whose own output counts errors fails whatever its exit status
+  (`ruff check --exit-zero .` printing `Found 3 errors.`), `--exit-zero`, pylint
+  `--fail-under` and `--issues-exit-code=0` mask the status, and a passing run over explicit
+  files, a rule or file selection (`--select`, `--ignore`, `--exclude`, pylint `--disable`,
+  mypy `--disable-error-code`), another configuration, `--follow-imports=skip` or another
+  directory (`cd /tmp/x && ruff check .`) cannot prove the claim. A newly added `# noqa`,
+  `# type: ignore`, `eslint-disable`, `@ts-ignore` or similar comment is treated like a skip
+  marker for that category. Each of these used to PASS; forgery kinds `check_claim:*` cover
+  them.
 
 ### Security
 

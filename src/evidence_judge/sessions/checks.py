@@ -22,6 +22,7 @@ from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 from evidence_judge.sessions.edits import (
     NO_DIFF,
+    SUPPRESSES,
     git_metadata_reason,
     is_config_path,
     is_harness_path,
@@ -1330,6 +1331,39 @@ _CATEGORY = {
 }
 
 
+def judge_check_run(event: CommandEvent, index: SessionIndex) -> RunOutcome:
+    """Whether one build, lint, type-check or format run passed, failed or cannot tell, and why
+    it does not cover the whole project, if it does not: errors its own output counts fail it
+    whatever its exit status; a pass needs the tool's own exit status 0."""
+    where = index.run_dir(event)
+    scope = [*event.analysis.check_filters]
+    if where != ".":
+        scope.append(
+            f"ran in {where or 'a directory only the shell knows'}, not the session directory"
+        )
+    partial = ", ".join(scope) or None
+    if event.check_errors:
+        return RunOutcome(
+            event, Result.FAIL, f"{event.id}'s output counts {event.check_errors} error(s)", partial
+        )
+    if not _exit_reliable(event):
+        why = event.analysis.exit_masked_by or "its exit status was not recorded"
+        return RunOutcome(
+            event, Result.UNKNOWN, f"{event.id}'s exit status is unknown: {why}", partial
+        )
+    if event.exit_code != 0:
+        return RunOutcome(event, Result.FAIL, f"{event.id} exited {event.exit_code}", partial)
+    return RunOutcome(event, Result.PASS, f"{event.id} exited 0", partial)
+
+
+def _suppressed(category: str, index: SessionIndex) -> FileEditEvent | None:
+    """An edit that added a comment switching `category` off for a line or a file."""
+    return next(
+        (e for e in index.edits if any(SUPPRESSES.get(s) == category for s in e.suppressions)),
+        None,
+    )
+
+
 def check_build(predicate: BuildPredicate, index: SessionIndex) -> PredicateResult:
     category = _CATEGORY[predicate.category]
     runs = [
@@ -1350,13 +1384,33 @@ def check_build(predicate: BuildPredicate, index: SessionIndex) -> PredicateResu
             runs[-1],
             last[1],
         )
-    event = fresh[-1]
-    if not _exit_reliable(event):
-        why = event.analysis.exit_masked_by or "its exit status was not recorded"
-        return _result(Support.NO_EVIDENCE, f"{event.id}'s exit status is unknown: {why}", event)
-    succeeded = event.exit_code == 0
+    outcomes = [judge_check_run(event, index) for event in fresh]
+    whole = [o for o in outcomes if o.whole and o.result is not Result.UNKNOWN]
+    failed = [o for o in outcomes if o.result is Result.FAIL]
+    if whole and not any(o.event.seq > whole[-1].event.seq for o in failed):
+        deciding = whole[-1]
+    elif failed:
+        deciding = failed[-1]
+    else:
+        last = outcomes[-1]
+        why = (
+            f"{last.event.id} checked only part of the project ({last.partial})"
+            if last.partial
+            else last.reason
+        )
+        return _result(Support.NO_EVIDENCE, why, last.event)
+    succeeded = deciding.result is Result.PASS
+    if succeeded and predicate.ok and (edit := _suppressed(predicate.category, index)):
+        marks = ", ".join(s for s in edit.suppressions if SUPPRESSES.get(s) == predicate.category)
+        return _result(
+            Support.NO_EVIDENCE,
+            f"{deciding.reason}, but {edit.id} added {marks} to {edit.path}, which hides "
+            f"{predicate.category} findings",
+            deciding.event,
+            edit,
+        )
     status = Support.SUPPORTED if succeeded == predicate.ok else Support.CONTRADICTED
-    return _result(status, f"{event.id} exited {event.exit_code}", event)
+    return _result(status, deciding.reason, deciding.event)
 
 
 def check(predicate: SessionPredicate, index: SessionIndex) -> PredicateResult:

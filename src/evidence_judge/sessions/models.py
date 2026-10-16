@@ -111,6 +111,11 @@ class CommandAnalysis(BaseModel):
         default_factory=list[str],
         description="Why a test run is a subset of the suite (empty for a whole-suite run)",
     )
+    check_filters: list[str] = Field(
+        default_factory=list[str],
+        description="Why a lint or type-check run does not decide the whole project (explicit "
+        "files, a rule selection, another configuration); empty when it does",
+    )
     stop_early: str | None = Field(
         default=None,
         description="Why a failing test run may have stopped before running every test it "
@@ -147,8 +152,8 @@ class CommandAnalysis(BaseModel):
     )
     run_cds: list[str] = Field(
         default_factory=list[str],
-        description="Directories the command changes to before its test run, in order, as "
-        "written (`?` for one only the shell knows)",
+        description="Directories the command changes to before its test run (or its lint or "
+        "type check), in order, as written (`?` for one only the shell knows)",
     )
     run_env: list[str] = Field(
         default_factory=list[str],
@@ -231,6 +236,11 @@ class CommandEvent(_Event):
     background: bool = False
     analysis: CommandAnalysis
     summary: TestSummary | None = None
+    check_errors: int | None = Field(
+        default=None,
+        description="Errors a lint or type-check run's own output counts (`Found 3 errors.`); "
+        "None when it prints no count the judge can read",
+    )
 
     @property
     def ran(self) -> bool:
@@ -258,6 +268,11 @@ class FileEditEvent(_Event):
     tests_added: int | None = Field(
         default=None,
         description="How many Python test functions the edit adds, when that can be counted",
+    )
+    suppressions: list[str] = Field(
+        default_factory=list[str],
+        description="Lint or type-check suppression comments the edit adds (`# noqa`, `# type: "
+        "ignore`, `eslint-disable`)",
     )
     session_store: bool = False
     guard_tamper: str | None = Field(

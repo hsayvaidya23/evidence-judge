@@ -627,7 +627,9 @@ def test_build_predicates() -> None:
         bash("tsc --noEmit || true", "", 0),
     )
     assert _check(BuildPredicate(category="lint"), run)[0] is Support.SUPPORTED
-    assert _check(BuildPredicate(category="typecheck"), run)[0] is Support.NO_EVIDENCE
+    assert _check(BuildPredicate(category="typecheck"), run)[0] is Support.CONTRADICTED
+    masked = session(edit("calc.py"), bash("tsc --noEmit || true", "", 0))
+    assert _check(BuildPredicate(category="typecheck"), masked)[0] is Support.NO_EVIDENCE
     status, reason = _check(BuildPredicate(category="build"), run)
     assert status is Support.NO_EVIDENCE and "before the workspace changed" in reason
     assert _check(BuildPredicate(category="format"), run)[0] is Support.NO_EVIDENCE

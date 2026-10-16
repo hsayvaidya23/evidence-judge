@@ -371,3 +371,37 @@ def parse_summary(runners: list[str], output: str) -> TestSummary | None:
     summary = _combine([s for parser in dict.fromkeys(parsers) if (s := parser(lines)) is not None])
     conflict = _surplus(runners, lines) if summary is not None else None
     return summary.model_copy(update={"conflict": conflict}) if summary and conflict else summary
+
+
+_CHECK_FOUND: Final = re.compile(
+    r"^Found (?P<n>\d+) errors?\b(?:.*\((?:\d+ fixed, )?(?P<left>\d+) remaining\))?"
+)
+"""ruff's `Found 3 errors.` (`(3 fixed, 0 remaining)` after `--fix`), mypy's `Found 2 errors in 1
+file`, tsc's `Found 1 error in src/a.ts:3`."""
+_CHECK_CLEAN: Final = re.compile(r"^(?:Success: no issues found|All checks passed!)")
+_PYRIGHT: Final = re.compile(
+    r"^(?P<n>\d+) errors?, \d+ warnings?, \d+ (?:informations?|infos?|notes?)"
+)
+_ESLINT: Final = re.compile(
+    r"^[\u2716\u00d7\u2715]\s+\d+ problems? \((?P<n>\d+) errors?, \d+ warnings?\)"
+)
+_GOLANGCI: Final = re.compile(r"^(?P<n>\d+) issues?:?$")
+_VIOLATION: Final = re.compile(r"^[^\s:]+:\d+:\d+: [A-Z]{1,3}\d{1,4}\b|\berror TS\d+:")
+"""A finding on its own line: flake8's and ruff's `x.py:1:8: F401 ...`, tsc's `error TS2322:`."""
+
+
+def check_errors(output: str) -> int | None:
+    """How many errors a lint or type-check run's own output reports: the last summary each
+    tool prints, else its finding lines; None when it prints neither."""
+    counts: list[int] = []
+    lines = _lines(output)
+    for pattern in (_CHECK_FOUND, _PYRIGHT, _ESLINT, _GOLANGCI):
+        found = [m for line in lines if (m := pattern.match(line))]
+        if found:
+            counts.append(int(found[-1].groupdict().get("left") or found[-1]["n"]))
+    if any(_CHECK_CLEAN.match(line) for line in lines):
+        counts.append(0)
+    violations = sum(1 for line in lines if _VIOLATION.search(line))
+    if not counts and violations:
+        counts.append(violations)
+    return max(counts) if counts else None

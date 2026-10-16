@@ -253,6 +253,12 @@ passes when the tests failing at the end are a strict subset of those failing be
 change, a comparison that trusts the test names the runs printed. With `--require-rerun`, every
 count and the end of that comparison come from the judge's own run of the whole suite.
 
+Lint and type-check claims are read from the session record only; a re-run does not repeat
+them. The judge reads the tool's own summary and its options, but a wrapper whose command line
+hides them (`npm run lint`, `make lint`, `tox -e lint`, `pre-commit run`) is judged by its exit
+status, and a suppression comment written by a shell command (`sed`, a heredoc) rather than an
+edit is not seen as one.
+
 The MCP server applies the same rule to what it returns. Page- and agent-derived text is
 fenced in `<untrusted_data>` tags. `judge_run` never replaces a file that is not an earlier
 evidence-judge report unless the caller passes `overwrite: true`.
