@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from evidence_judge.ingest._css import (
+from evidence_judge.ingest.css import (
     HIDDEN,
     ROOT,
     SHOWN,
@@ -580,7 +580,7 @@ def test_supports_conditions(condition: str, holds: bool | None) -> None:
 
 
 def test_a_stylesheet_over_its_cap_leaves_the_scope_unknown() -> None:
-    from evidence_judge.ingest._css import MAX_SHEET_CHARS
+    from evidence_judge.ingest.css import MAX_SHEET_CHARS
 
     css = ".a{color:red}" * (MAX_SHEET_CHARS // 13 + 1) + ".x{display:none}"
     sheets = _sheets(css)

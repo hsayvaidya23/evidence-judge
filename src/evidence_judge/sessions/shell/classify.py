@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Final
 
 from evidence_judge.sessions.models import Category, CommandAnalysis
 from evidence_judge.sessions.shell.classified import Classified
 from evidence_judge.sessions.shell.env import (
-    GO_REGEN,
     command_env,
     exports,
     harmless_env,
     harness_change,
     is_harness_env,
     off,
-    pytest_regenerates,
     regenerates_env,
     run_env_allowed,
 )
@@ -28,6 +26,12 @@ from evidence_judge.sessions.shell.guard_paths import (
     guard_tamper,
     writes_session_store,
 )
+from evidence_judge.sessions.shell.handlers.call import Call, Handler
+from evidence_judge.sessions.shell.handlers.checkers import CHECKERS
+from evidence_judge.sessions.shell.handlers.files import FILE_TOOLS, git_command, runs_commands
+from evidence_judge.sessions.shell.handlers.packages import PACKAGE_MANAGERS
+from evidence_judge.sessions.shell.handlers.testing import TEST_RUNNERS
+from evidence_judge.sessions.shell.handlers.toolchains import TOOLCHAINS
 from evidence_judge.sessions.shell.lexer import (
     MAX_NESTING,
     PYTHON,
@@ -42,27 +46,15 @@ from evidence_judge.sessions.shell.lexer import (
     unspelled,
     unwrap,
 )
-from evidence_judge.sessions.shell.runners.cargo import cargo_filters
-from evidence_judge.sessions.shell.runners.generic import generic_filters
-from evidence_judge.sessions.shell.runners.go import go_filters
-from evidence_judge.sessions.shell.runners.js import js_filters
+from evidence_judge.sessions.shell.programs import (
+    DETACHERS,
+    PYTHON_SIDE_EFFECTS,
+    READ_ONLY_PROGRAMS,
+    VERSION_FLAGS,
+)
 from evidence_judge.sessions.shell.runners.lint import lint_scope
-from evidence_judge.sessions.shell.runners.make import make_like
-from evidence_judge.sessions.shell.runners.node import node_test_filters
-from evidence_judge.sessions.shell.runners.pm import FIX_FLAGS, pm_script
-from evidence_judge.sessions.shell.runners.pytest import pytest_filters
 from evidence_judge.sessions.shell.runners.stop import stop_early
-from evidence_judge.sessions.shell.runners.tox import tox_filters
-from evidence_judge.sessions.shell.runners.unittest import unittest_filters
 from evidence_judge.sessions.shell.writes import (
-    PM,
-    SCRATCH,
-    git,
-    maybe_directory,
-    perl,
-    run_writes,
-    sed,
-    tool_config_change,
     written_code,
 )
 
@@ -79,290 +71,8 @@ _AGENT_SUMMARY_TEXT: Final = re.compile(
     re.IGNORECASE,
 )
 
-READ_ONLY_PROGRAMS: Final = frozenset(
-    {
-        "ls",
-        "cat",
-        "head",
-        "tail",
-        "less",
-        "more",
-        "grep",
-        "egrep",
-        "fgrep",
-        "rg",
-        "ag",
-        "wc",
-        "echo",
-        "printf",
-        "pwd",
-        "which",
-        "type",
-        "file",
-        "stat",
-        "diff",
-        "cmp",
-        "tree",
-        "sort",
-        "uniq",
-        "cut",
-        "tr",
-        "jq",
-        "yq",
-        "du",
-        "df",
-        "date",
-        "true",
-        "false",
-        "test",
-        "[",
-        "[[",
-        "sleep",
-        "cd",
-        "pushd",
-        "popd",
-        "export",
-        "set",
-        "unset",
-        "alias",
-        ":",
-        "exit",
-        "return",
-        "nl",
-        "column",
-        "basename",
-        "dirname",
-        "realpath",
-        "readlink",
-        "whoami",
-        "id",
-        "uname",
-        "hostname",
-        "ps",
-        "xxd",
-        "od",
-        "hexdump",
-        "md5",
-        "md5sum",
-        "sha1sum",
-        "sha256sum",
-        "shasum",
-        "env",
-        "printenv",
-        "fd",
-        "locate",
-        "comm",
-        "paste",
-        "fold",
-        "fmt",
-        "rev",
-        "tac",
-        "seq",
-        "yes",
-        "expr",
-        "bc",
-        "history",
-        "lsof",
-        "top",
-        "free",
-        "uptime",
-        "nproc",
-        "tput",
-        "clear",
-        "wait",
-        "jobs",
-        "read",
-        "shopt",
-        "ulimit",
-        "umask",
-        "trap",
-        "command",
-        "hash",
-        "declare",
-        "local",
-        "typeset",
-        "getconf",
-        "sw_vers",
-        "lscpu",
-        "pgrep",
-        "kill",
-        "pkill",
-        "open",
-        "awk",
-        "gawk",
-        "sed",
-        "find",
-        "curl",
-        "git",
-        "pip",
-        "pip3",
-        "npm",
-        "pnpm",
-        "yarn",
-        "bun",
-        "cargo",
-        "go",
-        "uv",
-    }
-)
-"""Programs that do not change files (the last group only for some subcommands, decided below)."""
 
-
-_MUTATING: Final = frozenset(
-    {
-        "rm",
-        "rmdir",
-        "mv",
-        "cp",
-        "mkdir",
-        "touch",
-        "ln",
-        "chmod",
-        "chown",
-        "chgrp",
-        "truncate",
-        "dd",
-        "tee",
-        "patch",
-        "install",
-        "unzip",
-        "tar",
-        "gunzip",
-        "gzip",
-        "bunzip2",
-        "zip",
-        "rsync",
-        "scp",
-        "wget",
-        "shred",
-        "unlink",
-        "brew",
-        "apt",
-        "apt-get",
-        "yum",
-        "dnf",
-        "apk",
-        "conda",
-        "mamba",
-        "pipx",
-        "gem",
-        "composer",
-        "sync",
-        "mkfifo",
-        "split",
-    }
-)
-
-
-_LINTERS: Final = frozenset(
-    {
-        "flake8",
-        "pylint",
-        "eslint",
-        "golangci-lint",
-        "rubocop",
-        "shellcheck",
-        "stylelint",
-        "markdownlint",
-        "markdownlint-cli2",
-        "yamllint",
-        "hadolint",
-        "swiftlint",
-        "ktlint",
-        "standard",
-        "xo",
-        "oxlint",
-        "pyflakes",
-        "pycodestyle",
-        "pydocstyle",
-        "bandit",
-        "vulture",
-        "staticcheck",
-        "revive",
-        "tflint",
-        "actionlint",
-        "codespell",
-        "cspell",
-        "djlint",
-    }
-)
-
-
-_TYPECHECKERS: Final = frozenset(
-    {"pyright", "basedpyright", "mypy", "pyre", "pytype", "vue-tsc", "flow", "ty"}
-)
-
-
-_BUILDERS: Final = frozenset(
-    {
-        "webpack",
-        "rollup",
-        "esbuild",
-        "parcel",
-        "ninja",
-        "msbuild",
-        "javac",
-        "gcc",
-        "g++",
-        "clang",
-        "clang++",
-        "rustc",
-        "tsup",
-        "swc",
-        "turbo",
-        "nx",
-    }
-)
-
-
-_OPAQUE_WRITERS: Final = frozenset(
-    {"tar", "unzip", "patch", "dd", "rsync", "wget", "split", "bunzip2", "gunzip", "7z", "unrar"}
-)
-"""File-changing programs whose targets are not (all) the words on their command line."""
-
-
-_DETACHERS: Final = frozenset(
-    {"setsid", "disown", "at", "batch", "screen", "tmux", "daemonize", "start-stop-daemon",
-     "systemd-run", "launchctl", "crontab", "watchexec", "entr", "fswatch", "inotifywait"}
-)  # fmt: skip
-"""Programs that leave something running, or scheduled, after the command returns."""
-
-
-_COPIERS: Final = frozenset({"cp", "mv", "install", "ln", "scp"})
-
-
-_VERSION_FLAGS: Final = frozenset({"--version", "-V", "-VV", "--help", "-h"})
-
-
-_PYTHON_SIDE_EFFECTS: Final = re.compile(
-    r"import|open|exec|eval|compile|__|getattr|setattr|delattr|globals|locals|vars|"
-    r"breakpoint|help|input|memoryview"
-)
-"""Without these a `python -c` program reaches no module, file or builtin that can write."""
-
-
-@dataclass(frozen=True, slots=True)
-class _Call:
-    """One simple command, unwrapped, as the per-program handlers see it."""
-
-    words: list[str]
-    prog: str
-    args: list[str]
-    env: dict[str, str]
-    depth: int
-    cwd: str | None
-
-    @property
-    def sub(self) -> str:
-        return self.args[0] if self.args else ""
-
-
-_Handler = Callable[[_Call], Classified | None]
-"""Classifies a command of the programs it is registered for, or None to leave it to the
-read-only, version-flag and inline-Python fallbacks."""
-
-
-def _shell(c: _Call) -> Classified | None:
+def _shell(c: Call) -> Classified | None:
     if c.depth >= MAX_NESTING:
         return None
     args = c.args
@@ -382,526 +92,35 @@ def _shell(c: _Call) -> Classified | None:
     return Classified(category, c.prog, nested=nested)
 
 
-def _pytest(c: _Call) -> Classified:
-    filters, collect, paths = pytest_filters(c.args, c.env)
-    regen = next((a for a in c.args if pytest_regenerates(a)), None)
-    written, emptied, after = run_writes("pytest", c.args, c.cwd)
-    why = f"pytest {regen} rewrites expected outputs" if regen else None
-    if written or emptied:
-        option, path = (written or emptied)[0]
-        why = why or f"pytest {option} writes {path}"
-    return Classified(
-        Category.TEST,
-        c.prog,
-        "pytest",
-        filters,
-        collect,
-        paths=paths,
-        mutation=why,
-        opaque=f"pytest {regen} rewrites expected outputs" if regen else None,
-        touched=[path for _, path in written],
-        deleted=[path for _, path in emptied],
-        writes_after=after,
-    )
-
-
-def _unittest(c: _Call) -> Classified:
-    filters, collect = unittest_filters(c.args)
-    return Classified(Category.TEST, c.prog, "unittest", filters, collect)
-
-
-def _js_runner(c: _Call) -> Classified:
-    prog, args = c.prog, c.args
-    filters, collect = js_filters(prog, args)
-    if prog == "vitest" and args[:1] in (["bench"], ["list"]):
-        collect = True
-    mutation = (
-        "updates snapshots"
-        if any(a in ("-u", "--updateSnapshot", "--update") for a in args)
-        else None
-    )
-    return Classified(
-        Category.TEST,
-        prog,
-        prog,
-        filters,
-        collect,
-        mutation=mutation,
-        opaque=f"{prog} -u rewrites the expected snapshots" if mutation else None,
-    )
-
-
-def _browser_runner(c: _Call) -> Classified | None:
-    sub = {"playwright": "test", "cypress": "run"}[c.prog]
-    if c.args[:1] != [sub]:
-        return None
-    filters, collect = js_filters(c.prog, c.args[1:])
-    return Classified(Category.TEST, c.prog, f"{c.prog} {sub}", filters, collect)
-
-
-_SELECTING_OPTIONS: Final = frozenset(
-    {"-e", "--example", "-t", "--tag", "--filter", "--group", "--testsuite", "-R", "-L", "-k",
-     "--only-failures"}
-)  # fmt: skip
-
-
-def _plain_runner(c: _Call) -> Classified:
-    filters = [f"only {a}" for a in c.args if not a.startswith("-")]
-    filters.extend(a.partition("=")[0] for a in c.args if a.partition("=")[0] in _SELECTING_OPTIONS)
-    return Classified(Category.TEST, c.prog, c.prog, filters)
-
-
-def _node(c: _Call) -> Classified | None:
-    if "--test" not in c.args:
-        return None
-    filters, update = node_test_filters(c.args)
-    why = "node --test --test-update-snapshots rewrites the expected snapshots"
-    return Classified(
-        Category.TEST,
-        c.prog,
-        "node --test",
-        filters,
-        mutation=why if update else None,
-        opaque=why if update else None,
-    )
-
-
-def _tox(c: _Call) -> Classified:
-    return Classified(Category.TEST, c.prog, c.prog, tox_filters(c.prog, c.args))
-
-
-def _go_test(c: _Call) -> Classified:
-    args = c.args[1:]
-    filters, collect = go_filters(args)
-    regen = next((a for a in args if GO_REGEN.fullmatch(a) and not off(a)), None)
-    why = f"go test {regen} rewrites expected outputs" if regen else None
-    written, _, after = run_writes("go test", args, c.cwd)
-    wrote = f"go test {written[0][0]} writes {written[0][1]}" if written else None
-    return Classified(
-        Category.TEST,
-        c.prog,
-        "go test",
-        filters,
-        collect,
-        mutation=why or wrote,
-        opaque=why,
-        touched=[path for _, path in written],
-        writes_after=after,
-    )
-
-
-def _go(c: _Call) -> Classified:
-    prog, args, sub = c.prog, c.args, c.sub
-    if sub == "test":
-        return _go_test(c)
-    if sub in ("build", "install"):
-        return Classified(Category.BUILD, prog)
-    if sub == "vet":
-        return Classified(Category.LINT, prog)
-    if sub in ("fmt", "generate", "get") or args[:2] == ["mod", "tidy"]:
-        return Classified(Category.MUTATING, prog, mutation=f"go {sub} changes files")
-    if why := tool_config_change(c.words):
-        return Classified(Category.MUTATING, prog, mutation=why, touched=[])
-    if sub in ("version", "env", "list", "doc", "help") or args[:2] == ["mod", "graph"]:
-        return Classified(Category.READ_ONLY, prog)
-    return Classified(Category.UNKNOWN, prog, mutation=f"go {sub} runs a program")
-
-
-def _cargo_insta(c: _Call) -> Classified | None:
-    args = c.args
-    action = args[1] if len(args) > 1 else ""
-    if action in ("accept", "review", "reject") or (
-        action == "test" and any(a in ("--accept", "--review") for a in args)
-    ):
-        why = f"cargo insta {action} rewrites expected outputs"
-        return Classified(Category.MUTATING, c.prog, mutation=why, opaque=why)
-    if action == "test":
-        filters, collect = cargo_filters(args[2:])
-        return Classified(Category.TEST, c.prog, "cargo insta test", filters, collect)
-    return None
-
-
-def _cargo(c: _Call) -> Classified:
-    prog, args, sub = c.prog, c.args, c.sub
-    if sub in ("test", "t"):
-        filters, collect = cargo_filters(args[1:])
-        return Classified(Category.TEST, prog, "cargo test", filters, collect)
-    if sub == "insta" and (insta := _cargo_insta(c)) is not None:
-        return insta
-    if sub == "nextest":
-        filters, collect = cargo_filters(args[1:])
-        return Classified(Category.TEST, prog, "cargo nextest", filters, collect)
-    if sub in ("build", "b"):
-        return Classified(Category.BUILD, prog)
-    if sub in ("check", "c"):
-        return Classified(Category.TYPECHECK, prog)
-    if sub == "clippy":
-        fix = "--fix" in args
-        return Classified(
-            Category.LINT, prog, mutation="clippy --fix rewrites files" if fix else None
-        )
-    if sub == "fmt":
-        check = "--check" in args
-        return Classified(
-            Category.FORMAT, prog, mutation=None if check else "cargo fmt rewrites files"
-        )
-    if sub in ("tree", "metadata", "search", "version", "--version", "help", "doc"):
-        return Classified(Category.READ_ONLY, prog)
-    return Classified(Category.UNKNOWN, prog, mutation=f"cargo {sub} may change files")
-
-
-def _jvm(c: _Call) -> Classified:
-    args = c.args
-    goals = [a for a in args if not a.startswith("-")]
-    filters = [
-        a.partition("=")[0]
-        for a in args
-        if a.startswith(("-Dtest", "-pl", "--tests", "--projects"))
-    ]
-    if any(g in ("test", "verify", "check", "integration-test") for g in goals):
-        return Classified(Category.TEST, c.prog, c.prog, filters)
-    if any(g in ("build", "package", "compile", "install", "assemble") for g in goals):
-        return Classified(Category.BUILD, c.prog)
-    return Classified(Category.UNKNOWN, c.prog, mutation=f"{c.prog} runs a project task")
-
-
-def _dotnet(c: _Call) -> Classified:
-    prog, args, sub = c.prog, c.args, c.sub
-    if sub == "test":
-        filters = [a for a in args[1:] if a in ("--filter",)] + [
-            f"only {a}" for a in args[1:2] if not a.startswith("-")
-        ]
-        return Classified(Category.TEST, prog, "dotnet test", filters)
-    if sub == "build":
-        return Classified(Category.BUILD, prog)
-    if sub == "format":
-        return Classified(
-            Category.FORMAT,
-            prog,
-            mutation=None if "--verify-no-changes" in args else "dotnet format rewrites files",
-        )
-    return Classified(Category.UNKNOWN, prog, mutation=f"dotnet {sub} may change files")
-
-
-def _toolchain(c: _Call) -> Classified:
-    prog, args, sub = c.prog, c.args, c.sub
-    if sub == "test":
-        filters = [f"only {a}" for a in args[1:] if not a.startswith("-")]
-        filters.extend(
-            a for a in args[1:] if a.partition("=")[0] in ("--filter", "--only", "--exclude")
-        )
-        return Classified(Category.TEST, prog, f"{prog} test", filters)
-    if sub in ("build", "compile"):
-        return Classified(Category.BUILD, prog)
-    if sub == "lint":
-        return Classified(Category.LINT, prog)
-    if sub == "check":
-        return Classified(Category.TYPECHECK, prog)
-    if sub in ("fmt", "format"):
-        return Classified(
-            Category.FORMAT,
-            prog,
-            mutation=None if "--check" in args else f"{prog} {sub} rewrites files",
-        )
-    return Classified(Category.UNKNOWN, prog, mutation=f"{prog} {sub} may change files")
-
-
-def _pm(c: _Call) -> Classified:
-    return pm_script(c.prog, c.words)
-
-
-def _make(c: _Call) -> Classified:
-    return make_like(c.prog, c.words)
-
-
-def _hatch(c: _Call) -> Classified | None:
-    if c.args[:1] == ["test"]:
-        return Classified(
-            Category.TEST, c.prog, "hatch test", generic_filters("hatch test", c.args[1:])
-        )
-    return _package_build(c)
-
-
-def _package_build(c: _Call) -> Classified | None:
-    return Classified(Category.BUILD, c.prog) if c.args[:1] == ["build"] else None
-
-
-def _uv(c: _Call) -> Classified:
-    prog, args, sub = c.prog, c.args, c.sub
-    if sub == "build":
-        return Classified(Category.BUILD, prog)
-    if sub in ("sync", "add", "remove", "lock", "venv", "init", "self", "tool") or args[:2] in (
-        ["pip", "install"],
-        ["pip", "uninstall"],
-        ["pip", "sync"],
-    ):
-        return Classified(Category.MUTATING, prog, mutation=f"uv {sub} changes the environment")
-    if sub in ("pip", "tree", "version", "--version", "help", "python"):
-        return Classified(Category.READ_ONLY, prog)
-    return Classified(Category.UNKNOWN, prog, mutation=f"uv {sub} may change files")
-
-
-def _pip(c: _Call) -> Classified:
-    if c.sub in ("install", "uninstall", "download", "wheel"):
-        return Classified(
-            Category.MUTATING, c.prog, mutation=f"pip {c.sub} changes the environment"
-        )
-    return Classified(Category.READ_ONLY, c.prog)
-
-
-def _ruff(c: _Call) -> Classified:
-    args = c.args
-    if c.sub == "format":
-        check = any(a in ("--check", "--diff") for a in args)
-        return Classified(
-            Category.FORMAT, c.prog, mutation=None if check else "ruff format rewrites files"
-        )
-    fix = any(
-        a.partition("=")[0] in ("--fix", "--unsafe-fixes", "--fix-only")
-        and not a.endswith("=false")
-        for a in args
-    )
-    return Classified(Category.LINT, c.prog, mutation="ruff --fix rewrites files" if fix else None)
-
-
-def _python_formatter(c: _Call) -> Classified:
-    prog, args = c.prog, c.args
-    check = any(a in ("--check", "--diff", "--check-only", "-c") for a in args)
-    if prog in ("autopep8", "yapf", "autoflake"):
-        check = not any(a in ("-i", "--in-place") for a in args)
-    return Classified(Category.FORMAT, prog, mutation=None if check else f"{prog} rewrites files")
-
-
-def _web_formatter(c: _Call) -> Classified:
-    prog, args = c.prog, c.args
-    writes = any(
-        a in ("--write", "-w", "--apply", "--apply-unsafe", "--fix") for a in args
-    ) or args[:1] == ["fmt"]
-    category = (
-        Category.LINT
-        if prog == "biome" and args[:1] in (["lint"], ["check"], ["ci"])
-        else Category.FORMAT
-    )
-    return Classified(category, prog, mutation=f"{prog} rewrites files" if writes else None)
-
-
-def _native_formatter(c: _Call) -> Classified:
-    prog, args = c.prog, c.args
-    writes = any(a in ("-w", "-i", "--write") for a in args) or (
-        prog == "rustfmt" and "--check" not in args
-    )
-    if prog == "terraform":
-        writes = args[:1] == ["fmt"] and "-check" not in args
-    return Classified(Category.FORMAT, prog, mutation=f"{prog} rewrites files" if writes else None)
-
-
-def _pre_commit(c: _Call) -> Classified:
-    return Classified(Category.LINT, c.prog, mutation="pre-commit hooks may rewrite files")
-
-
-def _linter(c: _Call) -> Classified:
-    fix = any(a.partition("=")[0] in FIX_FLAGS for a in c.args)
-    return Classified(
-        Category.LINT, c.prog, mutation=f"{c.prog} fixes rewrite files" if fix else None
-    )
-
-
-def _typechecker(c: _Call) -> Classified:
-    return Classified(Category.TYPECHECK, c.prog)
-
-
-def _tsc(c: _Call) -> Classified:
-    no_emit = "--noEmit" in c.args or "--noemit" in c.args
-    return Classified(Category.TYPECHECK if no_emit else Category.BUILD, c.prog)
-
-
-def _builder(c: _Call) -> Classified:
-    return Classified(Category.BUILD, c.prog)
-
-
-def _docker(c: _Call) -> Classified | None:
-    return _package_build(c)
-
-
-def _cmake(c: _Call) -> Classified | None:
-    return Classified(Category.BUILD, c.prog) if "--build" in c.args else None
-
-
-def _git(c: _Call) -> Classified:
-    return git(c.words)
-
-
-def _sed(c: _Call) -> Classified:
-    return sed(c.args)
-
-
-def _perl(c: _Call) -> Classified:
-    return perl(c.args)
-
-
-def _awk(c: _Call) -> Classified:
-    program_text = " ".join(c.args)
-    writes = "system(" in program_text or re.search(r"print[^|;]*>\s*\"", program_text) is not None
-    return Classified(
-        Category.MUTATING if writes else Category.READ_ONLY,
-        c.prog,
-        mutation="awk writes files or runs commands" if writes else None,
-        touched=[],
-        opaque="awk writes files or runs commands" if writes else None,
-    )
-
-
-_FIND_ACTIONS: Final = frozenset(
-    {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"}
-)
-
-
-def _find(c: _Call) -> Classified:
-    acting = [a for a in c.args if a in _FIND_ACTIONS]
-    return Classified(
-        Category.MUTATING if acting else Category.READ_ONLY,
-        c.prog,
-        mutation=f"find {acting[0]} acts on files" if acting else None,
-        touched=[],
-        opaque=f"find {acting[0]} acts on the files it finds" if acting else None,
-    )
-
-
-def _curl(c: _Call) -> Classified:
-    args = c.args
-    named = [
-        args[i + 1] if a in ("-o", "--output") else a.partition("=")[2]
-        for i, a in enumerate(args)
-        if (a in ("-o", "--output") and i + 1 < len(args)) or a.startswith("--output=")
-    ]
-    remote = any(a in ("-O", "--remote-name", "--remote-name-all", "-J") for a in args)
-    writes = bool(named) or remote
-    return Classified(
-        Category.MUTATING if writes else Category.READ_ONLY,
-        c.prog,
-        mutation="curl writes a file" if writes else None,
-        touched=named,
-        opaque="curl -O names the file after the URL" if remote else None,
-    )
-
-
-def _copier(c: _Call) -> Classified:
-    prog, args = c.prog, c.args
-    named = [a for a in args if not a.startswith("-")]
-    target = named[-1:] or [""]
-    into_directory = (maybe_directory(target[0]) and not target[0].startswith(SCRATCH)) or any(
-        a in ("-t", "--target-directory") or a.startswith("-t") for a in args
-    )
-    return Classified(
-        Category.MUTATING,
-        prog,
-        mutation="mv moves files" if prog == "mv" else f"{prog} changes files",
-        deleted=named[:-1] if prog == "mv" else [],
-        touched=named if prog == "mv" else target,
-        opaque=f"{prog} writes into a directory" if into_directory else None,
-    )
-
-
-def _file_writer(c: _Call) -> Classified:
-    prog = c.prog
-    if prog in ("rm", "unlink", "shred"):
-        deleted = [a for a in c.args if not a.startswith("-")]
-        return Classified(
-            Category.MUTATING, prog, mutation=f"{prog} deletes files", deleted=deleted
-        )
-    if prog in _COPIERS:
-        return _copier(c)
-    if prog in _OPAQUE_WRITERS:
-        return Classified(
-            Category.MUTATING,
-            prog,
-            mutation=f"{prog} changes files",
-            opaque=f"{prog} writes files its command line does not name",
-        )
-    return Classified(Category.MUTATING, prog, mutation=f"{prog} changes files")
-
-
-def _runs_commands(c: _Call) -> Classified:
-    return Classified(Category.UNKNOWN, c.prog, mutation=f"{c.prog} runs other commands")
-
-
-def _register(*families: tuple[Iterable[str], _Handler]) -> dict[str, _Handler]:
-    handlers: dict[str, _Handler] = {}
+def _register(*families: tuple[Iterable[str], Handler]) -> dict[str, Handler]:
+    handlers: dict[str, Handler] = {}
     for programs, handler in families:
         for prog in programs:
             handlers.setdefault(prog, handler)
     return handlers
 
 
-_TEST_RUNNERS: Final = (
-    (("pytest", "py.test"), _pytest),
-    (("unittest",), _unittest),
-    (("jest", "vitest", "mocha", "ava", "tap", "jasmine"), _js_runner),
-    (("playwright", "cypress"), _browser_runner),
-    (("rspec", "phpunit", "pest", "ctest", "behave", "nosetests", "nose2", "ward"), _plain_runner),
-    (("node", "nodejs"), _node),
-    (("tox", "nox"), _tox),
-)
-_TOOLCHAINS: Final = (
-    (("go",), _go),
-    (("cargo",), _cargo),
-    (("mvn", "mvnw", "gradle", "gradlew"), _jvm),
-    (("dotnet",), _dotnet),
-    (("deno", "swift", "mix", "bazel", "bazelisk"), _toolchain),
-)
-_PACKAGE_MANAGERS: Final = (
-    (PM, _pm),
-    (("make", "gmake", "just", "task", "mage"), _make),
-    (("hatch",), _hatch),
-    (("uv",), _uv),
-    (("build",), _builder),
-    (("poetry", "pdm", "flit"), _package_build),
-    (("pip", "pip3"), _pip),
-)
-_CHECKERS: Final = (
-    (("ruff",), _ruff),
-    (("black", "isort", "autopep8", "yapf", "autoflake"), _python_formatter),
-    (("prettier", "biome", "dprint"), _web_formatter),
-    (("gofmt", "goimports", "rustfmt", "clang-format", "shfmt", "terraform"), _native_formatter),
-    (("pre-commit",), _pre_commit),
-    (_LINTERS, _linter),
-    (_TYPECHECKERS, _typechecker),
-    (("tsc",), _tsc),
-    (("vite", "next", "nuxt", "astro", "svelte-kit", "ng"), _package_build),
-    (_BUILDERS, _builder),
-    (("docker",), _docker),
-    (("cmake",), _cmake),
-)
-_FILE_TOOLS: Final = (
-    (("sed",), _sed),
-    (("perl",), _perl),
-    (("awk", "gawk"), _awk),
-    (("find",), _find),
-    (("curl",), _curl),
-    ((*("rm", "unlink", "shred"), *_COPIERS, *_OPAQUE_WRITERS, *_MUTATING), _file_writer),
-)
-
 _HANDLERS: Final = _register(
     (SHELLS, _shell),
-    *_TEST_RUNNERS,
-    *_TOOLCHAINS,
-    *_PACKAGE_MANAGERS,
-    *_CHECKERS,
-    (("git",), _git),
-    *_FILE_TOOLS,
-    (("xargs", "parallel", "watch", "eval", "source", "."), _runs_commands),
+    *TEST_RUNNERS,
+    *TOOLCHAINS,
+    *PACKAGE_MANAGERS,
+    *CHECKERS,
+    (("git",), git_command),
+    *FILE_TOOLS,
+    (("xargs", "parallel", "watch", "eval", "source", "."), runs_commands),
 )
 """The handler for each program it classifies; the first family to name a program owns it."""
 
 
-def _fallback(c: _Call) -> Classified:
+def _fallback(c: Call) -> Classified:
     prog, args = c.prog, c.args
     if prog in READ_ONLY_PROGRAMS:
         return Classified(Category.READ_ONLY, prog)
-    if "/" not in c.words[0] and len(args) == 1 and args[0] in _VERSION_FLAGS:
+    if "/" not in c.words[0] and len(args) == 1 and args[0] in VERSION_FLAGS:
         return Classified(Category.READ_ONLY, prog)
     if PYTHON.match(prog) and args[:1] == ["-c"] and len(args) >= 2:
-        if _PYTHON_SIDE_EFFECTS.search(args[1]) is None:
+        if PYTHON_SIDE_EFFECTS.search(args[1]) is None:
             return Classified(Category.READ_ONLY, prog)
         return Classified(Category.UNKNOWN, prog, mutation="python -c runs code that can write")
     return Classified(Category.UNKNOWN, prog, mutation=f"{prog} is not a known read-only program")
@@ -910,7 +129,7 @@ def _fallback(c: _Call) -> Classified:
 def _classify_program(
     words: list[str], env: dict[str, str], depth: int, cwd: str | None
 ) -> Classified:
-    call = _Call(words, program_name(words[0]), words[1:], env, depth, cwd)
+    call = Call(words, program_name(words[0]), words[1:], env, depth, cwd)
     handler = _HANDLERS.get(call.prog)
     result = handler(call) if handler is not None else None
     if result is not None and result.runner is not None:
@@ -1054,7 +273,7 @@ def _note(
     """Record what every simple command adds, whether or not it nests another command line."""
     walk.touched.extend(classified.touched or [])
     walk.opaque = walk.opaque or classified.opaque
-    if classified.program in _DETACHERS:
+    if classified.program in DETACHERS:
         walk.lasting = (
             walk.lasting or f"{classified.program} starts a job that outlives the command"
         )
