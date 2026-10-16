@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Final, Literal, Self
 
 import yaml
 from pydantic import (
@@ -18,6 +18,7 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
+    field_validator,
     model_validator,
 )
 
@@ -25,6 +26,7 @@ from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.ingest._json import as_object
 from evidence_judge.sessions.rerun import RerunSpec
+from evidence_judge.sessions.shell import analyse
 
 MIN_TEXT = 3
 _GLOB_LITERAL = re.compile(r"[^*?/.\[\]{}]")
@@ -177,6 +179,24 @@ SessionPredicate = Annotated[
 PREDICATE_ADAPTER: TypeAdapter[SessionPredicate] = TypeAdapter(SessionPredicate)
 
 
+_CHECKS: Final = frozenset({"test", "build", "lint", "typecheck", "format"})
+
+
+def claimed(predicate: SessionPredicate) -> SessionPredicate:
+    """`predicate` as a claim states it: a claim that the agent ran a command says the command
+    succeeded, unless the command is a test, build, lint, type or format check, whose failure is
+    a result the answer reports in its own words. Specs keep `ok` unset to mean "ran"."""
+    if not isinstance(predicate, CommandPredicate) or predicate.ok is not None:
+        return predicate
+    if predicate.exit_code is not None or predicate.category is not None:
+        return predicate
+    if predicate.contains is not None and _CHECKS & {
+        c.value for c in analyse(predicate.contains).categories
+    }:
+        return predicate
+    return predicate.model_copy(update={"ok": True})
+
+
 class SessionClaim(BaseModel):
     """One checkable statement from the agent's answer. Every predicate must hold."""
 
@@ -189,6 +209,11 @@ class SessionClaim(BaseModel):
     key: bool = False
     predicates: list[SessionPredicate] = Field(min_length=1, max_length=4)
 
+    @field_validator("predicates")
+    @classmethod
+    def _as_claimed(cls, predicates: list[SessionPredicate]) -> list[SessionPredicate]:
+        return [claimed(p) for p in predicates]
+
 
 class SessionClaimSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -196,6 +221,11 @@ class SessionClaimSet(BaseModel):
     claims: list[SessionClaim] = Field(default_factory=list[SessionClaim])
     extractor: str = "unknown"
     note: str | None = None
+    unchecked: list[str] = Field(
+        default_factory=list[str],
+        description="Claims the extractor proposed but could not keep whole: no valid predicate, "
+        "a quote not in the answer, a predicate that did not validate, or over the claim cap",
+    )
 
 
 class SpecItem(BaseModel):

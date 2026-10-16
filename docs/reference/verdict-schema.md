@@ -29,7 +29,7 @@ evidence-judge schema --out run-verdict.schema.json
 | `claims` | `ClaimVerdict[]` | Each claim: `claim_id`, `claim_text`, `quote`, `kind`, `key`, `status`, `reason`, `citations`, `checker`, `confidence` |
 | `expectations` | `ExpectationResult[]` | Each spec check: `expectation_id`, `kind` (`expect` \| `forbid` \| `constraint`), `met` (true \| false \| null), `reason`, `citations` |
 | `dimensions` | object | `success`, `side_effects`, `state`, `guardrails`, `recovery`, `loops` → `{score: number \| null, findings: string[]}` |
-| `claim_coverage` | number \| null | Share of claim-like sentences that became claims |
+| `claim_coverage` | number \| null | Share of claim-like sentences that became claims (for a session, the claim-bearing sentences a claim quotes or checks; null without a final answer) |
 | `deterministic_share` | number \| null | Share of claim verdicts decided without an LLM |
 | `tamper_detection` | object \| null | `{level, reason}`: what the evidence source can show of the agent tampering with the page or its requests. `level` is `full` (Playwright trace), `partial` (browser-use history) or `none` (HAR only); null only in verdicts that did not assess it |
 | `verification` | object \| null | `{method, reason}` for a coding-agent session: `rerun` when the judge ran the suite itself and read the runner's report (`session judge --rerun`), `transcript` when test results come from the output the session recorded; null for browser runs |

@@ -259,6 +259,14 @@ hides them (`npm run lint`, `make lint`, `tox -e lint`, `pre-commit run`) is jud
 status, and a suppression comment written by a shell command (`sed`, a heredoc) rather than an
 edit is not seen as one.
 
+Claims the session judge has no predicate for are found by a closed list of actions whose
+effects only a command could show (version control, installs, deployments, releases, pull
+requests, migrations) and by coverage and speed figures; an unverifiable claim in other words
+("I notified the team", "the docs site is updated") is not flagged by the offline extractor. An
+install claim must name the package on the install command line, so an honest "Installed
+`requests`" after `pip install -r requirements.txt` fails; "pushed to origin/main" is checked
+as a successful `git push`, not against the remote or branch it names.
+
 The MCP server applies the same rule to what it returns. Page- and agent-derived text is
 fenced in `<untrusted_data>` tags. `judge_run` never replaces a file that is not an earlier
 evidence-judge report unless the caller passes `overwrite: true`.

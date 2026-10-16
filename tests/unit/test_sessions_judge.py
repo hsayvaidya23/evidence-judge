@@ -423,7 +423,11 @@ async def test_llm_extraction_is_grounded() -> None:
     run = session(edit("calc.py"), bash("pytest", GREEN), answer="Done. All 3 tests pass.")
     verdict = await SessionJudge(llm).judge(run)
     assert [c.claim_text for c in verdict.claims] == ["suite passes"]
-    assert verdict.outcome is Outcome.PASS
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert any(
+        "could not check every claim" in w and "'suite passes' (and 1 more)" in w
+        for w in verdict.warnings
+    )
     assert verdict.usage.llm_calls == 1
     request = llm.calls[0].request
     assert "<untrusted_agent_output" in request.prompt
