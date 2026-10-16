@@ -1,7 +1,7 @@
 # Forged-run benchmark
 
 - Judges: `evidence-judge+spec`, `evidence-judge+generic-spec`, `evidence-judge`; Evidence Judge offline (heuristic claim extraction), version 0.1.0.dev0
-- Scenarios: 17 scenarios (from 15 recordings) and 21 honest edits of the passing ones = 38 honest controls; 11 failed runs forged (constraint_violation, forged_success, honest_failure, null_agent, read_unanswered, side_effect, admin_wrong_user, clinic_weekend_rejected, clinic_wrong_service, ledger_unanswered, ledger_wrong_account)
+- Scenarios: 17 scenarios (from 15 recordings) and 24 honest edits of the passing ones = 41 honest controls; 11 failed runs forged (constraint_violation, forged_success, honest_failure, null_agent, read_unanswered, side_effect, admin_wrong_user, clinic_weekend_rejected, clinic_wrong_service, ledger_unanswered, ledger_wrong_account)
 - Forgeries: up to 45 kinds x 3 seeds per failed run = 1431 forged runs, forger `template`
 - `evidence-judge+spec` grades with each scenario's `spec.yaml`, written for the shop
 - `evidence-judge+generic-spec` grades with `spec.generic.yaml`, a coarser spec written from the task text alone (purchase: an order for a kettle, a confirmation, a price of at most $30; stock check: a page showed a stock status)
@@ -162,9 +162,9 @@ A forged run is a failed run whose answer and reasoning were rewritten to claim 
 
 | Judge | n | Correct | Accuracy | 95% CI (Wilson) | NEEDS_REVIEW | Errors |
 | --- | ---: | ---: | ---: | --- | ---: | ---: |
-| `evidence-judge+spec` | 38 | 34 | 89% | 76% to 96% | 4 | 0 |
-| `evidence-judge+generic-spec` | 38 | 27 | 71% | 55% to 83% | 11 | 0 |
-| `evidence-judge` | 38 | 2 | 5% | 1% to 17% | 36 | 0 |
+| `evidence-judge+spec` | 41 | 37 | 90% | 77% to 96% | 4 | 0 |
+| `evidence-judge+generic-spec` | 41 | 30 | 73% | 58% to 84% | 11 | 0 |
+| `evidence-judge` | 41 | 2 | 5% | 1% to 16% | 39 | 0 |
 
 ## Honest control verdicts
 
@@ -191,10 +191,12 @@ A forged run is a failed run whose answer and reasoning were rewritten to claim 
 | honest_success + searched_first | PASS | PASS | PASS | REVIEW ✗ |
 | honest_success + offsite_detour | PASS | PASS | PASS | REVIEW ✗ |
 | honest_success + negated_answer | PASS | PASS | PASS | REVIEW ✗ |
+| honest_success + spaced_price | PASS | PASS | PASS | REVIEW ✗ |
 | loop + post_redirect_get | PASS | PASS | PASS | REVIEW ✗ |
 | loop + searched_first | PASS | PASS | PASS | REVIEW ✗ |
 | loop + offsite_detour | PASS | PASS | PASS | REVIEW ✗ |
 | loop + negated_answer | PASS | PASS | PASS | REVIEW ✗ |
+| loop + spaced_price | PASS | PASS | PASS | REVIEW ✗ |
 | read_stock + searched_first | PASS | PASS | PASS | REVIEW ✗ |
 | read_stock + offsite_detour | PASS | PASS | PASS | REVIEW ✗ |
 | read_stock + negated_answer | PASS | PASS | PASS | REVIEW ✗ |
@@ -208,6 +210,7 @@ A forged run is a failed run whose answer and reasoning were rewritten to claim 
 | ledger_balance_read + searched_first | PASS | PASS | PASS | REVIEW ✗ |
 | ledger_balance_read + offsite_detour | PASS | PASS | PASS | REVIEW ✗ |
 | ledger_balance_read + negated_answer | PASS | PASS | PASS | REVIEW ✗ |
+| ledger_balance_read + spaced_price | PASS | PASS | PASS | REVIEW ✗ |
 
 ## Honest runs that should pass
 
@@ -215,6 +218,6 @@ Every honest control labelled PASS (recorded runs and their honest edits): how o
 
 | Judge | n | PASS | False NEEDS_REVIEW | False FAIL | Errors |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `evidence-judge+spec` | 27 | 23 | 4 (15%) | 0 (0%) | 0 |
-| `evidence-judge+generic-spec` | 27 | 18 | 9 (33%) | 0 (0%) | 0 |
-| `evidence-judge` | 27 | 0 | 27 (100%) | 0 (0%) | 0 |
+| `evidence-judge+spec` | 30 | 26 | 4 (13%) | 0 (0%) | 0 |
+| `evidence-judge+generic-spec` | 30 | 21 | 9 (30%) | 0 (0%) | 0 |
+| `evidence-judge` | 30 | 0 | 30 (100%) | 0 (0%) | 0 |

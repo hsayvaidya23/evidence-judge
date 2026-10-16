@@ -367,3 +367,39 @@ def test_regex_findall_reports_whether_it_read_every_match() -> None:
     windowed = regex_findall(regex, "n1" + "x" * (2 * MAX_REGEX_INPUT) + "n2")
     assert [m.group(1) for m in windowed.matches] == ["1", "2"]
     assert not windowed.complete
+
+
+@pytest.mark.parametrize(
+    ("haystack", "needle"),
+    [
+        ("Total USD 24.00", "$24"),
+        ("Total 24 USD", "$24"),
+        ("Total $ 24", "$24"),
+        ("Total $\N{NO-BREAK SPACE}24", "$24"),
+        ("Total US$24", "$24.00"),
+        ("Total 24,00 $", "$24"),
+        ("Gesamt 1.249,50 €", "€1,249.50"),
+        ("Total EUR 1249.50", "€1.249,50"),
+        ("Total \N{INDIAN RUPEE SIGN}1,500", "Rs. 1500"),
+        ("Price $1.500", "$1.500"),
+    ],
+)
+def test_an_amount_is_found_however_the_page_writes_it(haystack: str, needle: str) -> None:
+    assert contains(haystack, needle)
+
+
+@pytest.mark.parametrize(
+    ("haystack", "needle"),
+    [
+        ("Total €24", "$24"),
+        ("Total $24.50", "$24"),
+        ("Total $1 024", "$24"),
+        ("Total $24,000", "$24"),
+        ("Total $1,500", "$1.500"),
+        ("open 24 hours", "$24"),
+        ("ref pay24 usd", "$24"),
+        ("area $2\N{SUPERSCRIPT FOUR}", "$24"),
+    ],
+)
+def test_another_amount_or_currency_is_not_the_amount(haystack: str, needle: str) -> None:
+    assert not contains(haystack, needle)

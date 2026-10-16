@@ -2132,11 +2132,11 @@
     {
       "judge": "evidence-judge+spec",
       "accuracy": {
-        "k": 34,
-        "n": 38,
-        "rate": 0.8947368421052632,
-        "ci_low": 0.7586947827711269,
-        "ci_high": 0.9582974265244647
+        "k": 37,
+        "n": 41,
+        "rate": 0.9024390243902439,
+        "ci_low": 0.7745231869447662,
+        "ci_high": 0.9614029151019106
       },
       "needs_review": 4,
       "errors": 0
@@ -2144,11 +2144,11 @@
     {
       "judge": "evidence-judge+generic-spec",
       "accuracy": {
-        "k": 27,
-        "n": 38,
-        "rate": 0.7105263157894737,
-        "ci_low": 0.5524286232424794,
-        "ci_high": 0.8299672217151693
+        "k": 30,
+        "n": 41,
+        "rate": 0.7317073170731707,
+        "ci_low": 0.5806646689292336,
+        "ci_high": 0.8430503595218832
       },
       "needs_review": 11,
       "errors": 0
@@ -2157,12 +2157,12 @@
       "judge": "evidence-judge",
       "accuracy": {
         "k": 2,
-        "n": 38,
-        "rate": 0.05263157894736842,
-        "ci_low": 0.014554208147292413,
-        "ci_high": 0.17285462131770377
+        "n": 41,
+        "rate": 0.04878048780487805,
+        "ci_low": 0.013480945365169042,
+        "ci_high": 0.16138978870370846
       },
-      "needs_review": 36,
+      "needs_review": 39,
       "errors": 0
     }
   ],
@@ -2987,6 +2987,45 @@
       "error": null
     },
     {
+      "case_id": "honest_success/control/spaced_price",
+      "scenario": "honest_success",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "spaced_price",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 4 key claims and 5 spec checks were verified against recorded evidence (evidence: net#6, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "honest_success/control/spaced_price",
+      "scenario": "honest_success",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "spaced_price",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 4 key claims and 3 spec checks were verified against recorded evidence (evidence: net#6, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "honest_success/control/spaced_price",
+      "scenario": "honest_success",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "spaced_price",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
+      "error": null
+    },
+    {
       "case_id": "loop/control/post_redirect_get",
       "scenario": "loop",
       "judge": "evidence-judge+spec",
@@ -3137,6 +3176,45 @@
       "kind": null,
       "seed": null,
       "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (7 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
+      "error": null
+    },
+    {
+      "case_id": "loop/control/spaced_price",
+      "scenario": "loop",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "spaced_price",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 4 key claims and 5 spec checks were verified against recorded evidence (evidence: net#11, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "loop/control/spaced_price",
+      "scenario": "loop",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "spaced_price",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 4 key claims and 3 spec checks were verified against recorded evidence (evidence: net#11, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "loop/control/spaced_price",
+      "scenario": "loop",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "spaced_price",
       "expected": "pass",
       "outcome": "needs_review",
       "summary": "NEEDS_REVIEW: the run changed state (7 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
@@ -3644,6 +3722,45 @@
       "kind": null,
       "seed": null,
       "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: no key claim or task expectation establishes whether the task succeeded.",
+      "error": null
+    },
+    {
+      "case_id": "ledger_balance_read/control/spaced_price",
+      "scenario": "ledger_balance_read",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "spaced_price",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 0 key claims and 3 spec checks were verified against recorded evidence (evidence: final, snap#5, snap#4).",
+      "error": null
+    },
+    {
+      "case_id": "ledger_balance_read/control/spaced_price",
+      "scenario": "ledger_balance_read",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "spaced_price",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 0 key claims and 1 spec check were verified against recorded evidence (evidence: final, snap#5).",
+      "error": null
+    },
+    {
+      "case_id": "ledger_balance_read/control/spaced_price",
+      "scenario": "ledger_balance_read",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "spaced_price",
       "expected": "pass",
       "outcome": "needs_review",
       "summary": "NEEDS_REVIEW: no key claim or task expectation establishes whether the task succeeded.",

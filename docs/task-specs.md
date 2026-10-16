@@ -579,7 +579,10 @@ reference) must match a whole token: `1001` is not met by `10012` or `21001`, `$
 no-break space, or an apostrophe between digit groups joins them (`100` is not met by `1 100` or
 `1'100`), and an ID of three or more digits is not met by one with a letter, or a dash and a
 letter, right beside it (`1001` is not met by `1001A`, `A1001` or `1001-A`; `10:00` is met by
-`10:00am`). Letters without case
+`10:00am`). A phrase that is only an amount of money (`$24`, `EUR 1.249,50`, `24 USD`) is met
+by the same amount in the same currency however the page writes it: `$24` by `USD 24.00`,
+`$ 24`, `US$24` or `24,00 $`, and `€1.249,50` by `€1,249.50`, but not by `€24` or `$24.50`. An
+amount that cannot be read unambiguously (`$1.500`: 1.5 or 1500) is matched as text. Letters without case
 (Chinese, Japanese) have no word boundary the judge can see, so a phrase that ends in one is
 matched as a substring at that end (`注文1001` is met by `新注文1001`, but not by `注文10012`).
 Other phrases are substrings (`confirm` is met by `confirmed`). `body_contains` and `response_contains` match the

@@ -33,6 +33,7 @@ from evidence_judge.extract.merge import cap_claims, dedupe_claims, renumber
 from evidence_judge.extract.text import (
     CURRENCY,
     Sentence,
+    amount_text,
     asserted,
     names_purchase,
     normalize,
@@ -466,7 +467,7 @@ def _price_claims(sentence: Sentence, task_norm: str, bought: bool, tally: _Tall
         amount = match.group(0).strip()
         _claim(
             sentence,
-            f"The {name if paid else 'amount'} was {match.group(1)}",
+            f"The {name if paid else 'amount'} was {amount_text(match)}",
             ClaimKind.VALUE,
             key,
             _order_results(amount) if purchase else _page_texts([amount]),

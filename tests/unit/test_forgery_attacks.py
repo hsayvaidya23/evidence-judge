@@ -910,6 +910,12 @@ def test_controls_edit_the_run_the_honest_way(scenarios: dict[str, Scenario]) ->
     assert negated is not None
     assert negated.agent_answer == NEGATED_ANSWERS["honest_success"]
     assert apply_control(scenarios["null_agent"].run, ControlKind.NEGATED_ANSWER) is None
+    spaced = apply_control(base, ControlKind.SPACED_PRICE)
+    assert spaced is not None
+    assert spaced.final_state is not None
+    assert "$ 24.00" in spaced.final_state.text
+    assert "$24.00" not in " ".join(s.text for s in spaced.snapshots)
+    assert apply_control(scenarios["read_stock"].run, ControlKind.SPACED_PRICE) is None
 
 
 def test_input_forgeries_record_what_the_ingesters_record(scenarios: dict[str, Scenario]) -> None:

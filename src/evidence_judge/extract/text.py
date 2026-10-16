@@ -197,11 +197,21 @@ def asserted(sentence: str, start: int) -> bool:
 
 
 CURRENCY = re.escape(chr(0x24) + chr(0x20AC) + chr(0xA3) + chr(0x20B9))
+_AMOUNT = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:\.\d+|,\d{1,2})?"
 PRICE = re.compile(
-    rf"(?:[{CURRENCY}]|\b(?:USD|EUR|GBP|INR)\s?)\s?"
-    r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)",
+    rf"(?:[{CURRENCY}]|\b(?:USD|EUR|GBP|INR)\s?)\s?({_AMOUNT})(?!\d)"
+    rf"|(?<![\w.,])({_AMOUNT})\s?(?:[{CURRENCY}](?!\s?\d)|(?:USD|EUR|GBP|INR)\b)",
     re.I,
 )
+"""An amount with a currency symbol or code before it ('$24.00', 'EUR 19', '€1.249,50') or
+after it ('24 USD', '1.249,50 €'); `amount_text` is its number."""
+
+
+def amount_text(match: re.Match[str]) -> str:
+    """The number a PRICE match states, as written ('1.249,50')."""
+    return match.group(1) or match.group(2)
+
+
 PRICE_BOUND = re.compile(
     r"\b(?:limit|budget|under|below|max(?:imum)?|up\s+to|at\s+most|less\s+than|over|above|"
     r"shipping|delivery|postage|tax(?:es)?|vat|fees?|tip)\b(?:\W+\w+){0,2}\W*$",

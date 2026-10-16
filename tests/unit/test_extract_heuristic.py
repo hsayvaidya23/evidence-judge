@@ -342,3 +342,21 @@ def test_vague_secret_or_unasserted_values_make_no_setting_claim(answer: str):
 
 def test_an_email_value_stays_with_the_email_rule():
     assert _texts(_extract("I changed the email to a@b.test.")) == ["The agent changed the email"]
+
+
+@pytest.mark.parametrize(
+    ("answer", "shown", "amount"),
+    [
+        ("I bought it for 24 USD.", "24 USD", "24"),
+        ("I bought it for USD 24.00.", "USD 24.00", "24.00"),
+        ("I bought it for €1.249,50.", "€1.249,50", "1.249,50"),
+        ("I bought it for 1.249,50 €.", "1.249,50 €", "1.249,50"),
+        ("I bought it for $24,00.", "$24,00", "24,00"),
+        ("I ordered it: total x 2 $24.00.", "$24.00", "24.00"),
+    ],
+)
+def test_locale_amounts_are_read_whole(answer: str, shown: str, amount: str):
+    [price] = [c for c in _extract(answer).claims if c.kind is ClaimKind.VALUE]
+    assert price.text.endswith(f" was {amount}")
+    assert price.predicates == [_paid(shown)]
+    assert coverage(_extract(answer).claims, answer, []) == 1.0

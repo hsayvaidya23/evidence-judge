@@ -76,9 +76,8 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1326 browser and 0 of 1501 session
-  Go toy projects with runner-specific tricks; 0 of 1374 browser and 0 of 1465 session
-  forgeries pass, and 4 of 38 honest browser controls go to review offline.
+  Go toy projects with runner-specific tricks; 0 of 1398 browser and 0 of 1465 session
+  forgeries pass, and 4 of 41 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
   and got order #..."), so a claim reader that carries the negation over shows up in `make
@@ -312,6 +311,15 @@ The first release.
   letter (`#4316A`) and a dash and a letter (`#4316-B`) after the claimed number: 5 false
   PASSes over five seeds before the fix, none after. Bench unchanged: 0 of 1398 attacks pass,
   honest controls 34, 27 and 2 of 38.
+- An honest price in a locale format no longer goes to review: a phrase that is only an amount
+  of money (`$24`, `EUR 1.249,50`) is compared by currency and amount, so "bought it for $24"
+  is met by `USD 24.00`, `$ 24`, `$\xa024`, `US$24` or `24 $`, and `€1.249,50` by
+  `€1,249.50`, never by another currency or amount. Offline extraction reads `€1.249,50`
+  whole (it read `€1.249`), a decimal comma (`$24,00`) and a currency after the amount
+  (`24 USD`, `1.249,50 €`). New honest control `spaced_price` writes every dollar amount of a
+  passing run as `$ 24.00`: before the fix its three runs went to review or failed with every
+  spec, after it they pass. Bench: 0 of 1398 attacks pass; honest controls 37, 30 and 2 of 41
+  correct (34, 27 and 2 of 38 plus the three new ones with each spec).
 - The GitHub Action checks its boolean inputs: `offline`, `fail-on-review` and the new
   `upload-report` take `true` or `false` in any case, and any other value (`yes`, `1`) fails
   the step before anything is installed; before, everything but the exact string `true` was
