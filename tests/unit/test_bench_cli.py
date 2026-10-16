@@ -109,3 +109,23 @@ def test_bench_internal_error_exits_4_with_a_hint(monkeypatch: pytest.MonkeyPatc
     assert result.exit_code == ExitCode.INTERNAL, result.output
     assert "internal error: RuntimeError: boom" in result.output
     assert "--debug" in result.output
+
+
+@pytest.mark.parametrize(("flags", "redacted"), [([], True), (["--no-redact"], False)])
+def test_bench_redaction_follows_no_redact(
+    monkeypatch: pytest.MonkeyPatch, flags: list[str], redacted: bool
+) -> None:
+    import evidence_judge.bench
+
+    seen: list[Any] = []
+    real = evidence_judge.bench.BenchmarkRunner
+
+    def capture(*args: Any, **kwargs: Any) -> Any:
+        built = real(*args, **kwargs)
+        seen.append(built)
+        return built
+
+    monkeypatch.setattr(evidence_judge.bench, "BenchmarkRunner", capture)
+    result = runner.invoke(app, ["bench", str(RUNS), "--seeds", "1", "-q", *flags])
+    assert result.exit_code == ExitCode.PASS, result.output
+    assert (seen[0].redactor is not None) is redacted

@@ -600,8 +600,10 @@ def bench(
         config = BenchConfig(seeds=seeds, offline=offline)
         calls = llm_calls_upper_bound(scenarios, config, baseline=with_llm_baseline)
         llm = _bench_llm(settings, calls)
+        if no_redact:
+            settings = settings.model_copy(update={"redact": False})
         redactor = None
-        if settings.redact and not no_redact:
+        if settings.redact:
             redactor = (
                 Redactor(redaction_key(*runs_dirs))
                 if llm is None and settings.redaction_key is None

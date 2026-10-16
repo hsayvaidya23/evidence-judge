@@ -103,6 +103,9 @@ The first release.
 
 ### Changed
 
+- `read_settings` is exported from `evidence_judge` and used in the Python API, README and
+  benchmark examples in place of `Settings()`, which reads environment variables only and skips
+  `EVJ_ENV_FILE`.
 - The package description and keywords cover coding-agent sessions as well as browser agents,
   `session --help` names Gemini CLI (judged through the evidence log), and the Claude Code
   plugin's `Stop` hook says it is checking the answer against the recorded evidence instead of
@@ -541,5 +544,11 @@ The first release.
   such as "the password field was empty" stays intact; `Cookie:` and `Set-Cookie:` lines inside
   the answer, reasoning, page text or console messages, with the same tokens as the headers;
   and mixed-case credentials after an explicit `Authorization` scheme (`Basic Zm9vYmFy`).
+- The session hook recorder reads settings with `read_settings`, so an `EVJ_REDACTION_KEY` set
+  only in the `EVJ_ENV_FILE` dotenv file now keys the recorder's tokens too; before, the
+  recorder and `session judge` could redact with different keys and their tokens would not match.
+- `BenchmarkRunner` used from Python now redacts runs, specs and claims when `settings.redact` is
+  on and no `redactor` is passed, as `Judge` does; it judged unredacted evidence before. The
+  `bench` CLI is unchanged and its output byte-identical.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
