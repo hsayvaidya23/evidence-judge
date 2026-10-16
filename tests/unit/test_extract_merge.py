@@ -85,6 +85,39 @@ def test_coverage_counts_claim_like_sentences_with_quotes():
     assert coverage(claims, answer, []) == pytest.approx(1.0)
 
 
+def test_an_amount_no_claim_checks_leaves_its_sentence_uncovered():
+    answer = "I bought the Red Kettle, $4.00, and the shop confirmed order #1001."
+    placed = _claim("Placed order", "I bought the Red Kettle")
+    assert coverage([placed], answer, []) == 0.0
+    priced = _claim(
+        "The price was 4.00",
+        "I bought the Red Kettle, $4.00",
+        predicates=[PageTextPredicate(contains="$4.00")],
+    )
+    assert coverage([placed, priced], answer, []) == 1.0
+    in_a_body = _claim(
+        "Ordered",
+        "I bought the Red Kettle",
+        predicates=[RequestPredicate(method="POST", body_contains=['"price": 4'])],
+    )
+    assert coverage([in_a_body], answer, []) == 1.0
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "I bought the Red Kettle, $6 under the $30 budget.",
+        "I bought the Red Kettle (shipping $5.00).",
+        "I bought the Red Kettle and saved $5 off the list price.",
+        "The balance of account ACC-2041 is $1,284.50.",
+        "I could not buy the Red Kettle for $24.00.",
+    ],
+)
+def test_bounds_differences_and_unasserted_amounts_need_no_claim(answer: str) -> None:
+    placed = _claim("Placed order", answer)
+    assert coverage([placed], answer, []) == 1.0
+
+
 def test_coverage_is_full_when_nothing_asserted():
     assert coverage([], "I could not complete checkout.", ["Looking at the page."]) == 1.0
 

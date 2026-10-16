@@ -79,6 +79,8 @@ def test_evidence_kinds() -> None:
         ForgeryKind.DERIVED_ECHO,
         ForgeryKind.UNRENDERED_MARKUP,
         ForgeryKind.MUTATING_GET,
+        ForgeryKind.PREFIX_REFERENCE,
+        ForgeryKind.MISQUOTED_PRICE,
     } == EVIDENCE_KINDS
 
 

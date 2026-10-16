@@ -23,7 +23,7 @@ from evidence_judge.core.predicates import (
     status_spec,
 )
 from evidence_judge.core.site import Site
-from evidence_judge.textnorm import normalize
+from evidence_judge.textnorm import find_phrase, normalize
 
 Op = Literal["==", "!=", "<", "<=", ">", ">=", "contains"]
 
@@ -61,15 +61,16 @@ def is_truncated(body: str | None) -> bool:
 
 
 def contains(haystack: str | None, needle: str) -> bool:
+    """Whether `needle` occurs in `haystack` once both are normalised (textnorm.find_phrase)."""
     if haystack is None:
         return False
-    return normalize(needle) in normalize(haystack)
+    return find_phrase(normalize(haystack), normalize(needle)) >= 0
 
 
 def excerpt(text: str, needle: str, width: int = 80) -> str:
     """A short window of normalised `text` around the first occurrence of `needle`."""
     norm, want = normalize(text), normalize(needle)
-    at = norm.find(want)
+    at = find_phrase(norm, want)
     if at < 0:
         return norm[:width]
     pad = max(0, (width - len(want)) // 2)
