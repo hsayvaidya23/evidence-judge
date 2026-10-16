@@ -152,6 +152,7 @@ class ScenarioInfo(BaseModel):
     has_spec: bool
     forged: bool
     has_generic_spec: bool = False
+    recording: str = ""
 
 
 class BenchResult(BaseModel):
@@ -212,6 +213,7 @@ class BenchmarkRunner:
                     has_spec=s.spec is not None,
                     forged=s.forgery_base,
                     has_generic_spec=s.generic_spec is not None,
+                    recording=s.recording,
                 )
                 for s in scenarios
             ],

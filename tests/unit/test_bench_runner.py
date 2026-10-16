@@ -148,6 +148,7 @@ def test_results_round_trip_and_render(offline_result: BenchResult) -> None:
     assert BenchResult.model_validate_json(to_json(offline_result)) == offline_result
     report = to_markdown(offline_result)
     assert "## False PASS on forged runs" in report
+    assert "- Scenarios: 17 scenarios (from 15 recordings) and 15 honest edits" in report
     assert "| `evidence-judge+spec` | **all manipulations** | 1293 | 0 | 0% |" in report
     assert "`evidence-judge+generic-spec` grades with `spec.generic.yaml`" in report
     assert "## Accuracy on honest controls" in report

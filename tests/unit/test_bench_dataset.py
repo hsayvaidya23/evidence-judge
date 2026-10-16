@@ -43,6 +43,13 @@ def test_loads_several_directories_in_order() -> None:
     assert not by_name["ledger_balance_read"].spec.changes_state()
 
 
+def test_scenarios_that_judge_one_recording_again_share_its_digest() -> None:
+    by_name = {s.name: s for s in load_scenarios(RUNS)}
+    assert by_name["read_stock"].recording == by_name["honest_failure"].recording
+    assert by_name["read_unanswered"].recording == by_name["null_agent"].recording
+    assert by_name["honest_success"].recording != by_name["honest_failure"].recording
+
+
 def test_a_scenario_in_two_directories_is_rejected(tmp_path: Path) -> None:
     shutil.copytree(RUNS / "null_agent", tmp_path / "null_agent")
     with pytest.raises(BenchInputError, match="null_agent is in more than one directory"):

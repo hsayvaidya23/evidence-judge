@@ -58,119 +58,136 @@
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "79d807fb67adebfd"
     },
     {
       "name": "forged_success",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "ae6ee6fb77d5441e"
     },
     {
       "name": "honest_failure",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "8486da154acc997c"
     },
     {
       "name": "honest_success",
       "expected": "pass",
       "has_spec": true,
       "forged": false,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "6078595cf5b74164"
     },
     {
       "name": "loop",
       "expected": "pass",
       "has_spec": true,
       "forged": false,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "5c7c64b7939cc52f"
     },
     {
       "name": "null_agent",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "7d27579f48d3e24f"
     },
     {
       "name": "read_stock",
       "expected": "pass",
       "has_spec": true,
       "forged": false,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "8486da154acc997c"
     },
     {
       "name": "read_unanswered",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "7d27579f48d3e24f"
     },
     {
       "name": "side_effect",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "20708103896b9505"
     },
     {
       "name": "admin_user_disabled",
       "expected": "pass",
       "has_spec": true,
       "forged": false,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "13312dc858fa99cd"
     },
     {
       "name": "admin_wrong_user",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "699b60f64c7459de"
     },
     {
       "name": "clinic_booked",
       "expected": "pass",
       "has_spec": true,
       "forged": false,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "8ffe3c6cad9e06c5"
     },
     {
       "name": "clinic_weekend_rejected",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "71dafc670401cfa5"
     },
     {
       "name": "clinic_wrong_service",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "4622d38683a97f87"
     },
     {
       "name": "ledger_balance_read",
       "expected": "pass",
       "has_spec": true,
       "forged": false,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "0d9067c65c8396ac"
     },
     {
       "name": "ledger_unanswered",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "a32ee0b903b01ee4"
     },
     {
       "name": "ledger_wrong_account",
       "expected": "fail",
       "has_spec": true,
       "forged": true,
-      "has_generic_spec": true
+      "has_generic_spec": true,
+      "recording": "d646080775e18819"
     }
   ],
   "forgery_metrics": [

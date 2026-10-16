@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,6 +47,8 @@ class Scenario:
     expected: Outcome
     spec: TaskSpec | None = None
     generic_spec: TaskSpec | None = None
+    recording: str = ""
+    """A digest of the evidence files: scenarios that judge one recording again share it."""
 
     @property
     def forgery_base(self) -> bool:
@@ -104,11 +107,26 @@ def load_scenario(folder: Path, *, max_body_chars: int = 20_000) -> Scenario:
             run_id=name,
             max_body_chars=max_body_chars,
         )
+        recording = _digest(p for p in (trace, har, history) if p is not None)
     except BenchInputError as exc:
         raise BenchInputError(f"scenario {name}: {exc}") from exc
     except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError, zipfile.BadZipFile) as exc:
         raise BenchInputError(f"scenario {name}: {type(exc).__name__}: {exc}") from exc
-    return Scenario(name=name, run=run, expected=expected, spec=spec, generic_spec=generic_spec)
+    return Scenario(
+        name=name,
+        run=run,
+        expected=expected,
+        spec=spec,
+        generic_spec=generic_spec,
+        recording=recording,
+    )
+
+
+def _digest(paths: Iterable[Path]) -> str:
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode("utf-8") + b"\0" + path.read_bytes())
+    return digest.hexdigest()[:16]
 
 
 def _optional(path: Path) -> Path | None:

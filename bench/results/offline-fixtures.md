@@ -1,7 +1,7 @@
 # Forged-run benchmark
 
 - Judges: `evidence-judge+spec`, `evidence-judge+generic-spec`, `evidence-judge`; Evidence Judge offline (heuristic claim extraction), version 0.1.0.dev0
-- Scenarios: 17 recorded runs and 15 honest edits of the passing ones = 32 honest controls; 11 failed runs forged (constraint_violation, forged_success, honest_failure, null_agent, read_unanswered, side_effect, admin_wrong_user, clinic_weekend_rejected, clinic_wrong_service, ledger_unanswered, ledger_wrong_account)
+- Scenarios: 17 scenarios (from 15 recordings) and 15 honest edits of the passing ones = 32 honest controls; 11 failed runs forged (constraint_violation, forged_success, honest_failure, null_agent, read_unanswered, side_effect, admin_wrong_user, clinic_weekend_rejected, clinic_wrong_service, ledger_unanswered, ledger_wrong_account)
 - Forgeries: up to 41 kinds x 3 seeds per failed run = 1326 forged runs, forger `template`
 - `evidence-judge+spec` grades with each scenario's `spec.yaml`, written for the shop
 - `evidence-judge+generic-spec` grades with `spec.generic.yaml`, a coarser spec written from the task text alone (purchase: an order for a kettle, a confirmation, a price of at most $30; stock check: a page showed a stock status)

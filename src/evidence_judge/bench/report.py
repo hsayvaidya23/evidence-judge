@@ -110,14 +110,16 @@ def _header(result: BenchResult) -> list[str]:
     forged_bases = [s.name for s in result.scenarios if s.forged]
     forged_cases = len({c.case_id for c in result.cases if c.forged})
     edited = sorted({c.case_id for c in result.cases if c.control is not None})
+    recordings = len({s.recording or s.name for s in result.scenarios})
     mode = "offline (heuristic claim extraction)" if result.offline else "online (LLM extraction)"
     return [
         "# Forged-run benchmark",
         "",
         f"- Judges: {', '.join(f'`{j}`' for j in result.judges)}; Evidence Judge {mode}, "
         f"version {result.judge_version}",
-        f"- Scenarios: {len(result.scenarios)} recorded runs and {len(edited)} honest edits of "
-        f"the passing ones = {len(result.scenarios) + len(edited)} honest controls; "
+        f"- Scenarios: {len(result.scenarios)} scenarios (from {recordings} recordings) and "
+        f"{len(edited)} honest edits of the passing ones = "
+        f"{len(result.scenarios) + len(edited)} honest controls; "
         f"{len(forged_bases)} failed runs forged ({', '.join(forged_bases) or 'none'})",
         f"- Forgeries: up to {len(result.kinds)} kinds x {result.seeds} seeds per failed run = "
         f"{forged_cases} forged runs, forger `{result.forger}`",
