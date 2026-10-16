@@ -17,6 +17,7 @@ from typing import Any, Final
 from evidence_judge.sessions import edits, shell
 from evidence_judge.sessions.models import (
     CallStatus,
+    Category,
     CommandEvent,
     FileEditEvent,
     FileReadEvent,
@@ -25,7 +26,7 @@ from evidence_judge.sessions.models import (
     SessionEvent,
     SubagentEvent,
 )
-from evidence_judge.sessions.summaries import parse_summary
+from evidence_judge.sessions.summaries import check_errors, parse_summary
 
 OUTPUT_HEAD: Final = 4_000
 OUTPUT_TAIL: Final = 12_000
@@ -326,6 +327,13 @@ class EventBuilder:
             if analysis.is_test and call.status is not CallStatus.DENIED
             else None
         )
+        checks = (Category.LINT, Category.TYPECHECK)
+        errors = (
+            check_errors(call.output)
+            if any(c in checks for c in analysis.categories)
+            and call.status is not CallStatus.DENIED
+            else None
+        )
         self._append(
             CommandEvent(
                 id=self._id("cmd"),
@@ -340,6 +348,7 @@ class EventBuilder:
                 background=call.background,
                 analysis=analysis,
                 summary=summary,
+                check_errors=errors,
                 **common,
             )
         )
@@ -377,6 +386,9 @@ class EventBuilder:
                 test_findings=findings,
                 adds_tests=call.status is not CallStatus.DENIED and edits.adds_tests(added),
                 tests_added=edits.tests_added(removed, added, rel),
+                suppressions=edits.added_suppressions(removed, added, texts)
+                if call.status is not CallStatus.DENIED
+                else [],
                 session_store=shell.SESSION_STORE.search(path) is not None,
                 guard_tamper=_guard_tamper(path, rel, added, call.status),
                 **common,

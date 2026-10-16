@@ -21,6 +21,11 @@ _PYTEST_LINE: Final = re.compile(
     r"warnings?|rerun)(?:, )?)+|no tests ran)(?: in [\d.]+s(?: \([\d:]+\))?)?\s*=*\s*$"
 )
 _COUNT: Final = re.compile(r"(\d+) ([a-z]+)")
+_STRICT_XPASS: Final = re.compile(
+    r"^(?:(?:FAILED|XPASS\(strict\)) (?P<test>\S+::\S+)|\[XPASS\(strict\)\])"
+)
+"""A test marked `xfail(strict=True)` that passed: pytest counts it as a failure, and a summary
+that does not is not the runner's."""
 _UNITTEST_RAN: Final = re.compile(r"^Ran (\d+) tests? in [\d.]+s$")
 _UNITTEST_RESULT: Final = re.compile(r"^(OK|FAILED)(?: \((?P<body>[^)]*)\))?\s*$")
 _JEST_TESTS: Final = re.compile(r"^Tests:\s+(?P<body>.*\d+ total)\s*$")
@@ -66,15 +71,32 @@ def _pytest(lines: list[str]) -> TestSummary | None:
         if body == "no tests ran":
             return TestSummary(framework="pytest", no_tests=True)
         counts = {word: int(n) for n, word in _COUNT.findall(body)}
+        strict = _strict_xpasses(lines)
+        moved = min(max(strict - counts.get("failed", 0), 0), counts.get("xpassed", 0))
         return TestSummary(
             framework="pytest",
-            passed=counts.get("passed", 0) + counts.get("xpassed", 0),
-            failed=counts.get("failed", 0),
+            passed=counts.get("passed", 0) + counts.get("xpassed", 0) - moved,
+            failed=max(counts.get("failed", 0), strict),
             errors=counts.get("error", 0) + counts.get("errors", 0),
             skipped=counts.get("skipped", 0) + counts.get("xfailed", 0),
             deselected=counts.get("deselected", 0),
         )
     return None
+
+
+def _strict_xpasses(lines: list[str]) -> int:
+    """How many strict XPASSes the output reports: the tests named with the marker, or its bare
+    lines in the failures section when they are more."""
+    named: set[str] = set()
+    bare = 0
+    for line in lines:
+        if "XPASS(strict)" not in line or (m := _STRICT_XPASS.match(line)) is None:
+            continue
+        if m["test"]:
+            named.add(m["test"])
+        else:
+            bare += 1
+    return max(len(named), bare)
 
 
 def _unittest(lines: list[str]) -> TestSummary | None:
@@ -349,3 +371,37 @@ def parse_summary(runners: list[str], output: str) -> TestSummary | None:
     summary = _combine([s for parser in dict.fromkeys(parsers) if (s := parser(lines)) is not None])
     conflict = _surplus(runners, lines) if summary is not None else None
     return summary.model_copy(update={"conflict": conflict}) if summary and conflict else summary
+
+
+_CHECK_FOUND: Final = re.compile(
+    r"^Found (?P<n>\d+) errors?\b(?:.*\((?:\d+ fixed, )?(?P<left>\d+) remaining\))?"
+)
+"""ruff's `Found 3 errors.` (`(3 fixed, 0 remaining)` after `--fix`), mypy's `Found 2 errors in 1
+file`, tsc's `Found 1 error in src/a.ts:3`."""
+_CHECK_CLEAN: Final = re.compile(r"^(?:Success: no issues found|All checks passed!)")
+_PYRIGHT: Final = re.compile(
+    r"^(?P<n>\d+) errors?, \d+ warnings?, \d+ (?:informations?|infos?|notes?)"
+)
+_ESLINT: Final = re.compile(
+    r"^[\u2716\u00d7\u2715]\s+\d+ problems? \((?P<n>\d+) errors?, \d+ warnings?\)"
+)
+_GOLANGCI: Final = re.compile(r"^(?P<n>\d+) issues?:?$")
+_VIOLATION: Final = re.compile(r"^[^\s:]+:\d+:\d+: [A-Z]{1,3}\d{1,4}\b|\berror TS\d+:")
+"""A finding on its own line: flake8's and ruff's `x.py:1:8: F401 ...`, tsc's `error TS2322:`."""
+
+
+def check_errors(output: str) -> int | None:
+    """How many errors a lint or type-check run's own output reports: the last summary each
+    tool prints, else its finding lines; None when it prints neither."""
+    counts: list[int] = []
+    lines = _lines(output)
+    for pattern in (_CHECK_FOUND, _PYRIGHT, _ESLINT, _GOLANGCI):
+        found = [m for line in lines if (m := pattern.match(line))]
+        if found:
+            counts.append(int(found[-1].groupdict().get("left") or found[-1]["n"]))
+    if any(_CHECK_CLEAN.match(line) for line in lines):
+        counts.append(0)
+    violations = sum(1 for line in lines if _VIOLATION.search(line))
+    if not counts and violations:
+        counts.append(violations)
+    return max(counts) if counts else None

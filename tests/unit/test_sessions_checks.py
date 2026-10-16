@@ -627,7 +627,9 @@ def test_build_predicates() -> None:
         bash("tsc --noEmit || true", "", 0),
     )
     assert _check(BuildPredicate(category="lint"), run)[0] is Support.SUPPORTED
-    assert _check(BuildPredicate(category="typecheck"), run)[0] is Support.NO_EVIDENCE
+    assert _check(BuildPredicate(category="typecheck"), run)[0] is Support.CONTRADICTED
+    masked = session(edit("calc.py"), bash("tsc --noEmit || true", "", 0))
+    assert _check(BuildPredicate(category="typecheck"), masked)[0] is Support.NO_EVIDENCE
     status, reason = _check(BuildPredicate(category="build"), run)
     assert status is Support.NO_EVIDENCE and "before the workspace changed" in reason
     assert _check(BuildPredicate(category="format"), run)[0] is Support.NO_EVIDENCE
@@ -1086,3 +1088,36 @@ def test_combined_paths_with_a_new_test_file_need_a_baseline_naming_every_file()
 def test_a_path_run_may_not_count_more_or_fewer_tests(added: ToolCall, output: str) -> None:
     run = session(bash("pytest -q", RED), edit("calc.py"), added, bash("pytest -q tests/", output))
     assert _check(ALL_PASS, run)[0] is not Support.SUPPORTED
+
+
+def test_only_holds_when_every_change_matches() -> None:
+    only = EditPredicate(only=("calc.py",))
+    assert _check(only, session(edit("calc.py"), bash("pytest -q > /tmp/log", GREEN)))[0] is (
+        Support.SUPPORTED
+    )
+    status, reason = _check(only, session(edit("calc.py"), edit("utils.py")))
+    assert status is Support.CONTRADICTED and "edit#2 changed utils.py" in reason
+    status, reason = _check(only, session(edit("calc.py"), bash("sed -i 's/a/b/' utils.py")))
+    assert status is Support.CONTRADICTED and "utils.py" in reason
+    status, _ = _check(only, session(edit("calc.py"), bash("python scripts/gen.py")))
+    assert status is Support.NO_EVIDENCE
+    assert _check(only, session(edit("calc.py"), complete=False))[0] is Support.NO_EVIDENCE
+    both = EditPredicate(only=("calc.py", "tests/**"))
+    assert _check(both, session(edit("calc.py"), edit("tests/test_calc.py")))[0] is (
+        Support.SUPPORTED
+    )
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"only": ["**"]},
+        {"only": []},
+        {"only": ["calc.py"], "path": "calc.py"},
+        {"only": ["calc.py"], "touched": False},
+        {"only": ["calc.py"], "change": "add"},
+    ],
+)
+def test_only_rejects_globs_that_name_nothing(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        EditPredicate.model_validate(fields)

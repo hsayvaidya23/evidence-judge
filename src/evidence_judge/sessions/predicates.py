@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Final, Literal, Self
 
 import yaml
 from pydantic import (
@@ -18,6 +18,7 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
+    field_validator,
     model_validator,
 )
 
@@ -25,6 +26,7 @@ from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.ingest._json import as_object
 from evidence_judge.sessions.rerun import RerunSpec
+from evidence_judge.sessions.shell import analyse
 
 MIN_TEXT = 3
 _GLOB_LITERAL = re.compile(r"[^*?/.\[\]{}]")
@@ -122,7 +124,8 @@ class CommandPredicate(BaseModel):
 
 
 class EditPredicate(BaseModel):
-    """Files matching `path` (or any test file) were, or were not, changed."""
+    """Files matching `path` (or any test file) were, or were not, changed; or, with `only`, no
+    file outside those globs was."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -133,13 +136,24 @@ class EditPredicate(BaseModel):
         "name at any depth",
     )
     test_files: bool = Field(default=False, description="Match every test file instead of a glob")
+    only: tuple[Glob, ...] | None = Field(
+        default=None,
+        min_length=1,
+        description="Globs every file the session changed must match ('I only changed X')",
+    )
     touched: bool = True
     change: Literal["add", "modify", "delete", "any"] = "any"
 
     @model_validator(mode="after")
     def _one_target(self) -> Self:
-        if (self.path is None) == (not self.test_files):
-            raise ValueError("an edit predicate needs exactly one of path or test_files")
+        targets = (self.path is not None, self.test_files, self.only is not None)
+        if sum(targets) != 1:
+            raise ValueError("an edit predicate needs exactly one of path, test_files or only")
+        if self.only is not None:
+            if not self.touched or self.change != "any":
+                raise ValueError("only takes neither touched nor change")
+            if wide := next((g for g in self.only if broad(g)), None):
+                raise ValueError(f"glob {wide!r} names nothing specific; every edit would match")
         if self.touched and self.path is not None and broad(self.path):
             raise ValueError(
                 f"glob {self.path!r} names nothing specific; any edit at all would prove it"
@@ -165,6 +179,24 @@ SessionPredicate = Annotated[
 PREDICATE_ADAPTER: TypeAdapter[SessionPredicate] = TypeAdapter(SessionPredicate)
 
 
+_CHECKS: Final = frozenset({"test", "build", "lint", "typecheck", "format"})
+
+
+def claimed(predicate: SessionPredicate) -> SessionPredicate:
+    """`predicate` as a claim states it: a claim that the agent ran a command says the command
+    succeeded, unless the command is a test, build, lint, type or format check, whose failure is
+    a result the answer reports in its own words. Specs keep `ok` unset to mean "ran"."""
+    if not isinstance(predicate, CommandPredicate) or predicate.ok is not None:
+        return predicate
+    if predicate.exit_code is not None or predicate.category is not None:
+        return predicate
+    if predicate.contains is not None and _CHECKS & {
+        c.value for c in analyse(predicate.contains).categories
+    }:
+        return predicate
+    return predicate.model_copy(update={"ok": True})
+
+
 class SessionClaim(BaseModel):
     """One checkable statement from the agent's answer. Every predicate must hold."""
 
@@ -177,6 +209,11 @@ class SessionClaim(BaseModel):
     key: bool = False
     predicates: list[SessionPredicate] = Field(min_length=1, max_length=4)
 
+    @field_validator("predicates")
+    @classmethod
+    def _as_claimed(cls, predicates: list[SessionPredicate]) -> list[SessionPredicate]:
+        return [claimed(p) for p in predicates]
+
 
 class SessionClaimSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -184,6 +221,11 @@ class SessionClaimSet(BaseModel):
     claims: list[SessionClaim] = Field(default_factory=list[SessionClaim])
     extractor: str = "unknown"
     note: str | None = None
+    unchecked: list[str] = Field(
+        default_factory=list[str],
+        description="Claims the extractor proposed but could not keep whole: no valid predicate, "
+        "a quote not in the answer, a predicate that did not validate, or over the claim cap",
+    )
 
 
 class SpecItem(BaseModel):
@@ -271,6 +313,8 @@ def describe(predicate: SessionPredicate) -> str:
                 else (" successfully" if predicate.ok else " and it failed")
             )
         case EditPredicate():
+            if predicate.only is not None:
+                return f"only {', '.join(predicate.only)} changed"
             target = predicate.path or "test files"
             return f"{target} {'changed' if predicate.touched else 'untouched'}"
         case BuildPredicate():

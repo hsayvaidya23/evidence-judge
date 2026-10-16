@@ -33,8 +33,10 @@ from evidence_judge.sessions.edits import NO_DIFF
 from evidence_judge.sessions.extract import (
     LLMSessionExtractor,
     asserted_fix,
+    claim_coverage,
     heuristic_claims,
     reports_failure,
+    unchecked_actions,
 )
 from evidence_judge.sessions.models import (
     CallStatus,
@@ -282,6 +284,8 @@ class SessionJudge:
             state.review.append(_MISREAD)
         elif run.final_answer and (unproven := self._unproven(run, index, claim_set, verdicts)):
             state.review.append(unproven)
+        unchecked = unchecked_actions(run.final_answer, claim_set.claims)
+        state.review.extend(self._uncovered(claim_set, unchecked))
         expectations = (
             [self._expectation(item, "expect", index) for item in spec.expect] if spec else []
         )
@@ -310,13 +314,32 @@ class SessionJudge:
             claims=claims,
             expectations=expectations,
             dimensions=self._dimensions(claims, index, state),
-            claim_coverage=None,
+            claim_coverage=(
+                round(claim_coverage(run.final_answer, claim_set.claims, len(unchecked)), 4)
+                if run.final_answer
+                else None
+            ),
             deterministic_share=1.0 if claims else None,
             tamper_detection=tamper,
             verification=self._verification(rerun),
             warnings=[*state.review, *state.warnings],
             usage=state.usage,
         )
+
+    @staticmethod
+    def _uncovered(claim_set: SessionClaimSet, unchecked: list[str]) -> list[str]:
+        """Claims the answer makes that no predicate checks: an action only a command could
+        show with no command claim quoting it, a figure, or a claim the extractor dropped."""
+        reasons: list[str] = []
+        if unchecked:
+            more = f" (and {len(unchecked) - 1} more)" if len(unchecked) > 1 else ""
+            reasons.append(f"the answer claims what no check covers: {unchecked[0]}{more}")
+        if dropped := claim_set.unchecked:
+            more = f" (and {len(dropped) - 1} more)" if len(dropped) > 1 else ""
+            reasons.append(
+                f"claim extraction could not check every claim it found: {dropped[0]!r}{more}"
+            )
+        return reasons
 
     @staticmethod
     def _rerun(

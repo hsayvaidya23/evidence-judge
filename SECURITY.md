@@ -253,6 +253,20 @@ passes when the tests failing at the end are a strict subset of those failing be
 change, a comparison that trusts the test names the runs printed. With `--require-rerun`, every
 count and the end of that comparison come from the judge's own run of the whole suite.
 
+Lint and type-check claims are read from the session record only; a re-run does not repeat
+them. The judge reads the tool's own summary and its options, but a wrapper whose command line
+hides them (`npm run lint`, `make lint`, `tox -e lint`, `pre-commit run`) is judged by its exit
+status, and a suppression comment written by a shell command (`sed`, a heredoc) rather than an
+edit is not seen as one.
+
+Claims the session judge has no predicate for are found by a closed list of actions whose
+effects only a command could show (version control, installs, deployments, releases, pull
+requests, migrations) and by coverage and speed figures; an unverifiable claim in other words
+("I notified the team", "the docs site is updated") is not flagged by the offline extractor. An
+install claim must name the package on the install command line, so an honest "Installed
+`requests`" after `pip install -r requirements.txt` fails; "pushed to origin/main" is checked
+as a successful `git push`, not against the remote or branch it names.
+
 The MCP server applies the same rule to what it returns. Page- and agent-derived text is
 fenced in `<untrusted_data>` tags. `judge_run` never replaces a file that is not an earlier
 evidence-judge report unless the caller passes `overwrite: true`.

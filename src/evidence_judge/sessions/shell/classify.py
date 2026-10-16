@@ -46,6 +46,7 @@ from evidence_judge.sessions.shell.runners.cargo import cargo_filters
 from evidence_judge.sessions.shell.runners.generic import generic_filters
 from evidence_judge.sessions.shell.runners.go import go_filters
 from evidence_judge.sessions.shell.runners.js import js_filters
+from evidence_judge.sessions.shell.runners.lint import lint_scope
 from evidence_judge.sessions.shell.runners.make import make_like
 from evidence_judge.sessions.shell.runners.node import node_test_filters
 from evidence_judge.sessions.shell.runners.pm import FIX_FLAGS, pm_script
@@ -914,6 +915,8 @@ def _classify_program(
     result = handler(call) if handler is not None else None
     if result is not None and result.runner is not None:
         result.stop_early = stop_early(result.runner, call.args)
+    if result is not None and result.category in (Category.LINT, Category.TYPECHECK):
+        result.check_filters, result.check_masked = lint_scope(call.prog, call.args)
     return result if result is not None else _fallback(call)
 
 
@@ -1041,6 +1044,8 @@ class _Walk:
     masked: str | None = None
     output_filter: str | None = None
     stop_early: str | None = None
+    check_filters: list[str] = field(default_factory=list[str])
+    check_masked: str | None = None
 
 
 def _note(
@@ -1100,6 +1105,9 @@ def _take_nested(
         ]
         walk.run_env = [*nested.run_env, *outer]
         walk.config_files.extend(nested.config_files)
+    walk.check_filters.extend(nested.check_filters)
+    if classified.category in _CHECKS and not walk.runners and not nested.runners:
+        walk.run_cds = [*walk.cds, *nested.run_cds]
     if nested.runners or (classified.category in _CHECKS and not walk.runners):
         walk.nested_after = nested.mutation_after_check
         walk.primary = at
@@ -1127,6 +1135,10 @@ def _take(walk: _Walk, classified: Classified, at: tuple[int, int]) -> None:
         walk.collect_only = walk.collect_only or classified.collect_only
     elif classified.category not in _CHECKS or walk.runners:
         return
+    else:
+        walk.check_filters.extend(classified.check_filters)
+        walk.check_masked = walk.check_masked or classified.check_masked
+        walk.run_cds = [*walk.cds, *classified.relocations]
     walk.primary = at
     walk.masked = None
     walk.output_filter = None
@@ -1225,9 +1237,17 @@ def _analysis(
         programs=walk.programs,
         runners=walk.runners,
         test_filters=list(dict.fromkeys(walk.filters)),
+        check_filters=list(
+            dict.fromkeys(
+                [
+                    *walk.check_filters,
+                    *([walk.check_masked] if walk.runners and walk.check_masked else []),
+                ]
+            )
+        ),
         stop_early=walk.stop_early,
         collect_only=walk.collect_only,
-        exit_masked_by=walk.masked,
+        exit_masked_by=walk.masked or (None if walk.runners else walk.check_masked),
         output_filter=walk.output_filter,
         agent_text=walk.agent_text,
         mutation=walk.mutation,

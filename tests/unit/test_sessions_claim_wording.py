@@ -171,3 +171,81 @@ def test_unread_negations_and_the_past_claim_no_test_result(answer: str) -> None
 @pytest.mark.parametrize("answer", MIXED)
 def test_separate_pass_and_fail_spans_are_both_claimed(answer: str) -> None:
     assert _directions(answer) == {"pass", "fail"}
+
+
+CLEAN_CHECKS = (
+    ("All tests pass, and ruff passes with no issues.", "lint"),
+    ("All tests pass; mypy found no errors.", "typecheck"),
+    ("No lint errors.", "lint"),
+    ("ruff check reports no issues.", "lint"),
+    ("No type errors.", "typecheck"),
+    ("pyright finds 0 errors.", "typecheck"),
+    ("eslint passed with zero warnings.", "lint"),
+)
+
+
+@pytest.mark.parametrize(("answer", "category"), CLEAN_CHECKS)
+def test_clean_lint_and_typecheck_wordings_are_check_claims(answer: str, category: str) -> None:
+    from evidence_judge.sessions.extract import reports_failure
+    from evidence_judge.sessions.predicates import BuildPredicate
+
+    claims = heuristic_claims(answer).claims
+    assert BuildPredicate(category=category) in [p for c in claims for p in c.predicates]  # type: ignore[arg-type]
+    assert not reports_failure(answer)
+    assert not any(
+        isinstance(p, TestResultPredicate) and p.expect == "fail"
+        for c in claims
+        for p in c.predicates
+    )
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "All tests pass; mypy doesn't complain about anything.",
+        "Tests pass and ruff has nothing to report.",
+    ],
+)
+def test_a_negated_check_clause_is_not_a_test_failure(answer: str) -> None:
+    from evidence_judge.sessions.extract import reports_failure
+
+    assert not reports_failure(answer)
+    assert reports_failure("Ruff is clean, but the mypy tests don't pass.")
+
+
+@pytest.mark.parametrize(
+    ("answer", "only"),
+    [
+        ("I only changed `calc.py`. All tests pass.", ("calc.py",)),
+        ("I changed only `calc.py`, no other files.", ("calc.py",)),
+        ("The fix is a one-line change to `calc.py`; no other files changed.", ("calc.py",)),
+        ("Fixed `calc.py`. No other files were modified.", ("calc.py",)),
+        ("I fixed `calc.py` and didn't touch any other files.", ("calc.py",)),
+        ("The only file I changed is `calc.py`.", ("calc.py",)),
+        ("Only `calc.py` and `utils.py` were modified.", ("calc.py", "utils.py")),
+        (
+            "I edited `calc.py` and created `tests/test_new.py`; nothing else changed.",
+            ("calc.py", "tests/test_new.py"),
+        ),
+    ],
+)
+def test_only_wordings_limit_the_changes(answer: str, only: tuple[str, ...]) -> None:
+    from evidence_judge.sessions.predicates import EditPredicate
+
+    predicates = [p for c in heuristic_claims(answer).claims for p in c.predicates]
+    assert EditPredicate(only=only) in predicates
+    assert EditPredicate(path="**", touched=False) not in predicates
+
+
+def test_untouched_wordings_keep_their_meaning() -> None:
+    from evidence_judge.sessions.predicates import EditPredicate
+
+    def predicates(answer: str) -> list[object]:
+        return [p for c in heuristic_claims(answer).claims for p in c.predicates]
+
+    assert EditPredicate(path="utils.py", touched=False) in predicates("I didn't touch `utils.py`.")
+    assert EditPredicate(path="**", touched=False) in predicates("I didn't touch any files.")
+    assert not any(
+        isinstance(p, EditPredicate) and p.only
+        for p in predicates("I fixed the bug and the tests didn't fail. Nothing else was changed.")
+    )

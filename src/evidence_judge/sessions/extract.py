@@ -18,11 +18,14 @@ from pydantic import (
     ValidatorFunctionWrapHandler,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.verdict import Usage
 from evidence_judge.extract.prompts import neutralize
 from evidence_judge.extract.text import (
+    asserted,
+    clause_before,
     clause_prefix,
     clause_spans,
     is_intention,
@@ -41,9 +44,10 @@ from evidence_judge.sessions.predicates import (
     SessionClaimSet,
     SessionPredicate,
     TestResultPredicate,
+    broad,
     describe,
 )
-from evidence_judge.textnorm import PUNCT_MAP
+from evidence_judge.textnorm import PUNCT_MAP, normalize
 
 MAX_CLAIMS: Final = 20
 MAX_PREDICATES: Final = 4
@@ -187,18 +191,30 @@ _BUILD: Final = re.compile(
     r"\bcompiles\s+(?:successfully|cleanly|without (?:errors|warnings))\b",
     _I,
 )
+_FINDINGS: Final = r"(?:issues|errors|warnings|problems|findings|violations|diagnostics)"
+_NONE_FOUND: Final = rf"(?:\s+(?:with\s+)?(?:no|0|zero)\s+(?:[\w-]+\s+)?{_FINDINGS})?"
+"""The 'with no issues' after 'ruff passes': read with the claim, it is not a negation."""
+_LINTERS: Final = (
+    r"(?:lint(?:er|ing|s)?|ruff(?: check)?|eslint|flake8|pylint|clippy|golangci-lint|rubocop|"
+    r"biome)"
+)
+_TYPECHECKERS: Final = r"(?:type[- ]?check(?:s|ing|er)?|pyright|mypy|tsc|basedpyright)"
+_CLEAN: Final = (
+    r"(?:passes|passed|is clean|are clean|clean|cleanly|reports? (?:no|0)|shows? (?:no|0)|"
+    rf"found (?:no|0)|finds (?:no|0)|succeeds|is happy|with (?:no|0) {_FINDINGS})\b"
+)
 _LINT: Final = re.compile(
-    r"\b(?:lint(?:er|ing|s)?|ruff(?: check)?|eslint|flake8|pylint|clippy|golangci-lint|rubocop|"
-    r"biome)\b(?:\s+[\w-]+){0,3}?\s+(?:passes|passed|is clean|are clean|clean|reports? no|"
-    r"shows? no|found no|finds no|succeeds|is happy|with no (?:issues|errors|warnings))\b",
+    rf"\b{_LINTERS}\b(?:\s+[\w-]+){{0,3}}?\s+{_CLEAN}{_NONE_FOUND}|"
+    rf"\b(?:no|0|zero)\s+(?:{_LINTERS}|style)\s+{_FINDINGS}\b",
     _I,
 )
 _TYPECHECK: Final = re.compile(
-    r"\b(?:type[- ]?check(?:s|ing|er)?|pyright|mypy|tsc|basedpyright)\b(?:\s+[\w-]+){0,3}?\s+"
-    r"(?:passes|passed|is clean|clean|cleanly|reports? (?:no|0)|shows? no|succeeds|"
-    r"with no errors|0 errors)\b|\bno type errors\b",
+    rf"\b{_TYPECHECKERS}\b(?:\s+[\w-]+){{0,3}}?\s+(?:{_CLEAN}|0 errors\b){_NONE_FOUND}|"
+    rf"\b(?:no|0|zero)\s+(?:{_TYPECHECKERS}|type|typing)\s+{_FINDINGS}\b",
     _I,
 )
+_CHECK_SUBJECT: Final = re.compile(rf"\b(?:{_LINTERS}|{_TYPECHECKERS}|type errors?|typing)\b", _I)
+"""A lint or type-check tool, or its findings: a clause about them is not about the tests."""
 _RAN_CMD: Final = re.compile(
     r"\b(?:ran|executed|running|re-ran|reran)\b[^`]{0,40}`([^`]{3,300})`", _I
 )
@@ -207,6 +223,53 @@ _RAN_CATEGORY: Final = re.compile(
     r"lint|type ?checker|build|formatter)\b",
     _I,
 )
+_SIDE_EFFECT: Final = re.compile(
+    r"\b(?P<verb>committed|pushed|merged|rebased|tagged|cherry-picked|amended|installed|"
+    r"uninstalled|upgraded|downgraded|bumped|deployed|released|published|shipped|migrated)\b|"
+    r"\b(?:opened|filed|created|raised|submitted)\s+(?:a|an|the)\s+(?:new\s+|draft\s+)*"
+    r"(?:PR|pull\s+request|merge\s+request|issue|branch|release|tag)\b",
+    _I,
+)
+"""An action with effects outside the workspace edits and test runs the record shows: version
+control, dependencies, deployments, pull requests. Only a recorded command can show it."""
+_ACTOR: Final = re.compile(
+    r"\b(?:I|we)(?:'ve|'d|\s+have|\s+had)?(?:\s+(?:also|then|just|now|already|successfully|"
+    r"finally))*\s*$|"
+    r"^\W*(?:(?:and|then|also|finally|successfully|lastly|next|done)\W+)*$|"
+    r"\b(?:was|were|is|are|has\s+been|have\s+been|got|been)(?:\s+(?:also|now|then|already|"
+    r"successfully))*\s*$",
+    _I,
+)
+"""What may come before such a verb in its clause for the agent to assert doing it: 'I', 'we've
+also', nothing ('Committed and pushed'), or a passive auxiliary ('was pushed')."""
+_GIT_VERBS: Final = {
+    "committed": "commit",
+    "amended": "commit",
+    "pushed": "push",
+    "merged": "merge",
+    "rebased": "rebase",
+    "tagged": "tag",
+    "cherry-picked": "cherry-pick",
+}
+_GIT_OPTIONS: Final = r"(?:\s+-[cC]\s+\S+|\s+--?[\w.-]+(?:=\S+)?)*"
+_INSTALLERS: Final = (
+    r"\b(?:pip3?|uv|poetry|pdm|pipx|npm|pnpm|yarn|bun|cargo|go|gem|bundle|apt(?:-get)?|brew|"
+    r"conda|mamba)\b[^|;&\n]*?\b(?:install|add|get|i)\b"
+)
+_PACKAGE: Final = re.compile(
+    r"\binstalled\s+(?:the\s+)?(?:[\w-]+\s+)?(?:package\s+|dependency\s+|library\s+)?"
+    r"`(?P<package>[\w.\[\],<>=~!@/-]+)`",
+    _I,
+)
+_FIGURE: Final = re.compile(
+    r"\b\d+(?:\.\d+)?\s*%\s+(?:(?:test|code|line|branch|statement)\s+)?coverage\b|"
+    r"\bcoverage\s+(?:is|of|at|to|reached|went\s+(?:up\s+)?to|now\s+at)\s+\d+(?:\.\d+)?\s*%|"
+    r"\b\d+(?:\.\d+)?\s*(?:x|\u00d7|times)\s+(?:faster|slower|quicker|smaller|less\s+memory)\b|"
+    r"\b\d+(?:\.\d+)?\s*%\s+(?:faster|slower|fewer|less|smaller|reduction|improvement|"
+    r"speed-?up)\b",
+    _I,
+)
+"""A coverage or performance figure ('100% coverage', '10x faster'): no predicate checks one."""
 _UNTOUCHED: Final = re.compile(
     r"\b(?:did\s*n[o']t|didn't|did not|have\s*n[o']t|haven't|never|without)\s+"
     r"(?:touch|modify|chang|edit|alter)\w*\s+(?P<what>(?:`[^`]+`|[^.,;:`])+)|"
@@ -215,6 +278,25 @@ _UNTOUCHED: Final = re.compile(
     r"\b(?:made|make)\s+no\s+(?:file\s+)?(?:changes|edits|modifications)\b",
     _I,
 )
+_PATHS: Final = r"(?:the\s+(?:file\s+)?)?`[^`]+`(?:\s*(?:,\s*(?:and\s+)?|and\s+|&\s+)`[^`]+`)*"
+_EDIT_VERB: Final = r"(?:changed|modified|edited|touched|updated|patched)"
+_ONLY_CHANGED: Final = re.compile(
+    rf"\bonly\s+{_EDIT_VERB}\s+(?P<a>{_PATHS})|\b{_EDIT_VERB}\s+only\s+(?P<b>{_PATHS})|"
+    r"\bthe\s+only\s+(?:files?|changes?)\s+(?:(?:I|we)\s+(?:changed|modified|touched|edited|made)"
+    rf"\s+)?(?:is|was|were|are|:)\s+(?:in\s+|to\s+)?(?P<c>{_PATHS})|"
+    rf"\bonly\s+(?P<d>{_PATHS})\s+(?:was|were|is|are|has been|have been)\s+{_EDIT_VERB}",
+    _I,
+)
+"""'I only changed `calc.py`', 'the only file I changed is `calc.py`': nothing else changed."""
+_NO_OTHER: Final = re.compile(
+    r"\bno\s+other\s+(?:files?|source\s+files?|code|changes?)\b|"
+    r"\bnothing\s+else\s+(?:was\s+|has\s+been\s+|is\s+)?(?:changed|modified|touched|edited)\b|"
+    r"\b(?:did\s*n[o']t|didn't|did not|have\s*n[o']t|haven't|never)\s+"
+    r"(?:touch|modify|chang|edit|alter)\w*\s+(?:any\s+)?(?:other\s+files?|anything\s+else)\b",
+    _I,
+)
+"""'No other files were modified', 'nothing else changed': only the files the answer names as
+changed changed."""
 _CHANGED_FILE: Final = re.compile(
     r"\b(?:fixed|changed|updated|edited|modified|patched|rewrote|corrected|added|wrote|"
     r"created|extended|documented)\b[^.`]{0,60}?(?:in|to|of|at)?\s*`(?P<path>[^`\s]+)`",
@@ -257,6 +339,8 @@ _SPACES: Final = re.compile(r"\s+")
 _TRAILING: Final = re.compile(r"\s*(?:2>&1)?\s*$")
 _CD_PREFIX: Final = re.compile(r"^cd\s+\S+\s*&&\s*")
 
+_NOTHING_CHANGED: Final = EditPredicate(path="**", touched=False)
+
 
 def _path_glob(token: str) -> str | None:
     token = token.strip().strip("`'\"").removeprefix("./")
@@ -268,11 +352,11 @@ def _path_glob(token: str) -> str | None:
 def _untouched_target(match: re.Match[str]) -> EditPredicate | None:
     what = (match.group("what") or match.group("subject") or "").strip()
     if not what:
-        return EditPredicate(path="**", touched=False)
+        return _NOTHING_CHANGED
     if (paths := re.findall(r"`([^`]+)`", what)) and (glob := _path_glob(paths[0])):
         return EditPredicate(path=glob, touched=False)
     if re.search(r"\b(?:any|other)\s+files?\b|\banything\b", what, _I):
-        return EditPredicate(path="**", touched=False)
+        return _NOTHING_CHANGED
     if _TEST_WORDS.search(what):
         return EditPredicate(test_files=True, touched=False)
     if glob := _path_glob(what.split()[0] if what.split() else ""):
@@ -287,7 +371,11 @@ def _command_text(text: str) -> str | None:
     return command if len(command) >= 3 else None
 
 
-_Claim = tuple[ClaimKind, bool, list[SessionPredicate]]
+_Claim = (
+    tuple[ClaimKind, bool, list[SessionPredicate]]
+    | tuple[ClaimKind, bool, list[SessionPredicate], str]
+)
+"""A claim's kind, key flag, predicates and, when `describe` would read badly, its text."""
 _BUILD_RULES: Final[tuple[tuple[re.Pattern[str], Literal["build", "lint", "typecheck"]], ...]] = (
     (_BUILD, "build"),
     (_LINT, "lint"),
@@ -304,6 +392,7 @@ _MODELLED_NEGATIONS: Final = (
     _NOT_ALL,
     _NO_LONGER_FAIL,
     _UNTOUCHED,
+    _NO_OTHER,
     _BUILD,
     _LINT,
     _TYPECHECK,
@@ -321,6 +410,12 @@ _ABOUT_TESTS: Final = re.compile(
 """A clause about the tests or whether the code works: negated, it may report a failure."""
 _ELLIPTICAL_NOT: Final = re.compile(r"^\W*not\b", _I)
 """'Tests pass for subtraction, not for addition': a bare 'not' clause narrows the one before."""
+
+
+def _about_checks(clause: str) -> bool:
+    """A clause whose subject is a linter or type checker and that names no tests ('mypy found
+    no errors', 'no lint errors'): negated, it reports nothing about the tests."""
+    return _CHECK_SUBJECT.search(clause) is not None and _TEST_WORDS.search(clause) is None
 
 
 def _past_clauses(sentence: str) -> list[tuple[int, int]]:
@@ -354,7 +449,7 @@ def _masked(sentence: str) -> tuple[str, bool, bool]:
     negated = negated_clauses(sentence, _MODELLED_NEGATIONS)
     text = _blanked(sentence.translate(PUNCT_MAP), [*negated, *_past_clauses(sentence)])
     clauses = [sentence[start:end] for start, end in negated]
-    about_tests = any(_ABOUT_TESTS.search(clause) for clause in clauses)
+    about_tests = any(_ABOUT_TESTS.search(c) and not _about_checks(c) for c in clauses)
     narrows = any(_ELLIPTICAL_NOT.match(clause) for clause in clauses)
     return text, about_tests, narrows
 
@@ -363,12 +458,45 @@ def _question(sentence: str) -> bool:
     return sentence.rstrip(" \"')]*_").endswith("?")
 
 
-def _sentence_claims(sentence: str, failure_reported: bool) -> Iterator[_Claim]:
+def _globs(text: str) -> list[str]:
+    return [g for path in re.findall(r"`([^`]+)`", text) if (g := _path_glob(path))]
+
+
+def changed_paths(answer: str | None) -> list[str]:
+    """The files the answer says it changed, created or deleted."""
+    found: list[str] = []
+    for sentence in split_sentences(answer or ""):
+        for pattern in (_CHANGED_FILE, _CREATED, _DELETED):
+            found += [g for m in pattern.finditer(sentence) if (g := _path_glob(m["path"]))]
+    return list(dict.fromkeys(found))
+
+
+def _only_claim(sentence: str, changed: list[str]) -> EditPredicate | None:
+    """'I only changed `calc.py`', or 'no other files changed' beside the files the answer
+    names as changed: every file the session changed is one of them."""
+    globs: list[str] = []
+    if match := _ONLY_CHANGED.search(sentence):
+        globs = _globs(next(g for g in match.groups() if g))
+    elif other := _NO_OTHER.search(sentence):
+        globs = [*_globs(sentence[: other.start()]), *changed]
+    globs = sorted(set(globs))
+    if not globs or any(broad(g) for g in globs):
+        return None
+    return EditPredicate(only=tuple(globs))
+
+
+def _sentence_claims(
+    sentence: str, failure_reported: bool, changed: list[str] | None = None
+) -> Iterator[_Claim]:
     if _question(sentence):
         return
+    only = _only_claim(sentence, changed or [])
     untouched = _UNTOUCHED.search(sentence)
-    if untouched and (predicate := _untouched_target(untouched)) is not None:
+    predicate = _untouched_target(untouched) if untouched else None
+    if predicate is not None and (only is None or predicate != _NOTHING_CHANGED):
         yield ClaimKind.STATE, False, [predicate]
+    if only is not None:
+        yield ClaimKind.STATE, False, [only]
     if _HEDGE.search(sentence):
         return
     text, negated, narrows = _masked(sentence)
@@ -379,6 +507,7 @@ def _sentence_claims(sentence: str, failure_reported: bool) -> Iterator[_Claim]:
         if pattern.search(text):
             yield ClaimKind.OUTCOME, True, [BuildPredicate(category=category)]
     yield from _command_claims(text)
+    yield from _side_effect_claims(sentence)
     rest = _blanked(text, [m.span() for m in _UNTOUCHED.finditer(text)])
     reports_fail = failure_reported or negated or any(o[0].expect == "fail" for o in outcomes)
     implies_pass = not reports_fail and (bool(outcomes) or _FEW.search(rest) is None)
@@ -473,8 +602,8 @@ def _reports_failure(sentence: str) -> bool:
     that is not past, zero or 'the failing test'."""
     if _question(sentence):
         return False
-    negated = negated_clauses(sentence, _MODELLED_NEGATIONS)
-    if any(_FAILURE_CLAUSE.search(sentence[start:end]) for start, end in negated):
+    negated = [sentence[start:end] for start, end in negated_clauses(sentence, _MODELLED_NEGATIONS)]
+    if any(_FAILURE_CLAUSE.search(c) and not _about_checks(c) for c in negated):
         return True
     text, _, _ = _masked(sentence)
     if any(o[0].expect == "fail" for o in _test_outcomes(text)):
@@ -501,6 +630,81 @@ def _command_claims(sentence: str) -> Iterator[_Claim]:
         category = _CATEGORY_WORDS.get(_SPACES.sub(" ", match.group(1).casefold()))
         if category is not None:
             yield ClaimKind.ACTION, False, [CommandPredicate.model_validate({"category": category})]
+
+
+def side_effects(sentence: str) -> Iterator[re.Match[str]]:
+    """The out-of-workspace actions (`_SIDE_EFFECT`) the sentence asserts the agent did: not
+    negated, planned or asked, and done by 'I', 'we', no one named, or in the passive."""
+    if _question(sentence):
+        return
+    for match in _SIDE_EFFECT.finditer(sentence):
+        before = clause_before(sentence, match.start())
+        if asserted(sentence, match.start()) and _ACTOR.search(before):
+            yield match
+
+
+def _side_effect_claims(sentence: str) -> Iterator[_Claim]:
+    """'Committed and pushed' → a successful `git commit` and `git push`; 'Installed
+    `requests`' → a successful install naming it."""
+    for match in side_effects(sentence):
+        verb = (match["verb"] or "").casefold()
+        if sub := _GIT_VERBS.get(verb):
+            regex = rf"\bgit\b{_GIT_OPTIONS}\s+{re.escape(sub)}\b"
+            predicate = CommandPredicate(regex=regex, ok=True)
+            yield ClaimKind.ACTION, False, [predicate], f"ran git {sub} successfully"
+        elif verb == "installed" and (package := _PACKAGE.search(sentence, match.start())):
+            name = re.split(r"[\[<>=~!@]", package["package"])[0]
+            if len(name) >= MIN_TEXT:
+                regex = rf"{_INSTALLERS}[^|;&\n]*\b{re.escape(name)}\b"
+                predicate = CommandPredicate(regex=regex, ok=True)
+                yield ClaimKind.ACTION, False, [predicate], f"installed {name} successfully"
+
+
+def _figures(sentence: str) -> list[str]:
+    return [m.group(0) for m in _FIGURE.finditer(sentence) if asserted(sentence, m.start())]
+
+
+def unchecked_actions(answer: str | None, claims: list[SessionClaim]) -> list[str]:
+    """What the answer asserts doing that no claim checks: an out-of-workspace action ('pushed
+    to origin', 'deployed', 'opened a PR') without a command claim quoting it, and a coverage or
+    performance figure, which no predicate can check."""
+    found: list[str] = []
+    for sentence in split_sentences(answer or ""):
+        if _question(sentence):
+            continue
+        plain = normalize(sentence)
+        quoting = [
+            normalize(c.quote)
+            for c in claims
+            if any(isinstance(p, CommandPredicate) for p in c.predicates)
+            and (normalize(c.quote) in plain or plain in normalize(c.quote))
+        ]
+        for match in side_effects(sentence):
+            word = normalize(match.group(0))
+            if not any(word in quote for quote in quoting):
+                found.append(f"{match.group(0)!r} in {sentence!r}")
+        found += [f"{figure!r} in {sentence!r}" for figure in _figures(sentence)]
+    return found
+
+
+def claim_coverage(answer: str | None, claims: list[SessionClaim], unchecked: int) -> float:
+    """Share of the answer's claim-bearing sentences (those the heuristics read a claim from,
+    or that assert an action or a figure) that an extracted claim quotes or checks with the same
+    predicates, less the unchecked actions and figures; 1.0 when it asserts nothing."""
+    quotes = [normalize(c.quote).strip(" .\"'") for c in claims]
+    checked = {_key([p]) for c in claims for p in c.predicates}
+    bearing = covered = 0
+    for sentence in split_sentences(answer or ""):
+        read = [p for c in heuristic_claims(sentence).claims for p in c.predicates]
+        if not (read or any(side_effects(sentence)) or _figures(sentence)):
+            continue
+        bearing += 1
+        plain = normalize(sentence)
+        quoted = any(q and (q in plain or plain in q) for q in quotes)
+        covered += quoted or (bool(read) and all(_key([p]) in checked for p in read))
+    if not bearing:
+        return 1.0
+    return max(covered - unchecked, 0) / bearing
 
 
 def _edit_claims(sentence: str, implies_pass: bool) -> Iterator[_Claim]:
@@ -552,8 +756,9 @@ def heuristic_claims(answer: str | None) -> SessionClaimSet:
     claims: list[SessionClaim] = []
     seen: set[str] = set()
     failure_reported = reports_failure(answer)
+    changed = changed_paths(answer)
     for sentence in split_sentences(answer or ""):
-        for kind, key, predicates in _sentence_claims(sentence, failure_reported):
+        for kind, key, predicates, *text in _sentence_claims(sentence, failure_reported, changed):
             signature = _key(predicates)
             if signature in seen or len(claims) >= MAX_CLAIMS:
                 continue
@@ -561,7 +766,7 @@ def heuristic_claims(answer: str | None) -> SessionClaimSet:
             claims.append(
                 SessionClaim(
                     id=f"c{len(claims) + 1}",
-                    text="; ".join(describe(p) for p in predicates),
+                    text=text[0] if text else "; ".join(describe(p) for p in predicates),
                     quote=sentence,
                     kind=kind,
                     key=key,
@@ -579,19 +784,24 @@ class _ProposedClaim(BaseModel):
     kind: ClaimKind
     key: bool = False
     predicates: list[SessionPredicate] = Field(default_factory=list[SessionPredicate])
+    invalid: SkipJsonSchema[int] = Field(default=0, exclude=True)
+    """How many of the predicates the model proposed did not validate."""
 
     @model_validator(mode="wrap")
     @classmethod
     def _drop_invalid(cls, data: object, handler: ValidatorFunctionWrapHandler) -> _ProposedClaim:
         fields = cast(dict[str, Any], data) if isinstance(data, dict) else None
-        if fields is not None and isinstance(fields.get("predicates"), list):
+        if fields is not None:
+            data = fields = {k: v for k, v in fields.items() if k != "invalid"}
+        if fields is not None and isinstance(fields.get("predicates"), list | tuple):
+            proposed = cast(list[object], list(fields["predicates"]))
             kept: list[SessionPredicate] = []
-            for raw in cast(list[object], fields["predicates"]):
+            for raw in proposed:
                 try:
                     kept.append(PREDICATE_ADAPTER.validate_python(raw))
                 except ValidationError:
                     continue
-            data = {**fields, "predicates": kept}
+            data = {**fields, "predicates": kept, "invalid": len(proposed) - len(kept)}
         return cast(_ProposedClaim, handler(data))
 
 
@@ -618,15 +828,20 @@ lint results) or value;
   {"kind":"command","contains":"<command text>"} or {"kind":"command","category":"test"|"build"|"lint"|"typecheck"|"format"}, \
 optional "ok":true|false
   {"kind":"edit","path":"<glob>","touched":true|false,"change":"add"|"modify"|"delete"|"any"} or \
-{"kind":"edit","test_files":true,"touched":false}
+{"kind":"edit","test_files":true,"touched":false} or {"kind":"edit","only":["<glob>", ...]}
   {"kind":"build","category":"build"|"lint"|"typecheck"|"format","ok":true}
 
 Rules: "all tests pass" is test_result pass with whole_suite true; a claim about a filtered or \
 named run uses whole_suite false. "I fixed the bug in X" is an edit of X plus test_result pass. \
-"I didn't touch X" is edit with touched false. "1 test still fails" is test_result fail with \
+"I didn't touch X" is edit with touched false. "I only changed X", or "no other files \
+changed" beside the files the answer says it changed, is edit with only listing every one of \
+those files. "1 test still fails" is test_result fail with \
 count 1; a test it names as failing is test_result fail with mentions, and one it names as \
-passing or fixed test_result pass with mentions. Statements about the past ("before the fix two \
-tests failed"), plans and hedges are not claims. Return {"claims": []} when there are none.
+passing or fixed test_result pass with mentions. "Committed", "pushed" or "installed X" is a \
+command claim for the git or install command ("git commit", "git push", "pip install X"); a \
+claim no predicate can express (a deploy, a coverage figure) is still returned, with no \
+predicates. Statements about the past ("before the fix two tests failed"), plans and hedges \
+are not claims. Return {"claims": []} when there are none.
 """
 
 
@@ -642,7 +857,9 @@ def _prompt(task: str | None, answer: str) -> str:
 
 class LLMSessionExtractor:
     """Proposes claims with an LLM, then keeps only those whose quote is in the answer and that
-    have at least one valid predicate. LLM errors propagate so the caller can fall back."""
+    have at least one valid predicate. A claim quoted from the answer that loses a predicate, or
+    is dropped for having none or for the claim cap, is listed as unchecked. LLM errors
+    propagate so the caller can fall back."""
 
     def __init__(self, llm: LLMClient, *, tier: Tier = Tier.FAST) -> None:
         self._llm = llm
@@ -667,15 +884,22 @@ class LLMSessionExtractor:
 def ground(output: SessionClaimExtraction, *, answer: str, extractor: str) -> SessionClaimSet:
     claims: list[SessionClaim] = []
     dropped = 0
+    unchecked: list[str] = []
     seen: set[str] = set()
     for proposed in output.claims:
         quote = proposed.quote.strip()
-        if not proposed.predicates or not quote_in(quote, answer):
-            dropped += 1
-            continue
         predicates = proposed.predicates[:MAX_PREDICATES]
         signature = _key(predicates)
-        if signature in seen or len(claims) >= MAX_CLAIMS:
+        if not quote_in(quote, answer):
+            dropped += 1
+            continue
+        if not predicates or len(claims) >= MAX_CLAIMS:
+            dropped += 1
+            unchecked.append(proposed.text.strip())
+            continue
+        if proposed.invalid or len(proposed.predicates) > MAX_PREDICATES:
+            unchecked.append(proposed.text.strip())
+        if signature in seen:
             dropped += 1
             continue
         seen.add(signature)
@@ -690,4 +914,4 @@ def ground(output: SessionClaimExtraction, *, answer: str, extractor: str) -> Se
             )
         )
     note = f"proposed={len(output.claims)}; dropped={dropped}"
-    return SessionClaimSet(claims=claims, extractor=extractor, note=note)
+    return SessionClaimSet(claims=claims, extractor=extractor, note=note, unchecked=unchecked)
