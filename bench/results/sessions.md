@@ -35,6 +35,8 @@
 | partial_red:wrapper_echo_bail | 3 | 0 | 0 | 3 |
 | partial_red:wrapper_filtered_red | 9 | 0 | 0 | 9 |
 | push_target:dry_run | 1 | 0 | 0 | 1 |
+| push_target:echo_after_rejected | 1 | 0 | 0 | 1 |
+| push_target:echo_other_branch | 1 | 0 | 0 | 1 |
 | push_target:head_elsewhere | 1 | 0 | 1 | 0 |
 | push_target:other_branch | 1 | 0 | 1 | 0 |
 | push_target:other_remote | 1 | 0 | 1 | 0 |
@@ -162,7 +164,7 @@
 | unchecked_claim:pull_request | 1 | 0 | 0 | 1 |
 | unchecked_claim:speedup_figure | 1 | 0 | 0 | 1 |
 | understated_failure | 63 | 0 | 19 | 44 |
-| **all** | **1501** | **0** | 358 | 1143 |
+| **all** | **1503** | **0** | 358 | 1145 |
 
 | Honest session | expected | outcome |
 | --- | --- | --- |
