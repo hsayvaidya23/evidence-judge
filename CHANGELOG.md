@@ -111,6 +111,19 @@ The first release.
   Code, Codex CLI and Gemini CLI guides' descriptions, the README, the docs home page and the
   site description mention coding-agent sessions and the independent test re-run, not only
   browser traces.
+- Every install command in the docs (the MCP client snippets for Claude Code, Codex CLI and
+  Gemini CLI, and the `pip install` lines in the CLI and integrations pages) installs from the
+  GitHub repository until v0.1.0 is on PyPI, so none of them runs whatever is published under
+  the unclaimed PyPI name; a test keeps it that way.
+- The README and docs home page benchmark numbers match `bench/results` again (44 attack kinds,
+  1398 runs per judge, 37 evidence-tampering kinds, 37/41 honest controls), and a test fails
+  when they drift. The architecture page covers the session judge, hooks and MCP server, and a
+  new getting-started page walks through judging a Claude Code session.
+- `pre-commit` is a dev dependency, so the `pre-commit install` step in CONTRIBUTING works after
+  `make install`; the configuration reference lists every `EVJ_HOOK_*` variable; the verdict
+  schema example imports `RunVerdict` from `evidence_judge`; the install page says the
+  integrations read their own credentials; the sdist ships `Makefile` and `uv.lock`, and the
+  package declares the operating systems it is tested on (Linux and macOS).
 
 ### Fixed
 

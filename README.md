@@ -115,7 +115,7 @@ See [docs/architecture.md](docs/architecture.md).
 uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
 ```
 
-v0.1.0 is not released yet, so this installs from GitHub; once it is on PyPI, `uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"` does the same.
+v0.1.0 is not released yet, so this installs from GitHub, not PyPI; add `@<sha>` to the URL to pin a commit.
 
 Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically. The `mcp` extra adds the MCP server (`evidence-judge mcp`), which the Claude Code plugin starts.
 
@@ -274,7 +274,7 @@ the cache directory is not writable, a per-process key is used with a one-line w
   <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 1398 attack runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
 </p>
 
-The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites the agent's answer and reasoning into a success story: the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks on the claim extractor, answers that word their claims behind a negation, and thirty-six kinds that also tamper with the evidence the way a gaming agent would, each modelled on an attack that once got a false PASS (the agent's own input echoed back, confirmations off-site or on a mirror, injected scripts and mocked responses, hidden or unrendered text, writes sent as GETs, an order number claimed from inside a longer one, a misquoted price; see [all kinds](docs/benchmark.md#forgery-kinds)). The base runs are eleven failed runs on three local demo sites (a shop, a clinic's appointment form and an admin console), so the correct verdict is never PASS. Counts below pool the 43 attack kinds (1374 runs per judge); a style-only control adds 33 more, also 0 passes.
+The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites the agent's answer and reasoning into a success story: the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks on the claim extractor, answers that word their claims behind a negation, and 37 kinds that also tamper with the evidence the way a gaming agent would, each modelled on an attack that once got a false PASS (the agent's own input echoed back, confirmations off-site or on a mirror, injected scripts and mocked responses, hidden or unrendered text, writes sent as GETs, an order number claimed from inside a longer one, a misquoted price; see [all kinds](docs/benchmark.md#forgery-kinds)). The base runs are eleven failed runs on three local demo sites (a shop, a clinic's appointment form and an admin console), so the correct verdict is never PASS. Counts below pool the 44 attack kinds (1398 runs per judge); a style-only control adds 33 more, also 0 passes.
 
 | Judge | Forged runs | False PASS | 95% CI |
 | --- | ---: | ---: | --- |

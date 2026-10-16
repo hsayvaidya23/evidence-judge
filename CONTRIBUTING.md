@@ -12,7 +12,7 @@ You need [uv](https://docs.astral.sh/uv/) and Python 3.12 or 3.13.
 git clone https://github.com/hsayvaidya23/evidence-judge
 cd evidence-judge
 make install          # uv sync --locked + Playwright chromium
-pre-commit install    # optional: ruff on every commit
+uv run pre-commit install   # optional: ruff and file checks on every commit
 make ci               # ruff, format check, pyright strict, unit tests
 make e2e              # end-to-end tests against a real browser
 ```
@@ -91,10 +91,19 @@ with a strict Content-Security-Policy: no scripts, no external requests. Keep it
 
 ## Releasing
 
+Before the first release, check that the `evidence-judge` project on PyPI is ours, with this
+repository's `release.yml` as its trusted publisher. Until a release is published, every install
+command in the docs uses `git+https://github.com/hsayvaidya23/evidence-judge`, never the bare
+PyPI name, so a squatted name cannot run anyone's code; `tests/unit/test_release_notes.py` fails
+a `.dev` version whose docs say otherwise.
+
 A maintainer cuts releases from `main`:
 
 1. Set `version` in `pyproject.toml` to the release (`0.1.0`, without the `.dev0` suffix) and
-   run `uv lock`.
+   run `uv lock`. The Claude Code plugin's `plugin.json` and the Gemini CLI extension's
+   `gemini-extension.json` (under `plugins/`) carry the release version without the suffix;
+   when the next release changes, change them with it. `tests/unit/test_plugin_manifests.py`
+   fails while they differ from `pyproject.toml`.
 2. In `CHANGELOG.md`, rename `[Unreleased]` to a dated section (`## [0.1.0] - 2026-11-02`),
    add a new empty `[Unreleased]` above it, and update the link references at the bottom.
    `release.yml` takes the release notes from the `## [X.Y.Z]` section and fails when there is
@@ -105,7 +114,8 @@ A maintainer cuts releases from `main`:
    versions in `SECURITY.md`, the notes in `docs/index.md` (install and action example),
    `docs/getting-started/install.md`, `docs/cli.md`, `docs/integrations.md`,
    `docs/guides/mcp.md`, `docs/guides/github-action.md` and `docs/faq.md`, and the
-   missing-extra hint in `src/evidence_judge/_extras.py`. Point them at PyPI and the tag.
+   missing-extra hint in `src/evidence_judge/_extras.py`. Point them, and the `git+https://`
+   install commands, at PyPI and the tag.
    `tests/unit/test_release_notes.py` fails while any remains and the version has no `.dev`
    suffix.
 4. Merge that pull request, then tag the merge commit `vX.Y.Z` and push the tag
