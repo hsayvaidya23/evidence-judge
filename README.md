@@ -315,9 +315,10 @@ GitHub Actions: gate a pull request on a recorded run.
     answer-file: runs/checkout/answer.txt
     spec: specs/checkout.yaml
     # fail-on-review: "true"
+    # upload-report: "true"
 ```
 
-The step fails on FAIL (and optionally NEEDS_REVIEW), writes the verdict to the job summary, and exposes `outcome`, `score` and `report` outputs.
+The step fails on FAIL (and optionally NEEDS_REVIEW), writes the verdict to the job summary, exposes `outcome`, `score` and `report` outputs and can upload the HTML report as an artifact. Boolean inputs take `true` or `false` in any case; anything else fails the step. It runs offline by default; for LLM extraction set `offline: "false"` and pass `anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}`.
 
 Pin a release, never `@main`: the action installs evidence-judge from the ref you pin, so a moving branch changes your verdicts under you. v0.1.0 is not released yet, so there is no tag; until there is, pin a full commit SHA from `main`.
 

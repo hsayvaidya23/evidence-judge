@@ -25,13 +25,25 @@ inputs:
     description: Task spec YAML (required for write tasks to PASS)
     required: false
   offline:
-    description: "true: no LLM calls (heuristic claim extraction)"
+    description: "true: no LLM calls (heuristic claim extraction); false needs anthropic-api-key or ANTHROPIC_API_KEY. true or false, any case"
     required: false
     default: "true"
   fail-on-review:
-    description: "true: also fail the job when the verdict is NEEDS_REVIEW"
+    description: "true: also fail the job when the verdict is NEEDS_REVIEW. true or false, any case"
     required: false
     default: "false"
+  anthropic-api-key:
+    description: "Anthropic API key for LLM claim extraction (offline: false); pass a secret. Empty keeps ANTHROPIC_API_KEY from the job environment"
+    required: false
+    default: ""
+  upload-report:
+    description: "true: upload the HTML report as a workflow artifact, also when the step fails. true or false, any case"
+    required: false
+    default: "false"
+  report-artifact:
+    description: Artifact name for upload-report; give each invocation in a job its own
+    required: false
+    default: evidence-judge-report
   version:
     description: "Git tag, branch or commit SHA of github.com/hsayvaidya23/evidence-judge to install; empty installs this action's own source"
     required: false
@@ -55,6 +67,23 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Check inputs
+      id: inputs
+      shell: bash
+      env:
+        EJ_OFFLINE: ${{ inputs.offline }}
+        EJ_FAIL_ON_REVIEW: ${{ inputs.fail-on-review }}
+        EJ_UPLOAD_REPORT: ${{ inputs.upload-report }}
+      run: |
+        flag() {
+          case "$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" in
+            true | false) echo "$1=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::input $1 must be true or false (any case)"; return 1 ;;
+          esac
+        }
+        flag offline "$EJ_OFFLINE"
+        flag fail-on-review "$EJ_FAIL_ON_REVIEW"
+        flag upload-report "$EJ_UPLOAD_REPORT"
     - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       with:
         python-version: ${{ inputs.python-version }}
@@ -79,9 +108,19 @@ runs:
         EJ_ANSWER_FILE: ${{ inputs.answer-file }}
         EJ_REASONING_FILE: ${{ inputs.reasoning-file }}
         EJ_SPEC: ${{ inputs.spec }}
-        EJ_OFFLINE: ${{ inputs.offline }}
-        EJ_FAIL_ON_REVIEW: ${{ inputs.fail-on-review }}
+        EJ_OFFLINE: ${{ steps.inputs.outputs.offline }}
+        EJ_FAIL_ON_REVIEW: ${{ steps.inputs.outputs.fail-on-review }}
+        EJ_API_KEY: ${{ inputs.anthropic-api-key }}
       run: |
+        if [ -n "$EJ_API_KEY" ]; then
+          echo "::add-mask::$EJ_API_KEY"
+          export ANTHROPIC_API_KEY="$EJ_API_KEY"
+        fi
+        unset EJ_API_KEY
+        if [ "$EJ_OFFLINE" = "false" ] && [ "${EVJ_LLM_BACKEND:-anthropic}" = "anthropic" ] \
+          && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+          echo "::warning::offline is false but neither anthropic-api-key nor ANTHROPIC_API_KEY is set; judging offline"
+        fi
         out=$(mktemp -d "$RUNNER_TEMP/evidence-judge.XXXXXX")
         args=(judge --out "$out/verdict.json" --html "$out/report.html")
         [ -n "$EJ_TRACE" ] && args+=(--trace "$EJ_TRACE")
@@ -111,3 +150,10 @@ runs:
           needs_review) [ "$EJ_FAIL_ON_REVIEW" = "true" ] && exit 2 || exit 0 ;;
           *) exit 1 ;;
         esac
+    - name: Upload the report
+      if: always() && steps.inputs.outputs.upload-report == 'true' && steps.judge.outputs.report != ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.report-artifact }}
+        path: ${{ steps.judge.outputs.report }}
+        if-no-files-found: error

@@ -270,6 +270,16 @@ The first release.
   number, is charged another price and claims "for $4.00"; it produced false PASSes before the
   fix and none after. The benchmark now has 44 kinds: 0 of 1374 attack runs pass, honest
   controls unchanged.
+- The GitHub Action checks its boolean inputs: `offline`, `fail-on-review` and the new
+  `upload-report` take `true` or `false` in any case, and any other value (`yes`, `1`) fails
+  the step before anything is installed; before, everything but the exact string `true` was
+  silently read as `false`. New inputs `anthropic-api-key` (masked, set only for the judging
+  step, and an empty one keeps a job-level `ANTHROPIC_API_KEY`) and `upload-report` /
+  `report-artifact` (upload the HTML report as an artifact, also on FAIL); `offline: false`
+  without a key now warns that the run is judged offline. The API key requirement is
+  documented in the action guide.
+- The wall-clock budgets of the large-trace and large-stylesheet tests are tighter (3 s and
+  12 s, from 10 s and 20 s; they take about 0.5 s and 5 s).
 
 ### Security
 
