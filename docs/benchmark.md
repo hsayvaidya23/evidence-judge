@@ -201,6 +201,10 @@ recompute the key.
 `EVJ_REDACTION_KEY` still wins when set, and a bench that calls a model uses the same key as
 `judge` (see [the redaction key](reference/configuration.md#the-redaction-key)).
 
+Coding-agent sessions have a forgery benchmark of their own: `make bench-sessions` writes
+[`bench/results/sessions.md`](../bench/results/sessions.md) and `sessions.json`; see
+[Coding-agent sessions](design/coding-agent-sessions.md#benchmark).
+
 From Python:
 
 ```python

@@ -1,10 +1,10 @@
 UV ?= uv
 
 .DEFAULT_GOAL := help
-.PHONY: help install lint fmt typecheck test e2e fixtures schema svgs media bench ci
+.PHONY: help install lint fmt typecheck test e2e fixtures schema svgs media bench bench-sessions ci
 
 help: ## List targets
-	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
 install: ## Install dependencies and the Playwright browser
 	$(UV) sync --locked
@@ -43,5 +43,9 @@ media: ## Re-render the README animations and report screenshots (~9 min)
 bench: ## Re-run the offline benchmark into bench/results/
 	$(UV) run evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3 \
 		--out bench/results/offline-fixtures.json --markdown bench/results/offline-fixtures.md
+
+bench-sessions: ## Re-run the session forgery benchmark into bench/results/
+	$(UV) run python -m evidence_judge.sessions.bench tests/fixtures/sessions \
+		--out bench/results/sessions.json --markdown bench/results/sessions.md
 
 ci: lint typecheck test ## Everything CI runs except e2e

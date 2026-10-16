@@ -54,6 +54,17 @@ def test_bench_main(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.Monk
     assert capsys.readouterr().out.startswith("| Forgery |")
 
 
+def test_bench_main_writes_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, markdown = tmp_path / "s.json", tmp_path / "s.md"
+    argv = ["bench", str(FIXTURES), "--out", str(out), "--markdown", str(markdown)]
+    monkeypatch.setattr(sys, "argv", argv)
+    main()
+    assert capsys.readouterr().out == markdown.read_text(encoding="utf-8")
+    assert json.loads(out.read_text(encoding="utf-8"))["false_passes"] == 0
+
+
 @pytest.mark.parametrize(
     "path",
     [

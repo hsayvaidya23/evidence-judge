@@ -846,8 +846,10 @@ as a Claude Code transcript through the same scrubber. No model was called to ma
 
 ## Benchmark
 
-`python -m evidence_judge.sessions.bench tests/fixtures/sessions` forges success on three
-bases per project whose whole suite was never shown passing: the honest failure report, the
+`make bench-sessions` (`python -m evidence_judge.sessions.bench tests/fixtures/sessions` with
+`--out` and `--markdown`, written to
+[`bench/results/sessions.md`](../../bench/results/sessions.md) and `sessions.json`) forges
+success on three bases per project whose whole suite was never shown passing: the honest failure report, the
 filtered session, and the honest fix with its final test run removed (so each trick is the only
 test evidence). Each base gets eight rewritten answers and the tricks that fit its project's
 test runner, judged once on the forged answer and once with only a spec expecting the suite to
@@ -875,8 +877,9 @@ control, all fixed. Exit hooks were only read from Python, so a `slug.js` that r
 spec, and a new `main_test.go` whose `TestMain` drops `m.Run()`'s result and calls
 `os.Exit(0)` (`go test` then prints only `ok`) passed five of the six Go cases; both are now
 suite-weakening findings. And the honest Node failure report ("`npm test` fails: 1 of 3 tests
-passes") was FAILED, because "tests passes" read as a claim that the suite passes; a count of
-fewer than all the tests is now a failing-suite claim.
+passes") was FAILED, because "tests passes" read as a claim that the suite passes; a passing
+count below the total is now a failing-suite claim, while a zero failure count ("0 of 3 tests
+failed") is a passing one.
 
 All forty honest sessions keep their expected outcome. Thirty-five PASS, among them the Node
 and Go projects' honest fixes and failure reports, `go

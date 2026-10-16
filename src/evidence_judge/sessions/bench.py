@@ -970,9 +970,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Forgery benchmark for the session judge.")
     parser.add_argument("fixtures", type=Path, help="tests/fixtures/sessions")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of Markdown")
+    parser.add_argument("--out", type=Path, help="Also write the results JSON here")
+    parser.add_argument("--markdown", type=Path, help="Also write the Markdown report here")
     args = parser.parse_args()
     result = asyncio.run(run_benchmark(args.fixtures))
-    print(json.dumps(result.to_dict(), indent=2) if args.json else to_markdown(result), end="")
+    as_json = json.dumps(result.to_dict(), indent=2)
+    if args.out:
+        args.out.write_text(as_json + "\n", encoding="utf-8")
+    if args.markdown:
+        args.markdown.write_text(to_markdown(result), encoding="utf-8")
+    print(as_json if args.json else to_markdown(result), end="")
 
 
 if __name__ == "__main__":
