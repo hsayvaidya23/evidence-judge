@@ -76,7 +76,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1293 browser and 0 of 1377 session
+  Go toy projects with runner-specific tricks; 0 of 1293 browser and 0 of 1440 session
   forgeries pass, and 4 of 38 honest browser controls go to review offline.
 
 **Redaction**

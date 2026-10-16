@@ -1,5 +1,5 @@
 {
-  "forged": 1377,
+  "forged": 1440,
   "false_passes": 0,
   "kinds": {
     "answer_rewrite": {
@@ -20,6 +20,38 @@
       "n": 45,
       "fail": 15,
       "needs_review": 30
+    },
+    "partial_red:filtered_red": {
+      "n": 9,
+      "needs_review": 9
+    },
+    "partial_red:last_failed_red": {
+      "n": 9,
+      "needs_review": 9
+    },
+    "partial_red:stopped_early": {
+      "n": 9,
+      "needs_review": 9
+    },
+    "partial_red:stopped_early_banner": {
+      "n": 9,
+      "needs_review": 9
+    },
+    "partial_red:stopped_early_maxfail": {
+      "n": 9,
+      "needs_review": 9
+    },
+    "partial_red:unloaded_suite": {
+      "n": 3,
+      "needs_review": 3
+    },
+    "partial_red:unloaded_unit": {
+      "n": 3,
+      "needs_review": 3
+    },
+    "partial_red:vague_failure": {
+      "n": 12,
+      "needs_review": 12
     },
     "trick:addopts_env": {
       "n": 6,
