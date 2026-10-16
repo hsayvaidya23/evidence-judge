@@ -206,7 +206,7 @@ def load_exec_stream(path: Path, *, cwd: str | None = None) -> SessionRun:
     if blind:
         notes.append(
             f"the Codex exec stream records no diff for {', '.join(dict.fromkeys(blind))}; judge "
-            "the rollout file (~/.codex/sessions), or re-run the tests independently (--rerun)"
+            "the rollout file (~/.codex/sessions) or re-run the suite"
         )
     if dropped:
         notes.append(f"{dropped} event(s) over the event cap were dropped")

@@ -24,6 +24,7 @@ from evidence_judge.sessions.predicates import (
     TestResultPredicate,
 )
 from evidence_judge.sessions.redaction import redact_claims, redact_session, redact_spec
+from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from tests.unit.sessions_helpers import GREEN, RED, bash, edit, session
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "sessions"
@@ -421,3 +422,12 @@ def test_redaction_keeps_matching() -> None:
     assert command.contains in redacted.events[0].command  # type: ignore[union-attr]
     spec = redact_spec(redactor, SessionSpec(task=f"use {secret}"))
     assert spec.task is not None and secret not in spec.task
+
+
+@pytest.mark.parametrize("rerun", [None, RerunResult(status=RerunStatus.PASS, reason="3 passed")])
+async def test_codex_blind_edit_note_never_asks_for_a_rerun(rerun: RerunResult | None) -> None:
+    run = load_session(codex=FIXTURES / "codex" / "honest_success.exec.jsonl")
+    verdict = await SessionJudge().judge(run, SessionJudgeOptions(offline=True, rerun=rerun))
+    (note,) = [w for w in verdict.warnings if "records no diff" in w]
+    assert "--rerun" not in note and "independently" not in note
+    assert "rollout file" in note
