@@ -109,6 +109,10 @@ The first release.
   Gemini CLI, and the `pip install` lines in the CLI and integrations pages) installs from the
   GitHub repository until v0.1.0 is on PyPI, so none of them runs whatever is published under
   the unclaimed PyPI name; a test keeps it that way.
+- The README and docs home page benchmark numbers match `bench/results` again (44 attack kinds,
+  1398 runs per judge, 37 evidence-tampering kinds, 37/41 honest controls), and a test fails
+  when they drift. The architecture page covers the session judge, hooks and MCP server, and a
+  new getting-started page walks through judging a Claude Code session.
 
 ### Fixed
 
