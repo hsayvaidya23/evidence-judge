@@ -87,7 +87,7 @@ class _Chain:
             return False, None
         return True, line_mac(self.key, self.previous)
 
-    def check(self, raw: bytes, record: JsonObject) -> None:
+    def check(self, raw: bytes, record: JsonObject, line: int) -> None:
         seq = record.get("seq")
         prev = record.get("prev", ...)
         if seq is not None or prev is not ...:
@@ -101,9 +101,9 @@ class _Chain:
         if self.used and self.broken is None:
             checkable, expected = self._expected(keyed)
             if as_int(seq) != self.count:
-                self.broken = f"line {self.count + 1} has seq {seq!r}, expected {self.count}"
+                self.broken = f"line {line} has seq {seq!r}, expected {self.count}"
             elif checkable and prev != expected:
-                self.broken = f"line {self.count + 1} does not chain to the line before it"
+                self.broken = f"line {line} does not chain to the line before it"
         self.previous = raw
         self.count += 1
 
@@ -235,8 +235,8 @@ def load_evidence_log(
     first_ts: datetime | None = None
     last_ts: datetime | None = None
     for raw, record in iter_records(path, stats):
-        chain.check(raw, record)
-        if problem := _validate_record(record, chain.count):
+        chain.check(raw, record, stats.lines)
+        if problem := _validate_record(record, stats.lines):
             problems.append(problem)
             continue
         event = as_str(record.get("event")) or "tool"

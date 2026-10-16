@@ -227,6 +227,9 @@ The first release.
   transcript) or an empty one exits `3` (bad input), naming the format the file looks like.
   Before, nothing was recognised, only a warning about skipped records was printed, and the run
   got NEEDS_REVIEW (exit `2`).
+- Evidence-log problem messages name the file line, not the record number: a record missing
+  `cwd` on line 3 of a log whose first line is not JSON is reported as line 3, not line 1. The
+  same holds for a broken `seq`/`prev` chain.
 
 ### Security
 
