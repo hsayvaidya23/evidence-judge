@@ -11,7 +11,7 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | `bench` | Benchmark judges on forged runs: false-PASS rates and accuracy on honest controls |
 | `mcp` | Run an MCP server so coding agents can judge, inspect and explain runs as tools |
 | `hook` | Entry points coding agents run as hooks: stop checks, evidence recorders, guards |
-| `session judge` | Judge a coding-agent session (Claude Code, Codex) against its tool-call log |
+| `session judge` | Judge a coding-agent session (Claude Code, Codex, and Gemini CLI through the evidence log) against its tool-call log |
 | `session inspect` | Summarise a coding-agent session without judging it |
 | `session rerun` | Re-run a spec's test command on a copy of the project and judge the runner's own report |
 | `schema` | Print the JSON Schema of the verdict format |

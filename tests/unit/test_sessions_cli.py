@@ -461,6 +461,7 @@ def test_a_browser_spec_given_to_a_session_command_gets_a_hint() -> None:
         (["judge"], "--require-tamper-evidence"),
         (["judge"], "--langfuse-trace-id"),
         (["bench"], "--baseline-screenshot"),
+        (["session"], "Gemini CLI"),
     ],
 )
 def test_help_fits_80_columns(

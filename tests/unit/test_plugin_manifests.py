@@ -120,6 +120,7 @@ def test_plugin_hooks_use_documented_events_and_real_commands() -> None:
     commands = _hook_commands()
     for event, handler in handlers:
         assert handler["type"] == "command"
+        assert "browser" not in str(handler.get("statusMessage", ""))
         command = str(handler["command"])
         assert command.startswith('sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" ')
         adapter = _adapter(command)

@@ -95,6 +95,13 @@ The first release.
   `session judge|rerun|inspect`. Piping the output (`| head -1`) keeps the verdict's exit code.
 - A public Python API exported from `evidence_judge`, and a documentation site.
 
+### Changed
+
+- The package description and keywords cover coding-agent sessions as well as browser agents,
+  `session --help` names Gemini CLI (judged through the evidence log), and the Claude Code
+  plugin's `Stop` hook says it is checking the answer against the recorded evidence instead of
+  "the browser trace", since it also re-runs the session's tests.
+
 ### Fixed
 
 - The offline session judge no longer FAILs honest reports worded "No tests failed.", "None of
