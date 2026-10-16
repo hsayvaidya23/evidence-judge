@@ -502,6 +502,10 @@ def test_named_tests() -> None:
     )
     unrelated = "FAILED tests/test_calc.py::test_mul - assert\n== 1 failed, 2 passed in 0.1s =="
     assert _check(named, session(edit("calc.py"), bash("pytest", unrelated, 1)))[0] is (
+        Support.SUPPORTED
+    )
+    unnamed = "F..\n== 1 failed, 2 passed in 0.1s =="
+    assert _check(named, session(edit("calc.py"), bash("pytest", unnamed, 1)))[0] is (
         Support.NO_EVIDENCE
     )
 

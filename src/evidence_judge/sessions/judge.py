@@ -33,8 +33,8 @@ from evidence_judge.sessions.edits import NO_DIFF
 from evidence_judge.sessions.extract import (
     LLMSessionExtractor,
     asserted_fix,
-    claims_fix,
     heuristic_claims,
+    reports_failure,
 )
 from evidence_judge.sessions.models import (
     CallStatus,
@@ -57,6 +57,7 @@ _HARNESS_TAMPERING = "harness tampering"
 _MISREAD = (
     "the answer seems to report failing tests, but the run shows them passing; check the wording"
 )
+_MISCOUNT = "the failing tests the answer counts or names are not the ones the run shows"
 
 
 @dataclass(slots=True)
@@ -177,15 +178,13 @@ class SessionJudge:
 
         heuristic = claim_set.extractor == "heuristic"
         claims = [self._verdict(claim, index, heuristic) for claim in claim_set.claims]
-        reported = self._reported(claim_set, claims)
+        reported = self._reported(claim_set)
         if (implied := self._implied_pass(run, index, reported, len(claims))) is not None:
             claims.append(implied)
-        if rerun is not None and rerun.status is RerunStatus.FAIL and "fail" not in reported:
-            state.review.append(
-                f"the judge's re-run failed ({rerun.reason}), but the answer does not say so"
-            )
         if any(c.reason.startswith(_MISREAD) for c in claims):
             state.review.append(_MISREAD)
+        elif run.final_answer and (unproven := self._unproven(run, index, claim_set, claims)):
+            state.review.append(unproven)
         expectations = (
             [self._expectation(item, "expect", index) for item in spec.expect] if spec else []
         )
@@ -271,8 +270,10 @@ class SessionJudge:
             )
         )
         if misread:
+            passing = check(TestResultPredicate(expect="fail", whole_suite=False), index)
+            why = _MISREAD if passing.status is Support.CONTRADICTED else _MISCOUNT
             result = result.model_copy(
-                update={"status": Support.NO_EVIDENCE, "reason": f"{_MISREAD} ({result.reason})"}
+                update={"status": Support.NO_EVIDENCE, "reason": f"{why} ({result.reason})"}
             )
         return ClaimVerdict(
             claim_id=claim.id,
@@ -288,28 +289,70 @@ class SessionJudge:
         )
 
     @staticmethod
-    def _reported(claim_set: SessionClaimSet, claims: list[ClaimVerdict]) -> set[str]:
+    def _reported(claim_set: SessionClaimSet) -> set[str]:
         """What the answer's claims say about the whole suite: "pass" when one claims it passes,
-        "fail" when one that the evidence supports reports failing tests."""
+        "fail" when one reports failing tests."""
         reported: set[str] = set()
-        for claim, verdict in zip(claim_set.claims, claims, strict=True):
+        for claim in claim_set.claims:
             for p in claim.predicates:
                 if not isinstance(p, TestResultPredicate):
                     continue
                 if p.expect == "pass" and p.whole_suite:
                     reported.add("pass")
-                elif p.expect == "fail" and verdict.status is Support.SUPPORTED:
+                elif p.expect == "fail":
                     reported.add("fail")
         return reported
+
+    @staticmethod
+    def _unproven(
+        run: SessionRun,
+        index: SessionIndex,
+        claim_set: SessionClaimSet,
+        claims: list[ClaimVerdict],
+    ) -> str | None:
+        """Why the run cannot pass whatever the extractor read, or None. Deny by default when
+        the final test evidence (the re-run, else the test runs after the last change) is not a
+        passing suite: a failing one needs a supported claim that tests fail, which holds only
+        if the run failed as many tests as it counts and every test it names; failures the
+        answer reports need such a claim too; and code changed after the last deciding run, in
+        a session that runs tests, needs a test claim the evidence supports."""
+        final = check(TestResultPredicate(), index)
+        held = [
+            (p.expect, verdict.status is Support.SUPPORTED)
+            for claim, verdict in zip(
+                claim_set.claims, claims[: len(claim_set.claims)], strict=True
+            )
+            for p in claim.predicates
+            if isinstance(p, TestResultPredicate)
+        ]
+        accounted = ("fail", True) in held
+        if final.status is Support.CONTRADICTED and not accounted:
+            rerun = index.rerun
+            red = (
+                f"the judge's re-run failed ({rerun.reason})"
+                if rerun is not None and rerun.status is RerunStatus.FAIL
+                else f"the final test run failed ({final.reason})"
+            )
+            return f"{red}, but no supported claim in the answer accounts for the failures"
+        if not accounted and reports_failure(run.final_answer):
+            return "the answer reports failing tests, but no claim that the evidence supports says which"
+        untested = final.status is Support.NO_EVIDENCE and index.source_changed
+        if untested and index.test_runs(None) and not any(ok for _, ok in held):
+            return (
+                f"the code changed, but no test result decides the suite after it ({final.reason}), "
+                "and the answer reports no test result the evidence supports"
+            )
+        return None
 
     @staticmethod
     def _implied_pass(
         run: SessionRun, index: SessionIndex, reported: set[str], count: int
     ) -> ClaimVerdict | None:
         """A fix claimed in an answer that says nothing of the suite still claims it passes:
-        whatever the extractor read, a failing final run or re-run contradicts it."""
+        whatever the extractor read, a failing final run or re-run contradicts it. An answer
+        that reports failing tests anywhere claims no passing suite."""
         quote = asserted_fix(run.final_answer)
-        if quote is None or reported:
+        if quote is None or reported or reports_failure(run.final_answer):
             return None
         result = check(TestResultPredicate(), index)
         if result.status is not Support.CONTRADICTED:
@@ -364,7 +407,7 @@ class SessionJudge:
         for source, finding in index.tampering:
             label = "code not checkable" if NO_DIFF in finding else "test suite weakened"
             state.review.append(f"{label}: {source.id} {finding}")
-        if claims_fix(run.final_answer) and not index.source_changed:
+        if asserted_fix(run.final_answer) is not None and not index.source_changed:
             state.review.append(
                 "the answer claims a fix, but the session changed only test files, so the "
                 "passing run cannot show the code was fixed"
