@@ -7,17 +7,32 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Final, cast
+from typing import BinaryIO, Final, cast
 
 from evidence_judge.ingest._json import JsonObject, as_str
 
 MAX_FILE_BYTES: Final = 512 * 1024 * 1024
 MAX_LINE_BYTES: Final = 64 * 1024 * 1024
+SKIP_CHUNK_BYTES: Final = 1024 * 1024
+
+
+class UnrecognisedSessionError(ValueError):
+    """A session file in which the reader recognised no record of its format."""
+
+    def __init__(
+        self, path: Path, what: str, detail: str | None = None, hint: str | None = None
+    ) -> None:
+        message = f"{path} holds no {what} records" + (f" ({detail})" if detail else "")
+        super().__init__(message + (f"; {hint}" if hint else ""))
+        self.path = path
+        self.what = what
+        self.detail = detail
 
 
 @dataclass(slots=True)
 class LineStats:
     lines: int = 0
+    recognised: int = 0
     malformed: int = 0
     oversized: int = 0
     not_objects: int = 0
@@ -26,6 +41,11 @@ class LineStats:
 
     def skip(self, kind: str) -> None:
         self.skipped_types[kind] = self.skipped_types.get(kind, 0) + 1
+
+    def require_records(self, path: Path, what: str, detail: str | None = None) -> None:
+        """Raise UnrecognisedSessionError when no record of the reader's format was read."""
+        if not self.recognised:
+            raise UnrecognisedSessionError(path, what, detail)
 
     @property
     def damaged(self) -> bool:
@@ -44,12 +64,28 @@ class LineStats:
         return out
 
 
+def _skip_rest_of_line(handle: BinaryIO, budget: int) -> int:
+    """Read past the rest of the current line in bounded chunks; stop after ``budget`` bytes."""
+    skipped = 0
+    while skipped <= budget and (chunk := handle.readline(SKIP_CHUNK_BYTES)):
+        skipped += len(chunk)
+        if chunk.endswith(b"\n"):
+            break
+    return skipped
+
+
 def iter_records(path: Path, stats: LineStats) -> Iterator[tuple[bytes, JsonObject]]:
-    """Yield (raw line without newline, decoded object) for every readable line of `path`."""
+    """Yield (raw line without newline, decoded object) for every readable line of `path`.
+    No more than ``MAX_LINE_BYTES`` of a line is held in memory: the rest of a longer one is
+    read past in chunks and the line counts as oversized."""
     read = 0
+    limit = MAX_LINE_BYTES + 2
     with path.open("rb") as handle:
-        for raw in handle:
+        while raw := handle.readline(limit):
             read += len(raw)
+            cut = len(raw) == limit and not raw.endswith(b"\n")
+            if cut:
+                read += _skip_rest_of_line(handle, MAX_FILE_BYTES - read)
             if read > MAX_FILE_BYTES:
                 stats.capped = True
                 return
@@ -57,7 +93,7 @@ def iter_records(path: Path, stats: LineStats) -> Iterator[tuple[bytes, JsonObje
             line = raw.rstrip(b"\r\n")
             if not line.strip():
                 continue
-            if len(line) > MAX_LINE_BYTES:
+            if cut or len(line) > MAX_LINE_BYTES:
                 stats.oversized += 1
                 continue
             try:

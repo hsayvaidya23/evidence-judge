@@ -151,7 +151,9 @@ which the log path above relies on).
 ([details](claude-code.md#the-evidence-log)) to
 `~/.evidence-judge/sessions/<session_id>.jsonl`, with `"agent": "gemini"`. Gemini's
 `tool_response` has no structured exit code; for `run_shell_command` the recorder reads the
-`Exit Code: N` line of the result text, and leaves `exit_code` null for other tools. With
+`Exit Code: N` line of the trailer Gemini writes after the command's output in `llmContent`
+(the last such line, so output that prints `Exit Code: 0` cannot stand in for it), and leaves
+`exit_code` null for other tools. With
 `--state-dir`, lines are HMAC-chained and anchored as described for
 [Claude Code](claude-code.md#the-evidence-log).
 
@@ -161,7 +163,7 @@ which the log path above relies on).
 | --- | --- |
 | Reject the final answer and retry | Yes: `AfterAgent` with `decision: "deny"` |
 | Record every tool call | Yes: `AfterTool` (synchronous, about 0.3 s per call) |
-| Exit code | Parsed from `Exit Code: N` in `run_shell_command` output |
+| Exit code | Parsed from the `Exit Code: N` trailer of `run_shell_command` output |
 | Turn start | Not in the hook input; a 30 minute window is used |
 | Playwright use | Not in the hook input; missing or junk traces are only a notice |
 

@@ -35,7 +35,7 @@ _TRUNCATED: Final = re.compile(
     re.IGNORECASE,
 )
 _BACKGROUND: Final = re.compile(r"^Command running in background", re.IGNORECASE)
-_IGNORED_TYPES: Final = frozenset(
+IGNORED_TYPES: Final = frozenset(
     {
         "system", "attachment", "api-request", "api-request-blob", "api-request-shape",
         "queue-operation", "last-prompt", "cost-state", "ai-title", "custom-title", "mode",
@@ -245,9 +245,12 @@ def load_transcript(path: Path) -> SessionRun:
     for _, record in iter_records(path, stats):
         kind = as_str(record.get("type")) or "<none>"
         if kind not in ("user", "assistant"):
-            if kind not in _IGNORED_TYPES:
+            if kind in IGNORED_TYPES:
+                stats.recognised += 1
+            else:
                 stats.skip(kind)
             continue
+        stats.recognised += 1
         sidechain = record.get("isSidechain") is True
         ts = _read_header(reading, record, sidechain)
         if kind == "assistant":
@@ -269,6 +272,7 @@ def load_transcript(path: Path) -> SessionRun:
             for leftover in reading.pending.values()
         ),
     ]
+    stats.require_records(path, "Claude Code transcript")
     events, dropped = build_events(calls, reading.cwd)
     return SessionRun(
         source=SessionSource.CLAUDE_CODE,

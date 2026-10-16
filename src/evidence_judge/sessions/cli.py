@@ -50,7 +50,10 @@ from evidence_judge.sessions.rerun import RerunResult, RerunSpec, RerunStatus, e
 
 session_app = typer.Typer(
     name="session",
-    help="Grade coding-agent sessions (Claude Code, Codex) against their tool-call log.",
+    help=(
+        "Grade coding-agent sessions (Claude Code, Codex, and Gemini CLI through the evidence "
+        "log) against their tool-call log."
+    ),
     no_args_is_help=True,
 )
 

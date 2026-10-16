@@ -11,7 +11,7 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | `bench` | Benchmark judges on forged runs: false-PASS rates and accuracy on honest controls |
 | `mcp` | Run an MCP server so coding agents can judge, inspect and explain runs as tools |
 | `hook` | Entry points coding agents run as hooks: stop checks, evidence recorders, guards |
-| `session judge` | Judge a coding-agent session (Claude Code, Codex) against its tool-call log |
+| `session judge` | Judge a coding-agent session (Claude Code, Codex, and Gemini CLI through the evidence log) against its tool-call log |
 | `session inspect` | Summarise a coding-agent session without judging it |
 | `session rerun` | Re-run a spec's test command on a copy of the project and judge the runner's own report |
 | `schema` | Print the JSON Schema of the verdict format |
@@ -24,7 +24,7 @@ see the [configuration reference](reference/configuration.md).
 
 Exit codes are the same for every command: `0` pass, `1` fail, `2` needs review, `3` bad input
 (missing or unreadable evidence, an invalid spec, claims file or setting, a corrupt redaction key
-file), `4` internal or LLM error. `inspect`, `schema` and `version` exit `0` on success.
+file, a session file with no record of the format it was given as), `4` internal or LLM error. `inspect`, `schema` and `version` exit `0` on success.
 
 ## `evidence-judge judge`
 
@@ -171,7 +171,9 @@ evidence-judge session judge [--claude-code SESSION] [--codex FILE] [--evidence-
 
 At least one of `--claude-code`, `--codex` or `--evidence-log` is required. With an evidence
 log, tool calls come from the log, and a transcript given alongside supplies only the task and
-the final answer when the log lacks them.
+the final answer when the log lacks them. A file that is empty, or holds no record of the format
+its option names (a Claude Code transcript given as `--codex`), exits `3`, and the error says
+which format the file looks like.
 
 | Option | Description |
 | --- | --- |

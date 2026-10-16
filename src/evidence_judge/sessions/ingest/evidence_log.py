@@ -16,13 +16,13 @@ the session judge accepts it as tamper evidence only when the user says so (`--t
 from __future__ import annotations
 
 import hashlib
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
 from evidence_judge.core.verdict import TamperDetection, TamperLevel
+from evidence_judge.hooks.record import gemini_exit_code
 from evidence_judge.hooks.state import (
     LOG_CHAIN,
     LOG_KEY_FILE,
@@ -64,7 +64,6 @@ _STATUS: Final = {
     "denied": CallStatus.DENIED,
     "interrupted": CallStatus.INTERRUPTED,
 }
-_GEMINI_EXIT: Final = re.compile(r"^Exit Code: (-?\d+)\s*$", re.MULTILINE)
 
 
 class _Chain:
@@ -176,8 +175,7 @@ def _call(record: JsonObject, agent: str) -> ToolCall:
     output = stdout + ("\n" if stdout and stderr else "") + stderr
     exit_code = as_int(record.get("exit_code"))
     if exit_code is None and agent == "gemini" and tool == "run_shell_command":
-        found = _GEMINI_EXIT.findall(stdout)
-        exit_code = int(found[-1]) if found else None
+        exit_code = gemini_exit_code(stdout)
     status = _STATUS.get(as_str(record.get("status")) or "")
     if status is None:
         status = CallStatus.OK if exit_code in (None, 0) else CallStatus.ERROR
@@ -258,6 +256,9 @@ def load_evidence_log(
             calls.append(_call(record, agent))
         else:
             stats.skip(event)
+            continue
+        stats.recognised += 1
+    stats.require_records(path, "evidence-recorder", problems[0] if problems else None)
     session_id = next(iter(session_ids)) if len(session_ids) == 1 else None
     if anchor_file is None and session_id is not None:
         anchor_file = log_head_path(state, session_id)
