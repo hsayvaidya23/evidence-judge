@@ -1,5 +1,5 @@
 ---
-description: Use Evidence Judge with Google's Gemini CLI - an extension whose AfterAgent hook makes Gemini retry when the recorded browser trace contradicts its answer, plus an evidence-log recorder and the MCP server.
+description: Use Evidence Judge with Google's Gemini CLI - an extension whose AfterAgent hook makes Gemini retry when the recorded browser trace or, with a session spec, an independent re-run of the session's tests contradicts its answer, plus an evidence-log recorder and the MCP server.
 ---
 
 # Gemini CLI

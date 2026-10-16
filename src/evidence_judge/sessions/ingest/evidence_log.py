@@ -201,6 +201,8 @@ def _call(record: JsonObject, agent: str) -> ToolCall:
 
 def _validate_record(record: JsonObject, line: int) -> str | None:
     """Why a record cannot be read as format version 1, or None when it can."""
+    if "v" not in record:
+        return f"line {line}: no version field"
     if record.get("v") != FORMAT_VERSION:
         return f"line {line}: unsupported version {record.get('v')!r}"
     event = as_str(record.get("event")) or "tool"
@@ -258,7 +260,11 @@ def load_evidence_log(
             stats.skip(event)
             continue
         stats.recognised += 1
-    stats.require_records(path, "evidence-recorder", problems[0] if problems else None)
+    stats.require_records(
+        path,
+        "evidence-recorder",
+        "no valid evidence-log records were found" + (f"; {problems[0]}" if problems else ""),
+    )
     session_id = next(iter(session_ids)) if len(session_ids) == 1 else None
     if anchor_file is None and session_id is not None:
         anchor_file = log_head_path(state, session_id)

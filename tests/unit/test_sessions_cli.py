@@ -197,8 +197,14 @@ def test_judge_usage_errors(
          "Claude Code transcript (--claude-code)"),
         ("--claude-code", CODEX, "holds no Claude Code transcript records; it looks like a Codex "
          "session (--codex)"),
-        ("--evidence-log", SUCCESS, "holds no evidence-recorder records (line 1: unsupported "
-         "version None); it looks like a Claude Code transcript"),
+        ("--evidence-log", SUCCESS, "holds no evidence-recorder records (no valid evidence-log "
+         "records were found; line 1: no version field); it looks like a Claude Code transcript"),
+        ("--evidence-log", b'{"foo": 1}\nnot json\n[1]\n', "holds no evidence-recorder records "
+         "(no valid evidence-log records were found; line 1: no version field)"),
+        ("--evidence-log", b'{"v": 2, "agent": "codex"}\n', "holds no evidence-recorder records "
+         "(no valid evidence-log records were found; line 1: unsupported version 2)"),
+        ("--evidence-log", b"not json\n", "holds no evidence-recorder records (no valid "
+         "evidence-log records were found); it is not a session format"),
         ("--claude-code", None, "holds no Claude Code transcript records; the file is empty"),
         ("--codex", b"\x00\xff garbage\n", "it is not a session format evidence-judge reads"),
     ],

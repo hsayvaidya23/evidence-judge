@@ -1,5 +1,5 @@
 ---
-description: Use Evidence Judge with the OpenAI Codex CLI - a Stop hook that checks the answer against the recorded browser trace, an evidence-log recorder and the MCP server.
+description: Use Evidence Judge with the OpenAI Codex CLI - a Stop hook that checks the answer against the recorded browser trace and, with a session spec, an independent re-run of the session's tests judged with its evidence log and rollout, an evidence-log recorder and the MCP server.
 ---
 
 # Codex CLI

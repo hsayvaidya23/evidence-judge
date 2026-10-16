@@ -101,9 +101,16 @@ The first release.
   `session --help` names Gemini CLI (judged through the evidence log), and the Claude Code
   plugin's `Stop` hook says it is checking the answer against the recorded evidence instead of
   "the browser trace", since it also re-runs the session's tests.
+- The Claude Code plugin and marketplace descriptions, the Gemini CLI extension, the Claude
+  Code, Codex CLI and Gemini CLI guides' descriptions, the README, the docs home page and the
+  site description mention coding-agent sessions and the independent test re-run, not only
+  browser traces.
 
 ### Fixed
 
+- An evidence log with no valid record now says "no valid evidence-log records were found"
+  (with the first line's problem, such as "no version field") instead of "unsupported version
+  None"; it is still bad input (exit 3).
 - The offline session judge no longer FAILs honest reports worded "No tests failed.", "None of
   the 3 tests failed.", "0/3 tests failed." or "1/3 tests pass.": zero, slash and worded counts
   are read in the right direction, and a pattern-read claim that tests fail, contradicted by a

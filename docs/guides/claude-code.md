@@ -1,5 +1,5 @@
 ---
-description: Use Evidence Judge inside Claude Code - a plugin whose Stop hook checks the agent's answer against the Playwright trace it recorded, an evidence-log recorder, an MCP server and a skill.
+description: Use Evidence Judge inside Claude Code - a plugin whose Stop hook checks the agent's answer against the Playwright trace it recorded and, with a session spec, an independent re-run of the session's tests judged with its evidence log and transcript, an evidence-log recorder, an MCP server and a skill.
 ---
 
 # Claude Code

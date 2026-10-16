@@ -1,7 +1,7 @@
 site_name: Evidence Judge
 site_description: >-
-  Grade browser and computer-use agent runs by checking every claim against recorded evidence:
-  network requests, page state, screenshots and the final page.
+  Grade browser and computer-use agent runs and coding-agent sessions by checking every claim
+  against recorded evidence: network requests, page state, screenshots, commands and test runs.
 site_author: Yash Vaidya
 site_url: https://hsayvaidya23.github.io/evidence-judge/
 repo_url: https://github.com/hsayvaidya23/evidence-judge
