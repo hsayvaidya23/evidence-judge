@@ -142,6 +142,12 @@ The first release.
   or a unittest module that failed to import. Their tests are in no count, so such a run shows
   how many tests fail no more than it shows which; the count is unknown and the run needs
   review.
+- An honest "1 test still fails: `test_a`." no longer FAILs under the LLM extractor when the
+  run shows `1 failed, 1 error` for a test that failed and then errored in teardown, or two
+  failing parameters of one test: a count of failing tests now matches the summary's count or
+  the distinct tests the output names, with or without parameters. A claim that tests fail
+  whose count is still wrong now needs review instead of failing the run, whatever the
+  extractor; it never passes.
 
 ### Security
 

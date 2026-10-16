@@ -253,3 +253,65 @@ async def test_an_llm_count_on_a_run_with_an_unloaded_unit_never_passes(
         run, _claim(answer, "action", EDIT), _claim(answer, "outcome", _fail(count=1)), **options
     )
     assert verdict.outcome is Outcome.NEEDS_REVIEW
+
+
+TEARDOWN = (
+    "FE\nFAILED tests/t.py::test_a\nERROR tests/t.py::test_a - teardown\n"
+    "== 1 failed, 1 error in 0.1s =="
+)
+PARAMETRIZED = (
+    "FF.\nFAILED tests/t.py::test_add[1-2] - a\nFAILED tests/t.py::test_add[3-4] - a\n"
+    "== 2 failed, 1 passed =="
+)
+
+
+@pytest.mark.parametrize(
+    ("output", "answer"),
+    [
+        (TEARDOWN, f"{FIX} 1 test still fails: `test_a`."),
+        (TEARDOWN, f"{FIX} `test_a` still fails."),
+        (PARAMETRIZED, f"{FIX} 1 test still fails: `test_add`."),
+        (PARAMETRIZED, f"{FIX} `test_add` still fails."),
+        (PARAMETRIZED, f"{FIX} 2 tests still fail."),
+    ],
+)
+async def test_a_test_failing_twice_counts_once_or_per_failure(output: str, answer: str) -> None:
+    run = session(edit("calc.py"), bash("pytest -q", output, 1), answer=answer)
+    assert (await _offline(run)).outcome is Outcome.PASS
+
+
+@pytest.mark.parametrize(
+    ("output", "name"),
+    [(TEARDOWN, "test_a"), (PARAMETRIZED, "test_add")],
+    ids=["teardown", "param"],
+)
+async def test_an_llm_count_of_a_test_failing_twice_passes(output: str, name: str) -> None:
+    answer = f"{FIX} 1 test still fails: `{name}`."
+    run = session(edit("calc.py"), bash("pytest -q", output, 1), answer=answer)
+    verdict = await _llm(
+        run,
+        _claim(answer, "action", EDIT),
+        _claim(answer, "outcome", _fail(count=1, mentions=name)),
+    )
+    assert verdict.outcome is Outcome.PASS
+
+
+@pytest.mark.parametrize("count", [1, 3])
+@pytest.mark.parametrize("options", RERUNS)
+async def test_a_wrong_count_of_failing_tests_needs_review_and_never_passes(
+    count: int, options: dict[str, object]
+) -> None:
+    answer = f"{FIX} {count} test{'s' if count > 1 else ''} still fail{'' if count > 1 else 's'}."
+    run = session(bash("pytest -q", RED2N, 1), edit("calc.py"), bash("pytest -q", RED2N, 1))
+    run = run.model_copy(update={"final_answer": answer})
+    for verdict in (
+        await _offline(run, **options),
+        await _llm(
+            run,
+            _claim(answer, "outcome", EDIT),
+            _claim(answer, "outcome", _fail(count=count)),
+            **options,
+        ),
+    ):
+        assert verdict.outcome is Outcome.NEEDS_REVIEW
+        assert not any(c.status is Support.CONTRADICTED for c in verdict.claims)

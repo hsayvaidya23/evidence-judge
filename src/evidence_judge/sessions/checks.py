@@ -765,9 +765,15 @@ def failure_count(event: CommandEvent) -> int | None:
     return summary.failed + summary.errors
 
 
+def _failing_lines(event: CommandEvent) -> list[str]:
+    """Every failing test the output names, once per line that names it (a pytest test can fail
+    and then error in teardown)."""
+    output = _strip(event.output)
+    return [next(g for g in m.groups() if g) for m in _FAILING_TEST.finditer(output)]
+
+
 def _failing_tests(event: CommandEvent) -> list[str]:
-    found = (next(g for g in m.groups() if g) for m in _FAILING_TEST.finditer(_strip(event.output)))
-    return list(dict.fromkeys(found))
+    return list(dict.fromkeys(_failing_lines(event)))
 
 
 def _strip(output: str) -> str:
@@ -776,9 +782,27 @@ def _strip(output: str) -> str:
 
 def every_failing_test(event: CommandEvent) -> list[str] | None:
     """The failing tests the run's output names when it names every one it counts, else None."""
-    names = _failing_tests(event)
+    lines = _failing_lines(event)
     count = failure_count(event)
-    return names if names and count is not None and len(names) >= count else None
+    return (
+        list(dict.fromkeys(lines)) if lines and count is not None and len(lines) >= count else None
+    )
+
+
+_PARAMETERS: Final = re.compile(r"\[.*\]$")
+
+
+def failure_counts(event: CommandEvent) -> list[int]:
+    """The ways to count the run's failing tests: its summary's count and, when the output
+    names every failing test, the distinct tests it names, with and without their parameters
+    (a test that fails and errors in teardown, or fails for two parameters, is one test)."""
+    observed = failure_count(event)
+    if observed is None:
+        return []
+    counts = [observed]
+    if (names := every_failing_test(event)) is not None:
+        counts += [len(names), len({_PARAMETERS.sub("", name) for name in names})]
+    return list(dict.fromkeys(counts))
 
 
 _STOPPED: Final = re.compile(
@@ -978,17 +1002,17 @@ def _failing_count(predicate: TestResultPredicate, fail: RunOutcome) -> Predicat
             f"{fail.reason}, but the run cannot show how many tests of the suite fail: {why}",
             fail.event,
         )
-    observed = failure_count(fail.event)
-    if observed is None:
+    counts = failure_counts(fail.event)
+    if not counts:
         return _result(
             Support.NO_EVIDENCE,
             f"{fail.reason}, but the run does not show how many tests failed",
             fail.event,
         )
-    if observed != predicate.count:
+    if predicate.count not in counts:
         return _result(
             Support.CONTRADICTED,
-            f"{fail.reason}: {observed} tests failed, not {predicate.count}",
+            f"{fail.reason}: {' or '.join(map(str, counts))} tests failed, not {predicate.count}",
             fail.event,
         )
     return _result(Support.SUPPORTED, fail.reason, fail.event)

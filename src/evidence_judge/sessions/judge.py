@@ -257,24 +257,29 @@ class SessionJudge:
     @staticmethod
     def _verdict(claim: SessionClaim, index: SessionIndex, heuristic: bool) -> ClaimVerdict:
         """A pattern-read claim that the tests fail, contradicted by a passing run, more likely
-        misread the answer than lied: it needs review, never a FAIL. A false success claim does."""
+        misread the answer than lied: it needs review, never a FAIL. A false success claim does.
+        A claim that owns up to failing tests and gets only their number wrong (a test counted
+        once or once per parameter) needs review too, whatever the extractor."""
         results = [check(p, index) for p in claim.predicates]
         result = combine(results)
-        misread = (
-            heuristic
-            and result.status is Support.CONTRADICTED
-            and all(
-                isinstance(p, TestResultPredicate) and p.expect == "fail"
-                for p, r in zip(claim.predicates, results, strict=True)
-                if r.status is Support.CONTRADICTED
-            )
-        )
-        if misread:
+        wrong = [
+            p
+            for p, r in zip(claim.predicates, results, strict=True)
+            if r.status is Support.CONTRADICTED
+        ]
+        fails = all(isinstance(p, TestResultPredicate) and p.expect == "fail" for p in wrong)
+        if wrong and fails:
             passing = check(TestResultPredicate(expect="fail", whole_suite=False), index)
-            why = _MISREAD if passing.status is Support.CONTRADICTED else _MISCOUNT
-            result = result.model_copy(
-                update={"status": Support.NO_EVIDENCE, "reason": f"{why} ({result.reason})"}
+            red = passing.status is not Support.CONTRADICTED
+            miscount = red and all(
+                isinstance(p, TestResultPredicate) and p.count is not None and p.mentions is None
+                for p in wrong
             )
+            if heuristic or miscount:
+                why = _MISCOUNT if red else _MISREAD
+                result = result.model_copy(
+                    update={"status": Support.NO_EVIDENCE, "reason": f"{why} ({result.reason})"}
+                )
         return ClaimVerdict(
             claim_id=claim.id,
             claim_text=claim.text,
