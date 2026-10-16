@@ -620,7 +620,13 @@ piece of text three ways:
   measure), a `transform`, `rotate` or `scale` that squashes, stretches or turns the text
   edge-on (or uses a function the judge does not know), far off-screen positions (logical
   offsets too, and a fixed box outside the viewport), margins or `text-indent`, a zero-size
-  box that clips, scrolls or contains the paint of its overflow; SVG presentation attributes
+  box that clips, scrolls or contains the paint of its overflow; `backface-visibility: hidden`
+  on a box it or an ancestor may turn to show its back; a 3D transform under an ancestor's
+  `perspective`; an `animation` whose `@keyframes` may hide text at any point (a fade-in from
+  `opacity: 0` included); text under a fixed or absolute box with an opaque background
+  colour that covers the whole viewport or its containing block (`inset: 0`, or `top` and
+  `left` 0 with 100% or `100vw`/`100vh` sizes) and is painted above it (a higher `z-index`,
+  or a later place in the page for the same one); SVG presentation attributes
   (`font-size`, `transform`, `clip-path`, `mask`, `filter`, `fill`, `opacity`, ...) count like
   the properties they name; a hiding utility class (`hidden`, `d-none`, `sr-only`, `visually-hidden`,
   `invisible`) that no recorded stylesheet defines; and all text of a page whose stylesheets
@@ -628,8 +634,8 @@ piece of text three ways:
   cascade gives each element (with fallbacks, cycles, and `@property` initial values and
   inheritance), reads `env()` safe-area insets as 0, and evaluates `calc()`, `min()`, `max()`,
   `clamp()` and `abs()`; a percentage offset counts as a share of the viewport. It does not
-  model a box painted over the text, such as a full-page opaque overlay with a higher
-  `z-index`: that needs layout, so such text still reads as shown. Nor does it see images: a
+  lay the page out, so an opaque box smaller than its containing block that happens to sit
+  over the text, or one sized another way, is not seen. Nor does it see images: a
   background picture over a solid colour is taken to look like that colour, so white text over
   a white picture on a dark `background-color` reads as shown. Values, `var()` chains, selectors and blocks nested more than 32
   deep count as unreadable.

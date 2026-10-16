@@ -141,7 +141,12 @@ _BOX: Final = (
 )
 
 
-_TEXT: Final = TRACKED - _REMOVERS - _BOX - {"visibility"}
+_DEPTH: Final = words("transform rotate scale backface-visibility perspective")
+
+
+_TEXT: Final = (
+    TRACKED - _REMOVERS - _BOX - _DEPTH - words("visibility z-index animation animation-name")
+)
 
 
 def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Computed:
@@ -162,10 +167,33 @@ def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Co
     alpha = parent.alpha
     if cascade.sets("opacity", "filter"):
         alpha = alpha * _opacity(cascade)
+    flipped, deep = parent.flipped, parent.deep
+    if not present.isdisjoint(_DEPTH):
+        flips, lifted = _depth(cascade) if cascade.sets(*_TRANSFORMS) else (False, False)
+        flipped = flipped or flips
+        backface = any(v is None or v == "hidden" for v in cascade.values("backface-visibility"))
+        unsure = unsure or (backface and flipped) or (deep and lifted)
+        deep = deep or any(
+            v is None or (v not in _WIDE and v != "none") for v in cascade.values("perspective")
+        )
     if present.isdisjoint(_TEXT):
-        if unsure == parent.unsure and visibility == parent.visibility and alpha == parent.alpha:
+        if (unsure, visibility, alpha, flipped, deep) == (
+            parent.unsure,
+            parent.visibility,
+            parent.alpha,
+            parent.flipped,
+            parent.deep,
+        ):
             return parent
-        return replace(parent, removed=False, unsure=unsure, visibility=visibility, alpha=alpha)
+        return replace(
+            parent,
+            removed=False,
+            unsure=unsure,
+            visibility=visibility,
+            alpha=alpha,
+            flipped=flipped,
+            deep=deep,
+        )
     font_px, font_tiny = parent.font_px, parent.font_tiny
     if cascade.sets("font-size"):
         font_px, font_tiny = _font(cascade.values("font-size"), parent, viewport)
@@ -209,6 +237,9 @@ def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Co
         fill_faint=_inherits(cascade, "fill-opacity", parent.fill_faint, _faint),
         fills=fills,
         alpha=alpha,
+        flipped=flipped,
+        deep=deep,
+        boxes=parent.boxes,
         svg=parent.svg,
         custom=parent.custom,
         registered=parent.registered,
@@ -554,6 +585,54 @@ def _transformed_away(cascade: Cascade) -> bool:
                     return True
                 if _degenerate(matrix):
                     return True
+    return False
+
+
+def _depth(cascade: Cascade) -> tuple[bool, bool]:
+    """Whether ``rotate``, ``scale`` and ``transform`` together may turn the box to show its
+    back, and whether they may move it out of the page's plane (which an ancestor's
+    ``perspective`` turns into a change of size and place the reader does not measure); both
+    when it cannot read them."""
+    candidates = [
+        [v for v in cascade.values(p) if v is not None and v not in _WIDE and v != "none"] or [""]
+        for p in _TRANSFORMS
+    ]
+    flips = lifted = False
+    for transform in candidates[0][:_MAX_COMBINATIONS]:
+        for rotate in candidates[1][:_MAX_COMBINATIONS]:
+            for scale in candidates[2][:_MAX_COMBINATIONS]:
+                try:
+                    matrix = _multiply(
+                        _rotate_property(rotate),
+                        _multiply(_scale_property(scale), _transform_matrix(transform, None)),
+                    )
+                    moved = _moved_in_depth(transform)
+                except _UnreadableError:
+                    return True, True
+                flips = flips or matrix[2][2] < 0
+                lifted = lifted or moved or not _planar(matrix)
+    return flips, lifted
+
+
+def _planar(matrix: Matrix) -> bool:
+    """Whether a linear map keeps the box in the plane of the page."""
+    return all(abs(c) <= 1e-9 for c in (matrix[0][2], matrix[1][2], matrix[2][0], matrix[2][1]))
+
+
+def _moved_in_depth(value: str) -> bool:
+    """Whether a ``transform`` translates the box in depth."""
+    for name, args in functions(value) or []:
+        values = split_args(args)
+        if name in ("translatez", "translate3d"):
+            depth = length_px(values[-1], None)
+        elif name == "matrix3d" and len(values) == 16:
+            depth = parse_amount(values[14])
+        else:
+            continue
+        if depth is None:
+            raise _UnreadableError
+        if depth != 0:
+            return True
     return False
 
 

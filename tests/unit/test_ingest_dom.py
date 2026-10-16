@@ -698,3 +698,90 @@ def test_adversarial_styles_never_show_the_text_they_target(css: str) -> None:
     page = store.render("main", 0, viewport=(1280, 720), url="http://shop.test/p")
 
     assert "Out of stock" not in page.text
+
+
+_COVER = "position:fixed;inset:0;background:#fff"
+
+
+@pytest.mark.parametrize(
+    ("children", "shown", "unsure"),
+    [
+        ((["P", {}, "In stock"], ["DIV", {"style": _COVER}]), "", "In stock"),
+        ((["DIV", {"style": f"{_COVER};z-index:9"}], ["P", {}, "In stock"]), "", "In stock"),
+        (
+            (
+                [
+                    "DIV",
+                    {
+                        "style": "position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000"
+                    },
+                ],
+                ["P", {}, "In stock"],
+            ),
+            "",
+            "In stock",
+        ),
+        ((["DIV", {"style": _COVER}, "Loading"], ["P", {}, "In stock"]), "Loading", "In stock"),
+        (
+            (
+                ["DIV", {"style": "position:relative"}, ["P", {}, "In stock"]],
+                ["DIV", {"style": "position:absolute;inset:0;background:#fff"}],
+            ),
+            "",
+            "In stock",
+        ),
+        (
+            (
+                [
+                    "DIV",
+                    {"style": "position:relative"},
+                    ["DIV", {"style": _COVER.replace("fixed", "absolute")}],
+                ],
+                ["P", {}, "In stock"],
+            ),
+            "In stock",
+            "",
+        ),
+        (
+            (["DIV", {"style": _COVER}], ["MAIN", {"style": "position:relative"}, "In stock"]),
+            "In stock",
+            "",
+        ),
+        (
+            (
+                ["DIV", {"style": f"{_COVER};z-index:5"}],
+                ["MAIN", {"style": "position:relative;z-index:6"}, "In stock"],
+            ),
+            "In stock",
+            "",
+        ),
+        ((["DIV", {"style": f"{_COVER};z-index:-1"}], ["P", {}, "In stock"]), "In stock", ""),
+        (
+            (
+                ["P", {}, "In stock"],
+                ["DIV", {"style": "position:fixed;inset:0;background:rgb(0 0 0/50%)"}],
+            ),
+            "In stock",
+            "",
+        ),
+        ((["P", {}, "In stock"], ["DIV", {"style": f"{_COVER};opacity:0"}]), "In stock", ""),
+        ((["P", {}, "In stock"], ["DIV", {"style": f"{_COVER};display:none"}]), "In stock", ""),
+        (
+            (
+                ["P", {}, "In stock"],
+                [
+                    "DIV",
+                    {"style": "position:fixed;top:0;left:0;width:50%;height:100%;background:#fff"},
+                ],
+            ),
+            "In stock",
+            "",
+        ),
+    ],
+)
+def test_an_opaque_box_over_the_page_leaves_the_text_under_it_unsure(
+    children: tuple[object, ...], shown: str, unsure: str
+) -> None:
+    page = _rendered(*children)
+
+    assert (page.text, page.unsure_text) == (shown, unsure)

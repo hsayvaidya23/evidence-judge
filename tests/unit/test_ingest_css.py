@@ -530,6 +530,58 @@ def test_background_images_the_text_sits_on(css: str, state: int) -> None:
 @pytest.mark.parametrize(
     ("css", "state"),
     [
+        (".in{backface-visibility:hidden;transform:rotateY(180deg)}", UNSURE),
+        (".in{backface-visibility:hidden;rotate:x 150deg}", UNSURE),
+        (".in{backface-visibility:hidden;transform:rotateY(30deg)}", SHOWN),
+        (".in{transform:rotateY(180deg)}", SHOWN),
+        (".wrap{transform:rotateY(180deg)}.in{backface-visibility:hidden}", UNSURE),
+        (".wrap:hover{transform:rotateY(180deg)}.in{backface-visibility:hidden}", UNSURE),
+        (".wrap{transform:rotate(180deg)}.in{backface-visibility:hidden}", SHOWN),
+        (".wrap{perspective:1px}.in{transform:translateZ(-100000px)}", UNSURE),
+        (".wrap{perspective:10px}.in{transform:rotateX(70deg)}", UNSURE),
+        (".wrap:hover{perspective:10px}.in{transform:rotateY(10deg)}", UNSURE),
+        (".wrap{perspective:1000px}.in{transform:translateZ(0)}", SHOWN),
+        (".wrap{perspective:1000px}.in{transform:translate3d(10px,0,0) rotate(5deg)}", SHOWN),
+        (
+            ".wrap{perspective:1000px}.in{transform:matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)}",
+            SHOWN,
+        ),
+        (".in{transform:rotateX(70deg)}", SHOWN),
+    ],
+)
+def test_backfaces_and_perspective(css: str, state: int) -> None:
+    assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{animation:gone 1ms forwards}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".in{animation-name:gone}@keyframes gone{from,to{visibility:hidden}}", UNSURE),
+        (".in{animation:1s gone}@-webkit-keyframes gone{50%{transform:scale(0)}}", UNSURE),
+        (
+            ".in{animation:1s a,2s gone}@keyframes a{to{color:red}}@keyframes gone{to{color:#fff}}",
+            UNSURE,
+        ),
+        ('.in{animation-name:"gone"}@keyframes "gone"{to{display:none}}', UNSURE),
+        (".in{--a:gone 1s;animation:var(--a)}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".in{animation:Gone 1s}@keyframes Gone{to{opacity:0}}", UNSURE),
+        (".in:hover{animation:gone 1s}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".wrap{animation:gone 1s}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".in{animation:spin 1s infinite}@keyframes spin{to{transform:rotate(360deg)}}", SHOWN),
+        (".in{animation:pulse 1s}@keyframes pulse{50%{opacity:.5}}", SHOWN),
+        (".in{animation:gone 1s}@keyframes other{to{opacity:0}}", SHOWN),
+        (".in{animation:none}@keyframes gone{to{opacity:0}}", SHOWN),
+        (".in{transition:opacity 1s}", SHOWN),
+    ],
+)
+def test_animations_whose_keyframes_may_hide_text(css: str, state: int) -> None:
+    assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
         (".in{color:#fff}.wrap:hover{background:#000}", UNSURE),
         (".in{color:#fff}.wrap:hover .in{background:#000}", UNSURE),
         (".wrap{background:#000}.in{color:#fff}.wrap:hover{background:#fff}", UNSURE),

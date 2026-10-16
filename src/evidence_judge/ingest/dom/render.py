@@ -12,12 +12,14 @@ from urllib.parse import urljoin, urlsplit
 from evidence_judge.core.site import registrable_domain
 from evidence_judge.ingest._json import JsonObject, as_list, as_str
 from evidence_judge.ingest.css import (
+    FAINT_ALPHA,
     HIDDEN,
     REMOVED,
     ROOT,
     SHOWN,
     SVG,
     UNSURE,
+    Box,
     Computed,
     Element,
     Sheet,
@@ -99,6 +101,13 @@ class Renderer:
         self._unsure: list[str] = []
         self._opaque = False
         self._fixed = ""
+        self._pieces: list[tuple[int, tuple[Box, ...]]] = []
+        """Where each piece of shown text is in the shown text, and its positioned ancestors."""
+        self._order: dict[int, int] = {}
+        """The tree order of each positioned element, by its id."""
+        self._overlays: list[tuple[Box, Box | None, frozenset[int]]] = []
+        """Each box that may paint over the page: it, its containing block (None for the
+        viewport) and the ids of its positioned ancestors."""
         self._referenced: set[str] = set()
         """Ids a ``<use>`` or a ``url(#id)`` refers to: what an SVG paint server, mask, marker or
         symbol copies onto the page."""
@@ -125,7 +134,7 @@ class Renderer:
                 continue
             if isinstance(node, str):
                 if not folded:
-                    self._emit(node, inherited.text)
+                    self._emit(node, inherited.text, inherited.boxes)
                 continue
             node = as_element(node)
             if element is None or node is None:
@@ -140,6 +149,8 @@ class Renderer:
                 inherited, folded = replace(inherited, unsure=True), False
             visit = Visit(node, snapshot_index, element, inherited, scope, tag, attrs)
             self._element(visit, stack)
+        if self._overlays:
+            self._cover()
         return RenderedPage(
             title=normalise(title) or None,
             text=normalise("".join(self._shown)),
@@ -196,6 +207,8 @@ class Renderer:
         style = self._style(visit, shadow)
         if style.removed:
             return
+        if style.boxes and style.boxes[-1][0] is element:
+            self._positioned(style, scope)
         if ("-" in tag and not children) or (
             style.text != HIDDEN and scope.sheets.generates(element)
         ):
@@ -256,7 +269,7 @@ class Renderer:
         control_text = self._control_text(visit.node, visit.tag, visit.attrs, visit.index)
         if control_text is None:
             return False
-        self._emit(control_text, style.text)
+        self._emit(control_text, style.text, style.boxes)
         if self._fixed:
             self._emit(f" {self._fixed} ", max(style.text, UNSURE))
             self._fixed = ""
@@ -354,12 +367,55 @@ class Renderer:
             return None
         return scope.slots.get(as_str(attrs.get("name")) or "")
 
-    def _emit(self, text: str, state: int | None) -> None:
+    def _positioned(self, style: Computed, scope: Scope) -> None:
+        """Note a positioned element's tree order, and whether it may paint over the page: an
+        opaque box over the viewport (or its containing block) that the page does not hide."""
+        box = style.boxes[-1]
+        element, z, position = box
+        self._order[id(element)] = len(self._order)
+        if position not in ("absolute", "fixed") or (z is not None and z < 0):
+            return
+        if style.visibility == HIDDEN or style.alpha <= FAINT_ALPHA:
+            return
+        if not scope.sheets.covers(element):
+            return
+        outer = style.boxes[:-1]
+        block = outer[-1] if position == "absolute" and outer else None
+        ancestors = frozenset(id(e) for e, _, _ in outer)
+        self._overlays.append((box, block, ancestors))
+
+    def _cover(self) -> None:
+        """Move the shown text an opaque box paints over to the unsure text: text outside it,
+        in its containing block, that no positioned ancestor of its own lifts above it (a higher
+        ``z-index``, or the same one later in tree order)."""
+        for index, boxes in self._pieces:
+            if not any(self._under(overlay, boxes) for overlay in self._overlays):
+                continue
+            self._unsure.extend((self._shown[index], " "))
+            self._shown[index] = " "
+
+    def _under(
+        self, overlay: tuple[Box, Box | None, frozenset[int]], boxes: tuple[Box, ...]
+    ) -> bool:
+        (element, z, _), block, ancestors = overlay
+        ids = {id(e) for e, _, _ in boxes}
+        if id(element) in ids or (block is not None and id(block[0]) not in ids):
+            return False
+        top = float("inf") if z is None else z
+        after = self._order[id(element)]
+        return not any(
+            own is not None and (own > top or (own == top and self._order.get(id(e), -1) > after))
+            for e, own, _ in boxes
+            if id(e) not in ancestors
+        )
+
+    def _emit(self, text: str, state: int | None, boxes: tuple[Box, ...] = ()) -> None:
         """Add `text` to the shown or unsure text; a block break (state None) to both."""
         if state is None:
             self._shown.append(text)
             self._unsure.append(text)
         elif state == SHOWN:
+            self._pieces.append((len(self._shown), boxes))
             self._shown.append(text)
             if self._unsure and self._unsure[-1] != " ":
                 self._unsure.append(" ")

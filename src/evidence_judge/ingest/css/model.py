@@ -277,6 +277,11 @@ def contrast(colour: Rgba, behind: Rgba) -> float:
     return (max(one, two) + 0.05) / (min(one, two) + 0.05)
 
 
+Box = tuple[Element, int | None, str]
+"""A positioned element, its ``z-index`` (0 for ``auto``, None when the reader cannot read it)
+and its ``position``."""
+
+
 @dataclass(frozen=True, slots=True)
 class Computed:
     """What the cascade decides for an element, with what its children inherit."""
@@ -309,6 +314,13 @@ class Computed:
     """The colours its SVG ``fill`` may be."""
     alpha: float = 1.0
     """The least its own and its ancestors' ``opacity`` multiply to."""
+    flipped: bool = False
+    """It or an ancestor may be turned in 3D to show its back."""
+    deep: bool = False
+    """An ancestor sets ``perspective``: a 3D transform of its own is one the reader does not
+    measure."""
+    boxes: tuple[Box, ...] = field(default=(), compare=False)
+    """It and its positioned ancestors, outermost first."""
     svg: bool = False
     """It is an SVG element, whose text its ``fill`` paints."""
     custom: Mapping[str, tuple[str, ...] | None] = field(default=NO_CUSTOM, compare=False)

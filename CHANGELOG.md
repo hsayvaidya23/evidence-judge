@@ -441,6 +441,20 @@ The first release.
   docs 5.4% to 7.0%, mostly white captions over `from-transparent` gradients; the others
   unchanged or within 0.1%). New `unmodelled_hiding` variants `state_background` and
   `image_background`; each was a false SHOWN before the fix.
+- The page-text reader now sees four more ways to hide text it showed. An opaque box painted
+  over it: a fixed or absolute box with an opaque background colour covering the viewport or
+  its containing block (`inset: 0`, or `top`/`left` 0 with 100% or `100vw`/`100vh` sizes)
+  makes the text under it unsure, unless the text is inside it or a positioned ancestor lifts
+  it higher (a larger `z-index`, or the same one later in the page); one with a negative
+  `z-index`, a translucent one and a hidden one cover nothing. `backface-visibility: hidden`
+  on a box it or an ancestor turns to show its back (`rotateY(180deg)`). An `animation` whose
+  `@keyframes` may remove, hide or obscure the text at any point (`to{opacity:0}` with
+  `forwards`, a fade-in from `opacity: 0` too), or one it cannot name. A 3D transform under an
+  ancestor's `perspective` (`translateZ(-100000px)`), unless it stays in the page's plane.
+  Transitions need nothing new: the reader already judges the value they end on. On ten saved
+  real-site pages 0.17% more text reads as unsure, all of it from fade-in animations (Stripe
+  15.6% to 16.8%, Vercel 9.0% to 9.5%). New `unmodelled_hiding` variants `opaque_overlay`,
+  `backface_flip`, `ending_animation` and `perspective_depth`; each was a false SHOWN before.
 
 ### Security
 

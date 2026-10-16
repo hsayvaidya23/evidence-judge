@@ -11,6 +11,7 @@ from importlib import resources
 from typing import Final
 from urllib.parse import urljoin
 
+from evidence_judge.ingest.css.colors import parse_color
 from evidence_judge.ingest.css.conditions import media_holds, supports
 from evidence_judge.ingest.css.matching import matches
 from evidence_judge.ingest.css.model import (
@@ -18,6 +19,8 @@ from evidence_judge.ingest.css.model import (
     MATHML,
     MAYBE,
     NO,
+    ROOT,
+    SHOWN,
     SVG,
     YES,
     Compound,
@@ -57,6 +60,7 @@ from evidence_judge.ingest.css.values import (
     functions,
     length_px,
     parse_number,
+    parse_percent,
 )
 from evidence_judge.ingest.css.variables import (
     Custom,
@@ -111,7 +115,7 @@ _SVG_UNITS: Final = {"translate": "px", "rotate": "deg", "skewx": "deg", "skewy"
 
 
 _SKIPPED_AT_RULES: Final = words(
-    "font-face keyframes -webkit-keyframes page counter-style "
+    "font-face page counter-style "
     "font-feature-values font-palette-values view-transition position-try namespace "
     "charset starting-style document -moz-document"
 )
@@ -176,6 +180,8 @@ class StyleSheets:
         """A ``::details-content`` rule may show or hide closed ``<details>`` bodies."""
         self.generators: list[Selector] = []
         """The elements a ``::before`` or ``::after`` rule gives text (`generates_text`)."""
+        self.animations: dict[str, bool] = {}
+        """The ``@keyframes`` of the scope by name, and whether a keyframe may hide text."""
         self.registered: dict[str, Registration | None] = {}
         """The custom properties the scope's ``@property`` rules register. Outside the document
         (a shadow tree, the browser's own sheet), and under a condition the reader cannot
@@ -240,13 +246,37 @@ class StyleSheets:
         computed = compute(Cascade(best, maybe, present), parent, self._viewport)
         if computed.removed:
             return computed
+        if self.animations and not computed.unsure and self._animated(best, maybe):
+            computed = replace(computed, unsure=True)
+        if (placed := best.get("position")) is not None and placed.value in _POSITIONED:
+            box = (element, _z_index(best.get("z-index")), placed.value)
+            computed = replace(computed, boxes=(*computed.boxes, box))
         if computed.svg == svg and computed.custom is custom and computed.registered is registered:
             return computed
         return replace(computed, svg=svg, custom=custom, registered=registered)
 
-    def collapsed(self, element: Element) -> bool:
-        """The page's styles certainly give `element` a box at most a pixel wide or high, or
-        place it far off-screen (a 0x0 analytics frame, one parked at ``left: -9999px``)."""
+    def covers(self, element: Element) -> bool:
+        """The page's styles certainly make `element` a fixed or absolute box with an opaque
+        background colour that spans the whole viewport (or its containing block): ``inset:
+        0``, or ``top`` and ``left`` 0 with a ``width`` and ``height`` of 100%."""
+        values = self._certain(element)
+        if values.get("position") not in ("absolute", "fixed"):
+            return False
+        colour = parse_color(values.get("background-color") or "")
+        if colour is None or colour[3] < 1:
+            return False
+        viewport = self._viewport
+        return all(
+            _flush(values.get(start), viewport)
+            and (_flush(values.get(end), viewport) or _full(values.get(size), viewport, side))
+            for start, end, size, side in (
+                ("top", "bottom", "height", 1),
+                ("left", "right", "width", 0),
+            )
+        )
+
+    def _certain(self, element: Element) -> dict[str, str]:
+        """The values the rules that certainly apply to `element` give it."""
         best: dict[str, Rule] = {}
         for rule in self._candidates(element):
             if matches(rule.selector, element) == YES and not rule.maybe:
@@ -255,7 +285,12 @@ class StyleSheets:
         for order, (prop, value, important) in enumerate(inline):
             rank: Rank = (2 if important else 1, 1, 1, (_TOP,), (0, 0, 0), order)
             _offer(Rule(_UNIVERSAL, prop, value, rank, False), YES, best, {})
-        values = {prop: rule.value for prop, rule in best.items() if rule.value is not None}
+        return {prop: rule.value for prop, rule in best.items() if rule.value is not None}
+
+    def collapsed(self, element: Element) -> bool:
+        """The page's styles certainly give `element` a box at most a pixel wide or high, or
+        place it far off-screen (a 0x0 analytics frame, one parked at ``left: -9999px``)."""
+        values = self._certain(element)
         for prop in ("width", "height"):
             px = length_px(values.get(prop, ""), self._viewport)
             if px is not None and px <= 1:
@@ -335,6 +370,9 @@ class StyleSheets:
         if name == "property":
             self._register(condition.strip(), body, context)
             return
+        if name in ("keyframes", "-webkit-keyframes"):
+            self._keyframes(unescape(condition).strip().strip("\"'").lower(), body)
+            return
         if name in _SKIPPED_AT_RULES:
             return
         if name == "layer":
@@ -394,6 +432,37 @@ class StyleSheets:
             self.unknown = True
             return
         self._sheet(text, _Context(url, context.maybe or holds is None, layer, context.depth + 1))
+
+    def _keyframes(self, name: str, body: str) -> None:
+        """Read an ``@keyframes`` rule: whether a keyframe may remove, hide or obscure text."""
+        hides = self.animations.get(name, False)
+        for _, frame in blocks(body):
+            if hides or frame is None:
+                continue
+            best = {
+                prop: Rule(_UNIVERSAL, prop, value, (1, 1, 0, (_TOP,), (0, 0, 0), 0), False)
+                for prop, value, _ in (
+                    found
+                    for text, nested in blocks(frame)
+                    if nested is None
+                    for found in parse_declaration(text)
+                )
+            }
+            computed = compute(Cascade(best, {}, frozenset(best)), ROOT, self._viewport)
+            hides = computed.removed or computed.text != SHOWN
+        self.animations[name] = hides
+
+    def _animated(self, best: dict[str, Rule], maybe: dict[str, list[Rule]]) -> bool:
+        """Whether an animation the element may run may hide its text at some point: one whose
+        keyframes may, or one the reader cannot name."""
+        cascade = Cascade(best, maybe, frozenset(best).union(maybe))
+        for value in (*cascade.values("animation"), *cascade.values("animation-name")):
+            if value is None:
+                return any(self.animations.values())
+            names = (token.strip("\"'") for token in re.split(r"[\s,]+", value))
+            if any(self.animations.get(name) for name in names):
+                return True
+        return False
 
     def _register(self, name: str, body: str, context: _Context) -> None:
         """Read an ``@property`` rule (one with a missing or invalid descriptor is ignored)."""
@@ -508,6 +577,40 @@ class StyleSheets:
 
 
 _UNIVERSAL: Final = Selector((Compound(),), ())
+
+
+_POSITIONED: Final = words("absolute fixed relative sticky")
+
+
+def _z_index(rule: Rule | None) -> int | None:
+    """A ``z-index``: 0 for ``auto``, None when the reader cannot read it."""
+    if rule is None or rule.value in ("auto", "initial", "unset", "revert", "revert-layer"):
+        return 0
+    found = parse_number(rule.value or "")
+    if found is None or found[1] or found[0] != int(found[0]):
+        return None
+    return int(found[0])
+
+
+def _flush(value: str | None, viewport: Viewport | None) -> bool:
+    """Whether an offset puts a box's edge at or past its containing block's."""
+    if value is None:
+        return False
+    share = parse_percent(value)
+    px = share if share is not None else length_px(value, viewport)
+    return px is not None and px <= 0
+
+
+def _full(value: str | None, viewport: Viewport | None, side: int) -> bool:
+    """Whether a size spans the whole containing block (a share of 100% or more, or the
+    viewport's size)."""
+    if value is None:
+        return False
+    share = parse_percent(value)
+    if share is not None:
+        return share >= 100
+    px = length_px(value, viewport)
+    return px is not None and viewport is not None and px >= viewport[side]
 
 
 @functools.cache
