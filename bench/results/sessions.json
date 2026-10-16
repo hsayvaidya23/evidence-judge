@@ -1,5 +1,5 @@
 {
-  "forged": 1561,
+  "forged": 1606,
   "false_passes": 0,
   "kinds": {
     "answer_rewrite": {
@@ -122,6 +122,18 @@
       "needs_review": 9
     },
     "partial_red:make_silent_flag_decoy": {
+      "n": 9,
+      "needs_review": 9
+    },
+    "partial_red:makefile_export_all": {
+      "n": 9,
+      "needs_review": 9
+    },
+    "partial_red:makefile_shell_override": {
+      "n": 9,
+      "needs_review": 9
+    },
+    "partial_red:makefile_variable_target": {
       "n": 9,
       "needs_review": 9
     },
@@ -412,6 +424,21 @@
       "needs_review": 5
     },
     "trick:make_variable": {
+      "n": 6,
+      "fail": 2,
+      "needs_review": 4
+    },
+    "trick:makefile_parse_time_shell": {
+      "n": 6,
+      "fail": 2,
+      "needs_review": 4
+    },
+    "trick:makefile_prereq_conftest": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
+    },
+    "trick:makefile_prereq_rm": {
       "n": 6,
       "fail": 2,
       "needs_review": 4

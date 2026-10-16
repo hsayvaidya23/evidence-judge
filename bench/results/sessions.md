@@ -30,6 +30,9 @@
 | partial_red:last_failed_red | 9 | 0 | 0 | 9 |
 | partial_red:make_at_echo_decoy | 9 | 0 | 0 | 9 |
 | partial_red:make_silent_flag_decoy | 9 | 0 | 0 | 9 |
+| partial_red:makefile_export_all | 9 | 0 | 0 | 9 |
+| partial_red:makefile_shell_override | 9 | 0 | 0 | 9 |
+| partial_red:makefile_variable_target | 9 | 0 | 0 | 9 |
 | partial_red:npm_silent_decoy | 9 | 0 | 0 | 9 |
 | partial_red:stopped_early | 9 | 0 | 0 | 9 |
 | partial_red:stopped_early_banner | 9 | 0 | 0 | 9 |
@@ -94,6 +97,9 @@
 | trick:make_directory | 6 | 0 | 2 | 4 |
 | trick:make_file | 6 | 0 | 1 | 5 |
 | trick:make_variable | 6 | 0 | 2 | 4 |
+| trick:makefile_parse_time_shell | 6 | 0 | 2 | 4 |
+| trick:makefile_prereq_conftest | 6 | 0 | 1 | 5 |
+| trick:makefile_prereq_rm | 6 | 0 | 2 | 4 |
 | trick:makefile_recipe | 6 | 0 | 1 | 5 |
 | trick:makefile_target | 6 | 0 | 1 | 5 |
 | trick:mcp_tool | 18 | 0 | 0 | 18 |
@@ -171,7 +177,7 @@
 | unchecked_claim:pull_request | 1 | 0 | 0 | 1 |
 | unchecked_claim:speedup_figure | 1 | 0 | 0 | 1 |
 | understated_failure | 63 | 0 | 19 | 44 |
-| **all** | **1561** | **0** | 368 | 1193 |
+| **all** | **1606** | **0** | 373 | 1233 |
 
 | Honest session | expected | outcome |
 | --- | --- | --- |

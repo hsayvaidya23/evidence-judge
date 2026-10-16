@@ -69,9 +69,23 @@ _NOX_ECHO: Final = re.compile(r"^nox > (?P<command>.+)$")
 _MAKE_NOISE: Final = re.compile(r"^g?make(?:\[\d+\])?: ")
 _MAKE_IGNORED: Final = re.compile(r"^g?make(?:\[\d+\])?: \[[^\]]*\] Error \d+ \(ignored\)", re.M)
 _MAKE_DIRECTIVE: Final = re.compile(
-    r"^\s*(?:-?include|sinclude|ifeq|ifneq|ifdef|ifndef|define|unexport|override|vpath|"
-    r"\.RECIPEPREFIX|\.ONESHELL|\.SHELLFLAGS|SHELL\s*:?=|MAKEFLAGS)\b"
+    r"^\s*(?:-?include|sinclude|ifeq|ifneq|ifdef|ifndef|define|unexport|override|vpath)\b"
 )
+_MAKE_FUNCTION: Final = re.compile(r"\$[({][\w.-]+[ \t,]")
+"""A function call (`$(shell ...)`, `$(eval ...)`, `$(call f,x)`): it can run commands or
+define rules while make reads the file, whatever target runs."""
+_MAKE_RESERVED: Final = frozenset(
+    {"SHELL", "MAKESHELL", "MAKEFLAGS", "GNUMAKEFLAGS", "MFLAGS", "MAKE", "MAKEFILES",
+     "MAKECMDGOALS", "MAKEOVERRIDES", "MAKELEVEL", "VPATH", "CURDIR", "MAKEFILE_LIST", "SUFFIXES"}
+)  # fmt: skip
+"""Variables that change how make runs a recipe (`SHELL = ./fake`) or what it reads."""
+_MAKE_SPECIAL: Final = frozenset(
+    {".PHONY", ".DELETE_ON_ERROR", ".PRECIOUS", ".SECONDARY", ".INTERMEDIATE", ".NOTPARALLEL",
+     ".SUFFIXES"}
+)  # fmt: skip
+"""Special targets that change no recipe's command or exit status; any other (`.IGNORE`,
+`.SILENT`, `.EXPORT_ALL_VARIABLES`, `.ONESHELL`, `.POSIX`, `.DEFAULT`) leaves a Makefile
+unread."""
 _MAKE_ASSIGN: Final = re.compile(r"^(export\s+)?([A-Za-z_][\w.-]*)\s*(\?|::?|\+|!)?=\s*(.*)$")
 _SHELL_OPERATOR: Final = re.compile(r"[;&|`$()<>\n]")
 _MAKE_RULE: Final = re.compile(r"^([^:=#]+?)\s*(::?)(?!=)\s*([^=]*)$")
@@ -231,7 +245,11 @@ def _logical_lines(text: str) -> list[str]:
 def _parse_makefile(text: str) -> _Makefile | None:
     """Variables, rules and the variables it exports (`export PYTEST_ADDOPTS = -x`) of a
     Makefile in the plain subset the judge reads; None for one with conditionals, includes, a
-    bare `export`, pattern or double-colon rules, or anything else."""
+    bare `export`, a function call, a `SHELL` or other make variable, a special target outside
+    a few harmless ones, a variable in a target or prerequisite, pattern or double-colon rules,
+    or anything else."""
+    if _MAKE_FUNCTION.search(text):
+        return None
     variables: dict[str, str] = {"MAKE": "make"}
     rules: dict[str, list[tuple[list[str], list[str]]]] = {}
     exported: list[str] = []
@@ -249,8 +267,13 @@ def _parse_makefile(text: str) -> _Makefile | None:
             return None
         if assign := _MAKE_ASSIGN.match(line):
             export, name, kind, value = assign.groups()
-            if kind == "!":
+            if kind == "!" or name in _MAKE_RESERVED or name.startswith("."):
                 return None
+            if kind in (":", "::"):
+                value = _expand(value, _Makefile(variables, rules, exported), "")
+                if value is None:
+                    return None
+                value = value.replace("$", "$$")
             if export:
                 exported.append(name)
             if kind == "?" and name in variables:
@@ -262,7 +285,11 @@ def _parse_makefile(text: str) -> _Makefile | None:
             recipe = None
             continue
         rule = _MAKE_RULE.match(line)
-        if rule is None or rule[2] == "::" or "%" in rule[1]:
+        if rule is None or rule[2] == "::" or "%" in rule[1] or "$" in rule[1]:
+            return None
+        if any(t.startswith(".") and t not in _MAKE_SPECIAL for t in rule[1].split()):
+            return None
+        if "$" in rule[3].partition(";")[0]:
             return None
         prereqs, _, inline = rule[3].partition(";")
         recipe = [inline.strip()] if inline.strip() else []
@@ -542,6 +569,10 @@ def _merge(analysis: CommandAnalysis, steps: list[_Step], cwd: str | None) -> Co
     ]
     if not relevant or any(run.wrapper_unseen for _, run in relevant):
         return analysis
+    last = max(i for i, (_, run) in enumerate(runs) if any(run is r for _, r in relevant))
+    writing = [(step, run) for step, run in runs[: last + 1] if run.mutation or run.harness_change]
+    if writing:
+        return _writes(analysis, writing)
     filters: list[str] = []
     stop = analysis.stop_early
     masked = analysis.exit_masked_by
@@ -565,6 +596,46 @@ def _merge(analysis: CommandAnalysis, steps: list[_Step], cwd: str | None) -> Co
             "stop_early": stop,
             key: list(dict.fromkeys([*getattr(analysis, key), *filters])),
             "exit_masked_by": masked,
+        }
+    )
+
+
+def _writes(
+    analysis: CommandAnalysis, writing: list[tuple[_Step, CommandAnalysis]]
+) -> CommandAnalysis:
+    """`analysis`, still unseen, with what the recipe lines that may change files before the
+    run write, delete or change (`rm tests/test_x.py`, `echo ... > conftest.py`), so the checks
+    of a test-weakening command see them."""
+    first = writing[0][1]
+    runs = [run for _, run in writing]
+    return analysis.model_copy(
+        update={
+            "deleted_paths": list(
+                dict.fromkeys(
+                    [*analysis.deleted_paths, *(p for r in runs for p in r.deleted_paths)]
+                )
+            ),
+            "touched_paths": list(
+                dict.fromkeys(
+                    [*analysis.touched_paths, *(p for r in runs for p in r.touched_paths)]
+                )
+            ),
+            "opaque_write": analysis.opaque_write
+            or next((r.opaque_write for r in runs if r.opaque_write), None),
+            "harness_change": analysis.harness_change
+            or next((r.harness_change for r in runs if r.harness_change), None),
+            "source_findings": list(
+                dict.fromkeys(
+                    [*analysis.source_findings, *(f for r in runs for f in r.source_findings)]
+                )
+            ),
+            "suppressions": sorted(
+                {*analysis.suppressions, *(x for r in runs for x in r.suppressions)}
+            ),
+            "wrapper_unseen": (
+                f"{analysis.wrapper} runs {writing[0][0].command!r} before its check, which may "
+                f"change what it checks ({first.mutation or first.harness_change})"
+            ),
         }
     )
 

@@ -252,7 +252,10 @@ the wrapper ran: the wrapper's own echo of its command (npm's `> jest` header, t
 recipe line) or a `Makefile`, `package.json`, justfile or `tox.ini` the session read whole; an
 echo counts only when the wrapper itself printed it (no `--silent`, `-s`, `tox -q`, and the
 package manager's banner opens the output), though a `loglevel=silent` set in an `.npmrc` or an
-exported `npm_config_loglevel` is not seen, so a script could then print a decoy banner; otherwise its pass or fail still counts, but it backs no count of failing tests and
+exported `npm_config_loglevel` is not seen, so a script could then print a decoy banner. A
+Makefile is read only in a plain subset (no function call, `SHELL` or make variable, special
+target beyond a harmless few, or variable target), and a recipe line that may change files
+before the run is checked like a command of its own. Otherwise its pass or fail still counts, but it backs no count of failing tests and
 no "`test_x` is not among the failures", and its green run proves the whole suite passes only
 when it passed at least as many tests as an earlier whole-suite run of the same framework whose
 command the session showed (plus the tests the session added since). Gaps remain there: a
