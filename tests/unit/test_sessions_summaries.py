@@ -475,6 +475,36 @@ def test_ordinary_code_has_no_exit_hooks(source: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("path", "source", "fragment"),
+    [
+        ("slug.js", "process.on('exit', () => { process.exitCode = 0; });", "exit handler"),
+        ("lib/a.mjs", 'process.once("beforeExit", done);', "exit handler"),
+        ("slug.ts", "process.exitCode = 0;", "sets process.exitCode to 0"),
+        ("test/x.test.js", "after(() => process.exit());", "calls process.exit(0)"),
+        ("main_test.go", "func TestMain(m *testing.M) {\n\tm.Run()\n\tos.Exit(0)\n}", "os.Exit(0)"),
+        ("main_test.go", "func TestMain(m *testing.M) {\n\t_ = m.Run()\n}", "m.Run()"),
+    ],
+)
+def test_exit_hooks_in_javascript_and_go(path: str, source: str, fragment: str) -> None:
+    found = suite_findings(path, "add", [], source.splitlines())
+    assert any(fragment in f for f in found), found
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        ("bin/cli.js", "if (!ok) { process.exitCode = 1; }\nprocess.exit(2);"),
+        ("slug.js", "export const slugify = (t) => t.trim().toLowerCase();"),
+        ("main_test.go", "func TestMain(m *testing.M) {\n\tsetup()\n\tos.Exit(m.Run())\n}"),
+        ("main_test.go", "func TestMain(m *testing.M) {\n\tcode := m.Run()\n\tos.Exit(code)\n}"),
+        ("main.go", "func main() {\n\tos.Exit(0)\n}"),
+    ],
+)
+def test_ordinary_javascript_and_go_exits_are_not_hooks(path: str, source: str) -> None:
+    assert suite_findings(path, "add", [], source.splitlines()) == []
+
+
+@pytest.mark.parametrize(
     ("path", "flagged"),
     [
         ("~/.bash_profile", True),

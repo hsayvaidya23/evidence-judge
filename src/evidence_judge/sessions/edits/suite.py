@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Final
 
 from evidence_judge.sessions.edits.diff import config_findings, content, significant
+from evidence_judge.sessions.edits.exits import JS_SUFFIX, go_exit_hooks, js_exit_hooks
 from evidence_judge.sessions.edits.paths import (
     CODE_SUFFIX,
     git_metadata_reason,
@@ -98,6 +99,10 @@ def suite_findings(
             findings.extend(_new_findings(exit_hooks, name, added, texts))
     if path.endswith((".py", ".pyw")) and change != "delete":
         findings.extend(_new_findings(constant_comparisons, name, added, texts))
+    if path.endswith(JS_SUFFIX) and change != "delete":
+        findings.extend(_new_findings(js_exit_hooks, name, added, texts))
+    if path.endswith("_test.go") and change != "delete":
+        findings.extend(_new_findings(go_exit_hooks, name, added, texts))
     return findings
 
 
