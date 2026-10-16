@@ -19,6 +19,7 @@ from evidence_judge.bench import (
     BenchConfig,
     BenchmarkRunner,
     BenchResult,
+    CaseResult,
     Scenario,
     load_scenarios,
     to_json,
@@ -27,6 +28,7 @@ from evidence_judge.bench import (
 from evidence_judge.config import Settings
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.forgery import MANIPULATION_KINDS, ForgeryKind
+from evidence_judge.forgery.controls import NEGATED_ANSWERS, ControlKind
 from evidence_judge.forgery.evidence import WRITE_ONLY_KINDS
 from evidence_judge.llm.base import LLMError, LLMRequest
 from evidence_judge.llm.fake import FakeLLM
@@ -39,16 +41,16 @@ WRITE_BASES, READ_BASES = 8, 3
 FORGED_PER_SEED = WRITE_BASES * len(ForgeryKind) + READ_BASES * (
     len(ForgeryKind) - len(WRITE_ONLY_KINDS)
 )
-CONTROLS = 15
-"""Three controls on each of honest_success, loop and clinic_booked; read_stock,
-ledger_balance_read and admin_user_disabled (whose disable request loads no page after it) have
-no request to redirect."""
+CONTROLS = 21
+"""Four controls on each of honest_success, loop and clinic_booked; three on read_stock,
+ledger_balance_read and admin_user_disabled (whose disable request loads no page after it),
+which have no request to redirect."""
 HONEST = 17 + CONTROLS
 KNOWN_REVIEW = "admin_user_disabled"
 """An honest run offline extraction cannot pass: 'I disabled Priya Shah's account' becomes no
-checkable claim, so claim coverage is 0% and the run and its two controls go to review even
+checkable claim, so claim coverage is 0% and the run and its three controls go to review even
 with a spec that every recorded request and page meets."""
-KNOWN_REVIEW_CASES = 3
+KNOWN_REVIEW_CASES = 4
 _ANSWER = re.compile(r"## Agent final answer\n(.*)", re.DOTALL)
 _CONFIDENT = re.compile(
     r"confirm|complete|\bdone\b|bought|placed|\bsays\b|\breads?\b", re.IGNORECASE
@@ -148,7 +150,7 @@ def test_results_round_trip_and_render(offline_result: BenchResult) -> None:
     assert BenchResult.model_validate_json(to_json(offline_result)) == offline_result
     report = to_markdown(offline_result)
     assert "## False PASS on forged runs" in report
-    assert "- Scenarios: 17 scenarios (from 15 recordings) and 15 honest edits" in report
+    assert "- Scenarios: 17 scenarios (from 15 recordings) and 21 honest edits" in report
     assert "| `evidence-judge+spec` | **all manipulations** | 1293 | 0 | 0% |" in report
     assert "`evidence-judge+generic-spec` grades with `spec.generic.yaml`" in report
     assert "## Accuracy on honest controls" in report
@@ -186,13 +188,14 @@ async def test_gullible_transcript_judge_is_fooled(scenarios: list[Scenario]) ->
     assert (style.k, style.n) == (sum(believed), len(believed))
 
     accuracy = control(result, "llm-transcript").accuracy
+
+    def answer(case: CaseResult) -> str:
+        if case.control is ControlKind.NEGATED_ANSWER:
+            return NEGATED_ANSWERS[case.scenario]
+        return by_scenario[case.scenario].run.agent_answer or ""
+
     expected_correct = sum(
-        (
-            Outcome.PASS
-            if believes_confident_claims(by_scenario[c.scenario].run.agent_answer or "")
-            else Outcome.FAIL
-        )
-        is c.expected
+        (Outcome.PASS if believes_confident_claims(answer(c)) else Outcome.FAIL) is c.expected
         for c in baseline_cases
         if not c.forged
     )

@@ -1960,37 +1960,37 @@
     {
       "judge": "evidence-judge+spec",
       "accuracy": {
-        "k": 29,
-        "n": 32,
-        "rate": 0.90625,
-        "ci_low": 0.7578184527161212,
-        "ci_high": 0.9675984487016337
+        "k": 34,
+        "n": 38,
+        "rate": 0.8947368421052632,
+        "ci_low": 0.7586947827711269,
+        "ci_high": 0.9582974265244647
       },
-      "needs_review": 3,
+      "needs_review": 4,
       "errors": 0
     },
     {
       "judge": "evidence-judge+generic-spec",
       "accuracy": {
-        "k": 23,
-        "n": 32,
-        "rate": 0.71875,
-        "ci_low": 0.5462549057408342,
-        "ci_high": 0.8443541950225723
+        "k": 27,
+        "n": 38,
+        "rate": 0.7105263157894737,
+        "ci_low": 0.5524286232424794,
+        "ci_high": 0.8299672217151693
       },
-      "needs_review": 9,
+      "needs_review": 11,
       "errors": 0
     },
     {
       "judge": "evidence-judge",
       "accuracy": {
         "k": 2,
-        "n": 32,
-        "rate": 0.0625,
-        "ci_low": 0.017310567031640967,
-        "ci_high": 0.2014712314415458
+        "n": 38,
+        "rate": 0.05263157894736842,
+        "ci_low": 0.014554208147292413,
+        "ci_high": 0.17285462131770377
       },
-      "needs_review": 30,
+      "needs_review": 36,
       "errors": 0
     }
   ],
@@ -2776,6 +2776,45 @@
       "error": null
     },
     {
+      "case_id": "honest_success/control/negated_answer",
+      "scenario": "honest_success",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 3 key claims and 5 spec checks were verified against recorded evidence (evidence: net#6, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "honest_success/control/negated_answer",
+      "scenario": "honest_success",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 3 key claims and 3 spec checks were verified against recorded evidence (evidence: net#6, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "honest_success/control/negated_answer",
+      "scenario": "honest_success",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
+      "error": null
+    },
+    {
       "case_id": "loop/control/post_redirect_get",
       "scenario": "loop",
       "judge": "evidence-judge+spec",
@@ -2887,6 +2926,45 @@
       "kind": null,
       "seed": null,
       "control": "offsite_detour",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (7 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
+      "error": null
+    },
+    {
+      "case_id": "loop/control/negated_answer",
+      "scenario": "loop",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 3 key claims and 5 spec checks were verified against recorded evidence (evidence: net#11, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "loop/control/negated_answer",
+      "scenario": "loop",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 3 key claims and 3 spec checks were verified against recorded evidence (evidence: net#11, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "loop/control/negated_answer",
+      "scenario": "loop",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
       "expected": "pass",
       "outcome": "needs_review",
       "summary": "NEEDS_REVIEW: the run changed state (7 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
@@ -2971,6 +3049,45 @@
       "error": null
     },
     {
+      "case_id": "read_stock/control/negated_answer",
+      "scenario": "read_stock",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 0 key claims and 3 spec checks were verified against recorded evidence (evidence: snap#3, net#2, act#3).",
+      "error": null
+    },
+    {
+      "case_id": "read_stock/control/negated_answer",
+      "scenario": "read_stock",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 0 key claims and 1 spec check were verified against recorded evidence (evidence: snap#3).",
+      "error": null
+    },
+    {
+      "case_id": "read_stock/control/negated_answer",
+      "scenario": "read_stock",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: no key claim or task expectation establishes whether the task succeeded.",
+      "error": null
+    },
+    {
       "case_id": "admin_user_disabled/control/searched_first",
       "scenario": "admin_user_disabled",
       "judge": "evidence-judge+spec",
@@ -3043,6 +3160,45 @@
       "kind": null,
       "seed": null,
       "control": "offsite_detour",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (1 request) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
+      "error": null
+    },
+    {
+      "case_id": "admin_user_disabled/control/negated_answer",
+      "scenario": "admin_user_disabled",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: only 0% of the agent's answer became checkable claims (review threshold 60%).",
+      "error": null
+    },
+    {
+      "case_id": "admin_user_disabled/control/negated_answer",
+      "scenario": "admin_user_disabled",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: only 0% of the agent's answer became checkable claims (review threshold 60%).",
+      "error": null
+    },
+    {
+      "case_id": "admin_user_disabled/control/negated_answer",
+      "scenario": "admin_user_disabled",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
       "expected": "pass",
       "outcome": "needs_review",
       "summary": "NEEDS_REVIEW: the run changed state (1 request) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
@@ -3160,6 +3316,45 @@
       "kind": null,
       "seed": null,
       "control": "offsite_detour",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (1 request) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
+      "error": null
+    },
+    {
+      "case_id": "clinic_booked/control/negated_answer",
+      "scenario": "clinic_booked",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 3 key claims and 4 spec checks were verified against recorded evidence (evidence: net#4, final, snap#6).",
+      "error": null
+    },
+    {
+      "case_id": "clinic_booked/control/negated_answer",
+      "scenario": "clinic_booked",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: expect 'confirmed' could not be verified: predicate cannot prove an expectation: it was already true before the agent acted, so every run of the task meets it ('check-up' appears on 2 page states, latest at /).",
+      "error": null
+    },
+    {
+      "case_id": "clinic_booked/control/negated_answer",
+      "scenario": "clinic_booked",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
       "expected": "pass",
       "outcome": "needs_review",
       "summary": "NEEDS_REVIEW: the run changed state (1 request) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
@@ -3238,6 +3433,45 @@
       "kind": null,
       "seed": null,
       "control": "offsite_detour",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: no key claim or task expectation establishes whether the task succeeded.",
+      "error": null
+    },
+    {
+      "case_id": "ledger_balance_read/control/negated_answer",
+      "scenario": "ledger_balance_read",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 0 key claims and 3 spec checks were verified against recorded evidence (evidence: final, snap#5, snap#4).",
+      "error": null
+    },
+    {
+      "case_id": "ledger_balance_read/control/negated_answer",
+      "scenario": "ledger_balance_read",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 0 key claims and 1 spec check were verified against recorded evidence (evidence: final, snap#5).",
+      "error": null
+    },
+    {
+      "case_id": "ledger_balance_read/control/negated_answer",
+      "scenario": "ledger_balance_read",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "negated_answer",
       "expected": "pass",
       "outcome": "needs_review",
       "summary": "NEEDS_REVIEW: no key claim or task expectation establishes whether the task succeeded.",
@@ -13731,7 +13965,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"The agent added an item to the cart\", but no POST request whose URL contains 'cart' with a 2xx or 3xx status among 6 captured requests (1 mutation); closest was POST /anything/order → 200 (URL lacks 'cart').",
+      "summary": "NEEDS_REVIEW: the run changed state (1 request) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
       "error": null
     },
     {
@@ -14134,7 +14368,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6562'; final URL is /orders/6562 (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6562'; final URL is /orders/6562 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -14147,7 +14381,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6562'; final URL is /orders/6562 (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6562'; final URL is /orders/6562 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -14160,7 +14394,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6562'; final URL is /orders/6562 (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6562'; final URL is /orders/6562 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -14212,7 +14446,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6561'; final URL is /orders/6561 (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6561'; final URL is /orders/6561 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -14225,7 +14459,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6561'; final URL is /orders/6561 (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6561'; final URL is /orders/6561 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -14238,7 +14472,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6561'; final URL is /orders/6561 (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 4 recorded page states contains '6561'; final URL is /orders/6561 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -14394,7 +14628,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 7 recorded page states contains '6376'; final URL is /cart?error=card_declined (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 7 recorded page states contains '6376'; final URL is /cart?error=card_declined (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -19048,7 +19282,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 1 recorded page state contains '7894'; final URL is /orders/7894 (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 1 recorded page state contains '7894'; final URL is /orders/7894 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -19061,7 +19295,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 1 recorded page state contains '7894'; final URL is /orders/7894 (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 1 recorded page state contains '7894'; final URL is /orders/7894 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {
@@ -19074,7 +19308,7 @@
       "control": null,
       "expected": "fail",
       "outcome": "needs_review",
-      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 1 recorded page state contains '7894'; final URL is /orders/7894 (snapshots are point-in-time, so the text may have appeared between them). 1 other claim was also contradicted.",
+      "summary": "NEEDS_REVIEW: the agent claimed \"A confirmation was shown\", but none of 1 recorded page state contains '7894'; final URL is /orders/7894 (snapshots are point-in-time, so the text may have appeared between them).",
       "error": null
     },
     {

@@ -22,7 +22,12 @@ from evidence_judge.forgery.composed import (
     MARKUP_VARIANTS,
     SHORT_VARIANTS,
 )
-from evidence_judge.forgery.controls import DETOUR_URL, ControlKind, apply_control
+from evidence_judge.forgery.controls import (
+    DETOUR_URL,
+    NEGATED_ANSWERS,
+    ControlKind,
+    apply_control,
+)
 from evidence_judge.forgery.echoes import (
     BYPASS_VARIANTS,
     DERIVED_VARIANTS,
@@ -710,7 +715,10 @@ async def test_honest_write_controls_still_pass(
     assert (spec.outcome, generic.outcome, none.outcome) == (P, P, R), spec.summary
 
 
-@pytest.mark.parametrize("control", [ControlKind.SEARCHED_FIRST, ControlKind.OFFSITE_DETOUR])
+@pytest.mark.parametrize(
+    "control",
+    [ControlKind.SEARCHED_FIRST, ControlKind.OFFSITE_DETOUR, ControlKind.NEGATED_ANSWER],
+)
 async def test_honest_read_controls_still_pass(
     scenarios: dict[str, Scenario], control: ControlKind
 ) -> None:
@@ -739,6 +747,10 @@ def test_controls_edit_the_run_the_honest_way(scenarios: dict[str, Scenario]) ->
     assert apply_control(scenarios["read_stock"].run, ControlKind.POST_REDIRECT_GET) is None
     no_action = base.model_copy(update={"actions": []})
     assert apply_control(no_action, ControlKind.SEARCHED_FIRST) is None
+    negated = apply_control(base, ControlKind.NEGATED_ANSWER)
+    assert negated is not None
+    assert negated.agent_answer == NEGATED_ANSWERS["honest_success"]
+    assert apply_control(scenarios["null_agent"].run, ControlKind.NEGATED_ANSWER) is None
 
 
 def test_input_forgeries_record_what_the_ingesters_record(scenarios: dict[str, Scenario]) -> None:
