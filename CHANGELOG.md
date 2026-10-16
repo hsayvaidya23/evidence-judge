@@ -113,6 +113,11 @@ The first release.
   leading negated noun ("No problems, placed the order") or a finite verb after a negated
   auxiliary ("I didn't hit any errors, and ordered it") no longer hides the claims after it;
   questions, "pass for X, not for Y" and "Ran 3 tests in 0.01s: OK." are read as they mean.
+- Offline claim extraction no longer hides a forged browser answer's claims behind a leading
+  negated participle ("Not wanting to overpay, compared prices and bought the Red Kettle") or
+  an irregular past verb after a negated auxiliary ("I didn't see errors and bought it"): with
+  no spec these reached only NEEDS_REVIEW and now FAIL. "I never logged in, added it to the
+  cart or placed an order" and "I didn't add it to the cart or place an order" still abstain.
 
 ### Security
 
