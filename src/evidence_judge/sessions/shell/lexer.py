@@ -5,7 +5,7 @@ from __future__ import annotations
 import posixpath
 import re
 import shlex
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -289,58 +289,114 @@ def unwrap(words: list[str], wrapped: Wrapped | None = None) -> list[str]:
         if not words:
             return words
         prog = program_name(words[0])
-        rest = words[1:]
-        if prog in ("time", "nohup", "exec", "builtin", "caffeinate", "sudo", "doas"):
-            words = flags_then_rest(rest, frozenset({"-u", "-g", "-C"}))
-        elif prog == "command" and rest and rest[0] not in ("-v", "-V"):
-            words = flags_then_rest(rest, frozenset())
-        elif prog == "env" and rest:
-            for i, arg in enumerate(rest):
-                if arg in ("-C", "--chdir") and i + 1 < len(rest):
-                    wrapped.dirs.append(dir_word(rest[i + 1]))
-                elif arg.startswith("--chdir="):
-                    wrapped.dirs.append(dir_word(arg.partition("=")[2]))
-                elif not arg.startswith("-"):
-                    break
-            rest = flags_then_rest(rest, frozenset({"-u", "-C", "-S"}))
-            while rest and ASSIGNMENT.match(rest[0]):
-                rest = rest[1:]
-            if not rest:
-                return words
-            words = rest
-        elif prog == "timeout":
-            rest = flags_then_rest(rest, _TIMEOUT_VALUE_FLAGS)
-            words = rest[1:]
-        elif prog == "nice":
-            words = flags_then_rest(rest, frozenset({"-n", "--adjustment"}))
-        elif prog in ("stdbuf", "ionice", "chrt", "taskset"):
-            words = flags_then_rest(rest, frozenset({"-c", "-n", "-p"}))
-        elif prog == "xvfb-run":
-            words = flags_then_rest(rest, frozenset({"-n", "-s", "-e", "-f", "-p", "-w"}))
-        elif prog in ("uv", "poetry", "pipenv", "pdm", "rye", "hatch") and rest[:1] == ["run"]:
-            if prog == "uv":
-                _uv_run_options(rest[1:], wrapped)
-            words = flags_then_rest(rest[1:], _UV_VALUE_FLAGS)
-        elif prog in ("uvx", "pipx") and (prog == "uvx" or rest[:1] == ["run"]):
-            if prog == "uvx":
-                _uv_run_options(rest, wrapped)
-            words = flags_then_rest(rest if prog == "uvx" else rest[1:], _UV_VALUE_FLAGS)
-        elif prog in ("npx", "bunx", "pnpx"):
-            words = flags_then_rest(rest, frozenset({"-p", "--package", "-c", "--call"}))
-        elif prog in ("npm", "pnpm", "yarn") and rest[:1] in (["exec"], ["dlx"], ["x"]):
-            words = flags_then_rest(rest[1:], frozenset({"-p", "--package", "-c", "--call"}))
-        elif prog == "bundle" and rest[:1] == ["exec"]:
-            words = rest[1:]
-        elif prog == "dotenv" and "--" in rest:
-            wrapped.filters.append("variables loaded by dotenv")
-            words = rest[rest.index("--") + 1 :]
-        elif PYTHON.match(prog) and len(rest) >= 2 and rest[0] == "-m":
-            words = [rest[1], *rest[2:]]
-        elif PYTHON.match(prog) and rest[:1] and rest[0].startswith("-m") and len(rest[0]) > 2:
-            words = [rest[0][2:], *rest[1:]]
-        else:
+        handler = _WRAPPERS.get(prog) or (_python_module if PYTHON.match(prog) else None)
+        inner = handler(prog, words[1:], wrapped) if handler is not None else None
+        if inner is None:
             return words
+        words = inner
     return words
+
+
+_Unwrapper = Callable[[str, list[str], Wrapped], list[str] | None]
+"""A wrapper's handler: the command it runs, given the program name and its arguments, or None
+when this use of the program runs nothing else."""
+_NPX_VALUE_FLAGS: Final = frozenset({"-p", "--package", "-c", "--call"})
+
+
+def _skip_flags(value_flags: frozenset[str]) -> _Unwrapper:
+    return lambda _prog, rest, _wrapped: flags_then_rest(rest, value_flags)
+
+
+def _command(_prog: str, rest: list[str], _wrapped: Wrapped) -> list[str] | None:
+    if not rest or rest[0] in ("-v", "-V"):
+        return None
+    return flags_then_rest(rest, frozenset())
+
+
+def _env(_prog: str, rest: list[str], wrapped: Wrapped) -> list[str] | None:
+    if not rest:
+        return None
+    for i, arg in enumerate(rest):
+        if arg in ("-C", "--chdir") and i + 1 < len(rest):
+            wrapped.dirs.append(dir_word(rest[i + 1]))
+        elif arg.startswith("--chdir="):
+            wrapped.dirs.append(dir_word(arg.partition("=")[2]))
+        elif not arg.startswith("-"):
+            break
+    rest = flags_then_rest(rest, frozenset({"-u", "-C", "-S"}))
+    while rest and ASSIGNMENT.match(rest[0]):
+        rest = rest[1:]
+    return rest or None
+
+
+def _timeout(_prog: str, rest: list[str], _wrapped: Wrapped) -> list[str] | None:
+    return flags_then_rest(rest, _TIMEOUT_VALUE_FLAGS)[1:]
+
+
+def _project_run(prog: str, rest: list[str], wrapped: Wrapped) -> list[str] | None:
+    if rest[:1] != ["run"]:
+        return None
+    if prog == "uv":
+        _uv_run_options(rest[1:], wrapped)
+    return flags_then_rest(rest[1:], _UV_VALUE_FLAGS)
+
+
+def _uvx(_prog: str, rest: list[str], wrapped: Wrapped) -> list[str] | None:
+    _uv_run_options(rest, wrapped)
+    return flags_then_rest(rest, _UV_VALUE_FLAGS)
+
+
+def _pipx(_prog: str, rest: list[str], _wrapped: Wrapped) -> list[str] | None:
+    return flags_then_rest(rest[1:], _UV_VALUE_FLAGS) if rest[:1] == ["run"] else None
+
+
+def _package_exec(_prog: str, rest: list[str], _wrapped: Wrapped) -> list[str] | None:
+    if rest[:1] not in (["exec"], ["dlx"], ["x"]):
+        return None
+    return flags_then_rest(rest[1:], _NPX_VALUE_FLAGS)
+
+
+def _bundle(_prog: str, rest: list[str], _wrapped: Wrapped) -> list[str] | None:
+    return rest[1:] if rest[:1] == ["exec"] else None
+
+
+def _dotenv(_prog: str, rest: list[str], wrapped: Wrapped) -> list[str] | None:
+    if "--" not in rest:
+        return None
+    wrapped.filters.append("variables loaded by dotenv")
+    return rest[rest.index("--") + 1 :]
+
+
+def _python_module(_prog: str, rest: list[str], _wrapped: Wrapped) -> list[str] | None:
+    if len(rest) >= 2 and rest[0] == "-m":
+        return [rest[1], *rest[2:]]
+    if rest[:1] and rest[0].startswith("-m") and len(rest[0]) > 2:
+        return [rest[0][2:], *rest[1:]]
+    return None
+
+
+_WRAPPERS: Final[dict[str, _Unwrapper]] = {
+    **dict.fromkeys(
+        ("time", "nohup", "exec", "builtin", "caffeinate", "sudo", "doas"),
+        _skip_flags(frozenset({"-u", "-g", "-C"})),
+    ),
+    "command": _command,
+    "env": _env,
+    "timeout": _timeout,
+    "nice": _skip_flags(frozenset({"-n", "--adjustment"})),
+    **dict.fromkeys(
+        ("stdbuf", "ionice", "chrt", "taskset"), _skip_flags(frozenset({"-c", "-n", "-p"}))
+    ),
+    "xvfb-run": _skip_flags(frozenset({"-n", "-s", "-e", "-f", "-p", "-w"})),
+    **dict.fromkeys(("uv", "poetry", "pipenv", "pdm", "rye", "hatch"), _project_run),
+    "uvx": _uvx,
+    "pipx": _pipx,
+    **dict.fromkeys(("npx", "bunx", "pnpx"), _skip_flags(_NPX_VALUE_FLAGS)),
+    **dict.fromkeys(("npm", "pnpm", "yarn"), _package_exec),
+    "bundle": _bundle,
+    "dotenv": _dotenv,
+}
+"""Wrapper programs by name; `python -m` is matched by pattern."""
 
 
 def unspelled(path: str) -> bool:
