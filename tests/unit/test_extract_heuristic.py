@@ -134,12 +134,29 @@ def test_an_answer_that_bought_something_checks_every_amount_against_the_order(
     assert value.predicates == [predicate]
 
 
-def test_a_stated_value_in_reasoning_is_not_a_claim():
+def test_a_stated_value_in_reasoning_is_a_claim_only_in_a_purchase():
     reasoning = ["The home page lists the Red Kettle, which is $24.00."]
     assert [c for c in _extract(None, reasoning).claims if c.kind is ClaimKind.VALUE] == []
-    reasoning = ["I bought the Red Kettle. The Blue Kettle costs $29.00."]
+    reasoning = ["The Blue Kettle costs $29.00."]
     [value] = [c for c in _extract(None, reasoning).claims if c.kind is ClaimKind.VALUE]
     assert value.predicates == [PageTextPredicate(contains="$29.00", scope=Scope.ANY)]
+
+
+@pytest.mark.parametrize(
+    ("answer", "reasoning"),
+    [
+        ("Bought it.", ["Total: $4.00."]),
+        ("Bought it.", ["It came to $4.00."]),
+        ("Order #1001 is confirmed.", ["I placed the order.", "The price was $4.00."]),
+        ("The total was $4.00.", ["I bought the Red Kettle."]),
+        ("I bought it.", ["I bought the Red Kettle. The Blue Kettle costs $4.00."]),
+    ],
+)
+def test_an_amount_anywhere_in_a_purchase_run_is_checked_against_the_order(
+    answer: str, reasoning: list[str]
+):
+    [value] = [c for c in _extract(answer, reasoning).claims if c.kind is ClaimKind.VALUE]
+    assert value.predicates == [_paid("$4.00")]
 
 
 @pytest.mark.parametrize(

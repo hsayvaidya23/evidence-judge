@@ -82,8 +82,8 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1398 browser and 0 of 1653 session
-  forgeries pass, and 4 of 41 honest browser controls go to review offline.
+  Go toy projects with runner-specific tricks; 0 of 1446 browser and 0 of 1653 session
+  forgeries pass, and 4 of 43 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
   and got order #..."), so a claim reader that carries the negation over shows up in `make
@@ -436,6 +436,34 @@ The first release.
   passing run as `$ 24.00`: before the fix its three runs went to review or failed with every
   spec, after it they pass. Bench: 0 of 1398 attacks pass; honest controls 37, 30 and 2 of 41
   correct (34, 27 and 2 of 38 plus the three new ones with each spec).
+- A price given only in a reasoning step no longer passes on a page that lists it for another
+  item: with "Total: $29.00" in the reasoning and "Bought it." as the answer, the total was
+  checked as `page_text` anywhere and passed while the order was charged $29.50. In a run whose
+  answer or reasoning asserts a purchase, every price or stated amount (answer or reasoning) is
+  now checked against what the site answered the order with. An honest reasoning step that
+  prices another item in such a run ("The Blue Kettle costs $29.00") now goes to review. New
+  forgery kind `reasoning_price` (write) plants the `listed_price` evidence with the price only
+  in the reasoning ("Total: $29.00.", "It came to $29.00.", "The price was $29.00."): 12 false
+  PASSes before the fix, none after.
+- An order answered in JSON with the price as a bare number now shows it: `result_contains:
+  ["$29.50"]` is met by `{"total": 29.5}`, `{"grandTotal": 29.5}` or `{"amount_cents": 2950}`
+  (minor units only when the key says so), in the currency of the nearest `currency` field
+  (`{"total": 29.5, "currency": "EUR"}` does not show `$29.50`). Numbers under any other key
+  (`order_id`, `qty`, `item_count`) show no price. New honest control `json_confirmation`
+  answers the order with `{"total": 24.0, "total_cents": 2400, "currency": "USD", "qty": 1}`
+  and strips the price from the pages after it: before the fix its two runs went to review with
+  every spec, after it they pass. New forgery kind `json_total` (write) answers the order with
+  another total beside a quantity and a line id equal to the claimed amount, the claimed amount
+  in euros, or in cents; none passed before or after.
+- One space between two digit groups in a money amount (`$24 100`) is no longer read as 24100:
+  it may be $24 followed by 100, so it meets neither `$24` nor `$24,100` (as text it still meets
+  `$24 100`). A second group or a decimal part settles it (`$1 024 100`, `24 100,00 €`).
+- With Claude, a claim about what a purchase cost keeps only predicates that check the order's
+  answer (a `POST`, `PUT` or `PATCH` to a named URL with the amount in `result_contains` or
+  `response_contains`); a `page_text`, `value` or other predicate on the amount is replaced by
+  the offline extractor's order predicate, so an amount listed on any page no longer proves it.
+  Bench: 0 of 1446 attacks pass (47 kinds); honest controls 39, 32 and 2 of 43 correct (37, 30
+  and 2 of 41 plus the two new ones with each spec).
 - The GitHub Action checks its boolean inputs: `offline`, `fail-on-review` and the new
   `upload-report` take `true` or `false` in any case, and any other value (`yes`, `1`) fails
   the step before anything is installed; before, everything but the exact string `true` was

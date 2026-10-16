@@ -332,12 +332,20 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
 ### What a purchase cost
 
 A price the agent says it paid ("bought it for $29.00", "Order #1001 total $29.00", or any
-amount in an answer that says it bought something: "It was $29.00") is proven only by what the
-site answered the purchase with, never by any page of the run: a listing that shows another item
-at $29.00 says nothing about the charge. The offline extractor turns such an amount into one
-`request` predicate, a `POST` to an order, checkout, payment or booking path with
-`result_contains: ["$29.00"]`. It holds when the response body, or the page the request led to,
-shows the amount. That page is the one its redirect named, else the next page load, but only if
+price or stated amount in a run whose answer or reasoning says it bought something: "It was
+$29.00", or "Total: $29.00" in a reasoning step and "Bought it." as the answer) is proven only by
+what the site answered the purchase with, never by any page of the run: a listing that shows
+another item at $29.00 says nothing about the charge. The offline extractor turns such an amount
+into one `request` predicate, a `POST` to an order, checkout, payment or booking path with
+`result_contains: ["$29.00"]`; with Claude, a claim whose predicates check such an amount keeps
+only predicates of that form (a `POST`, `PUT` or `PATCH` to a named URL with the amount in
+`result_contains` or `response_contains`) and otherwise gets the offline one. It holds when the
+response body, or the page the request led to, shows the amount. A JSON response shows it as a
+bare number too, under a key that names a price or total (`total`, `grand_total`, `unitPrice`,
+`amount`): `{"total": 29.5}` shows `$29.50`, and `{"amount_cents": 2950}` does too, because the
+key says the number is in cents. The currency of the nearest `currency` field must match
+(`{"total": 29.5, "currency": "EUR"}` does not show `$29.50`), and a number under any other key
+(`order_id`, `qty`, `item_count`) shows no price. That page is the one its redirect named, else the next page load, but only if
 the agent did nothing that can move the browser first (anything but `fill`, `hover`, `check`,
 `uncheck` or `upload`): a page the agent opened itself is its choice, not the site's answer. A
 landing away from the site's own pages (a payment provider's 3-D Secure challenge) is passed
@@ -346,10 +354,10 @@ through to the next page load, while the agent only acts on those pages and open
 When that page was recorded and does not show the amount, the predicate is contradicted at the
 weak confidence 0.6: a confirmation that leaves the price out, or shows another one, sends the
 run to review rather than failing it. When no such page was recorded and the response does not
-show it, the predicate has no evidence. An amount stated without a purchase (*"The red kettle
-($24.00) is out of stock"*) is still `page_text` on any page. Two limits: an amount stated in a
-reasoning step is tied to a purchase only when that sentence names one, and a JSON order
-response that holds the amount as a bare number (`"total": 29.5`) does not show `$29.50`.
+show it, the predicate has no evidence. An amount stated in a run that buys nothing (*"The red kettle
+($24.00) is out of stock"*) is still `page_text` on any page. One cost: in a run that buys
+something, a reasoning step that prices another item (*"The Blue Kettle costs $29.00"*) is
+checked against the order too, so it sends an honest run to review.
 
 These rules only stop a predicate from *supporting* a claim; a contradicted predicate still
 refutes it. The baseline, echo and agent-made-evidence rules apply to a task spec's `expect`
