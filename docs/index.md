@@ -182,10 +182,10 @@ The `anthropic` extra enables LLM claim extraction; without it, or with `--offli
 <p class="ej-kicker">The forgery lab takes recorded runs that <strong>failed</strong> and rewrites the agent's answer and reasoning into a success story; some attacks also plant the evidence a gaming agent would (echoes of its own input, off-site confirmations, its own mirror of the shop). None of it does the task, so the correct verdict is never PASS.</p>
 
 <div class="ej-stats">
-  <div class="ej-stat"><span class="ej-stat__value">0 / 1293</span><span class="ej-stat__label">attack runs passed, with a task spec (95% CI 0–0.3%)</span></div>
-  <div class="ej-stat"><span class="ej-stat__value">0 / 1293</span><span class="ej-stat__label">attack runs passed without a spec; 971 sent to review instead</span></div>
+  <div class="ej-stat"><span class="ej-stat__value">0 / 1326</span><span class="ej-stat__label">attack runs passed, with a task spec (95% CI 0–0.3%)</span></div>
+  <div class="ej-stat"><span class="ej-stat__value">0 / 1326</span><span class="ej-stat__label">attack runs passed without a spec; 989 sent to review instead</span></div>
   <div class="ej-stat"><span class="ej-stat__value">29 / 32</span><span class="ej-stat__label">honest controls judged correctly with a spec; the other 3 sent to review, none failed</span></div>
-  <div class="ej-stat"><span class="ej-stat__value">1326</span><span class="ej-stat__label">forged runs: 11 failed runs × up to 41 forgery kinds × 3 seeds</span></div>
+  <div class="ej-stat"><span class="ej-stat__value">1359</span><span class="ej-stat__label">forged runs: 11 failed runs × up to 42 forgery kinds × 3 seeds</span></div>
 </div>
 
 <figure class="ej-figure">

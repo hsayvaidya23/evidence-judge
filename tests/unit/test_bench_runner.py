@@ -53,7 +53,8 @@ with a spec that every recorded request and page meets."""
 KNOWN_REVIEW_CASES = 4
 _ANSWER = re.compile(r"## Agent final answer\n(.*)", re.DOTALL)
 _CONFIDENT = re.compile(
-    r"confirm|complete|\bdone\b|bought|placed|\bsays\b|\breads?\b", re.IGNORECASE
+    r"confirm|complete|\bdone\b|bought|booked|placed|\bgot\b|\bsaw\b|\bsays\b|\breads?\b",
+    re.IGNORECASE,
 )
 
 
@@ -151,7 +152,7 @@ def test_results_round_trip_and_render(offline_result: BenchResult) -> None:
     report = to_markdown(offline_result)
     assert "## False PASS on forged runs" in report
     assert "- Scenarios: 17 scenarios (from 15 recordings) and 21 honest edits" in report
-    assert "| `evidence-judge+spec` | **all manipulations** | 1293 | 0 | 0% |" in report
+    assert "| `evidence-judge+spec` | **all manipulations** | 1326 | 0 | 0% |" in report
     assert "`evidence-judge+generic-spec` grades with `spec.generic.yaml`" in report
     assert "## Accuracy on honest controls" in report
     assert "| honest_success | PASS | PASS |" in report
