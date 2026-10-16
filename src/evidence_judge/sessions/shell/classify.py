@@ -934,41 +934,50 @@ def _classify(simple: Simple, depth: int, cwd: str | None) -> Classified:
     if simple.heredoc and result.category is Category.UNKNOWN:
         result.mutation = result.mutation or "feeds a heredoc to a program"
     if result.runner is not None:
-        changed = [
-            name
-            for name, value in simple.env.items()
-            if is_harness_env(name)
-            and name != "PYTEST_ADDOPTS"
-            and not harmless_env(name, value, cwd)
-        ]
-        result.filters.extend(f"runs with {name} changed" for name in changed)
-        if changed:
-            result.paths = None
-        run_env = command_env(simple)
-        result.run_env = [
-            *result.run_env,
-            *(
-                name
-                for name, value in run_env.items()
-                if not run_env_allowed(name) and not harmless_env(name, value, cwd)
-            ),
-        ]
-        regen = next(
-            (n for n, v in run_env.items() if regenerates_env(n) and not off(f"={v}")), None
-        )
-        if regen is not None and result.mutation is None:
-            result.mutation = result.opaque = f"{regen} set: the run rewrites expected outputs"
+        _runner_env(result, simple, cwd)
     named = result.touched
     if named is None:
         mutating = result.category is Category.MUTATING and not read_only
         named = [w for w in words[1:] if not w.startswith("-")] if mutating else []
     result.touched = [*named, *simple.writes]
-    if result.opaque is None and result.mutation is not None:
-        if result.category in (Category.UNKNOWN, Category.BUILD):
-            result.opaque = result.mutation
-        elif built := next((p for p in result.touched if unspelled(p)), None):
-            result.opaque = f"writes {built}, a path the shell builds at run time"
+    _opaque(result)
     return result
+
+
+def _runner_env(result: Classified, simple: Simple, cwd: str | None) -> None:
+    """What a test run's environment changes: harness variables it filters with, variables
+    the run sees that the judge does not allow, and one that rewrites expected outputs."""
+    changed = [
+        name
+        for name, value in simple.env.items()
+        if is_harness_env(name) and name != "PYTEST_ADDOPTS" and not harmless_env(name, value, cwd)
+    ]
+    result.filters.extend(f"runs with {name} changed" for name in changed)
+    if changed:
+        result.paths = None
+    run_env = command_env(simple)
+    result.run_env = [
+        *result.run_env,
+        *(
+            name
+            for name, value in run_env.items()
+            if not run_env_allowed(name) and not harmless_env(name, value, cwd)
+        ),
+    ]
+    regen = next((n for n, v in run_env.items() if regenerates_env(n) and not off(f"={v}")), None)
+    if regen is not None and result.mutation is None:
+        result.mutation = result.opaque = f"{regen} set: the run rewrites expected outputs"
+
+
+def _opaque(result: Classified) -> None:
+    """Mark a write the judge cannot follow: by a program it does not know, or to a path the
+    shell builds at run time."""
+    if result.opaque is not None or result.mutation is None:
+        return
+    if result.category in (Category.UNKNOWN, Category.BUILD):
+        result.opaque = result.mutation
+    elif built := next((p for p in result.touched or [] if unspelled(p)), None):
+        result.opaque = f"writes {built}, a path the shell builds at run time"
 
 
 def _empty(reason: str, command: str) -> CommandAnalysis:
