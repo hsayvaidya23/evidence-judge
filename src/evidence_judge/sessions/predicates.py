@@ -25,6 +25,7 @@ from pydantic import (
 from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.ingest._json import as_object
+from evidence_judge.sessions.models import Category
 from evidence_judge.sessions.rerun import RerunSpec
 from evidence_judge.sessions.shell import analyse
 
@@ -275,6 +276,26 @@ class SessionSpec(BaseModel):
         description="Run the suite again under the judge's control (`session judge --rerun`) "
         "and decide test results from its report instead of the session record",
     )
+    trusted_wrappers: dict[str, str] = Field(
+        default_factory=dict[str, str],
+        description="What a project wrapper runs, as its owner declares it (`make test: pytest "
+        "-q`): a run through it whose command the session does not show is judged as that "
+        "command, until the session may have changed the wrapper's definition",
+    )
+
+    @field_validator("trusted_wrappers")
+    @classmethod
+    def _wrappers(cls, value: dict[str, str]) -> dict[str, str]:
+        for wrapper, command in value.items():
+            if analyse(wrapper).wrapper is None:
+                raise ValueError(f"{wrapper!r} is not a wrapper the judge recognises")
+            declared = analyse(command)
+            checks = {Category.LINT, Category.TYPECHECK} & set(declared.categories)
+            if declared.parse_error or declared.wrapper or not (declared.runners or checks):
+                raise ValueError(
+                    f"{command!r} must be a test, lint or type-check command, not another wrapper"
+                )
+        return value
 
     @model_validator(mode="after")
     def _unique_ids(self) -> Self:

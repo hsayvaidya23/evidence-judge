@@ -21,6 +21,7 @@ from evidence_judge.checks.matching import (
     parse_number,
     regex_findall,
     regex_search,
+    shows_amount,
     status_matches,
     url_contains,
     url_host,
@@ -403,3 +404,55 @@ def test_an_amount_is_found_however_the_page_writes_it(haystack: str, needle: st
 )
 def test_another_amount_or_currency_is_not_the_amount(haystack: str, needle: str) -> None:
     assert not contains(haystack, needle)
+
+
+@pytest.mark.parametrize(
+    ("haystack", "needle", "found"),
+    [
+        ("Total $24 100 items in stock", "$24", False),
+        ("Total $24 100 items in stock", "$24,100", False),
+        ("Total $24 100 items in stock", "$24 100", True),
+        ("Total 24 100,00 €", "€24,100", True),
+        ("Total $1 024 100", "$1,024,100", True),
+        ("Total $24 100.50", "$24,100.50", True),
+    ],
+)
+def test_one_space_between_digit_groups_is_neither_one_amount_nor_two(
+    haystack: str, needle: str, found: bool
+) -> None:
+    assert contains(haystack, needle) is found
+
+
+@pytest.mark.parametrize(
+    ("body", "phrase"),
+    [
+        ('{"order_id": "1001", "total": 29.5}', "$29.50"),
+        ('{"grand_total": 1249.5, "currency": "EUR"}', "€1.249,50"),
+        ('{"totalPrice": 29.5}', "$29.50"),
+        ('{"amount_cents": 2950, "currency": "usd"}', "$29.50"),
+        ('{"order": {"currency": "GBP", "lines": [{"unit_price": 4}]}}', "£4.00"),
+        ('[{"subtotal": 24}]', "24 USD"),
+    ],
+)
+def test_a_json_answer_shows_a_price_as_a_bare_number(body: str, phrase: str) -> None:
+    assert shows_amount(body, phrase)
+
+
+@pytest.mark.parametrize(
+    ("body", "phrase"),
+    [
+        ('{"total": 29.5, "currency": "EUR"}', "$29.50"),
+        ('{"total": 2950}', "$29.50"),
+        ('{"total_cents": 2950.5}', "$29.50"),
+        ('{"amount_cents": 4}', "$4.00"),
+        ('{"cents": 400}', "$4.00"),
+        ('{"order_id": 4, "qty": 4, "item_count": 4, "total_items": 4}', "$4.00"),
+        ('{"price_id": 4, "total": true}', "$4.00"),
+        ('{"total": "29.50"}', "$29.50"),
+        ("<p>Total: 29.50</p>", "$29.50"),
+        ('{"total": 29.5}', "29.50"),
+        ('{"total": 24100}', "$24 100"),
+    ],
+)
+def test_no_other_number_or_currency_shows_the_price(body: str, phrase: str) -> None:
+    assert not shows_amount(body, phrase)

@@ -3,8 +3,9 @@ from typing import Any
 import pytest
 
 from evidence_judge.core.claims import ClaimKind
-from evidence_judge.core.predicates import PageTextPredicate, RequestPredicate
+from evidence_judge.core.predicates import PageTextPredicate, RequestPredicate, Scope
 from evidence_judge.core.verdict import Usage
+from evidence_judge.extract.heuristic import ORDER_URL
 from evidence_judge.extract.llm_extractor import LLMClaimExtractor
 from evidence_judge.extract.prompts import EXTRACTION_SYSTEM_PROMPT, UNTRUSTED_TAG
 from evidence_judge.extract.schema import ClaimExtraction
@@ -209,3 +210,101 @@ def test_few_shot_examples_only_teach_specific_predicates():
     for example in _EXAMPLES:
         parsed = ClaimExtraction.model_validate(example["output"])
         assert all(c.dropped_predicates == 0 for c in parsed.claims), example["task"]
+
+
+ORDER_PAID = RequestPredicate(method="POST", url_regex=ORDER_URL, result_contains=["$24.00"])
+
+
+@pytest.mark.parametrize(
+    ("answer", "reasoning", "quote", "kind", "predicates"),
+    [
+        (
+            "I bought the kettle for $24.00.",
+            [],
+            "for $24.00",
+            "value",
+            [{"kind": "page_text", "contains": "$24.00", "scope": "any"}],
+        ),
+        (
+            "Bought it. Order #1042 confirmed.",
+            ["Total: $24.00."],
+            "Total: $24.00",
+            "value",
+            [{"kind": "page_text", "contains": "24.00 USD", "scope": "any"}],
+        ),
+        (
+            "I bought the kettle for $24.00.",
+            [],
+            "I bought the kettle for $24.00",
+            "outcome",
+            [
+                {"kind": "request", "method": "POST", "url_contains": ["order"]},
+                {"kind": "value", "field": "price", "json_path": "items.0.price", "value": 24},
+            ],
+        ),
+        (
+            "I bought the kettle for $24.00.",
+            [],
+            "I bought the kettle for $24.00",
+            "value",
+            [
+                {
+                    "kind": "request",
+                    "method": "GET",
+                    "url_contains": ["cart"],
+                    "response_contains": ["$24.00"],
+                }
+            ],
+        ),
+    ],
+)
+async def test_a_purchase_price_is_proven_only_by_the_order(
+    answer: str, reasoning: list[str], quote: str, kind: str, predicates: list[dict[str, Any]]
+):
+    llm = _llm(_claim("Paid $24.00", quote, kind=kind, predicates=predicates))
+    claim_set, _ = await LLMClaimExtractor(llm).extract(
+        task="Buy a kettle", answer=answer, reasoning=reasoning
+    )
+    [claim] = claim_set.claims
+    assert claim.predicates == [ORDER_PAID]
+
+
+async def test_a_price_checked_against_the_order_answer_is_kept():
+    scoped = {
+        "kind": "request",
+        "method": "POST",
+        "url_contains": ["order"],
+        "result_contains": ["$24.00"],
+    }
+    llm = _llm(
+        _claim(
+            "Paid $24.00",
+            "for $24.00",
+            kind="value",
+            predicates=[scoped, {"kind": "page_text", "contains": "$24.00", "scope": "any"}],
+        )
+    )
+    claim_set, _ = await LLMClaimExtractor(llm).extract(
+        task=None, answer="I bought the kettle for $24.00.", reasoning=[]
+    )
+    assert claim_set.claims[0].predicates == [
+        RequestPredicate(method="POST", url_contains=["order"], result_contains=["$24.00"])
+    ]
+
+
+@pytest.mark.parametrize(
+    ("answer", "quote"),
+    [
+        ("The balance of account ACC-2041 is $1,284.50.", "is $1,284.50"),
+        (
+            "The home page lists the Red Kettle at $24.00. I bought it.",
+            "lists the Red Kettle at $24.00",
+        ),
+    ],
+)
+async def test_an_amount_that_is_no_purchase_price_keeps_its_predicates(answer: str, quote: str):
+    amount = quote.split()[-1]
+    predicate = {"kind": "page_text", "contains": amount, "scope": "any"}
+    llm = _llm(_claim("Saw the amount", quote, kind="value", predicates=[predicate]))
+    claim_set, _ = await LLMClaimExtractor(llm).extract(task=None, answer=answer, reasoning=[])
+    assert claim_set.claims[0].predicates == [PageTextPredicate(contains=amount, scope=Scope.ANY)]

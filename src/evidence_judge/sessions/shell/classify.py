@@ -480,12 +480,7 @@ def _analysis(
         ),
         stop_early=walk.stop_early,
         wrapper=wrapper,
-        wrapper_unseen=(
-            f"{wrapper} runs a command its project defines, which the session does not show, so "
-            "the options it passes (a stop at the first failure, a filter) are unseen"
-            if wrapper
-            else None
-        ),
+        wrapper_unseen=unseen_reason(wrapper) if wrapper else None,
         collect_only=walk.collect_only,
         exit_masked_by=walk.masked or (None if walk.runners else walk.check_masked),
         output_filter=walk.output_filter,
@@ -511,6 +506,15 @@ def _analysis(
         suppressions=sorted(
             {*walk.suppressions, *written_suppressions(pipelines, command, walk.opaque is not None)}
         ),
+    )
+
+
+def unseen_reason(wrapper: str) -> str:
+    """Why a run through `wrapper` cannot show what it ran, when nothing the session showed
+    names it."""
+    return (
+        f"{wrapper} runs a command its project defines, which the session does not show, so "
+        "the options it passes (a stop at the first failure, a filter) are unseen"
     )
 
 

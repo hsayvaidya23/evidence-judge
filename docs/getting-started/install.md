@@ -8,9 +8,9 @@ Evidence Judge needs **Python 3.12 or newer** (it is tested on 3.12 and 3.13).
 
 !!! info "Not released yet"
 
-    v0.1.0 is not released yet, so nothing is on PyPI: install from the GitHub repository. Once
-    it is, `uv tool install --python 3.12 "evidence-judge[anthropic]"` and
-    `pip install "evidence-judge[anthropic]"` will work as well.
+    v0.1.0 is not released yet, so nothing is on PyPI: install from the GitHub repository, as
+    below. Do not install `evidence-judge` from PyPI until the release notes say it is there.
+    To pin a commit, add it to the URL: `git+https://github.com/hsayvaidya23/evidence-judge@<sha>`.
 
 === "uv (recommended)"
 
@@ -82,7 +82,9 @@ export ANTHROPIC_API_KEY=...
 Or keep it in a dotenv file and name that file with `evidence-judge --env-file PATH ...` (or
 `EVJ_ENV_FILE=PATH`). A `.env` in the working directory is not read on its own.
 
-That is the only credential Evidence Judge reads. Every other setting is an `EVJ_*` environment
-variable with a safe default; see [Configuration](../reference/configuration.md).
+That is the only credential the judge itself reads. The OpenTelemetry, Langfuse and Phoenix
+integrations read their own (`OTEL_*`, `LANGFUSE_*`, `PHOENIX_*`; see
+[Integrations](../integrations.md)), and only when you use them. Every other setting is an `EVJ_*` environment variable with a safe default; see
+[Configuration](../reference/configuration.md).
 
 Next: [record a run](record-a-run.md).

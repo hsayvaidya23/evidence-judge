@@ -150,6 +150,7 @@ nav:
       - Record a run: getting-started/record-a-run.md
       - Your first judgement: getting-started/first-judge.md
       - Read the report: getting-started/read-the-report.md
+      - Judge a coding-agent session: getting-started/judge-a-session.md
   - Concepts:
       - concepts/index.md
       - Claims & predicates: concepts/claims-and-predicates.md

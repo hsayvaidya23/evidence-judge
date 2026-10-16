@@ -52,7 +52,7 @@ A citation is `{evidence_id, excerpt}`, with ids like `net#12`, `act#3`, `snap#4
 
     ```python
     from pathlib import Path
-    from evidence_judge.core.verdict import RunVerdict
+    from evidence_judge import RunVerdict
 
     verdict = RunVerdict.model_validate_json(Path("verdict.json").read_bytes())
     failed = [c for c in verdict.claims if c.key and c.status == "contradicted"]

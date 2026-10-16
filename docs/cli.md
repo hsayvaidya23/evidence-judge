@@ -17,7 +17,7 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | `schema` | Print the JSON Schema of the verdict format |
 | `version` | Print the evidence-judge version (also `evidence-judge --version`) |
 
-v0.1.0 is not released yet, so install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install "evidence-judge[...]"` forms below work once it is on PyPI.
+v0.1.0 is not released yet, so install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. Add `@<sha>` to the URL to pin a commit.
 
 Settings (models, budget, redaction, cache) come from environment variables, plus a dotenv file
 only when you name one with the global `--env-file PATH` option (before the command) or
@@ -141,7 +141,7 @@ Offline, redaction tokens are keyed by a digest of the files in the run director
 ## `evidence-judge mcp`
 
 Runs an MCP server exposing `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and
-`find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp]"`); without it the
+`find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`); without it the
 command exits `3`. See the [MCP server guide](guides/mcp.md) for client setup.
 
 ```bash
@@ -187,7 +187,7 @@ which format the file looks like.
 | `--log-anchor FILE` | The evidence log's head anchor (default: `<session>/log-head.json` in the `--log-key` directory, else `<state>/<session>/log-head.json`) |
 | `--trusted-log` | Assert that the log, its key and anchor were out of the agent's reach (a sandbox that denies the state directory, a container, another OS user). Without it, an agent running as your user could have read the key and signed a forged log, so a verified log is still `partial`. The spec's `trusted_evidence_log: true` does the same |
 | `--answer TEXT` / `--answer-file FILE` | Judge this final answer instead of the recorded one |
-| `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block |
+| `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block, `trusted_wrappers` (what a project wrapper runs: `{"make test": "pytest -q"}`; a run through it the session does not show is judged as that command until the session may have changed the wrapper's definition) |
 | `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
 | `--out FILE` | Write the verdict JSON (schema `evidence-judge/run-verdict@1`) here |
 | `--offline` | No LLM calls; heuristic claim extraction only |

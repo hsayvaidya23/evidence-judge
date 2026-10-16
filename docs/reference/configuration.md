@@ -61,6 +61,35 @@ The HMAC key that makes redaction fingerprints stable is chosen in this order:
 Offline runs and `inspect` never read or create the key file. Treat the key and the key file as
 secrets.
 
+## Agent hooks
+
+The hooks that `evidence-judge hook ...` runs for Claude Code, Codex CLI and Gemini CLI read
+`EVJ_HOOK_*` variables from the environment the agent starts them with, never from a `.env`
+file. The judge they start inherits none of the other `EVJ_*` variables unless
+`EVJ_HOOK_PASS_ENV` names them.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `EVJ_HOOK_ENABLED` | `true` | `false` turns every stop hook into a no-op |
+| `EVJ_HOOK_GUARD` | `true` | `false` lets the guard hook allow writes to agent configuration and the judge's install |
+| `EVJ_HOOK_ALLOW_MISSING_JUDGE` | unset | `1` lets the Stop hook allow the stop with a notice when the pinned CLI is gone or changed |
+| `EVJ_HOOK_TIMEOUT_S` | `60` | Wall-clock limit for judging the turn's traces; on timeout the stop is allowed with a notice |
+| `EVJ_HOOK_BLOCK_ON_NEEDS_REVIEW` | `false` | Also keep the agent working on NEEDS REVIEW |
+| `EVJ_HOOK_LLM` | `false` | Judge with the configured LLM (`ANTHROPIC_API_KEY`) instead of offline |
+| `EVJ_HOOK_TRACE_DIRS` | `[]` | Extra trace directories, a JSON list, relative to the project root |
+| `EVJ_HOOK_SPEC` | unset | Spec to use instead of the conventional locations. An absolute path outside the workspace keeps it out of the agent's reach (recommended) |
+| `EVJ_HOOK_ON_BAD_EVIDENCE` | `block` | When Playwright was used but its traces are missing, unreadable, older than the turn or refused by the judge: `block` or `notice` |
+| `EVJ_HOOK_BLOCK_ON_SPEC_CHANGE` | `true` | Keep the agent working when the spec changed during the turn; `false` only warns |
+| `EVJ_HOOK_SESSION_SPEC` | unset | Session spec whose `rerun:` block the Stop hook runs, instead of `.evidence-judge/session.yaml`; see [Re-running the tests](../guides/claude-code.md#re-running-the-tests) |
+| `EVJ_HOOK_PASS_ENV` | `[]` | `EVJ_*` variables the judge may inherit, a JSON list; every other `EVJ_*` is dropped |
+| `EVJ_HOOK_MAX_TRACE_AGE_S` | `1800` | Newest trace age accepted when the turn's start is unknown |
+| `EVJ_HOOK_LOG_DIR` | unset | Evidence-log directory when no `--log-dir` is given |
+| `EVJ_HOOK_STATE_DIR` | `$CLAUDE_PLUGIN_DATA/state`, else `~/.evidence-judge/state` | The hooks' private state (spec snapshots, log key, log anchors) when no `--state-dir` is given |
+
+`EVJ_HOOK_ALLOW_MISSING_JUDGE` is read by the plugins' `run-hook.sh`; set it where the agent
+harness runs, not where the agent can. See the [Claude Code](../guides/claude-code.md),
+[Codex CLI](../guides/codex.md) and [Gemini CLI](../guides/gemini-cli.md) guides.
+
 ## Integration variables
 
 The integrations read their own standard variables:

@@ -317,7 +317,7 @@ class SessionIndex:
         """Why a passing run through a wrapper whose command the session does not show may be a
         part of the suite (`@pytest -k sub` in a silent recipe), or None when it passed at least
         as many tests as an earlier whole-suite run the session showed ran, plus the tests the
-        session added since."""
+        session added since, when every change since can be counted."""
         wrapper = event.analysis.wrapper
         if wrapper is None or event.analysis.wrapper_unseen is None or event.summary is None:
             return None
@@ -329,7 +329,13 @@ class SessionIndex:
                 "whole-suite run the session showed counted the tests to compare it with"
             )
         ran, baseline = earlier
-        added = self._tests_added(baseline.seq) or 0
+        added = self._tests_added(baseline.seq)
+        if added is None:
+            return (
+                f"{unseen}, and since the earlier whole-suite run {baseline.id} the session "
+                "changed the tests in a way the judge cannot count (a command, a parametrize "
+                "case, a removed test), so that run's count is no floor for this one"
+            )
         if event.summary.passed >= ran + added:
             return None
         since = f" plus the {added} the session added since" if added else ""
