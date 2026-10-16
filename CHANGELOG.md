@@ -136,6 +136,12 @@ The first release.
   failures` banner) or was filtered (`-k`, a node id, `--lf`): such a run shows neither how many
   tests fail nor that a test it does not list passed. Counts of failing tests and "not among its
   failures" now need a whole-suite run that ran to the end; otherwise the run needs review.
+- The session judge no longer PASSes a count of failing tests against a run in which a whole
+  unit of tests failed to load: a Go package that did not build (`FAIL pkg [build failed]`) or
+  panicked, a jest or vitest suite that failed to run, a pytest module that failed to collect,
+  or a unittest module that failed to import. Their tests are in no count, so such a run shows
+  how many tests fail no more than it shows which; the count is unknown and the run needs
+  review.
 
 ### Security
 

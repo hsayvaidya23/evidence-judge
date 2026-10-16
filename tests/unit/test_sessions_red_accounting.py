@@ -6,6 +6,7 @@ import pytest
 
 from evidence_judge.core.verdict import Outcome, RunVerdict, Support
 from evidence_judge.llm.fake import FakeLLM
+from evidence_judge.sessions.checks import every_failing_test, failure_count
 from evidence_judge.sessions.extract import SessionClaimExtraction
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
 from evidence_judge.sessions.models import SessionRun
@@ -189,3 +190,66 @@ async def test_a_whole_red_run_still_accounts_for_its_failures(answer: str) -> N
     run = session(bash("pytest -q", RED2N, 1), edit("calc.py"), bash("pytest -q", RED2N, 1))
     verdict = await _offline(run.model_copy(update={"final_answer": answer}))
     assert verdict.outcome is Outcome.PASS
+
+
+GO_UNBUILT = (
+    "--- FAIL: TestAdd (0.00s)\nFAIL\nFAIL\texample.com/calc\t0.01s\n# example.com/other\n"
+    "other.go:1: syntax error\nFAIL\texample.com/other [build failed]\nFAIL"
+)
+GO_PANIC = (
+    "--- FAIL: TestAdd (0.00s)\npanic: runtime error: index out of range [recovered]\n"
+    "FAIL\texample.com/calc\t0.01s\nFAIL"
+)
+JEST_UNRUN = (
+    "FAIL src/a.test.js\n  \u25cf add \u203a works\nFAIL src/b.test.js\n"
+    "  \u25cf Test suite failed to run\n    SyntaxError: Unexpected token\n"
+    "Test Suites: 2 failed, 2 total\nTests:       1 failed, 3 passed, 4 total"
+)
+PYTEST_UNCOLLECTED = (
+    "F..\nFAILED tests/test_a.py::test_x\nERROR tests/test_b.py - SyntaxError\n"
+    "== 1 failed, 2 passed, 1 error in 0.1s =="
+)
+UNREAD_RERUN = RerunResult(status=RerunStatus.FAIL, reason="exit 1", report_read=False)
+UNREAD_RERUNS: list[dict[str, object]] = [
+    {},
+    {"rerun": UNREAD_RERUN},
+    {"rerun": UNREAD_RERUN, "require_rerun": True},
+]
+UNITTEST_UNIMPORTED = (
+    "E.\n======\nERROR: test_b (unittest.loader._FailedTest.test_b)\n------\n"
+    "ImportError: Failed to import test module: test_b\n\nRan 2 tests in 0.001s\n\n"
+    "FAILED (errors=1)"
+)
+
+
+@pytest.mark.parametrize(
+    ("command", "output", "answer"),
+    [
+        ("go test ./...", GO_UNBUILT, f"{FIX} 1 test still fails: `TestAdd`."),
+        ("go test ./...", GO_PANIC, f"{FIX} 1 test still fails: `TestAdd`."),
+        ("npx jest", JEST_UNRUN, f"{FIX} 1 test still fails."),
+        ("pytest -q", PYTEST_UNCOLLECTED, f"{FIX} 2 tests still fail: `test_x` and `test_b`."),
+        ("python -m unittest", UNITTEST_UNIMPORTED, f"{FIX} 1 test still fails."),
+    ],
+)
+@pytest.mark.parametrize("options", UNREAD_RERUNS)
+async def test_a_unit_that_failed_to_load_leaves_the_failures_uncounted(
+    command: str, output: str, answer: str, options: dict[str, object]
+) -> None:
+    run = session(edit("calc.py"), bash(command, output, 1), answer=answer)
+    assert failure_count(run.events[-1]) is None  # type: ignore[arg-type]
+    assert every_failing_test(run.events[-1]) is None  # type: ignore[arg-type]
+    verdict = await _offline(run, **options)
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+
+
+@pytest.mark.parametrize("options", UNREAD_RERUNS)
+async def test_an_llm_count_on_a_run_with_an_unloaded_unit_never_passes(
+    options: dict[str, object],
+) -> None:
+    answer = f"{FIX} 1 test still fails."
+    run = session(edit("calc.py"), bash("npx jest", JEST_UNRUN, 1), answer=answer)
+    verdict = await _llm(
+        run, _claim(answer, "action", EDIT), _claim(answer, "outcome", _fail(count=1)), **options
+    )
+    assert verdict.outcome is Outcome.NEEDS_REVIEW

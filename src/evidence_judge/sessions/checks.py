@@ -741,11 +741,24 @@ def _named_failure(event: CommandEvent, name: str) -> bool:
     )
 
 
+_UNLOADED: Final = re.compile(
+    r"^(?:FAIL\s+\S+\s+\[(?:build|setup) failed\]|panic: |"
+    r"(?:\u25cf )?Test suite failed to run|.*\bFailed Suites \d+|"
+    r"ERROR collecting |ERROR (?!\S+::)\S+\.\w+(?: - |$)|"
+    r".*unittest\.loader\._FailedTest)",
+    re.M,
+)
+"""A unit of tests that failed before its tests ran: a Go package that did not build or
+panicked, a jest or vitest suite that failed to run, a pytest module that failed to collect, a
+unittest module that failed to import. Its tests are neither counted nor named."""
+
+
 def failure_count(event: CommandEvent) -> int | None:
     """How many tests the run reports failing, or None when its summary does not count tests
-    (plain `go test` counts packages; then its `--- FAIL:` lines count them)."""
+    (plain `go test` counts packages; then its `--- FAIL:` lines count them) or when a unit of
+    tests failed to load, so the tests in it are not counted."""
     summary = event.summary
-    if summary is None:
+    if summary is None or _UNLOADED.search(_strip(event.output)):
         return None
     if summary.framework == "go test":
         return len(_failing_tests(event)) or None
