@@ -22,23 +22,26 @@ verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yam
 print(verdict.outcome, verdict.summary)
 ```
 
-1.  Reads `EVJ_*` variables and `.env`, like the CLI.
+1.  Reads `EVJ_*` environment variables only; no `.env` file is read.
 2.  Any of `trace`, `har` and `browser_use`, plus `answer` or `answer_file`, `reasoning_file`,
     `task`, `run_id`, `max_body_chars`, `allow_mismatch` and `screenshot_root`.
 3.  `build_llm` returns `None` when no API key is configured; the judge then runs offline.
 
-!!! warning "Redact before the verdict leaves the process"
+!!! note "Redaction"
 
-    The CLI redacts runs before judging; `Judge` does not do it for you. Redact first if the
-    verdict, a report or an LLM prompt will leave the machine:
+    `Judge.judge` redacts the run, spec and claims before claim extraction and any LLM call
+    whenever `settings.redact` is on (`EVJ_REDACT`, default true), exactly as the CLI does: the
+    CLI goes through the same `Judge.redact`. To write a report, redact first so the report shows
+    what was judged; the returned options are marked so nothing is redacted twice:
 
     ```python
-    from evidence_judge import Redactor
-
-    redactor = Redactor.from_settings(settings)
-    run, report = redactor.redact_run(run)
-    spec, _ = redactor.redact_model(TaskSpec.load("spec.yaml"))  # same key, so predicates still match
+    run, options, report = judge.redact(run, JudgeOptions(spec=TaskSpec.load("spec.yaml")))
+    verdict = asyncio.run(judge.judge(run, options))
     ```
+
+    Pass `Judge(..., redactor=Redactor(key))` to choose the key; by default it is
+    `EVJ_REDACTION_KEY`, else the key file in `EVJ_CACHE_DIR` when the judge has an LLM, else a
+    random key per process.
 
 ## Options
 
@@ -47,6 +50,7 @@ JudgeOptions(
     offline=False,  # True: heuristic extraction, no model calls
     spec=None,  # a TaskSpec
     claims=None,  # a pre-extracted ClaimSet; skips extraction
+    redact=True,  # False: the inputs are already redacted (Judge.redact returns this)
 )
 ```
 
@@ -132,9 +136,9 @@ SemVer covers:
 | `load_run` | Load a trace, HAR or browser-use history into a run |
 | `TaskSpec` | A task spec; `TaskSpec.load(path)` |
 | `RunVerdict`, `Outcome` | The verdict and its `pass` / `fail` / `needs_review` outcome |
-| `Settings` | Configuration from `EVJ_*` variables and `.env` |
+| `Settings` | Configuration from `EVJ_*` environment variables |
 | `build_llm` | The configured LLM client, or `None` offline |
-| `Redactor` | Redact a run and spec before the verdict leaves the process |
+| `Redactor` | The redaction `Judge` applies; pass one to `Judge` to choose its key |
 | `__version__` | The installed version |
 
 Everything else, including every module path under `evidence_judge.` (`evidence_judge.core`,

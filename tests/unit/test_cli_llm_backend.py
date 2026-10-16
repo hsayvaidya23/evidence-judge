@@ -52,7 +52,7 @@ def test_judge_llm_overrides_the_configured_backend(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("EVJ_LLM_BACKEND", "codex" if backend != "codex" else "gemini")
     seen = _record_settings(monkeypatch)
     result = runner.invoke(app, ["judge", "--har", str(RUN / "run.har"), "--llm", backend, "-q"])
-    assert result.exit_code in (0, 1, 2), result.output
+    assert result.exit_code == ExitCode.INTERNAL, result.output
     assert [s.llm_backend for s in seen] == [backend]
 
 
@@ -84,6 +84,23 @@ def test_an_unknown_configured_backend_is_a_usage_error(monkeypatch: pytest.Monk
     text = " ".join(result.output.split())
     assert "EVJ_LLM_BACKEND: must be one of anthropic, claude-code, codex, gemini" in text
     assert "pydantic" not in text and "'gpt'" not in text
+
+
+def test_llm_anthropic_without_a_key_exits_internal_naming_the_key():
+    result = runner.invoke(app, ["judge", "--har", str(RUN / "run.har"), "--llm", "anthropic"])
+    assert result.exit_code == ExitCode.INTERNAL, result.output
+    assert "ANTHROPIC_API_KEY" in _flat(result.output)
+    assert "judging offline" not in result.output
+    offline = runner.invoke(
+        app, ["judge", "--har", str(RUN / "run.har"), "--llm", "anthropic", "--offline", "-q"]
+    )
+    assert offline.exit_code in (0, 1, 2), offline.output
+
+
+def test_no_llm_option_without_a_key_still_judges_offline():
+    result = runner.invoke(app, ["judge", "--har", str(RUN / "run.har")])
+    assert result.exit_code in (0, 1, 2), result.output
+    assert "judging offline" in result.output
 
 
 def test_a_missing_cli_exits_internal_with_install_advice(

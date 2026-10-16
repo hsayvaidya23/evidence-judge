@@ -336,7 +336,7 @@ class HeuristicExtractor:
         task_norm = normalize(task or "")
         tally = _Tally()
         told = sentences(answer, reasoning)
-        bought = any(names_purchase(s.text) for s in told if s.origin == "answer")
+        bought = any(names_purchase(s.text) for s in told)
         for sentence in told:
             _rule_claims(sentence, task_norm, tally)
             _setting_claims(sentence, tally)
@@ -450,33 +450,45 @@ def _price_claims(sentence: Sentence, task_norm: str, bought: bool, tally: _Tall
     balance is $1,284.50') and, in a sentence naming no price field, what a purchase cost:
     'bought it for $24.00', 'ordered at $24.00', 'the kettle ($24.00)'.
 
-    An amount in a sentence that asserts a purchase, or in an answer that does (`bought`), is
-    what the purchase cost, so only what the site answered the order with proves it
-    (`_order_results`): any page of the run could list the same amount for another item. A
-    value stated without a price word is read from the answer only.
+    In a run whose answer or reasoning asserts a purchase (`bought`), every such amount is what
+    the purchase cost, wherever it is told ('Total: $4.00' in a reasoning step and 'Bought it.'
+    as the answer), so only what the site answered the order with proves it (`order_results`):
+    any page of the run could list the same amount for another item. Otherwise a value stated
+    without a price word is read from the answer only.
     """
     field_match = _PRICE_FIELD.search(sentence.text)
     name = "total" if field_match and field_match.group(1).lower() in _TOTAL_WORDS else "price"
     key = _PRICE_TASK.search(task_norm) is not None
-    answer = sentence.origin == "answer"
-    purchase = names_purchase(sentence.text) or (answer and bought)
-    for match in stated_amounts(sentence.text):
-        paid = field_match is not None or paid_amount(sentence.text, match)
-        if not paid and not (answer and stated_value(sentence.text, match)):
-            continue
+    purchase = bought or names_purchase(sentence.text)
+    for match, paid in priced_amounts(sentence, purchase=purchase):
         amount = match.group(0).strip()
         _claim(
             sentence,
             f"The {name if paid else 'amount'} was {amount_text(match)}",
             ClaimKind.VALUE,
             key,
-            _order_results(amount) if purchase else _page_texts([amount]),
+            order_results([amount]) if purchase else _page_texts([amount]),
             tally,
         )
 
 
-def _order_results(amount: str) -> list[Predicate]:
+def priced_amounts(sentence: Sentence, *, purchase: bool) -> list[tuple[re.Match[str], bool]]:
+    """The amounts `sentence` states as a price, each with whether a price word or a purchase
+    names it (`paid`): a value stated without one ('It was $4.00') counts in the answer, or
+    anywhere in a run that asserts a `purchase`."""
+    field = _PRICE_FIELD.search(sentence.text) is not None
+    stated = purchase or sentence.origin == "answer"
+    out: list[tuple[re.Match[str], bool]] = []
+    for match in stated_amounts(sentence.text):
+        paid = field or paid_amount(sentence.text, match)
+        if paid or (stated and stated_value(sentence.text, match)):
+            out.append((match, paid))
+    return out
+
+
+def order_results(amounts: list[str]) -> list[Predicate]:
     """A POST to an order, checkout, payment or booking URL (the requests the purchase and
-    booking claims point at) that the site answered with `amount`: in its response or on the
-    page it led to before the agent acted again (checks.request.site_result)."""
-    return [RequestPredicate(method="POST", url_regex=ORDER_URL, result_contains=[amount])]
+    booking claims point at) that the site answered with `amounts`: in its response (as text,
+    or as a number under a price key of a JSON answer) or on the page it led to before the
+    agent acted again (checks.request.site_result)."""
+    return [RequestPredicate(method="POST", url_regex=ORDER_URL, result_contains=amounts)]

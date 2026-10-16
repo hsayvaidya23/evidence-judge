@@ -11,10 +11,10 @@ from evidence_judge.sessions.extract import SessionClaimExtraction
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
 from evidence_judge.sessions.models import CallStatus, CommandAnalysis, CommandEvent, SessionRun
 from evidence_judge.sessions.normalize import ToolCall
-from evidence_judge.sessions.predicates import BuildPredicate, TestResultPredicate
+from evidence_judge.sessions.predicates import BuildPredicate, SessionSpec, TestResultPredicate
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import analyse
-from evidence_judge.sessions.shell.wrappers import defined, echoed, resolve
+from evidence_judge.sessions.shell.wrappers import defined, echoed, resolve, trust
 from tests.unit.sessions_helpers import CWD, GREEN, RED, bash, edit, session, tool, write
 
 ONE_RED = "F\nFAILED tests/test_calc.py::test_add - assert -1 == 5\n1 failed in 0.01s"
@@ -743,3 +743,172 @@ async def test_a_prerequisite_that_weakens_the_tests_is_tampering(prep: str, fin
     )
     assert verdict.outcome is not Outcome.PASS
     assert finding in verdict.summary or any(finding in c.reason for c in verdict.claims)
+
+
+TOX_ECHO = "py: commands[0]> pytest -q\n" + GREEN
+
+
+@pytest.mark.parametrize(
+    ("shown", "unseen", "filtered"),
+    [
+        (
+            read(
+                "setup.cfg",
+                "[tox:tox]\nenvlist = py\n\n[testenv]\nsetenv =\n    PYTEST_ADDOPTS = -k add\n",
+            ),
+            False,
+            True,
+        ),
+        (
+            bash(
+                "cat pyproject.toml",
+                '[tool.tox]\nlegacy_tox_ini = """\n[testenv]\nsetenv =\n    PYTEST_ADDOPTS = -x\n"""\n',
+            ),
+            False,
+            True,
+        ),
+        (
+            read(
+                "pyproject.toml",
+                '[tool.tox.env.py]\nset_env = { PYTEST_ADDOPTS = "-k add" }\n',
+            ),
+            False,
+            True,
+        ),
+        (
+            read("pyproject.toml", '[tool.tox.env_run_base]\nset_env = { file = ".env" }\n'),
+            True,
+            False,
+        ),
+        (read("setup.cfg", "[testenv]\nsetenv =\n    file|.env\n"), True, False),
+        (read("setup.cfg", "[testenv\n"), True, False),
+        (read("pyproject.toml", "[tool.tox\n"), True, False),
+        (read("setup.cfg", "[metadata]\nname = calc\n"), False, False),
+        (read("pyproject.toml", '[project]\nname = "calc"\n'), False, False),
+    ],
+)
+def test_tox_variables_count_from_setup_cfg_and_pyproject(
+    shown: ToolCall, unseen: bool, filtered: bool
+) -> None:
+    analysis = _analysis(shown, bash("tox -e py", TOX_ECHO))
+    assert (analysis.wrapper_unseen is not None) is unseen
+    assert bool(analysis.test_filters) is filtered
+
+
+def test_tox_variables_of_every_shown_configuration_reach_a_tox_ini_s_commands() -> None:
+    analysis = _analysis(
+        read("tox.ini", TOX),
+        read("setup.cfg", "[testenv]\nsetenv =\n    PYTEST_ADDOPTS = -k add\n"),
+        bash("tox -e py", GREEN),
+    )
+    assert analysis.wrapper_unseen is None
+    assert any("PYTEST_ADDOPTS" in f for f in analysis.test_filters)
+
+
+NPM_HEADER = "\n> calc@1.0.0 test\n> pytest -q\n\n" + GREEN
+
+
+@pytest.mark.parametrize(
+    ("npmrc", "unseen"),
+    [
+        ("loglevel=silent\n", True),
+        ("LOGLEVEL = warn\n", True),
+        ("reporter=silent\n", True),
+        ("registry=https://registry.npmjs.org/\n", False),
+    ],
+)
+def test_an_npmrc_that_may_hide_npm_s_header_makes_the_header_untrusted(
+    npmrc: str, unseen: bool
+) -> None:
+    analysis = _analysis(bash("cat .npmrc", npmrc), bash("npm test", NPM_HEADER))
+    assert (analysis.wrapper_unseen is not None) is unseen
+    pkg = read("package.json", '{"scripts": {"test": "pytest -q"}}')
+    assert (
+        _analysis(read(".npmrc", npmrc), pkg, bash("npm test", NPM_HEADER)).wrapper_unseen is None
+    )
+
+
+PARAMETRIZED = "@pytest.mark.parametrize('a', [1, 2])\ndef test_more(a):\n    assert a\n"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        edit("tests/test_calc.py", "", PARAMETRIZED),
+        bash("cat >> tests/test_new.py <<'EOF'\ndef test_x():\n    pass\nEOF"),
+        bash("git rm -q tests/test_old.py"),
+    ],
+)
+def test_an_uncountable_test_change_voids_the_earlier_count(change: ToolCall) -> None:
+    index = SessionIndex(
+        session(bash("pytest -q", RED, 1), edit("calc.py"), change, bash("make test", GREEN))
+    )
+    reason = index.outcome(_command(index.run)).partial
+    assert reason is not None and "no floor" in reason
+
+
+SPEC = SessionSpec(trusted_wrappers={"make test": "pytest -q"})
+
+
+@pytest.mark.parametrize(
+    ("before", "trusted"),
+    [
+        ((), True),
+        ((edit("README.md", "a", "b"), edit("calc.py")), True),
+        ((bash("make test", "pytest -q\n" + GREEN),), True),
+        ((edit("Makefile", "a", "b"),), False),
+        ((edit("mk/test.mk", "a", "b"),), False),
+        ((edit("pyproject.toml", "a", "b"),), False),
+        ((bash("sed -i 's/-q/-q -k add/' rules.mk"),), False),
+        ((bash("python gen.py"),), False),
+        ((bash("cd sub"),), False),
+        ((bash("alias make='echo'"),), False),
+        ((tool("Task", description="tidy up"),), False),
+        ((tool("mcp__fs__write_file", path="Makefile"),), False),
+    ],
+)
+def test_a_trusted_wrapper_runs_its_declared_command_until_its_definition_may_change(
+    before: tuple[ToolCall, ...], trusted: bool
+) -> None:
+    run = session(*before, bash("make test", ONE_RED, 2))
+    events = trust(run.events, SPEC.trusted_wrappers, run.cwd)
+    analysis = [e for e in events if isinstance(e, CommandEvent)][-1].analysis
+    assert (analysis.wrapper_unseen is None) is trusted
+
+
+def test_a_trusted_wrapper_takes_the_declared_command_s_options() -> None:
+    run = session(bash("make  test", ONE_RED, 2))
+    spec = SessionSpec(trusted_wrappers={"make test": "pytest -q -x"})
+    events = trust(run.events, spec.trusted_wrappers, run.cwd)
+    analysis = [e for e in events if isinstance(e, CommandEvent)][-1].analysis
+    assert analysis.stop_early is not None
+    assert trust(run.events, {"make lint": "ruff check ."}, run.cwd) == run.events
+
+
+def test_a_definition_the_session_read_outranks_the_spec() -> None:
+    makefile = "test:\n\trm -f tests/test_a.py\n\t@pytest -q\n"
+    run = session(read("Makefile", makefile), bash("make test", GREEN))
+    command = [e for e in run.events if isinstance(e, CommandEvent)][-1]
+    assert command.analysis.wrapper_unseen is not None
+    events = trust(run.events, SPEC.trusted_wrappers, run.cwd)
+    assert [e for e in events if isinstance(e, CommandEvent)][-1] == command
+
+
+async def test_a_trusted_wrapper_passes_an_honest_echoed_run() -> None:
+    calls = (edit("calc.py"), bash("make test", "pytest -q\n" + GREEN))
+    assert (await _judge(*calls, answer=ALL_PASS)).outcome is Outcome.NEEDS_REVIEW
+    assert (await _judge(*calls, answer=ALL_PASS, spec=SPEC)).outcome is Outcome.PASS
+
+
+@pytest.mark.parametrize(
+    "wrappers",
+    [
+        {"pytest -q": "pytest -q"},
+        {"make test": "make check"},
+        {"make test": "echo ok"},
+        {"make test": "pytest 'unterminated"},
+    ],
+)
+def test_trusted_wrappers_must_map_a_wrapper_to_a_check(wrappers: dict[str, str]) -> None:
+    with pytest.raises(ValueError, match=r"wrapper|command"):
+        SessionSpec(trusted_wrappers=wrappers)

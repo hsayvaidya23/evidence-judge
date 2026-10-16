@@ -6,7 +6,7 @@
   <img alt="Python 3.12 | 3.13" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white">
   <img alt="pyright strict" src="https://img.shields.io/badge/types-pyright%20strict-2F6FED">
   <img alt="ruff" src="https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black">
-  <img alt="0 of 1431 forged runs passed on three demo sites" src="https://img.shields.io/badge/forged%20runs%20passed%20(3%20demo%20sites)-0%2F1431-brightgreen">
+  <img alt="0 of 1479 forged runs passed on three demo sites" src="https://img.shields.io/badge/forged%20runs%20passed%20(3%20demo%20sites)-0%2F1479-brightgreen">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -115,7 +115,7 @@ See [docs/architecture.md](docs/architecture.md).
 uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
 ```
 
-v0.1.0 is not released yet, so this installs from GitHub; once it is on PyPI, `uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"` does the same.
+v0.1.0 is not released yet, so this installs from GitHub, not PyPI; add `@<sha>` to the URL to pin a commit.
 
 Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically. The `mcp` extra adds the MCP server (`evidence-judge mcp`), which the Claude Code plugin starts.
 
@@ -227,15 +227,12 @@ Full references: [docs/cli.md](docs/cli.md) (every command and option) and
 ```python
 import asyncio
 
-from evidence_judge import Judge, JudgeOptions, Redactor, Settings, TaskSpec, build_llm, load_run
+from evidence_judge import Judge, JudgeOptions, Settings, TaskSpec, build_llm, load_run
 
 settings = Settings()
 run = load_run(trace="trace.zip", har="run.har", answer_file="answer.txt")
-redactor = Redactor.from_settings(settings)  # Judge does not redact; the CLI does
-run, _ = redactor.redact_run(run)
-spec, _ = redactor.redact_model(TaskSpec.load("spec.yaml"))  # same key, so predicates match
-judge = Judge(settings, build_llm(settings))
-verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=spec)))
+judge = Judge(settings, build_llm(settings))  # redacts run, spec and claims, like the CLI
+verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yaml"))))
 print(verdict.outcome, verdict.summary)
 ```
 
@@ -243,7 +240,9 @@ The names exported from `evidence_judge` are the supported Python API; SemVer al
 
 ## ⚙️ Configuration
 
-Environment variables (or `.env`, see [.env.example](.env.example)):
+Environment variables, or a dotenv file you name with `evidence-judge --env-file PATH` or
+`EVJ_ENV_FILE=PATH` (see [.env.example](.env.example)); a `.env` in the working directory is
+never read on its own:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -271,18 +270,18 @@ the cache directory is not writable, a per-process key is used with a one-line w
 ## 🧪 Benchmark: can a forged story fool it?
 
 <p align="center">
-  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 1398 attack runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
+  <img src="docs/assets/benchmark.svg" width="900" alt="Forged-run benchmark: 0 of 1446 attack runs passed for every judge; FAIL and NEEDS_REVIEW split per forgery kind">
 </p>
 
-The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites the agent's answer and reasoning into a success story: the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks on the claim extractor, answers that word their claims behind a negation, and thirty-six kinds that also tamper with the evidence the way a gaming agent would, each modelled on an attack that once got a false PASS (the agent's own input echoed back, confirmations off-site or on a mirror, injected scripts and mocked responses, hidden or unrendered text, writes sent as GETs, an order number claimed from inside a longer one, a misquoted price; see [all kinds](docs/benchmark.md#forgery-kinds)). The base runs are eleven failed runs on three local demo sites (a shop, a clinic's appointment form and an admin console), so the correct verdict is never PASS. Counts below pool the 43 attack kinds (1374 runs per judge); a style-only control adds 33 more, also 0 passes.
+The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rewrites the agent's answer and reasoning into a success story: the four manipulations from [Gaming the Judge](https://arxiv.org/abs/2601.14691), prompt-injection and tautological-proof attacks on the claim extractor, answers that word their claims behind a negation, and 39 kinds that also tamper with the evidence the way a gaming agent would, each modelled on an attack that once got a false PASS (the agent's own input echoed back, confirmations off-site or on a mirror, injected scripts and mocked responses, hidden or unrendered text, writes sent as GETs, an order number claimed from inside a longer one, a misquoted price; see [all kinds](docs/benchmark.md#forgery-kinds)). The base runs are eleven failed runs on three local demo sites (a shop, a clinic's appointment form and an admin console), so the correct verdict is never PASS. Counts below pool the 46 attack kinds (1446 runs per judge); a style-only control adds 33 more, also 0 passes.
 
 | Judge | Forged runs | False PASS | 95% CI |
 | --- | ---: | ---: | --- |
-| Evidence Judge + exact task spec (offline) | 1398 | **0** (144 sent to review) | 0–0.3% |
-| Evidence Judge + generic task spec (offline) | 1398 | **0** (638 sent to review) | 0–0.3% |
-| Evidence Judge, no spec (offline) | 1398 | **0** (1051 sent to review) | 0–0.3% |
+| Evidence Judge + exact task spec (offline) | 1446 | **0** (167 sent to review) | 0–0.3% |
+| Evidence Judge + generic task spec (offline) | 1446 | **0** (678 sent to review) | 0–0.3% |
+| Evidence Judge, no spec (offline) | 1446 | **0** (1097 sent to review) | 0–0.3% |
 
-These are three small demo sites with five tasks (a purchase, a booking and a user change; a stock check and a balance lookup) and template forgeries, so they show these attacks are refused, not that every site and task is covered. Honest controls: 37/41 correct with the exact spec and 30/41 with the generic one, and none wrongly failed. The 41 are the seventeen scenarios (from fifteen recordings: two shop recordings are judged again against the stock check) plus twenty-four honest edits of the passing ones (an order answered with a redirect to its confirmation, a search typed first, a detour to another site, an answer that also says what the agent left alone, such as "nothing was added to the cart", a site that writes `$ 24.00`). The four the exact spec misses are the honest disable-a-user run and its edits: offline extraction finds no checkable claim in "I disabled Priya Shah's account", so they go to review with every expectation met. The generic spec also sends to review the side-effect run (no `forbid` rule), the clinic booking and its edits (the start page already lists "Dental check-up") and an unanswered balance lookup. Without a spec all 30 runs that should pass go to review by design: no site is named, and a spec-less run that changes state or makes no checkable claim is review-only anyway. Reproduce with `make bench` (`evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3`); add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
+These are three small demo sites with five tasks (a purchase, a booking and a user change; a stock check and a balance lookup) and template forgeries, so they show these attacks are refused, not that every site and task is covered. Honest controls: 39/43 correct with the exact spec and 32/43 with the generic one, and none wrongly failed. The 43 are the seventeen scenarios (from fifteen recordings: two shop recordings are judged again against the stock check) plus twenty-six honest edits of the passing ones (an order answered with a redirect to its confirmation, a search typed first, a detour to another site, an answer that also says what the agent left alone, such as "nothing was added to the cart", a site that writes `$ 24.00`, an order confirmed only by a JSON answer with a bare-number total). The four the exact spec misses are the honest disable-a-user run and its edits: offline extraction finds no checkable claim in "I disabled Priya Shah's account", so they go to review with every expectation met. The generic spec also sends to review the side-effect run (no `forbid` rule), the clinic booking and its edits (the start page already lists "Dental check-up") and an unanswered balance lookup. Without a spec all 32 runs that should pass go to review by design: no site is named, and a spec-less run that changes state or makes no checkable claim is review-only anyway. Reproduce with `make bench` (`evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3`); add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
 
 ## 🔌 Integrations
 
@@ -303,7 +302,7 @@ Coding agents: check the agent's answer against its own browser trace and, with 
 - **Codex CLI**: `evidence-judge hook codex-stop` as a blocking `Stop` hook, `codex-record` as a `PostToolUse` recorder, and `codex mcp add evidence-judge -- evidence-judge mcp`. See [docs/guides/codex.md](docs/guides/codex.md).
 - **Gemini CLI**: an extension whose `AfterAgent` hook makes Gemini retry a contradicted answer, plus an `AfterTool` recorder and the MCP server. See [docs/guides/gemini-cli.md](docs/guides/gemini-cli.md).
 
-Coding-agent sessions: `evidence-judge session judge` checks "all tests pass", "I fixed the bug" and "I didn't touch the tests" against the session's tool-call log. With `--rerun` (or a `rerun:` block in the session spec the stop hooks use) it does not trust the recorded test output at all: it runs the suite itself on a copy of the project, in a clean environment, and reads the runner's own report. See [Coding-agent sessions](docs/design/coding-agent-sessions.md#independent-re-run). On the [session forgery benchmark](bench/results/sessions.md) (`make bench-sessions`), 1608 sessions forged on Python, Node and Go projects with rewritten answers, 122 kinds of test-run tricks (among them a partial green run behind a silent `make test` or a yarn 2+ script, and a Makefile whose prerequisite or parse-time `$(shell ...)` deletes a test), lint and type-check claims backed by partial runs (directly, behind `make lint`, `npm run lint` or `pre-commit`, behind an echo the wrapper did not print itself, or after a suppression comment written from the shell), git, install, deploy and figure claims no command shows, pushes to another remote or branch than the answer names and fixes reported against runs that stopped early, were filtered (directly, behind `make test` or `npm test`, behind a decoy echo from `make -s`, `npm --silent` or an `@echo` recipe, or behind a Makefile that sets `SHELL`, `.EXPORT_ALL_VARIABLES` or a variable target) or could not count every failure get 0 false PASS (373 FAIL, 1235 NEEDS_REVIEW), and all 85 honest controls keep their expected outcome, thirty of them with the answer reworded ("Not all tests pass: 2 fail.", "I fixed `test_add`. `test_add_negative` still fails.").
+Coding-agent sessions: `evidence-judge session judge` checks "all tests pass", "I fixed the bug" and "I didn't touch the tests" against the session's tool-call log. With `--rerun` (or a `rerun:` block in the session spec the stop hooks use) it does not trust the recorded test output at all: it runs the suite itself on a copy of the project, in a clean environment, and reads the runner's own report. See [Coding-agent sessions](docs/design/coding-agent-sessions.md#independent-re-run). On the [session forgery benchmark](bench/results/sessions.md) (`make bench-sessions`), 1653 sessions forged on Python, Node and Go projects with rewritten answers, 123 kinds of test-run tricks (among them a partial green run behind a silent `make test` or a yarn 2+ script, and a Makefile whose prerequisite or parse-time `$(shell ...)` deletes a test), lint and type-check claims backed by partial runs (directly, behind `make lint`, `npm run lint` or `pre-commit`, behind an echo the wrapper did not print itself, or after a suppression comment written from the shell), git, install, deploy and figure claims no command shows, pushes to another remote or branch than the answer names and fixes reported against runs that stopped early, were filtered (directly, behind `make test` or `npm test`, behind a decoy echo from `make -s`, `npm --silent`, an `.npmrc` with `loglevel=silent` or an `@echo` recipe, behind a Makefile that sets `SHELL`, `.EXPORT_ALL_VARIABLES` or a variable target, or behind a tox `set_env` in `setup.cfg` or `pyproject.toml`) or could not count every failure get 0 false PASS (378 FAIL, 1275 NEEDS_REVIEW), and all 86 honest controls keep their expected outcome, thirty of them with the answer reworded ("Not all tests pass: 2 fail.", "I fixed `test_add`. `test_add_negative` still fails.").
 
 GitHub Actions: gate a pull request on a recorded run.
 

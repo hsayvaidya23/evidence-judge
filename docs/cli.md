@@ -17,10 +17,12 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | `schema` | Print the JSON Schema of the verdict format |
 | `version` | Print the evidence-judge version (also `evidence-judge --version`) |
 
-v0.1.0 is not released yet, so install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. The `pip install "evidence-judge[...]"` forms below work once it is on PyPI.
+v0.1.0 is not released yet, so install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. Add `@<sha>` to the URL to pin a commit.
 
-Settings (models, budget, redaction, cache) come from environment variables or a `.env` file;
-see the [configuration reference](reference/configuration.md).
+Settings (models, budget, redaction, cache) come from environment variables, plus a dotenv file
+only when you name one with the global `--env-file PATH` option (before the command) or
+`EVJ_ENV_FILE`; a `.env` in the working directory is never read on its own. See the
+[configuration reference](reference/configuration.md).
 
 Exit codes are the same for every command: `0` pass, `1` fail, `2` needs review, `3` bad input
 (missing or unreadable evidence, an invalid spec, claims file or setting, a corrupt redaction key
@@ -70,7 +72,7 @@ At least one of `--trace`, `--har` or `--browser-use` is required.
 | `--out FILE` | Write the verdict JSON here (schema: `evidence-judge schema`) |
 | `--html FILE` | Write the self-contained HTML report here. Screenshots are embedded unredacted |
 | `--offline` | No LLM calls; heuristic claim extraction and no screenshot checks. Also never reads or creates the redaction key file. Default: off, but runs offline anyway on the `anthropic` backend when no `ANTHROPIC_API_KEY` is set |
-| `--llm BACKEND` | Where LLM calls go for this run: `anthropic` (the API, with `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to run that CLI headless on your existing login, with its tools off. Default: `EVJ_LLM_BACKEND`. A CLI that is missing or not logged in exits `4`. `--offline` wins over it |
+| `--llm BACKEND` | Where LLM calls go for this run: `anthropic` (the API, with `ANTHROPIC_API_KEY`), or `claude-code`, `codex` or `gemini` to run that CLI headless on your existing login, with its tools off. Default: `EVJ_LLM_BACKEND`. A CLI that is missing or not logged in, or `anthropic` without `ANTHROPIC_API_KEY`, exits `4`; without `--llm`, a missing key judges offline. `--offline` wins over it |
 | `--no-redact` | Keep secrets and PII in evidence, prompts and reports. Use only on synthetic data |
 | `--quiet`, `-q` | Print nothing; only set the exit code |
 | `--debug` | Re-raise internal errors with a traceback instead of exiting `4` |
@@ -139,7 +141,7 @@ Offline, redaction tokens are keyed by a digest of the files in the run director
 ## `evidence-judge mcp`
 
 Runs an MCP server exposing `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and
-`find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp]"`); without it the
+`find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`); without it the
 command exits `3`. See the [MCP server guide](guides/mcp.md) for client setup.
 
 ```bash
@@ -185,7 +187,7 @@ which format the file looks like.
 | `--log-anchor FILE` | The evidence log's head anchor (default: `<session>/log-head.json` in the `--log-key` directory, else `<state>/<session>/log-head.json`) |
 | `--trusted-log` | Assert that the log, its key and anchor were out of the agent's reach (a sandbox that denies the state directory, a container, another OS user). Without it, an agent running as your user could have read the key and signed a forged log, so a verified log is still `partial`. The spec's `trusted_evidence_log: true` does the same |
 | `--answer TEXT` / `--answer-file FILE` | Judge this final answer instead of the recorded one |
-| `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block |
+| `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block, `trusted_wrappers` (what a project wrapper runs: `{"make test": "pytest -q"}`; a run through it the session does not show is judged as that command until the session may have changed the wrapper's definition) |
 | `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
 | `--out FILE` | Write the verdict JSON (schema `evidence-judge/run-verdict@1`) here |
 | `--offline` | No LLM calls; heuristic claim extraction only |

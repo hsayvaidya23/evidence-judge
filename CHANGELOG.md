@@ -48,6 +48,12 @@ The first release.
   `verification` (`rerun` or `transcript`); `--require-rerun` refuses a pass without a re-run;
   `session rerun` judges a re-run without a session record; `rerun.include` adds gitignored
   paths to the copy and `rerun.sandbox` runs the command under an OS sandbox.
+- A session spec's `trusted_wrappers` (`{"make test": "pytest -q"}`) declares what a project
+  wrapper runs, so an honest run through a wrapper the session does not show (`make test`
+  echoing `pytest -q` with no Makefile shown) can pass. The declaration stops applying once the
+  session may have changed what the wrapper runs (an edit or shell write to anything but source
+  code or prose, a harness change, a `cd`, a subagent or an MCP tool), and a definition the
+  session showed outranks it.
 
 **Integrations**
 
@@ -76,8 +82,8 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1398 browser and 0 of 1608 session
-  forgeries pass, and 4 of 41 honest browser controls go to review offline.
+  Go toy projects with runner-specific tricks; 0 of 1446 browser and 0 of 1653 session
+  forgeries pass, and 4 of 43 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
   and got order #..."), so a claim reader that carries the negation over shows up in `make
@@ -105,9 +111,29 @@ The first release.
   Code, Codex CLI and Gemini CLI guides' descriptions, the README, the docs home page and the
   site description mention coding-agent sessions and the independent test re-run, not only
   browser traces.
+- **Breaking:** no `.env` file is read implicitly any more. Name a dotenv file with the global
+  `--env-file PATH` option or `EVJ_ENV_FILE=PATH`; real environment variables still win over
+  it. Anyone who kept settings in a `.env` next to where they run the CLI must pass it
+  explicitly.
+- Every install command in the docs (the MCP client snippets for Claude Code, Codex CLI and
+  Gemini CLI, and the `pip install` lines in the CLI and integrations pages) installs from the
+  GitHub repository until v0.1.0 is on PyPI, so none of them runs whatever is published under
+  the unclaimed PyPI name; a test keeps it that way.
+- The README and docs home page benchmark numbers match `bench/results` again (44 attack kinds,
+  1398 runs per judge, 37 evidence-tampering kinds, 37/41 honest controls), and a test fails
+  when they drift. The architecture page covers the session judge, hooks and MCP server, and a
+  new getting-started page walks through judging a Claude Code session.
+- `pre-commit` is a dev dependency, so the `pre-commit install` step in CONTRIBUTING works after
+  `make install`; the configuration reference lists every `EVJ_HOOK_*` variable; the verdict
+  schema example imports `RunVerdict` from `evidence_judge`; the install page says the
+  integrations read their own credentials; the sdist ships `Makefile` and `uv.lock`, and the
+  package declares the operating systems it is tested on (Linux and macOS).
 
 ### Fixed
 
+- `judge --llm anthropic` without `ANTHROPIC_API_KEY` now exits `4` and names the missing key,
+  like the CLI backends do when their CLI is missing, instead of judging offline and exiting
+  `0`. Without `--llm`, a missing key still judges offline.
 - An evidence log with no valid record now says "no valid evidence-log records were found"
   (with the first line's problem, such as "no version field") instead of "unsupported version
   None"; it is still bad input (exit 3).
@@ -347,6 +373,14 @@ The first release.
   check that may change files (a prerequisite's `rm tests/...` or `echo ... > conftest.py`)
   leaves the wrapper unseen and is checked like a command of its own, so a deleted test file or
   a written `conftest.py` is tampering.
+- A wrapper's echo no longer counts beside an `.npmrc` the session showed with a `loglevel`,
+  `silent`, `quiet` or `reporter` setting (npm then prints no header, so the script can print
+  one). A tox `setenv`/`set_env` now counts from a `setup.cfg`'s `[testenv]` sections and a
+  `pyproject.toml`'s `[tool.tox]` (its `legacy_tox_ini` or native `set_env` tables) as well as a
+  `tox.ini`, and one the judge cannot read (a `file|` line) leaves tox's echo unread. A silent
+  wrapper's green run is no longer measured against an earlier whole-suite count when the
+  session changed the tests since in a way the judge cannot count (a test written by a command,
+  a parametrize case, a removed or deleted test). 30 forged sessions passed before; none does now.
 - A lint or type-check claim no longer passes after a suppression comment written from the
   shell (`sed -i 's/$/  # noqa/'`, `perl -pi`, a heredoc or `echo` appended to a source file,
   `python -c` rewriting one), or on a `pre-commit run` without `--all-files`, with a hook id,
@@ -409,6 +443,34 @@ The first release.
   passing run as `$ 24.00`: before the fix its three runs went to review or failed with every
   spec, after it they pass. Bench: 0 of 1398 attacks pass; honest controls 37, 30 and 2 of 41
   correct (34, 27 and 2 of 38 plus the three new ones with each spec).
+- A price given only in a reasoning step no longer passes on a page that lists it for another
+  item: with "Total: $29.00" in the reasoning and "Bought it." as the answer, the total was
+  checked as `page_text` anywhere and passed while the order was charged $29.50. In a run whose
+  answer or reasoning asserts a purchase, every price or stated amount (answer or reasoning) is
+  now checked against what the site answered the order with. An honest reasoning step that
+  prices another item in such a run ("The Blue Kettle costs $29.00") now goes to review. New
+  forgery kind `reasoning_price` (write) plants the `listed_price` evidence with the price only
+  in the reasoning ("Total: $29.00.", "It came to $29.00.", "The price was $29.00."): 12 false
+  PASSes before the fix, none after.
+- An order answered in JSON with the price as a bare number now shows it: `result_contains:
+  ["$29.50"]` is met by `{"total": 29.5}`, `{"grandTotal": 29.5}` or `{"amount_cents": 2950}`
+  (minor units only when the key says so), in the currency of the nearest `currency` field
+  (`{"total": 29.5, "currency": "EUR"}` does not show `$29.50`). Numbers under any other key
+  (`order_id`, `qty`, `item_count`) show no price. New honest control `json_confirmation`
+  answers the order with `{"total": 24.0, "total_cents": 2400, "currency": "USD", "qty": 1}`
+  and strips the price from the pages after it: before the fix its two runs went to review with
+  every spec, after it they pass. New forgery kind `json_total` (write) answers the order with
+  another total beside a quantity and a line id equal to the claimed amount, the claimed amount
+  in euros, or in cents; none passed before or after.
+- One space between two digit groups in a money amount (`$24 100`) is no longer read as 24100:
+  it may be $24 followed by 100, so it meets neither `$24` nor `$24,100` (as text it still meets
+  `$24 100`). A second group or a decimal part settles it (`$1 024 100`, `24 100,00 €`).
+- With Claude, a claim about what a purchase cost keeps only predicates that check the order's
+  answer (a `POST`, `PUT` or `PATCH` to a named URL with the amount in `result_contains` or
+  `response_contains`); a `page_text`, `value` or other predicate on the amount is replaced by
+  the offline extractor's order predicate, so an amount listed on any page no longer proves it.
+  Bench: 0 of 1446 attacks pass (47 kinds); honest controls 39, 32 and 2 of 43 correct (37, 30
+  and 2 of 41 plus the two new ones with each spec).
 - The GitHub Action checks its boolean inputs: `offline`, `fail-on-review` and the new
   `upload-report` take `true` or `false` in any case, and any other value (`yes`, `1`) fails
   the step before anything is installed; before, everything but the exact string `true` was
@@ -462,5 +524,14 @@ The first release.
   recorded fixtures and benchmark forgery kinds, and the judge was changed until none of them
   passed. [docs/security-history.md](docs/security-history.md) has the full record, and
   [SECURITY.md](SECURITY.md) the threat model and its limits.
+- A `.env` in the working directory can no longer change settings. The GitHub Action runs in
+  `$GITHUB_WORKSPACE`, so a pull request's `.env` could set `EVJ_REDACT=false` (an unredacted
+  report uploaded as an artifact) or `EVJ_REVIEW_COVERAGE_THRESHOLD=0` (a needs-review run
+  passing); the CLI and MCP server read it the same way. The Action also warns when its
+  workflow sets `EVJ_REDACT=false`.
+- The Python API now redacts: `Judge.judge` redacts the run, spec and claims before claim
+  extraction and any LLM call when `EVJ_REDACT` is on, as SECURITY.md says. The CLI, MCP server
+  and Inspect scorer go through the same `Judge.redact`, so redaction happens once and the same
+  way everywhere; `JudgeOptions(redact=False)` marks inputs that are already redacted.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main

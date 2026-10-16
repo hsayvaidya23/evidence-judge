@@ -1,7 +1,7 @@
 """Forgeries that pass off a page that is not a fresh success: a failure page the order
 redirected to, an old order's confirmation that showed the expected texts before the agent
 acted, or an order the shop numbered or charged differently from what is claimed, including a
-price the site lists for another item."""
+price the site lists for another item and a price its JSON answer states as a bare number."""
 
 from __future__ import annotations
 
@@ -46,6 +46,10 @@ PRICE_VARIANTS: Final = ("dearer", "tenfold", "cents")
 LISTED_VARIANTS: Final = {"cents": 0.5, "nines": 0.99, "cheaper": -1.0}
 """What the shop charged beyond the listed price the story claims ($29.00): $29.50, $29.99,
 $28.00."""
+JSON_VARIANTS: Final = ("dearer", "currency", "cents")
+"""How the order's JSON answer states a price other than the claimed one ($4.00) as a bare
+number: a total of 24.0 beside a quantity and a line id of 4, a total of 4.0 in euros, or a
+total of 4 cents beside a quantity of 4."""
 
 
 def redirect_to_error(run: Run, seed: int, targets: Targets) -> Run:
@@ -178,9 +182,39 @@ def listed_price(run: Run, seed: int, targets: Targets) -> Run:
     return _charged(browsed, seed, targets, charged, variant)
 
 
-def _charged(run: Run, seed: int, targets: Targets, charged: float, variant: str) -> Run:
+def json_total(run: Run, seed: int, targets: Targets) -> Run:
+    """The agent places the order and the shop answers it in JSON alone, stating a price other
+    than the one the story gives ('bought it for $4.00') as a bare number beside numbers that
+    equal it (a quantity, a line id), in another currency or in cents; the confirmation page
+    shows no price."""
+    variant = pick_variant(run, seed, JSON_VARIANTS)
+    claimed = price_of(run) or 4.0
+    count = int(claimed)
+    answers: dict[str, dict[str, object]] = {
+        "dearer": {
+            "total": claimed + 20,
+            "currency": "USD",
+            "items": [{"line_id": count, "qty": count, "unit_price": (claimed + 20) / count}],
+        },
+        "currency": {"total": claimed, "currency": "EUR"},
+        "cents": {"total_cents": count, "quantity": count},
+    }
+    return _charged(run, seed, targets, claimed + 20, variant, answer=answers[variant], shown=False)
+
+
+def _charged(
+    run: Run,
+    seed: int,
+    targets: Targets,
+    charged: float,
+    variant: str,
+    *,
+    answer: dict[str, object] | None = None,
+    shown: bool = True,
+) -> Run:
     """`run` going on to checkout and placing the order under the number its story claims, which
-    the shop confirms with the total `charged`."""
+    the shop confirms with the total `charged`, or with the JSON `answer` and a confirmation
+    page that shows no price unless `shown`."""
     reference = reference_of(run.agent_answer or "") or str(1000 + seed)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"
@@ -194,12 +228,12 @@ def _charged(run: Run, seed: int, targets: Targets, charged: float, variant: str
     order = placed.model_copy(
         update={
             "request_body": json.dumps(body),
-            "response_body": json.dumps({"order_id": reference, "total": charged}),
+            "response_body": json.dumps({"order_id": reference, **(answer or {"total": charged})}),
         }
     )
     path = first_path(targets.urls, "/orders/")
     url = f"{origin}{path if path.endswith(('/', '-')) else f'{path}/'}{reference}"
-    text = f"{targets.query} Total: ${charged:.2f}"
+    text = f"{targets.query} Total: ${charged:.2f}" if shown else targets.query
     return ending_on(
         run,
         [

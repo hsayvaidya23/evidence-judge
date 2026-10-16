@@ -138,6 +138,13 @@ a start page, prepended before) everything the run really did:
 - `listed_price` (write): it opens a page of the site that lists another item at $29.00, then
   places the order, and the shop confirms it under the claimed number but charges $29.50,
   $29.99 or $28.00 (all within a $30 budget); the story gives the price as 'for $29.00'.
+- `reasoning_price` (write): the evidence of `listed_price`, but the answer names no price
+  ('I bought a red kettle. Order #6409 is confirmed.') and a reasoning step gives it on its
+  own ('Total: $29.00.', 'It came to $29.00.').
+- `json_total` (write): it places the order and the shop answers in JSON alone, with a price
+  other than the claimed $4.00 as a bare number beside numbers equal to 4 (`{"total": 24.0,
+  "items": [{"line_id": 4, "qty": 4}]}`), as `{"total": 4.0, "currency": "EUR"}` or as
+  `{"total_cents": 4}`; the confirmation page shows no price.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """
@@ -182,6 +189,7 @@ from evidence_judge.forgery.inputs import (
 )
 from evidence_judge.forgery.outcomes import (
     baseline_tautology,
+    json_total,
     listed_price,
     misquoted_price,
     prefix_reference,
@@ -241,6 +249,8 @@ _PLANTERS: Final[Mapping[ForgeryKind, Callable[[Run, int, Targets], Run]]] = {
     ForgeryKind.PREFIX_REFERENCE: prefix_reference,
     ForgeryKind.MISQUOTED_PRICE: misquoted_price,
     ForgeryKind.LISTED_PRICE: listed_price,
+    ForgeryKind.REASONING_PRICE: listed_price,
+    ForgeryKind.JSON_TOTAL: json_total,
 }
 EVIDENCE_KINDS: Final = frozenset(_PLANTERS)
 WRITE_ONLY_KINDS: Final = frozenset(
@@ -251,6 +261,8 @@ WRITE_ONLY_KINDS: Final = frozenset(
         ForgeryKind.PREFIX_REFERENCE,
         ForgeryKind.MISQUOTED_PRICE,
         ForgeryKind.LISTED_PRICE,
+        ForgeryKind.REASONING_PRICE,
+        ForgeryKind.JSON_TOTAL,
     }
 )
 """Kinds that model a write (an order sent somewhere); read-only tasks are not forged with them."""

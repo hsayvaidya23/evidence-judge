@@ -21,7 +21,9 @@ with `EVJ_SCREENSHOTS_TO_LLM=true` (see Limits).
 ## Redaction
 
 Redaction is **on by default** (`EVJ_REDACT=true`). It runs immediately after ingest, before
-claim extraction, before any LLM call and before any report is written. It covers:
+claim extraction, before any LLM call and before any report is written, in `Judge` itself, so
+the CLI, the MCP server, the Inspect scorer and the Python API (`Judge.judge`) all redact the
+same way. It covers:
 
 | Category | What is redacted |
 | --- | --- |
@@ -249,20 +251,28 @@ output, and only from a whole-suite run that ran to the end. A run through a wra
 test`, `npm test`, `tox`) counts as whole and run to the end only when the session shows what
 the wrapper ran: the wrapper's own echo of its command (npm's `> jest` header, tox's
 `commands[0]>` line, make's echo of a recipe line beside a shown Makefile with no silent
-recipe line) or a `Makefile`, `package.json`, justfile or `tox.ini` the session read whole; an
-echo counts only when the wrapper itself printed it (no `--silent`, `-s`, `tox -q`, and the
-package manager's banner opens the output), though a `loglevel=silent` set in an `.npmrc` or an
-exported `npm_config_loglevel` is not seen, so a script could then print a decoy banner. A
+recipe line) or a `Makefile`, `package.json`, justfile or `tox.ini` the session read whole, or
+the command a spec's `trusted_wrappers` declares for it until the session may have changed
+what it runs; an echo counts only when the wrapper itself printed it (no `--silent`, `-s`, `tox
+-q`, no quieting setting in an `.npmrc` the session showed, and the package manager's banner
+opens the output). A write to an `.npmrc` and an `npm_config_*` variable set or exported in the
+session keep the run from proving the suite, but an `.npmrc` the session never showed (the
+repository's or your home directory's) is not seen, so a script could then print a decoy
+banner. A
 Makefile is read only in a plain subset (no function call, `SHELL` or make variable, special
 target beyond a harmless few, or variable target), and a recipe line that may change files
 before the run is checked like a command of its own. Otherwise its pass or fail still counts, but it backs no count of failing tests and
 no "`test_x` is not among the failures", and its green run proves the whole suite passes only
 when it passed at least as many tests as an earlier whole-suite run of the same framework whose
-command the session showed (plus the tests the session added since). Gaps remain there: a
-silent recipe that filters out tests the session added by a command the judge cannot count, or
-deletes tests between the two runs, is measured against the earlier count only; a tox
-environment's `setenv` is seen only when the session showed `tox.ini` (not `setup.cfg`,
-`pyproject.toml` or a `file|` line); a noxfile is never read. And a claimed fix that admits failures without counting or naming them
+command the session showed (plus the tests the session added since, when every change since
+can be counted; a test written by a command, a parametrize case or a deleted test voids the
+earlier count). Gaps remain there: a tox environment's `setenv` is read from a `tox.ini`,
+`setup.cfg` or `pyproject.toml` the session showed (any of them, since which one tox reads may
+turn on a file the session did not show), but not from one it never showed; a noxfile, justfile
+settings and parameters and tox factor-conditional `commands` are never read; and an unseen
+wrapper (or a trusted one) can still change files while it runs, which nothing in the session
+shows. `trusted_wrappers` is as strong as the declaration in your spec: the judge cannot check
+that `make test` runs what you say it does. And a claimed fix that admits failures without counting or naming them
 passes when the tests failing at the end are a strict subset of those failing before the first
 change, a comparison that trusts the test names the runs printed. With `--require-rerun`, every
 count and the end of that comparison come from the judge's own run of the whole suite.
@@ -338,6 +348,11 @@ compromised agent:
   recordings there. The LLM cache and redaction key live outside the repository, in the per-user
   cache directory (`EVJ_CACHE_DIR`).
 - Never commit `.env`. API keys are read from the environment only.
+- No dotenv file is read unless it is named with `--env-file PATH` or `EVJ_ENV_FILE`. A `.env`
+  in the working directory is ignored, so in the GitHub Action (which runs in
+  `$GITHUB_WORKSPACE`), the MCP server or a plain CLI run, the checked-out repository cannot set
+  `EVJ_REDACT=false` or `EVJ_REVIEW_COVERAGE_THRESHOLD=0`. The workflow's own `env:` still
+  applies; the Action prints a warning when it turns redaction off.
 - Third-party GitHub Actions in the workflows and `action.yml` are pinned to full commit SHAs
   with a `# vX.Y.Z` comment (Dependabot keeps both current); a new one must be pinned the same
   way, which a unit test checks.

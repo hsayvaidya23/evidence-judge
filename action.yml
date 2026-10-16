@@ -121,6 +121,10 @@ runs:
           && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
           echo "::warning::offline is false but neither anthropic-api-key nor ANTHROPIC_API_KEY is set; judging offline"
         fi
+        case "$(printf '%s' "${EVJ_REDACT:-}" | tr '[:upper:]' '[:lower:]')" in
+          0 | false | f | no | n | off)
+            echo "::warning::EVJ_REDACT is false: the verdict and uploaded report may contain secrets" ;;
+        esac
         out=$(mktemp -d "$RUNNER_TEMP/evidence-judge.XXXXXX")
         args=(judge --out "$out/verdict.json" --html "$out/report.html")
         [ -n "$EJ_TRACE" ] && args+=(--trace "$EJ_TRACE")

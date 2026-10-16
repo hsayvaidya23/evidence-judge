@@ -72,7 +72,9 @@ def test_thirty_claims_over_two_thousand_long_snapshots_judge_within_budget() ->
     run = _long_run()
     judge = Judge(Settings(_env_file=None, cache_dir=None))  # pyright: ignore[reportCallIssue]
     start = time.perf_counter()
-    verdict = asyncio.run(judge.judge(run, JudgeOptions(offline=True, claims=_claims())))
+    verdict = asyncio.run(
+        judge.judge(run, JudgeOptions(offline=True, claims=_claims(), redact=False))
+    )
     elapsed = time.perf_counter() - start
     assert len(verdict.claims) == CLAIMS
     assert elapsed < BUDGET_S, f"judging took {elapsed:.2f}s"
