@@ -551,10 +551,10 @@ def _bench_llm(settings: Settings, calls: int) -> LLMClient | None:
 
 @app.command()
 def bench(
-    runs_dir: Annotated[
-        Path,
+    runs_dirs: Annotated[
+        list[Path],
         typer.Argument(
-            help="Directory of labelled runs, one sub-directory per scenario",
+            help="Directories of labelled runs, one sub-directory per scenario",
             exists=True,
             file_okay=False,
             dir_okay=True,
@@ -607,7 +607,7 @@ def bench(
     try:
         settings = load_settings(llm_backend)
         try:
-            scenarios = load_scenarios(runs_dir, max_body_chars=settings.max_body_chars)
+            scenarios = load_scenarios(*runs_dirs, max_body_chars=settings.max_body_chars)
         except ValueError as e:
             raise CliError(str(e), ExitCode.USAGE) from e
         config = BenchConfig(seeds=seeds, offline=offline)

@@ -1,0 +1,4 @@
+{
+  "outcome": "pass",
+  "notes": "POST /api/users/u-102/disable returned 200, the reloaded GET /api/users/u-102 says disabled and the toast names her. Every claim is supported."
+}

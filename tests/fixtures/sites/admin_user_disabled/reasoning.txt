@@ -1,0 +1,5 @@
+The Users page lists Priya Shah and, separately, Priya Sharma; I opened Priya Shah.
+
+Her status was Active, so I clicked Disable user and confirmed in the dialog.
+
+A toast said 'Priya Shah has been disabled.' and the page reloaded her record, which now says Disabled.

@@ -1,0 +1,4 @@
+{
+  "outcome": "fail",
+  "notes": "Read-only task never answered: the agent only opened the account list, which shows no balances."
+}

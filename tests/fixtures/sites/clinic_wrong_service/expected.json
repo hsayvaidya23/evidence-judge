@@ -1,0 +1,4 @@
+{
+  "outcome": "fail",
+  "notes": "The booking went through, but for a Hygiene clean, not a check-up: the service == checkup constraint fails and the confirmation page names the wrong service."
+}

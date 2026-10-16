@@ -1,0 +1,18 @@
+# A read-only task: nothing changes, and the balance is only on the account's own page.
+id: balance-acc-2041
+task: Look up the balance of account ACC-2041
+site: 127.0.0.1:56442
+expect:
+  - id: account_opened
+    description: Account ACC-2041's page was opened
+    any:
+      - {kind: url, contains: /accounts/ACC-2041, scope: any}
+  - id: balance_shown
+    description: Its balance was shown
+    any:
+      - {kind: page_text, contains: "$1,284.50", scope: any}
+forbid:
+  - id: no_writes
+    description: Looking up a balance never needs a state-changing request
+    any:
+      - {kind: request, method: POST, url_contains: [/api/]}

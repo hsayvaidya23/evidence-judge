@@ -1,0 +1,4 @@
+{
+  "outcome": "fail",
+  "notes": "The agent disabled Priya Sharma (u-107), not Priya Shah (u-102): the expected request is missing, the forbid rule matches and the toast names the wrong user."
+}

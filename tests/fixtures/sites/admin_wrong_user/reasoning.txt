@@ -1,0 +1,5 @@
+I opened the Users page and clicked the Priya entry.
+
+I clicked Disable user and confirmed.
+
+The status changed to Disabled.

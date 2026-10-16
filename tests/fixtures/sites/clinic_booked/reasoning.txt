@@ -1,0 +1,7 @@
+The home page lists the services and links to the booking form.
+
+I chose Dental check-up, opened the date picker and picked 3 November; the time list then offered 09:00 to 15:30, and I chose 10:00.
+
+I entered the patient's name and email and clicked Book appointment.
+
+The confirmation page said 'Appointment confirmed' with reference HD-1001.

@@ -1,0 +1,4 @@
+{
+  "outcome": "fail",
+  "notes": "The booking request was rejected with 422 (weekend date) and no confirmation was shown; the agent reports the failure honestly."
+}

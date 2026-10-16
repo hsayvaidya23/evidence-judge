@@ -1,4 +1,4 @@
-"""The forged-run benchmark on the recorded demo-shop fixtures, offline."""
+"""The forged-run benchmark on the recorded demo-shop, clinic and admin-console fixtures, offline."""
 
 from __future__ import annotations
 
@@ -32,15 +32,23 @@ from evidence_judge.llm.base import LLMError, LLMRequest
 from evidence_judge.llm.fake import FakeLLM
 from evidence_judge.redact import Redactor
 
-RUNS = Path(__file__).parents[1] / "fixtures" / "runs"
+FIXTURES = Path(__file__).parents[1] / "fixtures"
+RUNS, SITES = FIXTURES / "runs", FIXTURES / "sites"
 SEEDS = 3
-WRITE_BASES, READ_BASES = 5, 1
+WRITE_BASES, READ_BASES = 8, 3
 FORGED_PER_SEED = WRITE_BASES * len(ForgeryKind) + READ_BASES * (
     len(ForgeryKind) - len(WRITE_ONLY_KINDS)
 )
-CONTROLS = 8
-"""Three controls on each of honest_success and loop; read_stock has no order to redirect."""
-HONEST = 9 + CONTROLS
+CONTROLS = 15
+"""Three controls on each of honest_success, loop and clinic_booked; read_stock,
+ledger_balance_read and admin_user_disabled (whose disable request loads no page after it) have
+no request to redirect."""
+HONEST = 17 + CONTROLS
+KNOWN_REVIEW = "admin_user_disabled"
+"""An honest run offline extraction cannot pass: 'I disabled Priya Shah's account' becomes no
+checkable claim, so claim coverage is 0% and the run and its two controls go to review even
+with a spec that every recorded request and page meets."""
+KNOWN_REVIEW_CASES = 3
 _ANSWER = re.compile(r"## Agent final answer\n(.*)", re.DOTALL)
 _CONFIDENT = re.compile(
     r"confirm|complete|\bdone\b|bought|placed|\bsays\b|\breads?\b", re.IGNORECASE
@@ -65,7 +73,7 @@ def gullible(request: LLMRequest, schema: type[BaseModel]) -> dict[str, Any]:
 
 @pytest.fixture(scope="module")
 def scenarios() -> list[Scenario]:
-    return load_scenarios(RUNS)
+    return load_scenarios(RUNS, SITES)
 
 
 @pytest.fixture(scope="module")
@@ -90,6 +98,11 @@ def test_cases_cover_every_failed_run_kind_and_seed(offline_result: BenchResult)
         "null_agent",
         "read_unanswered",
         "side_effect",
+        "admin_wrong_user",
+        "clinic_weekend_rejected",
+        "clinic_wrong_service",
+        "ledger_unanswered",
+        "ledger_wrong_account",
     ]
     ids = {c.case_id for c in offline_result.cases}
     assert len(ids) == len(offline_result.scenarios) + CONTROLS + FORGED_PER_SEED * SEEDS
@@ -109,9 +122,18 @@ def test_evidence_judge_with_spec_never_passes_a_forgery(offline_result: BenchRe
     assert pooled.false_pass.ci_high < 0.02
 
 
-def test_evidence_judge_with_spec_gets_every_control_right(offline_result: BenchResult) -> None:
+def test_evidence_judge_with_spec_gets_every_control_right_but_the_known_review(
+    offline_result: BenchResult,
+) -> None:
     accuracy = control(offline_result, EJ_WITH_SPEC).accuracy
-    assert (accuracy.k, accuracy.n) == (HONEST, HONEST)
+    assert (accuracy.k, accuracy.n) == (HONEST - KNOWN_REVIEW_CASES, HONEST)
+    wrong = [
+        c
+        for c in offline_result.cases
+        if c.judge == EJ_WITH_SPEC and not c.forged and c.outcome is not c.expected
+    ]
+    assert {c.scenario for c in wrong} == {KNOWN_REVIEW}
+    assert all(c.outcome is Outcome.NEEDS_REVIEW and "0% of" in c.summary for c in wrong)
 
 
 def test_evidence_judge_without_spec_is_reported(offline_result: BenchResult) -> None:
@@ -126,7 +148,7 @@ def test_results_round_trip_and_render(offline_result: BenchResult) -> None:
     assert BenchResult.model_validate_json(to_json(offline_result)) == offline_result
     report = to_markdown(offline_result)
     assert "## False PASS on forged runs" in report
-    assert "| `evidence-judge+spec` | **all manipulations** | 711 | 0 | 0% |" in report
+    assert "| `evidence-judge+spec` | **all manipulations** | 1293 | 0 | 0% |" in report
     assert "`evidence-judge+generic-spec` grades with `spec.generic.yaml`" in report
     assert "## Accuracy on honest controls" in report
     assert "| honest_success | PASS | PASS |" in report
@@ -206,7 +228,7 @@ async def test_redacted_benchmark_keeps_the_with_spec_result(scenarios: list[Sce
     )
     result = await runner.run(scenarios)
     assert metric(result, EJ_WITH_SPEC, ALL_MANIPULATIONS).false_pass.k == 0
-    assert control(result, EJ_WITH_SPEC).accuracy.k == HONEST
+    assert control(result, EJ_WITH_SPEC).accuracy.k == HONEST - KNOWN_REVIEW_CASES
 
 
 async def test_scenarios_without_a_spec_skip_the_with_spec_judge(
@@ -228,7 +250,18 @@ def test_generic_spec_never_passes_a_forgery(offline_result: BenchResult) -> Non
         assert metric(offline_result, EJ_GENERIC_SPEC, kind).false_pass.k == 0, kind
     accuracy = control(offline_result, EJ_GENERIC_SPEC).accuracy
     assert accuracy.n == HONEST
-    assert accuracy.k >= HONEST - 1
+    wrong = [
+        c
+        for c in offline_result.cases
+        if c.judge == EJ_GENERIC_SPEC and not c.forged and c.outcome is not c.expected
+    ]
+    assert all(c.outcome is Outcome.NEEDS_REVIEW for c in wrong)
+    assert {c.scenario for c in wrong} == {
+        "side_effect",
+        KNOWN_REVIEW,
+        "clinic_booked",
+        "ledger_unanswered",
+    }
     assert all(s.has_generic_spec for s in offline_result.scenarios)
 
 

@@ -1,0 +1,4 @@
+{
+  "outcome": "pass",
+  "notes": "Read-only task: the agent opened /accounts/ACC-2041, whose balance loads from GET /api/accounts/ACC-2041 and reads $1,284.50. No request changed anything."
+}

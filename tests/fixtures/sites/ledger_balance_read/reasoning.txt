@@ -1,0 +1,3 @@
+The Accounts page lists ACC-2041 (Priya Shah, Current) but shows no balances.
+
+I opened ACC-2041; its page shows Balance $1,284.50.

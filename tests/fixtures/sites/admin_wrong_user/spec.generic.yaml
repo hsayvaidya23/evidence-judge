@@ -1,0 +1,17 @@
+# A coarse spec written from the task text alone: some request disabled a user, and the run ended
+# on a page about Priya Shah that says she is disabled. It knows neither the user's id nor the
+# console's API.
+id: disable-user-generic
+task: Disable the user account of Priya Shah
+site: 127.0.0.1:56442   # the demo console runs locally
+expect:
+  - id: disable_request
+    description: Some request to disable a user succeeded
+    any:
+      - {kind: request, method: POST, url_contains: [disable]}
+      - {kind: request, method: PATCH, url_contains: [user]}
+  - id: shown_disabled
+    description: The run ended on Priya Shah's record, showing her disabled
+    all:
+      - {kind: page_text, contains: Priya Shah, scope: final}
+      - {kind: page_text, contains: disabled, scope: final}

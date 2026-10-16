@@ -1,0 +1,4 @@
+{
+  "outcome": "fail",
+  "notes": "Read-only task answered from the wrong page: the agent opened ACC-2014 (digits swapped), whose balance is $9,310.00, and reported it for ACC-2041."
+}

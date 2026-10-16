@@ -41,7 +41,7 @@ media: ## Re-render the README animations and report screenshots (~9 min)
 	$(UV) run --with pillow python -m scripts.make_readme_media
 
 bench: ## Re-run the offline benchmark into bench/results/
-	$(UV) run evidence-judge bench tests/fixtures/runs --seeds 3 \
+	$(UV) run evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3 \
 		--out bench/results/offline-fixtures.json --markdown bench/results/offline-fixtures.md
 
 ci: lint typecheck test ## Everything CI runs except e2e

@@ -1,0 +1,7 @@
+I opened the booking form and chose Dental check-up.
+
+In the date picker I clicked 7 November instead of 3 November.
+
+I submitted the form; the clinic answered 'Please fix the errors below' and 'We are closed at weekends. Please choose a weekday.'
+
+I stopped there and reported that no appointment was booked.

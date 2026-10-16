@@ -17,6 +17,7 @@ from evidence_judge.core.verdict import Outcome
 from tests.unit.conftest import forged_run
 
 RUNS = Path(__file__).parents[1] / "fixtures" / "runs"
+SITES = Path(__file__).parents[1] / "fixtures" / "sites"
 
 
 def test_loads_every_labelled_fixture() -> None:
@@ -30,6 +31,21 @@ def test_loads_every_labelled_fixture() -> None:
     assert honest.run.task == "Buy a red kettle under $30"
     assert honest.run.agent_answer
     assert honest.run.network
+
+
+def test_loads_several_directories_in_order() -> None:
+    names = [s.name for s in load_scenarios(RUNS, SITES)]
+    assert names == sorted(p.name for p in RUNS.iterdir()) + sorted(p.name for p in SITES.iterdir())
+    by_name = {s.name: s for s in load_scenarios(SITES)}
+    assert by_name["clinic_booked"].run.task == "Book a dental check-up on 3 November 2026"
+    assert by_name["ledger_balance_read"].spec is not None
+    assert not by_name["ledger_balance_read"].spec.changes_state()
+
+
+def test_a_scenario_in_two_directories_is_rejected(tmp_path: Path) -> None:
+    shutil.copytree(RUNS / "null_agent", tmp_path / "null_agent")
+    with pytest.raises(BenchInputError, match="null_agent is in more than one directory"):
+        load_scenarios(RUNS, tmp_path)
 
 
 def test_forgery_bases_are_failed_and_null_runs() -> None:

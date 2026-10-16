@@ -16,6 +16,7 @@ from evidence_judge.llm.budget import Budget
 from evidence_judge.llm.fake import FakeLLM
 
 RUNS = Path(__file__).parents[1] / "fixtures" / "runs"
+SITES = Path(__file__).parents[1] / "fixtures" / "sites"
 runner = CliRunner()
 
 
@@ -77,12 +78,15 @@ def test_baseline_runs_with_a_configured_llm(monkeypatch: pytest.MonkeyPatch) ->
         return FakeLLM(handler=always_pass)
 
     monkeypatch.setattr(evidence_judge.llm.factory, "build_llm", build_llm)
-    result = runner.invoke(app, ["bench", str(RUNS), "--seeds", "1", "--with-llm-baseline"])
+    result = runner.invoke(
+        app, ["bench", str(RUNS), str(SITES), "--seeds", "1", "--with-llm-baseline"]
+    )
 
     assert result.exit_code == ExitCode.PASS, result.output
-    assert "| `llm-transcript` | **all manipulations** | 237 | 237 | 100% |" in result.output
+    assert "| `llm-transcript` | **all manipulations** | 431 | 431 | 100% |" in result.output
     assert budgets[0] is not None
-    assert budgets[0].max_cost_usd == pytest.approx(Settings().max_cost_usd * (9 + 9 + 243))
+    forged = 8 * 41 + 3 * 38
+    assert budgets[0].max_cost_usd == pytest.approx(Settings().max_cost_usd * (17 + 6 * 3 + forged))
 
 
 @pytest.mark.parametrize("flag", ["--out", "--markdown"])

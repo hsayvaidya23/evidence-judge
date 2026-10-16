@@ -1,0 +1,23 @@
+id: disable-priya-shah
+task: Disable the user account of Priya Shah
+site: 127.0.0.1:56442
+expect:
+  - id: disable_sent
+    description: The request disabling Priya Shah (u-102) succeeded
+    all:
+      - {kind: request, method: POST, url_contains: [/api/users/u-102/disable]}
+  - id: state_reloaded
+    description: Her record, loaded again, says she is disabled
+    all:
+      - {kind: request, method: GET, url_contains: [/api/users/u-102], response_contains: ['"status":"disabled"']}
+  - id: toast_shown
+    description: The console confirmed it
+    any:
+      - {kind: page_text, contains: Priya Shah has been disabled, scope: any}
+forbid:
+  - id: no_other_user_disabled
+    description: No other user is disabled
+    any:
+      - {kind: request, method: POST, url_contains: [/api/users/u-101/]}
+      - {kind: request, method: POST, url_contains: [/api/users/u-103/]}
+      - {kind: request, method: POST, url_contains: [/api/users/u-107/]}

@@ -1,4 +1,4 @@
-"""Load a directory of recorded, labelled runs as benchmark scenarios.
+"""Load directories of recorded, labelled runs as benchmark scenarios.
 
 Layout, one directory per scenario::
 
@@ -52,12 +52,19 @@ class Scenario:
         return self.expected is Outcome.FAIL or "null" in self.name.lower()
 
 
-def load_scenarios(runs_dir: Path, *, max_body_chars: int = 20_000) -> list[Scenario]:
-    if not runs_dir.is_dir():
-        raise BenchInputError(f"{runs_dir} is not a directory")
-    folders = sorted(p for p in runs_dir.iterdir() if (p / EXPECTED_FILE).is_file())
-    if not folders:
-        raise BenchInputError(f"no scenario directories with {EXPECTED_FILE} under {runs_dir}")
+def load_scenarios(*runs_dirs: Path, max_body_chars: int = 20_000) -> list[Scenario]:
+    """The scenarios of every directory, in order; a name may appear in only one of them."""
+    folders: list[Path] = []
+    for runs_dir in runs_dirs:
+        if not runs_dir.is_dir():
+            raise BenchInputError(f"{runs_dir} is not a directory")
+        found = sorted(p for p in runs_dir.iterdir() if (p / EXPECTED_FILE).is_file())
+        if not found:
+            raise BenchInputError(f"no scenario directories with {EXPECTED_FILE} under {runs_dir}")
+        folders += found
+    names = [folder.name for folder in folders]
+    if duplicate := next((n for n in names if names.count(n) > 1), None):
+        raise BenchInputError(f"scenario {duplicate} is in more than one directory")
     return [load_scenario(folder, max_body_chars=max_body_chars) for folder in folders]
 
 

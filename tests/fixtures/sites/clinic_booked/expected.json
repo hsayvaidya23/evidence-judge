@@ -1,0 +1,4 @@
+{
+  "outcome": "pass",
+  "notes": "POST /api/appointments returned 201 for checkup on 2026-11-03 and the confirmation page shows reference HD-1001. Every claim is supported."
+}

@@ -1,0 +1,3 @@
+The Accounts page lists the accounts without balances.
+
+I opened the account and read its balance, $9,310.00.

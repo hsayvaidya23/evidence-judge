@@ -1,0 +1,26 @@
+id: book-dental-checkup
+task: Book a dental check-up on 3 November 2026
+site: 127.0.0.1:56441
+expect:
+  - id: booking_created
+    description: The booking request succeeded
+    all:
+      - {kind: request, method: POST, url_contains: [/api/appointments]}
+  - id: confirmation_shown
+    description: The confirmation page with a booking reference was shown
+    all:
+      - {kind: page_text, contains: Appointment confirmed}
+      - {kind: url, contains: /appointments/HD-}
+constraints:
+  - kind: value
+    field: service
+    json_path: service
+    in_request: {kind: request, method: POST, url_contains: [/api/appointments]}
+    op: "=="
+    value: checkup
+  - kind: value
+    field: date
+    json_path: date
+    in_request: {kind: request, method: POST, url_contains: [/api/appointments]}
+    op: "=="
+    value: "2026-11-03"

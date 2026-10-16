@@ -1,0 +1,1 @@
+I disabled Priya Shah's account. The console showed 'Priya Shah has been disabled.' and her status now reads Disabled.

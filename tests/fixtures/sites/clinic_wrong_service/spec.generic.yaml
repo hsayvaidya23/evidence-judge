@@ -1,0 +1,18 @@
+# A coarse spec written from the task text alone, without looking at the recording or the site's
+# API: "some booking request succeeded and the run ended on a confirmation of a check-up on
+# 3 November 2026".
+id: book-checkup-generic
+task: Book a dental check-up on 3 November 2026
+site: 127.0.0.1:56441   # the demo clinic runs locally
+expect:
+  - id: booking_made
+    description: Some booking or appointment request succeeded
+    any:
+      - {kind: request, method: POST, url_contains: [appointment]}
+      - {kind: request, method: POST, url_contains: [booking]}
+  - id: confirmed
+    description: The run ended on a confirmation of the right appointment
+    all:
+      - {kind: page_text, contains: confirmed, scope: final}
+      - {kind: page_text, contains: check-up, scope: final}
+      - {kind: page_text, contains: 3 November 2026, scope: final}
