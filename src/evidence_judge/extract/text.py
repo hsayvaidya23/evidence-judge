@@ -58,7 +58,13 @@ _DO_SUPPORT = re.compile(
 """A negated auxiliary: the verbs it reverses are bare ('did not open, edit and save it')."""
 _NEGATED_NOUN = re.compile(r"^\W*(?:no|nothing|nobody|none|zero|neither)\b", re.I)
 _PASSIVE = re.compile(r"\b(?:was|were|is|are|been|being|be|got|gets)\b", re.I)
-_FINITE_PAST = re.compile(r"^\W*\w*[^\We]ed\b", re.I)
+_FINITE_PAST = re.compile(
+    r"^\W*(?:\w*[^\We]ed|bought|paid|got|made|went|saw|found|sent|left|gave|took|came|"
+    r"brought|chose|kept|knew|lost|met|ran|said|sold|spent|told|thought|won|wrote)\b",
+    re.I,
+)
+"""A verb only a finite past can be: '-ed' or a common irregular past unlike its bare form."""
+_NEGATED_PARTICIPLE = re.compile(r"^\W*not\s+(?!\w*thing\b)\w+ing\b", re.I)
 _INTENTION_TAIL = re.compile(
     r"\b(?:will|shall|going\s+to|plan\s+to|planning\s+to|want\s+to|need\s+to|needs\s+to|"
     r"about\s+to|try\s+to|trying\s+to|attempt\s+to|should|would|could|might|may|must|"
@@ -140,8 +146,9 @@ def negated_clauses(
     pass') that no `modelled` pattern accounts for, or when it continues a negated verb with ','
     or 'and' and has no subject of its own: 'never logged in, added it to the cart or placed an
     order', 'did not open, edit and save it'. A clause after a negated noun ('no problems,
-    placed the order') or a finite verb after a negated auxiliary ('didn't hit any errors, and
-    ordered it') says something of its own. Extractors claim nothing from a negated clause: a
+    placed the order') or a finite verb after a negated auxiliary or participle ('didn't see
+    any errors and bought it', 'Not wanting to overpay, compared prices') says something of its
+    own. Extractors claim nothing from a negated clause: a
     pattern that reads its verb could read it the wrong way round. Text in backticks is code,
     not a negation.
     """
@@ -172,11 +179,14 @@ def negated_clauses(
 def _carried(clause: str) -> Literal["any", "bare"] | None:
     """What a negated clause passes on to the subjectless clauses joined after it: nothing
     after a negated noun ('no problems'), unless a passive verb continues ('nothing was
-    changed, deleted'); bare verbs after a negated auxiliary ('did not open'); any verb after
-    'never' or 'not' ('never logged in')."""
+    changed, deleted'); bare verbs after a negated auxiliary ('did not open') or a negated
+    participle, which modifies the main clause without negating it ('Not wanting to overpay,
+    compared prices'); any verb after 'never' or 'not' ('never logged in')."""
     if _NEGATED_NOUN.match(clause):
         return "any" if _PASSIVE.search(clause) else None
-    return "bare" if _DO_SUPPORT.search(clause) else "any"
+    if _DO_SUPPORT.search(clause) or _NEGATED_PARTICIPLE.match(clause):
+        return "bare"
+    return "any"
 
 
 def asserted(sentence: str, start: int) -> bool:
