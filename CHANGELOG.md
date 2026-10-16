@@ -91,6 +91,13 @@ The first release.
   `session judge|rerun|inspect`. Piping the output (`| head -1`) keeps the verdict's exit code.
 - A public Python API exported from `evidence_judge`, and a documentation site.
 
+### Fixed
+
+- The offline session judge no longer FAILs honest reports worded "No tests failed.", "None of
+  the 3 tests failed.", "0/3 tests failed." or "1/3 tests pass.": zero, slash and worded counts
+  are read in the right direction, and a pattern-read claim that tests fail, contradicted by a
+  passing run, now needs review instead of failing the run.
+
 ### Security
 
 - Hardened over eighteen red-team rounds before release: each round's working attacks became

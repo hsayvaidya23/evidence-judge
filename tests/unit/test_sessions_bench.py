@@ -8,7 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from evidence_judge.sessions.bench import PROJECTS, TRICKS, cases, main, run_benchmark, to_markdown
+from evidence_judge.sessions.bench import (
+    PROJECTS,
+    REWORDED,
+    TRICKS,
+    cases,
+    main,
+    run_benchmark,
+    to_markdown,
+)
 from evidence_judge.sessions.edits import is_harness_path
 from evidence_judge.sessions.shell import analyse
 
@@ -27,6 +35,7 @@ async def test_no_forged_session_passes() -> None:
     markdown = to_markdown(result)
     assert "| **all** |" in markdown and "honest_success" in markdown
     assert "claude_code/node/honest_failure.jsonl" in markdown
+    assert sum('"' in name for name, _, _ in result.controls) == len(REWORDED)
     assert result.to_dict()["false_passes"] == 0
 
 
