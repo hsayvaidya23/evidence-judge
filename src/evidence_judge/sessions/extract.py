@@ -22,7 +22,7 @@ from pydantic import (
 from evidence_judge.core.claims import ClaimKind
 from evidence_judge.core.verdict import Usage
 from evidence_judge.extract.prompts import neutralize
-from evidence_judge.extract.text import quote_in, split_sentences
+from evidence_judge.extract.text import clause_spans, negated_clauses, quote_in, split_sentences
 from evidence_judge.llm.base import LLMClient, LLMRequest, Tier
 from evidence_judge.sessions.predicates import (
     PREDICATE_ADAPTER,
@@ -35,6 +35,7 @@ from evidence_judge.sessions.predicates import (
     TestResultPredicate,
     describe,
 )
+from evidence_judge.textnorm import PUNCT_MAP
 
 MAX_CLAIMS: Final = 20
 MAX_PREDICATES: Final = 4
@@ -75,16 +76,25 @@ _TESTS: Final = r"(?:tests?|specs?|test cases)"
 _RED_VERB: Final = r"(?:fail(?:s|ed|ing|ures?)?|red)"
 _GREEN_VERB: Final = r"(?:pass(?:es|ed|ing)?|green|succeed(?:s|ed)?)"
 _ZERO: Final = re.compile(
-    r"\b(?:0|no|none|zero|nothing)"
+    r"\b(?:0|no|none|zero|nothing|not\s+(?:a\s+single|one))"
     rf"(?:\s+(?:out\s+)?of(?:\s+(?:the|these|them|my))?(?:\s+{_N})?|\s*/\s*{_N})?"
     rf"(?:\s+{_TESTS})?(?:\s+(?:is|are|was|were|has|have))?(?:\s+(?:now|still))?"
     rf"\s+(?:(?P<fail>{_RED_VERB})|(?P<pass>{_GREEN_VERB}))\b",
     _I,
 )
-"""'No tests failed', '0/3 tests fail', 'none of them pass': a zero count flips the verb."""
+"""'No tests failed', '0/3 tests fail', 'none of them pass', 'not a single test failed': a zero
+count flips the verb."""
+_NOT_ALL: Final = re.compile(
+    rf"\b(?:not|far\s+from|no\s+longer)\s+(?:yet\s+)?(?:all|every)\b(?:\s+[\w-]+){{0,4}}?\s+"
+    rf"{_GREEN_VERB}\b|"
+    rf"\b(?:{_TESTS}|suite|they)\s+(?:(?:are|is|do|does)\s*(?:n't|not)|(?:are|is)\s+no\s+longer)"
+    rf"\s+(?:yet\s+)?(?:all\s+)?{_GREEN_VERB}\b",
+    _I,
+)
+"""'Not all tests pass', 'the tests don't all pass', 'the suite isn't green': some test fails."""
 _NO_LONGER_FAIL: Final = re.compile(
-    rf"\b(?:{_TESTS}|suite|it|they)\s+(?:no longer|don't|do not|doesn't|does not|never)"
-    r"\s+fail\b",
+    rf"\b(?:{_TESTS}|suite|it|they)\s+"
+    r"(?:no longer|don't|do not|doesn't|does not|didn't|did not|never)\s+fail\b",
     _I,
 )
 _PARTIAL: Final = re.compile(
@@ -95,7 +105,7 @@ _PARTIAL: Final = re.compile(
 """'1 of 3 tests passes', '1/3 passing': fewer than all of them pass, so the suite fails."""
 _COUNT_FAILED: Final = re.compile(
     rf"\b{_SOME}\s+(?:{_TESTS}\s+)?(?:(?:is|are)\s+)?(?:still\s+)?"
-    r"(?:failed|failing|failures?|errors?)\b",
+    r"(?:fail(?:s|ed|ing|ures?)?(?!-)|errors?)\b",
     _I,
 )
 _COUNT_PASSED: Final = re.compile(
@@ -103,7 +113,7 @@ _COUNT_PASSED: Final = re.compile(
 )
 _ALL_PASS: Final = re.compile(
     r"\b(?:all|every|each)\b(?:\s+[\w-]+){0,4}?\s+(?:tests?|specs?|test cases|checks)\b"
-    r"(?:\s+[\w-]+){0,3}?\s+(?:pass(?:es|ed)?|are passing|are green|succeed(?:ed)?)\b|"
+    r"(?:\s+[\w-]+){0,3}?\s+(?:pass(?:es|ed)?|(?:are|is) (?:passing|green)|succeed(?:ed)?)\b|"
     r"\b(?:the\s+)?(?:full\s+|whole\s+|entire\s+)?(?:test\s+suite|tests|suite)\s+"
     r"(?:now\s+|all\s+)?(?:pass(?:es|ed)?|is passing|are passing|is green|are green|succeeds?)\b|"
     r"\btests?\s+(?:are\s+|is\s+)?(?:all\s+)?green\b|\ball green\b|"
@@ -228,23 +238,67 @@ _FILE_RULES: Final[tuple[tuple[re.Pattern[str], Literal["add", "delete"]], ...]]
 )
 
 
+_MODELLED_NEGATIONS: Final = (
+    _ZERO,
+    _NOT_ALL,
+    _NO_LONGER_FAIL,
+    _UNTOUCHED,
+    _BUILD,
+    _LINT,
+    _TYPECHECK,
+)
+"""The negated wordings the patterns above read in the right direction."""
+_CONTRASTS: Final = frozenset({";", "but", "while", "whereas", "however", "although", "though"})
+_OUTCOME_WORD: Final = re.compile(rf"\b(?:{_RED_VERB}|{_GREEN_VERB}|errors?)\b", _I)
+
+
+def _past_clauses(sentence: str) -> list[tuple[int, int]]:
+    """Clauses about the past: those naming it ('the previously failing test now passes') and
+    those a bare time phrase leads into ('Before the fix, I ran the tests and 2 failed'), up to
+    a contrast ('but', ';')."""
+    past: list[tuple[int, int]] = []
+    leads = False
+    for start, end, separators in clause_spans(sentence):
+        clause = sentence[start:end]
+        leads = leads and not any(s in _CONTRASTS for s in separators)
+        if leads or _PAST.search(clause):
+            past.append((start, end))
+            leads = _OUTCOME_WORD.search(clause) is None
+    return past
+
+
+def _masked(sentence: str) -> tuple[str, bool]:
+    """The sentence (with ASCII quotes) with its past and negated clauses blanked, and whether
+    any was negated.
+
+    A clause with a negation no pattern here reads ('nothing was pushed', 'test_x isn't
+    passing') says nothing the extractor may claim, in either direction.
+    """
+    negated = negated_clauses(sentence, _MODELLED_NEGATIONS)
+    text = sentence.translate(PUNCT_MAP)
+    for start, end in [*negated, *_past_clauses(sentence)]:
+        text = text[:start] + " " * (end - start) + text[end:]
+    return text, bool(negated)
+
+
 def _sentence_claims(sentence: str) -> Iterator[_Claim]:
     untouched = _UNTOUCHED.search(sentence)
     if untouched and (predicate := _untouched_target(untouched)) is not None:
         yield ClaimKind.STATE, False, [predicate]
-    if _PAST.search(sentence) or _HEDGE.search(sentence):
+    if _HEDGE.search(sentence):
         return
-    outcomes = _test_outcomes(sentence)
+    text, negated = _masked(sentence)
+    outcomes = _test_outcomes(text)
     for outcome in outcomes:
         yield ClaimKind.OUTCOME, True, [outcome]
     for pattern, category in _BUILD_RULES:
-        if pattern.search(sentence):
+        if pattern.search(text):
             yield ClaimKind.OUTCOME, True, [BuildPredicate(category=category)]
-    yield from _command_claims(sentence)
+    yield from _command_claims(text)
     if untouched is None:
-        reports_fail = any(o.expect == "fail" for o in outcomes)
-        implies_pass = not reports_fail and (bool(outcomes) or _FEW.search(sentence) is None)
-        yield from _edit_claims(sentence, implies_pass)
+        reports_fail = negated or any(o.expect == "fail" for o in outcomes)
+        implies_pass = not reports_fail and (bool(outcomes) or _FEW.search(text) is None)
+        yield from _edit_claims(text, implies_pass)
 
 
 def _number(word: str) -> int:
@@ -256,7 +310,9 @@ def _test_outcomes(sentence: str) -> list[TestResultPredicate]:
     consumed once read: "0 of 3 tests failed" and "none of them fail" pass, "1/3 tests pass",
     "2 failures" and "still fail" fail. A sentence that also says "most" or "except" leaves the
     passing part unknown. Failing tests beside a separate "all tests pass" claim both."""
-    fails = passes = False
+    fails = _NOT_ALL.search(sentence) is not None
+    sentence = _NOT_ALL.sub(" ", sentence)
+    passes = False
     for match in _ZERO.finditer(sentence):
         passes |= match["fail"] is not None
         fails |= match["pass"] is not None

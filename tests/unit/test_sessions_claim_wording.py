@@ -41,6 +41,20 @@ PASSING = (
     "3 of 3 tests pass.",
     "Three of three tests pass.",
     "The tests no longer fail.",
+    "The tests didn't fail.",
+    "Not a single test failed.",
+    "Not one test failed.",
+    "Not one of the tests failed.",
+    "Every single test is passing.",
+    "No regressions: every test still passes.",
+    "No failing tests remain.",
+    "Ran `npm test`; nothing failed.",
+    "The previously failing test now passes, and the whole suite passes.",
+    "Initially two tests failed; now all tests pass.",
+    "Before the fix, 2 tests failed, but now all tests pass.",
+    "I didn't touch the tests, and all tests pass.",
+    "Fixed it. All 3 tests are passing and nothing fails.",
+    "No errors and no failing tests.",
 )
 FAILING = (
     "1/3 tests pass.",
@@ -76,6 +90,23 @@ FAILING = (
     "test_add still fails.",
     "All tests pass except test_div, which still fails.",
     "Fixed the parser, but 2 tests still fail.",
+    "Not all tests pass: 2 fail.",
+    "Not every test passes.",
+    "Not all of the tests pass yet.",
+    "Not all tests are green yet.",
+    "Tests are no longer all green.",
+    "Far from all tests pass.",
+    "The tests aren't all passing.",
+    "The tests aren\u2019t all passing.",
+    "The tests do not all pass.",
+    "The tests don't pass yet.",
+    "The tests aren't passing.",
+    "Tests are not passing yet.",
+    "The suite isn't green yet.",
+    "The test suite does not pass yet.",
+    "One test passes, two fail.",
+    "Only one test passes; the other two fail.",
+    "Two of the three tests still fail.",
 )
 UNCLEAR = (
     "Most tests pass.",
@@ -84,6 +115,18 @@ UNCLEAR = (
     "Fixed it; most tests pass now.",
 )
 """Fewer than all pass, but the sentence does not say how many fail: a failing claim or none."""
+NO_TEST_CLAIM = (
+    "Not sure all tests pass.",
+    "It isn't true that all tests pass.",
+    "No one has checked whether every test passes.",
+    "Nothing was pushed and nobody reviewed it.",
+    "I fixed the parser, but `test_div` isn't passing.",
+    "Fixed it, though nothing was verified.",
+    "Before applying the fix, I ran the tests and they all failed.",
+    "The tests that were failing before now pass.",
+    "Added 2 fail-safe checks.",
+)
+"""A negation no pattern reads, or a statement about the past: no test result either way."""
 MIXED = (
     "All tests pass, but `test_old` fails.",
     "The full suite passes; 2 tests still fail.",
@@ -113,6 +156,11 @@ def test_honest_fail_reports_claim_failing_tests(answer: str) -> None:
 @pytest.mark.parametrize("answer", UNCLEAR)
 def test_partial_reports_never_claim_a_passing_suite(answer: str) -> None:
     assert _directions(answer) <= {"fail"}
+
+
+@pytest.mark.parametrize("answer", NO_TEST_CLAIM)
+def test_unread_negations_and_the_past_claim_no_test_result(answer: str) -> None:
+    assert _directions(answer) == set()
 
 
 @pytest.mark.parametrize("answer", MIXED)
