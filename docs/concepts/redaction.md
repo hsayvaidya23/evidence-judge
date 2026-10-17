@@ -77,6 +77,6 @@ pass through. Free text is matched conservatively so prose stays readable: a pla
 name, test id or call after a secret's name (`grep -rn token src/auth`) is kept as written (see
 [SECURITY.md](../../SECURITY.md#limits)). Command lines are read as a shell reads them: a
 trailing backslash continues a command on the next line and an unclosed quote runs to the end of
-its line. Only the first 1,024 words of one command are read by tool; the rest get the free-text
-rules. Review reports before sharing them. `--no-redact` (or
+its line. A long command is read by tool in overlapping windows of 1,024 words, so a
+tool-specific form such as `curl -u user:X` is found at any word. Review reports before sharing them. `--no-redact` (or
 `EVJ_REDACT=false`) disables all of it; use it only on synthetic data.

@@ -121,7 +121,8 @@ fixes made during development are in the [security history](docs/security-histor
   read as text the agent typed, so a verdict does not depend on the key.
 - Credentials on command lines (`mysql -pX`, `curl -u user:X`, `sshpass -p`, `docker login -p`,
   `htpasswd -b`, `npm`/`aws` `config set`, `--token X`) are redacted by tool and flag, while
-  paths, file names and test ids after a secret's name stay readable.
+  paths, file names and test ids after a secret's name stay readable, at any word of a command
+  however long.
 - Command lines continued with a backslash, or cut off inside a quote, are redacted too, and
   command redaction runs in linear time (a line of 5,000 `--token` flags takes a fraction of a
   second, not minutes). A test id, path or small count after a known tool's secret flag
