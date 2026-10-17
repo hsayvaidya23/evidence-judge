@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import re
 import time
 from fnmatch import fnmatchcase
@@ -9,6 +10,7 @@ from pydantic import ValidationError
 
 from evidence_judge.core.verdict import Support
 from evidence_judge.sessions.checks import SessionIndex, check, path_matches
+from evidence_judge.sessions.checks.common import _Class, _glob_tokens
 from evidence_judge.sessions.models import CallStatus, SessionRun
 from evidence_judge.sessions.normalize import ToolCall, build_events
 from evidence_judge.sessions.predicates import (
@@ -1257,3 +1259,81 @@ def test_an_unplaceable_absolute_edit_is_placed_by_suffix() -> None:
         Support.CONTRADICTED
     )
     assert _check(EditPredicate(only=("src/**",)), removed)[0] is Support.CONTRADICTED
+
+
+@pytest.mark.parametrize("glob", ["/tests/**", "/tests/", "/tests"])
+def test_a_leading_slash_anchors_a_glob_to_the_session_directory(glob: str) -> None:
+    run = session(edit("tests/test_calc.py"))
+    assert _check(EditPredicate(path=glob, touched=False), run)[0] is Support.CONTRADICTED
+    assert _check(EditPredicate(path=glob), run)[0] is Support.SUPPORTED
+    assert _check(EditPredicate(only=(glob,)), run)[0] is Support.SUPPORTED
+    nested = session(edit("sub/tests/test_calc.py"))
+    assert _check(EditPredicate(path=glob, touched=False), nested)[0] is Support.SUPPORTED
+    assert _check(EditPredicate(only=(glob,)), nested)[0] is Support.CONTRADICTED
+
+
+def test_unanchored_globs_keep_their_depth() -> None:
+    assert path_matches("tests/**", f"{CWD}/tests/a.py", CWD)
+    assert not path_matches("tests/**", f"{CWD}/sub/tests/a.py", CWD)
+    assert path_matches("tests/", f"{CWD}/sub/tests/a.py", CWD)
+    assert not path_matches("/tests/", f"{CWD}/sub/tests/a.py", CWD)
+    assert path_matches("/calc.py", f"{CWD}/calc.py", CWD)
+    assert not path_matches("/calc.py", f"{CWD}/src/calc.py", CWD)
+
+
+@pytest.mark.parametrize(
+    "glob",
+    ["//tests/**", "/tests//a.py", "~/tests/**", "C:/tests/**", "c:tests", "../tests/**",
+     "tests/../a.py", "/./tests", "tests/[/]x.py", "tests/[z-a].py", "/", "//"],
+)  # fmt: skip
+def test_globs_outside_the_session_directory_are_rejected(glob: str) -> None:
+    with pytest.raises(ValidationError):
+        EditPredicate(path=glob, touched=False)
+
+
+_GLOB_ATOMS = ("a", "Z", "9", "_", "-", ".", "*", "?", "[abc]", "[a-z]", "[!_]", "[]x]", "[!]]",
+               "[a-]", "~", ":", "[", "!", "/")  # fmt: skip
+
+
+def _witness(glob: str) -> str:
+    pool = "abcxyzAZ09_-.~:!]["
+    out = []
+    for token in _glob_tokens(glob.rstrip("/").removeprefix("/")):
+        if isinstance(token, _Class):
+            out.append(next(c for c in pool if token.matches(c)))
+        elif token in ("**", "*"):
+            out.append("w")
+        elif token == "?":
+            out.append("q")
+        elif token != "**/":
+            out.append(token)
+    return "".join(out)
+
+
+def test_every_accepted_glob_matches_some_path_under_the_root() -> None:
+    rng = random.Random(132)
+    accepted = 0
+    for _ in range(20000):
+        glob = "".join(rng.choice(_GLOB_ATOMS) for _ in range(rng.randint(1, 7)))
+        try:
+            predicate = EditPredicate(path=glob, touched=False)
+        except ValidationError:
+            continue
+        accepted += 1
+        assert predicate.path is not None
+        path = f"{CWD}/{_witness(predicate.path)}"
+        assert path_matches(predicate.path, path, CWD), (glob, path)
+    assert accepted > 2000
+
+
+def test_a_touched_claim_placed_by_an_inferred_directory_says_so() -> None:
+    events, _ = build_events([edit("src/app.py")], None)
+    rootless = session().model_copy(update={"cwd": None, "events": events})
+    status, reason = _check(EditPredicate(path="src/app.py"), rootless)
+    assert status is Support.SUPPORTED and "inferred directory" in reason and "`cwd`" in reason
+    events, _ = build_events([bash("touch /elsewhere/src/app.py")], None)
+    by_command = session().model_copy(update={"cwd": None, "events": events})
+    status, reason = _check(EditPredicate(path="src/app.py"), by_command)
+    assert status is Support.SUPPORTED and "inferred directory" in reason
+    status, reason = _check(EditPredicate(path="src/app.py"), session(edit("src/app.py")))
+    assert status is Support.SUPPORTED and "inferred" not in reason
