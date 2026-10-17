@@ -51,7 +51,8 @@ Each value becomes `[REDACTED:<category>:<fingerprint>]`, where the fingerprint 
 case-folded and card and phone numbers reduced to their digits, because evidence matching ignores case and
 card formatting; credentials are fingerprinted exactly. Equal values get equal tokens, so a claim
 that quotes an email still matches the request that sent it, without the email ever being shown,
-and redaction never changes a verdict (this is tested). Set `EVJ_REDACTION_KEY` to keep
+and redaction never changes a verdict (this is tested). A fingerprint is never compared as
+text the agent typed; the text around a token in a typed value still counts as its echo. Set `EVJ_REDACTION_KEY` to keep
 fingerprints stable everywhere; otherwise, when a run uses the LLM cache, a random key is kept in
 `<EVJ_CACHE_DIR>/redaction.key` (mode 0600), and in every other case a random key is used per
 process. Treat the key and the key file as secrets: with the key, a fingerprint can be confirmed

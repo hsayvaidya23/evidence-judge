@@ -48,7 +48,9 @@ quotes an email still matches the request that sent it without the email ever be
 right inbox."
 ```
 
-**Redaction never changes a verdict**; that invariance is tested.
+**Redaction never changes a verdict**; that invariance is tested. A fingerprint is never read
+as text the agent typed: when a typed value contains a token, only the text around the token is
+compared with the page, so an echo of that text is still masked.
 
 The HMAC key comes from `EVJ_REDACTION_KEY`; otherwise, when a run uses the LLM cache, from a
 random key file at `<EVJ_CACHE_DIR>/redaction.key` (mode 0600); otherwise a per-process key.
