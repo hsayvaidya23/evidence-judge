@@ -26,6 +26,8 @@ fixes made during development are in the [security history](docs/security-histor
   echoes the agent's own input proves nothing, and text the page may hide is unsure.
 - Text under a full-screen opaque box reads as unsure, also when the box is out of sight now
   but a fade-in or another animation, or a `:hover` or `:target` rule, may show it.
+  A preloader that fades out and stays out (one animation that ends within five seconds
+  filling forwards) covers nothing.
 - A claimed price is matched in an order's JSON answer only as its one total, on the order's
   own path (the root, `order`, `checkout`, `payment`, `invoice`, `data`, ...), never in a
   sub-object, a line item, a non-payment Stripe object or a body that reports a failure, and
@@ -46,14 +48,17 @@ fixes made during development are in the [security history](docs/security-histor
   `command`, `edit`, `build`, lint and type-check predicates. A passing test run proves a pass
   only when it ran the whole suite to the end after the last change, with no test-weakening
   edit or command. `session inspect` lists what the judge sees; `session judge --html` writes
-  the HTML report.
+  the HTML report, `--task` sets the task, and `--otel` / `--langfuse-trace-id` export the
+  verdict as `judge` does.
 - A session spec's `trusted_wrappers` (`{"make test": "pytest -q"}`) declares what a project
   wrapper runs; the declaration stops applying once the session may have changed it.
 - A silent wrapper's count floor survives writes of data files (`.gitignore`,
   `config/app.yaml`, test fixtures) unless a Makefile the session showed may read them; Makefile
   fragments, wrapper configuration and files of unknown kind still void it.
 - Spec and claim regexes run under the browser checks' 50 ms budget; a search that runs past
-  it needs review. Path globs match in linear time.
+  it needs review. Path globs match in linear time, support `[...]` and `[!...]` classes, and
+  reject `{a,b}` and backslash escapes; a path outside the session directory matches no glob, so
+  `only` fails an edit outside the project and `ignore_edits` never ignores one.
 
 **Independent re-run**
 
@@ -91,8 +96,8 @@ fixes made during development are in the [security history](docs/security-histor
   hook that refuses writes switching the hooks off, the MCP server and a skill.
 - Codex CLI and Gemini CLI: the same hooks (`evidence-judge hook ...`) and a Gemini CLI
   extension.
-- GitHub Action for browser runs and sessions (`session-transcript`, `session-format`,
-  `session-spec`), with a job summary, strict boolean inputs and an optional HTML report
+- GitHub Action for browser runs (with a `site` input) and sessions (`session-transcript`,
+  `session-format`, `session-spec`), with a job summary, strict boolean inputs and an optional HTML report
   artifact; a Docker image.
 - Python API: `Judge`, `SessionJudge`, `load_run`, `load_session`, `TaskSpec`, `SessionSpec`,
   `RunVerdict`, `Redactor`, `build_llm` and `read_settings`, exported from `evidence_judge`.
@@ -110,6 +115,10 @@ fixes made during development are in the [security history](docs/security-histor
 - Credentials on command lines (`mysql -pX`, `curl -u user:X`, `sshpass -p`, `docker login -p`,
   `htpasswd -b`, `npm`/`aws` `config set`, `--token X`) are redacted by tool and flag, while
   paths, file names and test ids after a secret's name stay readable.
+- Command lines continued with a backslash, or cut off inside a quote, are redacted too, and
+  command redaction runs in linear time (a line of 5,000 `--token` flags takes a fraction of a
+  second, not minutes). A test id, path or small count after a known tool's secret flag
+  (`curl --token tests/test_x.py::test_a`, `npm test --password 2 failed`) is kept.
 - Screenshots reach the LLM only when `EVJ_SCREENSHOTS_TO_LLM` is set.
 
 **Docs**

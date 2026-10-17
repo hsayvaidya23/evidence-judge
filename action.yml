@@ -34,6 +34,9 @@ inputs:
   spec:
     description: Task spec YAML (required for write tasks to PASS)
     required: false
+  site:
+    description: "Site the browser run's task is on, as an http(s) URL or host with an optional port (shop.example.com, https://shop.example.com:8443), no path; overrides the spec's site. Browser runs only"
+    required: false
   offline:
     description: "true: no LLM calls (heuristic claim extraction); false needs anthropic-api-key or ANTHROPIC_API_KEY. true or false, any case"
     required: false
@@ -92,6 +95,7 @@ runs:
         EJ_BROWSER_USE: ${{ inputs.browser-use }}
         EJ_REASONING_FILE: ${{ inputs.reasoning-file }}
         EJ_SPEC: ${{ inputs.spec }}
+        EJ_SITE: ${{ inputs.site }}
       run: |
         flag() {
           case "$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" in
@@ -106,12 +110,16 @@ runs:
           if [ -n "${EJ_SESSION_SPEC:-}" ]; then
             echo "::error::input session-spec needs session-transcript"; exit 1
           fi
+          if [ -n "${EJ_SITE:-}" ] && ! printf '%s' "$EJ_SITE" | tr '[:upper:]' '[:lower:]' \
+            | grep -Eqx '(https?://)?([^][:space:]/?#@:]+|\[[0-9a-f:.]+\])(:[0-9]+)?/?'; then
+            echo "::error::input site must be an http(s) URL or a host, with an optional port and no path"; exit 1
+          fi
           echo "mode=browser" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        for browser in "${EJ_TRACE:-}" "${EJ_HAR:-}" "${EJ_BROWSER_USE:-}" "${EJ_REASONING_FILE:-}" "${EJ_SPEC:-}"; do
+        for browser in "${EJ_TRACE:-}" "${EJ_HAR:-}" "${EJ_BROWSER_USE:-}" "${EJ_REASONING_FILE:-}" "${EJ_SPEC:-}" "${EJ_SITE:-}"; do
           if [ -n "$browser" ]; then
-            echo "::error::session-transcript judges a session: drop trace, har, browser-use, reasoning-file and spec (use session-spec)"; exit 1
+            echo "::error::session-transcript judges a session: drop trace, har, browser-use, reasoning-file, spec and site (use session-spec)"; exit 1
           fi
         done
         format=$(printf '%s' "${EJ_SESSION_FORMAT:-claude-code}" | tr '[:upper:]' '[:lower:]')
@@ -145,6 +153,7 @@ runs:
         EJ_ANSWER_FILE: ${{ inputs.answer-file }}
         EJ_REASONING_FILE: ${{ inputs.reasoning-file }}
         EJ_SPEC: ${{ inputs.spec }}
+        EJ_SITE: ${{ inputs.site }}
         EJ_MODE: ${{ steps.inputs.outputs.mode }}
         EJ_SESSION_TRANSCRIPT: ${{ inputs.session-transcript }}
         EJ_SESSION_FORMAT: ${{ steps.inputs.outputs.session-format }}
@@ -178,6 +187,7 @@ runs:
           [ -n "$EJ_BROWSER_USE" ] && args+=(--browser-use "$EJ_BROWSER_USE")
           [ -n "$EJ_REASONING_FILE" ] && args+=(--reasoning-file "$EJ_REASONING_FILE")
           [ -n "$EJ_SPEC" ] && args+=(--spec "$EJ_SPEC")
+          [ -n "$EJ_SITE" ] && args+=(--site "$EJ_SITE")
         fi
         [ -n "$EJ_ANSWER_FILE" ] && args+=(--answer-file "$EJ_ANSWER_FILE")
         [ "$EJ_OFFLINE" = "true" ] && args+=(--offline)

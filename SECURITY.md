@@ -86,7 +86,13 @@ by guessing.
 - Command lines are read by tool and flag tables. A password passed as `mysql -p X` (MySQL
   reads that as a prompt and a database name), through an unlisted tool's short flag, from a
   variable (`-p $PASS`) or after a generic `--token` flag as a plain word with no digit or symbol
-  (`--password sunshine`) passes through.
+  (`--password sunshine`) passes through. A backslash at the end of a line joins it to the
+  next, and a quote left open (`curl -u "alice:s3cr3t`) runs to the end of its line, which is
+  redacted with the secret. After a secret-named flag, a path, file name, test id, call or
+  number of at most three digits is kept, so a command predicate written against an honest
+  command still matches. Only the first 1,024 words of one command are read against its tool's
+  flags; the rest are left to the free-text rules, which still catch `--token X` there but not
+  a tool-specific form such as `-u user:X`.
 - `--no-redact` (or `EVJ_REDACT=false`) disables all of the above. Use it only on synthetic data.
 
 ## Trust assumptions
