@@ -435,6 +435,8 @@ def test_one_space_between_digit_groups_is_neither_one_amount_nor_two(
         ('{"amount": 2950, "currency": "usd"}', "$29.50"),
         ('{"order": {"currency": "GBP", "amount_paid": 4}}', "£4.00"),
         ('{"total_money": {"amount": 2400, "currency": "USD"}}', "24 USD"),
+        ('{"total": "29.50"}', "$29.50"),
+        ('{"amount": {"value": "29.50", "currency_code": "USD"}}', "$29.50"),
     ],
 )
 def test_a_json_answer_shows_a_price_as_a_bare_number(body: str, phrase: str) -> None:
@@ -451,7 +453,9 @@ def test_a_json_answer_shows_a_price_as_a_bare_number(body: str, phrase: str) ->
         ('{"cents": 400}', "$4.00"),
         ('{"order_id": 4, "qty": 4, "item_count": 4, "total_items": 4}', "$4.00"),
         ('{"price_id": 4, "total": true}', "$4.00"),
-        ('{"total": "29.50"}', "$29.50"),
+        ('{"total": "29.5O"}', "$29.50"),
+        ('{"total": "$29.50"}', "$29.50"),
+        ('{"total": "1,029.50"}', "$1,029.50"),
         ("<p>Total: 29.50</p>", "$29.50"),
         ('{"total": 29.5}', "29.50"),
         ('{"total": 24100}', "$24 100"),
