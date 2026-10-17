@@ -395,12 +395,43 @@ def _dimension_views(verdict: RunVerdict) -> list[DimensionView]:
     ]
 
 
-def _new_ctx(verdict: RunVerdict, run: Run) -> _Ctx:
+@dataclass(frozen=True, slots=True)
+class EvidenceView:
+    """What the report shows of the recording beside the verdict: its source, the timeline that
+    citations link to, and how each cited evidence id is described."""
+
+    source: str
+    channels: list[str]
+    timeline: list[TimelineRow]
+    timeline_hidden: int
+    described: dict[str, tuple[str, str]]
+    timeline_note: str
+    timeline_empty: str
+    thumbs: list[ThumbView] = field(default_factory=list[ThumbView])
+    final_url: str | None = None
+    final_title: str | None = None
+
+
+def cited_ids(verdict: RunVerdict) -> set[str]:
+    return {c.evidence_id for c in _all_citations(verdict)}
+
+
+def _browser_evidence(verdict: RunVerdict, run: Run) -> EvidenceView:
     stamps = [a.ts for a in run.actions] + [n.ts for n in run.network]
-    return _Ctx(
-        cited={c.evidence_id for c in _all_citations(verdict)},
-        span=max(stamps, default=0.0),
+    ctx = _Ctx(cited=cited_ids(verdict), span=max(stamps, default=0.0))
+    rows, hidden = _timeline(run, ctx)
+    final = run.final_state
+    return EvidenceView(
+        source=run.source,
+        channels=sorted(c.value for c in run.captured),
+        timeline=rows,
+        timeline_hidden=hidden,
         described=_describe_evidence(run),
+        timeline_note="actions and state-changing requests",
+        timeline_empty="No actions or state-changing requests were captured.",
+        thumbs=_thumbnails(run, ctx),
+        final_url=final.url if final else None,
+        final_title=final.title if final else None,
     )
 
 
@@ -409,17 +440,21 @@ def _tally(verdict: RunVerdict) -> list[tuple[str, int, str]]:
     return [(label, counts[s], tone) for s, (label, tone) in _SUPPORT.items() if counts[s]]
 
 
-def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
-    ctx = _new_ctx(verdict, run)
-    rows, hidden = _timeline(run, ctx)
-    thumbs = _thumbnails(run, ctx)
-    ctx.anchors = {r.anchor for r in rows} | {t.anchor for t in thumbs}
+def _verification(verdict: RunVerdict) -> str | None:
+    if verdict.verification is None:
+        return None
+    return f"{verdict.verification.method.value}: {verdict.verification.reason}"
 
+
+def _context(verdict: RunVerdict, evidence: EvidenceView) -> dict[str, object]:
+    ctx = _Ctx(
+        anchors={r.anchor for r in evidence.timeline} | {t.anchor for t in evidence.thumbs},
+        described=evidence.described,
+    )
     claim_views = [_claim_view(cv, ctx) for cv in verdict.claims]
     expectations = [_expectation_view(ex, ctx) for ex in verdict.expectations]
     dimensions = _dimension_views(verdict)
     outcome_label, outcome_class = _OUTCOME[verdict.outcome]
-    final = run.final_state
     return {
         "v": verdict,
         "outcome_label": outcome_label,
@@ -430,13 +465,16 @@ def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
         "headline": _headline(verdict),
         "expectations": expectations,
         "dimensions": dimensions,
-        "timeline": rows,
-        "timeline_hidden": hidden,
-        "thumbs": thumbs,
-        "final_url": final.url if final else None,
-        "final_title": final.title if final else None,
-        "source": run.source,
-        "channels": sorted(c.value for c in run.captured),
+        "timeline": evidence.timeline,
+        "timeline_hidden": evidence.timeline_hidden,
+        "timeline_note": evidence.timeline_note,
+        "timeline_empty": evidence.timeline_empty,
+        "thumbs": evidence.thumbs,
+        "final_url": evidence.final_url,
+        "final_title": evidence.final_title,
+        "source": evidence.source,
+        "channels": evidence.channels,
+        "verification": _verification(verdict),
         "coverage": _pct(verdict.claim_coverage),
         "deterministic": _pct(verdict.deterministic_share),
         "cost": f"${verdict.usage.cost_usd:.4f}",
@@ -445,9 +483,15 @@ def _context(verdict: RunVerdict, run: Run) -> dict[str, object]:
     }
 
 
+def render_report(verdict: RunVerdict, evidence: EvidenceView) -> str:
+    """Render a self-contained HTML report of `verdict` beside `evidence`. All agent-controlled
+    text is HTML-escaped."""
+    return _env.get_template("report.html.j2").render(_context(verdict, evidence))
+
+
 def render_html(verdict: RunVerdict, run: Run) -> str:
     """Render a self-contained HTML report. All agent-controlled text is HTML-escaped."""
-    return _env.get_template("report.html.j2").render(_context(verdict, run))
+    return render_report(verdict, _browser_evidence(verdict, run))
 
 
 def write_html(verdict: RunVerdict, run: Run, path: Path) -> Path:

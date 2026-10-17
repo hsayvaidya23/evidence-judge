@@ -40,6 +40,7 @@ from evidence_judge.core.verdict import (
 from evidence_judge.llm.base import LLMConfigError, LLMError
 from evidence_judge.report.console import StdoutConsole, print_verdict
 from evidence_judge.report.json_report import write_json
+from evidence_judge.sessions.html import write_session_html
 from evidence_judge.sessions.ingest import load_session, locate
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
 from evidence_judge.sessions.models import SessionRun
@@ -215,6 +216,9 @@ def judge_command(
     out: Annotated[
         Path | None, typer.Option(help="Write the verdict JSON here", **OUT_FILE)
     ] = None,
+    html: Annotated[
+        Path | None, typer.Option(help="Write the HTML report here", **OUT_FILE)
+    ] = None,
     offline: Annotated[
         bool, typer.Option("--offline", help="No LLM calls; heuristic claim extraction only")
     ] = False,
@@ -299,6 +303,8 @@ def judge_command(
         verdict = _run(session_judge, run, options)
         if out:
             write_output(out, lambda p: write_json(verdict, p))
+        if html:
+            write_output(html, lambda p: write_session_html(verdict, run, p))
     except CliError as e:
         raise fail(e) from None
     except Exception as e:
@@ -307,8 +313,9 @@ def judge_command(
         raise internal(e) from None
     if not quiet:
         print_verdict(verdict, StdoutConsole())
-        if out:
-            err.print(Text.assemble(("wrote json ", "dim"), str(out)))
+        for label, path in (("json", out), ("html", html)):
+            if path:
+                err.print(Text.assemble((f"wrote {label} ", "dim"), str(path)))
     raise typer.Exit(int(OUTCOME_EXIT[verdict.outcome]))
 
 

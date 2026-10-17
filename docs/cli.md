@@ -190,6 +190,7 @@ which format the file looks like.
 | `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block, `trusted_wrappers` (what a project wrapper runs: `{"make test": "pytest -q"}`; a run through it the session does not show is judged as that command until the session may have changed the wrapper's definition) |
 | `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
 | `--out FILE` | Write the verdict JSON (schema `evidence-judge/run-verdict@1`) here |
+| `--html FILE` | Write the self-contained HTML report here: the claims with the tool calls they cite (command and exit code), spec expectations, how test results were verified (re-run or transcript), warnings and every recorded tool call. It shows the redacted session, and all agent text is escaped |
 | `--offline` | No LLM calls; heuristic claim extraction only |
 | `--no-redact` | Keep secrets in commands, outputs and reports |
 | `--require-tamper-evidence` | Cap the run at needs review unless it comes from an evidence log or a harness stream |

@@ -103,6 +103,10 @@ The first release.
 - The session judge is part of the public Python API: `SessionJudge`, `SessionJudgeOptions`,
   `SessionSpec` and `load_session` are exported from `evidence_judge` and documented beside
   `Judge`.
+- `session judge --html PATH` writes the same self-contained HTML report as `judge --html`, for
+  a session: claims with the tool calls they cite (command and exit code), spec expectations,
+  the verification method (re-run or transcript), warnings, and every recorded tool call as the
+  timeline. It shows the redacted session and escapes all agent text.
 
 ### Changed
 

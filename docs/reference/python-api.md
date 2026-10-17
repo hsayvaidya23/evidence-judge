@@ -119,6 +119,17 @@ print(verdict_to_json(verdict))
 The HTML report reads screenshots lazily from the trace, so keep the trace file in place until
 the report is written.
 
+A session verdict's HTML report takes the session instead of a browser run (`judge` is a
+`SessionJudge`):
+
+```python
+from evidence_judge.sessions.html import write_session_html
+
+run, options, _ = judge.redact(run, options)  # the report shows the redacted session
+verdict = asyncio.run(judge.judge(run, options))
+write_session_html(verdict, run, Path("session-report.html"))
+```
+
 ## Loading evidence
 
 | Function | Module | Reads |

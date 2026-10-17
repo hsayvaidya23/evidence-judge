@@ -371,6 +371,9 @@ footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
         <div><span class="k">Captured</span><b>{{ channels | join(" · ") if channels else "nothing" }}</b></div>
         <div><span class="k">Claim coverage</span><b>{{ coverage }}</b></div>
         <div><span class="k">Decided without LLM</span><b>{{ deterministic }}</b></div>
+        {% if verification %}
+        <div><span class="k">Verified by</span><b>{{ verification }}</b></div>
+        {% endif %}
       </div>
     </div>
 
@@ -476,7 +479,7 @@ footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
     <section aria-labelledby="tl-h">
       <header>
         <h2 id="tl-h">Evidence timeline</h2>
-        <span class="count">actions and state-changing requests{% if timeline_hidden %} · {{ timeline_hidden }} more not shown{% endif %}</span>
+        <span class="count">{{ timeline_note }}{% if timeline_hidden %} · {{ timeline_hidden }} more not shown{% endif %}</span>
       </header>
       {% if timeline %}
       <div class="trace panel">
@@ -493,7 +496,7 @@ footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
         </ol>
       </div>
       {% else %}
-      <div class="empty">No actions or state-changing requests were captured.</div>
+      <div class="empty">{{ timeline_empty }}</div>
       {% endif %}
     </section>
 
