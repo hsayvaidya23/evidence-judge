@@ -372,15 +372,20 @@ or an `invoice` whose `status` is `paid`. PayPal's `"amount": {"value": "29.50",
 "currency_code": "USD"}` shows `$29.50`. A total written as a string counts only when it is a
 plain decimal number (`"total_price": "29.50"`, as Shopify and WooCommerce write it). The
 document must state one total: two that differ (`{"order": {"total": 45}, "total_paid": 29.5}`)
-show neither. A document that reports a failure at any depth shows no price, and the order
-request it answers proves no order: a status-like field (`status`, `state`, `result`,
+show neither. A document that reports a failure on the order's path (the root and objects under `order`,
+`checkout`, `payment`, `payment_intent`, `charge`, `transaction`, `data`, `result`, `outcome`,
+...) shows no price, and the order request it answers proves no order: a status-like field (`status`, `state`, `result`,
 `outcome`, `payment_status`, `financialStatus`) naming one (`payment_declined`,
 `PAYMENT-DECLINED`, `not_paid`, `unpaid`, `insufficient_funds`, `pending_payment`, `abandoned`,
 `draft`, `refunded`, `requires_payment_method`), an `error` or `errors` (`checkoutUserErrors`)
 with content, a success flag that is false (`success`, `ok`, `paid`, `is_paid`, `isSuccess`,
 `payment_success`), a failure flag that is true (`declined`, `failed`, `refunded`), a set
 `failure_code` or `decline_code`, an `outcome.type` such as `issuer_declined`, a `message`
-saying the card was declined, or a Stripe `charge` with `"captured": false`. Fields about
+saying the card was declined, or a Stripe `charge` with `"captured": false`. Off that path
+(`customer`, `coupon`, `fulfillment`, `address_validation`, an `invoice` inside the order) only an
+error with content or a declined message counts; order history, line items, notifications,
+events and logs count not at all, and of a list of attempts (`payment_attempts`,
+`transactions`) only the last one does. Fields about
 something else (`email_status`, `coupon_expired`), counts (`"failed_attempts": 0`), empty
 errors (`"error": null`, `"errors": []`) and product names ("Declined Coffee") report nothing. Every currency the document
 names, at any depth, must be the claimed one: a `currency`, `currency_code`, `currency_iso` or

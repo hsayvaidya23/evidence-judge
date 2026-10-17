@@ -141,6 +141,55 @@ _FAILED_STATES: Final = frozenset(
     }
 )
 """Status values that name a payment that did not go through, besides any `failure_mark`."""
+_PATH_WORDS: Final = frozenset(
+    {
+        "order",
+        "orders",
+        "checkout",
+        "payment",
+        "payments",
+        "charge",
+        "charges",
+        "purchase",
+        "transaction",
+        "transactions",
+        "booking",
+        "reservation",
+        "receipt",
+        "outcome",
+        "error",
+        "failure",
+        "decline",
+    }
+)
+"""Words of a key whose object lies on the order's path, where any failure field counts."""
+_ORDER_WORDS: Final = frozenset({"order", "orders", "purchase", "booking", "reservation"})
+"""Words of a key whose object is the order itself: an `invoice` inside it is a document about
+the order, not its payment."""
+_ATTEMPT_WORDS: Final = frozenset(
+    {"attempt", "attempts", "retries", "tries", "payments", "charges", "transactions"}
+)
+"""Words of a key whose list holds attempts in order: only the last one says how it ended."""
+_ASIDE_WORDS: Final = frozenset(
+    {
+        "history",
+        "previous",
+        "prior",
+        "past",
+        "item",
+        "items",
+        "line",
+        "lines",
+        "notification",
+        "notifications",
+        "event",
+        "events",
+        "log",
+        "logs",
+    }
+)
+"""Words of a key whose value is about other orders, line items or side effects, never this
+order's payment."""
 _STATUS_WORDS: Final = frozenset({"status", "state", "result", "outcome"})
 _SUBJECT_WORDS: Final = frozenset(
     {
@@ -264,7 +313,7 @@ def shows_amount(body: str | None, phrase: str) -> bool:
     in lowercase and has an `object` type or a Stripe amount key (`{"amount": 2950,
     "currency": "usd"}`), whose `object` type, if any, is a payment that went through, or in a `total_money` as Square writes it; a PayPal `amount` is
     `{"value": "29.50", "currency_code": "USD"}`; a bare `amount` shows nothing anywhere else.
-    The document must state one total and no failure at any depth (json_failure), and every
+    The document must state one total and report no failure on the order's path (json_failure), and every
     currency it names, as a code, a currency object or a formatted amount ('29,50 €'), must be
     the phrase's."""
     wanted = _money(normalize(phrase))
@@ -313,24 +362,52 @@ def reported(value: object) -> bool:
 
 
 def json_failure(tree: object) -> tuple[str, object] | None:
-    """The first field, at any depth of a JSON tree, that reports a payment or order that did not
-    go through, as its key and value, or None (field_failure). A Stripe `charge` must also have
-    been captured: `"captured": false` reports one."""
-    queue: list[tuple[object, list[str]]] = [(tree, [])]
-    for node, parent in queue:
+    """The first field of a JSON tree that reports a payment or order that did not go through, as
+    its key and value, or None. Every field on the order's path (the root and objects under keys
+    that name the order, its payment or an outcome: `order`, `checkout`, `payment`,
+    `payment_intent`, `charge`, `transaction`, `data`, `result`, `outcome`, ...) counts
+    (field_failure); a Stripe `charge` there must also have been captured: `"captured": false`
+    reports one. Off that path (`customer`, `coupon`, `fulfillment`, `address_validation`, an
+    `invoice` inside an order) only an error with content or a message saying a payment was
+    declined counts. History, line items, notifications, events and logs (`order_history`,
+    `items`, `line_items`, `notifications`) report nothing, and of a list of attempts
+    (`payment_attempts`, `transactions`, `charges`) only the last one counts."""
+    queue: list[tuple[object, list[str], bool, bool]] = [(tree, [], True, False)]
+    for node, parent, path, ordered in queue:
         if isinstance(node, list):
-            queue.extend((v, parent) for v in cast(list[object], node))
+            items = cast(list[object], node)
+            if _ATTEMPT_WORDS & set(parent):
+                items = items[-1:]
+            queue.extend((v, parent, path, ordered) for v in items)
             continue
         if not isinstance(node, dict):
             continue
         fields = cast(dict[str, object], node)
-        if fields.get("object") == "charge" and fields.get("captured") is False:
+        if path and fields.get("object") == "charge" and fields.get("captured") is False:
             return "captured", False
         for key, value in fields.items():
-            if field_failure(key, value, parent):
+            if field_failure(key, value, parent) if path else _aside_failure(key, value):
                 return key, value
-        queue.extend((v, _key_words(k)) for k, v in fields.items())
+        for key, value in fields.items():
+            words = _key_words(key)
+            if _ASIDE_WORDS.isdisjoint(words):
+                inside = ordered or not _ORDER_WORDS.isdisjoint(words)
+                queue.append((value, words, path and _on_path(words, ordered), inside))
     return None
+
+
+def _on_path(words: list[str], ordered: bool) -> bool:
+    joined = "_".join(words)
+    if joined == "invoice":
+        return not ordered
+    return joined in _ORDER_KEYS or not _PATH_WORDS.isdisjoint(words)
+
+
+def _aside_failure(key: str, value: object) -> bool:
+    last = (_key_words(key) or [""])[-1]
+    if last in ("error", "errors"):
+        return reported(value)
+    return last in _MESSAGE_WORDS and isinstance(value, str) and bool(_DECLINE_PHRASE.search(value))
 
 
 def field_failure(key: str, value: object, parent: list[str] | None = None) -> bool:

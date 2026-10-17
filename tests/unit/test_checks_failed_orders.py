@@ -1,4 +1,5 @@
-"""An order answer that reports a failure at any depth proves neither the order nor its price."""
+"""An order answer that reports a failure on the order's path proves neither the order nor its
+price; history, line items, retries and side effects report nothing."""
 
 from __future__ import annotations
 
