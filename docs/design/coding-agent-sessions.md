@@ -514,8 +514,13 @@ matched by stepping every pattern position at once, in time linear in the path, 
 backtrack.
 
 Globs (`path`, `only`, `ignore_edits`) are gitignore-like and relative to the session directory:
-a glob without `/` matches a file or directory name at any depth, a glob with `/` matches from
-the session directory, and a directory glob matches everything under it. `*` and `?` match within
+a glob without `/` matches a file or directory name at any depth (`tests/` matches
+`sub/tests/a.py`), a glob with `/` matches from the session directory (`tests/**` matches
+`tests/a.py`, not `sub/tests/a.py`), a leading `/` anchors any glob there (`/tests/` and
+`/calc.py` match only at the top), and a directory glob matches everything under it. A glob
+with `//`, a leading `~` or drive letter, a `.` or `..` segment, or a class no path character
+matches (`[/]`, `[z-a]`) is rejected, so every accepted glob matches some path in the
+project. `*` and `?` match within
 one path segment, `**` across segments, and `[abc]`, `[a-z]` and `[!_]` match one character of a
 segment as in `fnmatch` (never `/`). `{a,b}` alternatives, backslash escapes and an unclosed `[`
 are rejected when the spec is loaded; list each path as its own glob. A path is placed relative to
@@ -532,7 +537,8 @@ matches is *no evidence* rather than *supported*, and `ignore_edits` never ignor
 `touched: true` the suffix must start below the deepest directory holding every unplaceable
 changed path (the root is that directory or an ancestor only if every change is in the
 project): a same-named file in an unrelated tree or a nested copy (`vendor/x/src/app.py` for
-`src/app.py`) is *no evidence*. That directory is never used as the root itself: it may lie
+`src/app.py`) is *no evidence*, and a *supported* result placed this way says so in its
+reason: set `cwd` in the spec for strict placement. That directory is never used as the root itself: it may lie
 deeper than the session directory, and then `touched: false` and `only` would wrongly pass.
 
 ### Soundness rules
