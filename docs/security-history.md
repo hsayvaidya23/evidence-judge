@@ -34,6 +34,14 @@ version: all of it happened before v0.1.0. The threat model and its current limi
   words, set failure and decline codes, decline messages, and uncaptured Stripe charges.
   Product names, empty errors, counts and fields about something else (`email_status`) report
   nothing. Fixtures in `tests/fixtures/prices/failed_orders.json` cover each shape end to end.
+- **Command redaction handles continued lines and open quotes, in linear time.** `curl \` with
+  `-u alice:Hunter22` on the next line, `curl -u "alice:s3cr3t` and `curl -u alice:'unbal` were
+  left unchanged, because a word could not cross a line or start at an unmatched quote. Every
+  `--token` flag re-read all the text before it, so 2,000 flags on one 37 KB line took 31 s; each
+  text is now split into commands once, and one command is read for at most 1,024 words. A
+  test id or count after a known tool's secret flag (`curl --token tests/test_x.py::test_a`,
+  `npm test --password 2 failed`) was redacted and could break a `contains` predicate; it is
+  kept now.
 - **Writing a data file no longer voids a silent wrapper's count floor.** Since the floor rule
   voided it for any written file but source code or prose, an honest session that wrote
   `.gitignore`, `config/app.yaml`, `data/sample.csv` or `tests/fixtures/cases.json` before a

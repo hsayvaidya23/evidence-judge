@@ -186,6 +186,7 @@ which format the file looks like.
 | `--log-key FILE` | The evidence-log key (default: `log-key` in the hooks' state directory, `EVJ_HOOK_STATE_DIR` or `~/.evidence-judge/state`) |
 | `--log-anchor FILE` | The evidence log's head anchor (default: `<session>/log-head.json` in the `--log-key` directory, else `<state>/<session>/log-head.json`) |
 | `--trusted-log` | Assert that the log, its key and anchor were out of the agent's reach (a sandbox that denies the state directory, a container, another OS user). Without it, an agent running as your user could have read the key and signed a forged log, so a verified log is still `partial`. The spec's `trusted_evidence_log: true` does the same |
+| `--task TEXT` | The task given to the agent, used by claim extraction and reported as the verdict's `task`; overrides the spec's `task` and the recorded one (a transcript's first prompt) |
 | `--answer TEXT` / `--answer-file FILE` | Judge this final answer instead of the recorded one |
 | `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block, `trusted_wrappers` (what a project wrapper runs: `{"make test": "pytest -q"}`; a run through it the session does not show is judged as that command until the session may have changed the wrapper's definition) |
 | `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
@@ -202,6 +203,7 @@ which format the file looks like.
 | `--run-id TEXT` | Override the run id (default: the session id) |
 | `--quiet`, `-q` | Only set the exit code |
 | `--debug` | Show tracebacks for internal errors |
+| `--otel` / `--langfuse-trace-id ID` | Export the redacted session verdict as for `judge` (see [Export to other tools](#export-to-other-tools)): same names and attributes, same extras, and a missing extra or Langfuse credentials exit `3` before judging |
 
 ### `evidence-judge session rerun`
 
