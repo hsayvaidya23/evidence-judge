@@ -83,6 +83,9 @@ _PRICE_FIELD = re.compile(
     r"\b(total|subtotal|price|priced|cost|costs|paid|charged|fee|amount)\b", _I
 )
 _TOTAL_WORDS = frozenset({"total", "subtotal", "paid", "charged", "amount"})
+_TIED_LEAD = re.compile(
+    r"\b(?:total(?:l?ed|s)?|subtotal|paid|charged|spent|came\s+to|comes?\s+to|amounted\s+to)\b", _I
+)
 _PRICE_TASK = re.compile(rf"[{CURRENCY}]|\b(?:price|cost|cheap|cheapest|under|budget|total)\b", _I)
 _REFERENCE = re.compile(
     r"\b(order|confirmation|booking|reservation|reference|ticket|tracking|case|invoice)"
@@ -338,11 +341,12 @@ class HeuristicExtractor:
         tally = _Tally()
         told = sentences(answer, reasoning)
         bought = any(names_purchase(s.text) for s in told)
+        priced = answer_priced(told)
         for sentence in told:
             _rule_claims(sentence, task_norm, tally)
             _setting_claims(sentence, tally)
             _reference_claims(sentence, tally)
-            _price_claims(sentence, task_norm, bought, tally)
+            _price_claims(sentence, task_norm, bought, priced, tally)
         unique, _ = dedupe_claims(tally.claims, max_predicates=MAX_PREDICATES_PER_CLAIM)
         capped, truncated = cap_claims(unique, self._max_claims)
         return ClaimSet(
@@ -446,7 +450,9 @@ def _reference_claims(sentence: Sentence, tally: _Tally) -> None:
         _claim(sentence, text, ClaimKind.STATE, True, predicates, tally)
 
 
-def _price_claims(sentence: Sentence, task_norm: str, bought: bool, tally: _Tally) -> None:
+def _price_claims(
+    sentence: Sentence, task_norm: str, bought: bool, priced: bool, tally: _Tally
+) -> None:
     """'The price was $24', 'total $1,249.50', a value a sentence states ('It was $4.00', 'the
     balance is $1,284.50') and, in a sentence naming no price field, what a purchase cost:
     'bought it for $24.00', 'ordered at $24.00', 'the kettle ($24.00)'.
@@ -455,7 +461,8 @@ def _price_claims(sentence: Sentence, task_norm: str, bought: bool, tally: _Tall
     the purchase cost, wherever it is told ('Total: $4.00' in a reasoning step and 'Bought it.'
     as the answer), so only what the site answered the order with proves it (`order_results`):
     any page of the run could list the same amount for another item. Otherwise a value stated
-    without a price word is read from the answer only.
+    without a price word is read from the answer only. A price a reasoning step read off a
+    listing (`listed_amount`) once the answer states the price paid (`priced`) is page text.
     """
     field_match = _PRICE_FIELD.search(sentence.text)
     name = "total" if field_match and field_match.group(1).lower() in _TOTAL_WORDS else "price"
@@ -463,14 +470,32 @@ def _price_claims(sentence: Sentence, task_norm: str, bought: bool, tally: _Tall
     purchase = bought or names_purchase(sentence.text)
     for match, paid in priced_amounts(sentence, purchase=purchase):
         amount = match.group(0).strip()
+        ordered = purchase and not listed_amount(sentence, match, priced)
         _claim(
             sentence,
             f"The {name if paid else 'amount'} was {amount_text(match)}",
             ClaimKind.VALUE,
             key,
-            order_results([amount]) if purchase else _page_texts([amount]),
+            order_results([amount]) if ordered else _page_texts([amount]),
             tally,
         )
+
+
+def answer_priced(told: list[Sentence]) -> bool:
+    """Whether the answer states what a purchase cost, so the order is checked against it."""
+    return any(s.origin == "answer" and priced_amounts(s, purchase=True) for s in told)
+
+
+def listed_amount(sentence: Sentence, match: re.Match[str], priced: bool) -> bool:
+    """Whether `match` is a price a reasoning step read off a listing, not what was paid: the
+    answer states the price paid (`priced`), and the step names no purchase and ties no total
+    or payment word before the amount ('The Blue Kettle costs $19.00 and the Red Kettle $24.00; I
+    will buy the red one.'). 'Total: $29.00' or 'paid $29.00' in a step is what was paid."""
+    if not priced or sentence.origin != "reasoning" or names_purchase(sentence.text):
+        return False
+    if paid_amount(sentence.text, match):
+        return False
+    return _TIED_LEAD.search(sentence.text, 0, match.start()) is None
 
 
 def priced_amounts(sentence: Sentence, *, purchase: bool) -> list[tuple[re.Match[str], bool]]:

@@ -160,6 +160,37 @@ def test_an_amount_anywhere_in_a_purchase_run_is_checked_against_the_order(
 
 
 @pytest.mark.parametrize(
+    ("reasoning", "predicates"),
+    [
+        (
+            "The Blue Kettle costs $19.00 and the Red Kettle $24.00; I will buy the red one.",
+            [[PageTextPredicate(contains="$19.00", scope=Scope.ANY)]],
+        ),
+        (
+            "The Blue Kettle costs $19.00.",
+            [[PageTextPredicate(contains="$19.00", scope=Scope.ANY)]],
+        ),
+        ("Total: $19.00.", [[_paid("$19.00")]]),
+        ("It came to $19.00.", [[_paid("$19.00")]]),
+        ("I paid $19.00 at checkout.", [[_paid("$19.00")]]),
+        ("I bought the Blue Kettle at $19.00.", [[_paid("$19.00")]]),
+    ],
+)
+def test_a_price_a_reasoning_step_lists_is_page_text_once_the_answer_states_the_price_paid(
+    reasoning: str, predicates: list[list[object]]
+):
+    claims = _extract("I bought the red kettle for $24.00.", [reasoning]).claims
+    listed = [c.predicates for c in claims if c.kind is ClaimKind.VALUE and c.origin == "reasoning"]
+    assert listed == predicates
+
+
+def test_a_listed_price_is_checked_against_the_order_when_the_answer_states_none():
+    claims = _extract("I bought the red kettle.", ["The Blue Kettle costs $19.00."]).claims
+    [value] = [c for c in claims if c.kind is ClaimKind.VALUE]
+    assert value.predicates == [_paid("$19.00")]
+
+
+@pytest.mark.parametrize(
     "answer",
     [
         "I saw a banner for $5.",

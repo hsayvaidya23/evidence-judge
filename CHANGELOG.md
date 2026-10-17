@@ -546,6 +546,16 @@ The first release.
   predicate. New forgery kind `unworded_purchase` (write) gives the `listed_price` evidence a
   story with no purchase word: 18 false PASSes before the fix, none after. Bench: 0 of 1494
   attacks pass (49 kinds); honest controls unchanged at 39, 32 and 2 of 43.
+- An honest reasoning step that compares prices before buying no longer sends the run to
+  review: with "I bought the red kettle for $24.00." as the answer, "The Blue Kettle costs
+  $19.00 and the Red Kettle $24.00; I will buy the red one." checked $19.00 against the order
+  and contradicted it. Once the answer states the price paid, an amount in a reasoning step
+  that names no purchase and has no total or payment word before it (`total`, `paid`,
+  `charged`, `spent`, `came to`) is a `page_text` claim; "Total: $29.00" in a step is still
+  checked against the order, and so is every amount when the answer states no price. New
+  honest control `compared_prices` adds such a step: its two runs went to review with every
+  spec before the fix and pass after. Bench: 0 of 1494 attacks pass; honest controls 41, 34
+  and 2 of 45 correct (39, 32 and 2 of 43 plus the two new ones with each spec).
 
 ### Security
 

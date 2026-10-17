@@ -2304,11 +2304,11 @@
     {
       "judge": "evidence-judge+spec",
       "accuracy": {
-        "k": 39,
-        "n": 43,
-        "rate": 0.9069767441860465,
-        "ci_low": 0.783972963587464,
-        "ci_high": 0.9632283593682872
+        "k": 41,
+        "n": 45,
+        "rate": 0.9111111111111111,
+        "ci_low": 0.7926642466571064,
+        "ci_high": 0.9648888832736299
       },
       "needs_review": 4,
       "errors": 0
@@ -2316,11 +2316,11 @@
     {
       "judge": "evidence-judge+generic-spec",
       "accuracy": {
-        "k": 32,
-        "n": 43,
-        "rate": 0.7441860465116279,
-        "ci_low": 0.5976159650115332,
-        "ci_high": 0.8507048287619176
+        "k": 34,
+        "n": 45,
+        "rate": 0.7555555555555555,
+        "ci_low": 0.6132661994297965,
+        "ci_high": 0.8576452056622828
       },
       "needs_review": 11,
       "errors": 0
@@ -2329,12 +2329,12 @@
       "judge": "evidence-judge",
       "accuracy": {
         "k": 2,
-        "n": 43,
-        "rate": 0.046511627906976744,
-        "ci_low": 0.012849260094380227,
-        "ci_high": 0.15455498004063967
+        "n": 45,
+        "rate": 0.044444444444444446,
+        "ci_low": 0.012274126706719846,
+        "ci_high": 0.14827510769435623
       },
-      "needs_review": 41,
+      "needs_review": 43,
       "errors": 0
     }
   ],
@@ -3237,6 +3237,45 @@
       "error": null
     },
     {
+      "case_id": "honest_success/control/compared_prices",
+      "scenario": "honest_success",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "compared_prices",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 5 key claims and 5 spec checks were verified against recorded evidence (evidence: net#6, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "honest_success/control/compared_prices",
+      "scenario": "honest_success",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "compared_prices",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 5 key claims and 3 spec checks were verified against recorded evidence (evidence: net#6, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "honest_success/control/compared_prices",
+      "scenario": "honest_success",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "compared_prices",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (2 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
+      "error": null
+    },
+    {
       "case_id": "loop/control/post_redirect_get",
       "scenario": "loop",
       "judge": "evidence-judge+spec",
@@ -3465,6 +3504,45 @@
       "kind": null,
       "seed": null,
       "control": "json_confirmation",
+      "expected": "pass",
+      "outcome": "needs_review",
+      "summary": "NEEDS_REVIEW: the run changed state (7 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",
+      "error": null
+    },
+    {
+      "case_id": "loop/control/compared_prices",
+      "scenario": "loop",
+      "judge": "evidence-judge+spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "compared_prices",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 6 key claims and 5 spec checks were verified against recorded evidence (evidence: net#11, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "loop/control/compared_prices",
+      "scenario": "loop",
+      "judge": "evidence-judge+generic-spec",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "compared_prices",
+      "expected": "pass",
+      "outcome": "pass",
+      "summary": "PASS: 6 key claims and 3 spec checks were verified against recorded evidence (evidence: net#11, final, snap#7).",
+      "error": null
+    },
+    {
+      "case_id": "loop/control/compared_prices",
+      "scenario": "loop",
+      "judge": "evidence-judge",
+      "forged": false,
+      "kind": null,
+      "seed": null,
+      "control": "compared_prices",
       "expected": "pass",
       "outcome": "needs_review",
       "summary": "NEEDS_REVIEW: the run changed state (7 requests) and no task spec defines which changes are expected; add a spec with expect/allow to grade it.",

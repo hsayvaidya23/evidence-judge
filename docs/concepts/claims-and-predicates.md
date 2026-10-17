@@ -338,7 +338,11 @@ whose evidence shows an order placed, however the answer words it: "Checkout com
 $29.00." after a successful write to an order, checkout, payment or booking URL, or one the
 spec's `expect` entries name) is proven only by
 what the site answered the purchase with, never by any page of the run: a listing that shows
-another item at $29.00 says nothing about the charge. The offline extractor turns such an amount
+another item at $29.00 says nothing about the charge. Once the answer states the price paid, a price a
+reasoning step reads off a listing ("The Blue Kettle costs $19.00 and the Red Kettle $24.00; I
+will buy the red one.") is page text: only a step that names a purchase, or puts a total or
+payment word before the amount ("Total: $24.00", "paid $24.00", "it came to $24.00"), is
+checked against the order. When the answer states no price, every amount is. The offline extractor turns such an amount
 into one `request` predicate, a `POST` to an order, checkout, payment or booking path with
 `result_contains: ["$29.00"]`; with Claude, a claim whose predicates check such an amount keeps
 only predicates of that form (a `POST`, `PUT` or `PATCH` to the same order URL pattern, or with a

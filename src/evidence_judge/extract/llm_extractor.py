@@ -11,7 +11,14 @@ from evidence_judge.core.evidence import MUTATION_METHODS
 from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
 from evidence_judge.core.verdict import Usage
 from evidence_judge.extract.base import MAX_CLAIMS, MAX_PREDICATES_PER_CLAIM
-from evidence_judge.extract.heuristic import ORDER_URL, ORDER_WORDS, order_results, priced_amounts
+from evidence_judge.extract.heuristic import (
+    ORDER_URL,
+    ORDER_WORDS,
+    answer_priced,
+    listed_amount,
+    order_results,
+    priced_amounts,
+)
 from evidence_judge.extract.merge import cap_claims, dedupe_claims, renumber
 from evidence_judge.extract.prompts import EXTRACTION_SYSTEM_PROMPT, build_extraction_prompt
 from evidence_judge.extract.schema import ClaimExtraction, ExtractedClaim
@@ -180,11 +187,13 @@ def _order_scoped(claim: Claim, told: list[Sentence], bought: bool) -> Claim:
 def _paid_amounts(claim: Claim, told: list[Sentence], bought: bool) -> list[str]:
     said = [s for s in told if s.origin == claim.origin and quote_in(claim.quote, s.text)]
     said = said or [Sentence(t, claim.origin) for t in split_sentences(claim.quote)]
+    priced = answer_priced(told)
     amounts = [
         match.group(0).strip()
         for sentence in said
         if bought or names_purchase(sentence.text)
         for match, _ in priced_amounts(sentence, purchase=True)
+        if not listed_amount(sentence, match, priced)
     ]
     return list(dict.fromkeys(amounts))
 
