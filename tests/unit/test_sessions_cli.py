@@ -316,6 +316,24 @@ def test_judge_with_an_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "llm calls 1" in result.output
 
 
+def test_task_overrides_the_recorded_and_spec_task(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    llm = FakeLLM()
+    llm.queue(SessionClaimExtraction, {"claims": []})
+    monkeypatch.setattr(evidence_judge.llm.factory, "build_llm", lambda settings: llm)
+    spec = tmp_path / "spec.yaml"
+    spec.write_text("task: the spec task\n", encoding="utf-8")
+    out = tmp_path / "verdict.json"
+    args = ["--claude-code", str(SUCCESS), "--spec", str(spec), "--out", str(out)]
+    result = runner.invoke(app, ["session", "judge", *args, "--task", "Fix the parser"])
+    assert result.exit_code in (0, 2), result.output
+    [call] = llm.calls
+    assert "<task>\nFix the parser\n</task>" in call.request.prompt
+    assert "the spec task" not in call.request.prompt
+    assert json.loads(out.read_text())["task"] == "Fix the parser"
+
+
 @pytest.mark.parametrize(
     ("error", "fragment"),
     [(LLMConfigError("bad model"), "use --offline"), (LLMError("boom"), "LLM error")],
@@ -495,6 +513,7 @@ def test_a_browser_spec_given_to_a_session_command_gets_a_hint() -> None:
         (["session", "judge"], "--require-tamper-evidence"),
         (["judge"], "--require-tamper-evidence"),
         (["judge"], "--langfuse-trace-id"),
+        (["session", "judge"], "--langfuse-trace-id"),
         (["bench"], "--baseline-screenshot"),
         (["session"], "Gemini CLI"),
     ],

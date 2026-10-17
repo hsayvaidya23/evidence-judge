@@ -46,7 +46,8 @@ fixes made during development are in the [security history](docs/security-histor
   `command`, `edit`, `build`, lint and type-check predicates. A passing test run proves a pass
   only when it ran the whole suite to the end after the last change, with no test-weakening
   edit or command. `session inspect` lists what the judge sees; `session judge --html` writes
-  the HTML report.
+  the HTML report, `--task` sets the task, and `--otel` / `--langfuse-trace-id` export the
+  verdict as `judge` does.
 - A session spec's `trusted_wrappers` (`{"make test": "pytest -q"}`) declares what a project
   wrapper runs; the declaration stops applying once the session may have changed it.
 - A silent wrapper's count floor survives writes of data files (`.gitignore`,

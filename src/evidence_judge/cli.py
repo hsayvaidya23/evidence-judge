@@ -23,7 +23,10 @@ from evidence_judge._cli_common import (
     Debug,
     ExitCode,
     FileOpt,
+    LangfuseTraceId,
     LlmOption,
+    Otel,
+    check_exporters,
     chosen_env_file,
     chosen_llm,
     fail,
@@ -194,13 +197,6 @@ def _require_evidence(trace: Path | None, har: Path | None, browser_use: Path | 
         raise InputUsageError("provide evidence with --trace, --har and/or --browser-use")
 
 
-def _check_exporters(otel: bool, langfuse_trace_id: str | None) -> None:
-    try:
-        exporters.check(otel=otel, langfuse_trace_id=langfuse_trace_id)
-    except (ImportError, ValueError) as e:
-        raise CliError(str(e), ExitCode.USAGE) from e
-
-
 def _warn_about_model(
     err: Console, settings: Settings, llm: LLMClient | None, *, offline: bool
 ) -> None:
@@ -262,15 +258,6 @@ _ScreenshotRoot = Annotated[
         help="Directory browser-use screenshots may be read from (default: next to the history)"
     ),
 ]
-_Otel = Annotated[
-    bool,
-    typer.Option(
-        "--otel", help="Emit gen_ai.evaluation.result events via OpenTelemetry (OTEL_* env)"
-    ),
-]
-_LangfuseTraceId = Annotated[
-    str | None, typer.Option(help="Push scores to this Langfuse trace (LANGFUSE_* env)")
-]
 
 
 @app.command()
@@ -329,8 +316,8 @@ def judge(
     screenshot_root: _ScreenshotRoot = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: Debug = False,
-    otel: _Otel = False,
-    langfuse_trace_id: _LangfuseTraceId = None,
+    otel: Otel = False,
+    langfuse_trace_id: LangfuseTraceId = None,
 ) -> None:
     """Judge one agent run. Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
     _require_evidence(trace, har, browser_use)
@@ -339,7 +326,7 @@ def judge(
 
     err = stderr()
     try:
-        _check_exporters(otel, langfuse_trace_id)
+        check_exporters(otel, langfuse_trace_id)
         settings = load_settings(llm_backend)
         task_spec = _load_spec(spec) if spec else None
         site_name = _site(site) if site is not None else None

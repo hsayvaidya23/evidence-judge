@@ -16,6 +16,7 @@ from rich.text import Text
 from evidence_judge.config import EnvFileError, Settings, describe_settings_error, read_settings
 from evidence_judge.core.spec_errors import json_syntax_problem
 from evidence_judge.core.verdict import Outcome
+from evidence_judge.integrations import exporters
 from evidence_judge.llm import factory
 from evidence_judge.llm.base import LLMClient, LLMError
 from evidence_judge.redact import Redactor, redactor_for
@@ -57,6 +58,15 @@ IN_FILE: FileOpt = {"exists": True, "dir_okay": False, "readable": True, "resolv
 OUT_FILE: FileOpt = {"dir_okay": False, "writable": True, "resolve_path": True}
 
 Debug = Annotated[bool, typer.Option("--debug", help="Show tracebacks for internal errors")]
+Otel = Annotated[
+    bool,
+    typer.Option(
+        "--otel", help="Emit gen_ai.evaluation.result events via OpenTelemetry (OTEL_* env)"
+    ),
+]
+LangfuseTraceId = Annotated[
+    str | None, typer.Option(help="Push scores to this Langfuse trace (LANGFUSE_* env)")
+]
 
 
 def stderr() -> Console:
@@ -130,6 +140,13 @@ def build_llm(settings: Settings) -> LLMClient | None:
         return factory.build_llm(settings)
     except LLMError as e:
         raise CliError(f"could not initialise the LLM client: {e}", ExitCode.INTERNAL) from e
+
+
+def check_exporters(otel: bool, langfuse_trace_id: str | None) -> None:
+    try:
+        exporters.check(otel=otel, langfuse_trace_id=langfuse_trace_id)
+    except (ImportError, ValueError) as e:
+        raise CliError(str(e), ExitCode.USAGE) from e
 
 
 def chosen_llm(settings: Settings, choice: LLMChoice | None, *, offline: bool) -> LLMClient | None:
