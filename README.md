@@ -113,10 +113,10 @@ See [docs/architecture.md](docs/architecture.md).
 ## 📦 Install
 
 ```bash
-uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
+uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"
 ```
 
-v0.1.0 is not released yet, so this installs from GitHub, not PyPI; add `@<sha>` to the URL to pin a commit.
+To pin a version, add it to the requirement: `"evidence-judge[anthropic,mcp]==0.1.0"`.
 
 Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically. The `mcp` extra adds the MCP server (`evidence-judge mcp`), which the Claude Code plugin starts.
 
@@ -241,10 +241,10 @@ CLI you're already logged into (`--llm claude-code`, `codex` or `gemini`), so no
 ¹ A `codex exec --json` stream records no diffs, so a session that edited code is NEEDS_REVIEW;
 judge the rollout file or the evidence log instead.
 
-Every agent needs the CLI on your `PATH` first (v0.1.0 is not released yet, so it installs from GitHub):
+Every agent needs the CLI on your `PATH` first:
 
 ```bash
-uv tool install --python 3.12 "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
+uv tool install --python 3.12 "evidence-judge[mcp]"
 evidence-judge version
 ```
 
@@ -407,7 +407,7 @@ GitHub Actions: gate a pull request on a recorded run.
 
 The step fails on FAIL (and optionally NEEDS_REVIEW), writes the verdict to the job summary, exposes `outcome`, `score` and `report` outputs and can upload the HTML report as an artifact. Boolean inputs take `true` or `false` in any case; anything else fails the step. It runs offline by default; for LLM extraction set `offline: "false"` and pass `anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}`.
 
-Pin a release, never `@main`: the action installs evidence-judge from the ref you pin, so a moving branch changes your verdicts under you. v0.1.0 is not released yet, so there is no tag; until there is, pin a full commit SHA from `main`.
+Pin a release, never `@main`: the action installs evidence-judge from the ref you pin, so a moving branch changes your verdicts under you.
 
 Docker: `docker build -t evidence-judge . && docker run --rm -v "$PWD:/work:ro" evidence-judge judge --trace trace.zip --answer-file answer.txt --offline`
 

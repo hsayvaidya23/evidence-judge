@@ -6,16 +6,16 @@ description: Install the evidence-judge CLI with uv, pip or Docker, and pick the
 
 Evidence Judge needs **Python 3.12 or newer** (it is tested on 3.12 and 3.13).
 
-!!! info "Not released yet"
+!!! info "Pinning"
 
-    v0.1.0 is not released yet, so nothing is on PyPI: install from the GitHub repository, as
-    below. Do not install `evidence-judge` from PyPI until the release notes say it is there.
-    To pin a commit, add it to the URL: `git+https://github.com/hsayvaidya23/evidence-judge@<sha>`.
+    To pin a version, add it to the requirement: `"evidence-judge[anthropic]==0.1.0"`. To run
+    unreleased code from `main`, install from the repository instead:
+    `"evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"`.
 
 === "uv (recommended)"
 
     ```bash
-    uv tool install --python 3.12 "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"
+    uv tool install --python 3.12 "evidence-judge[anthropic]"
     ```
 
     `uv tool install` uses uv's default interpreter, not a `.python-version` file, so
@@ -24,7 +24,7 @@ Evidence Judge needs **Python 3.12 or newer** (it is tested on 3.12 and 3.13).
 === "pip"
 
     ```bash
-    pip install "evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"
+    pip install "evidence-judge[anthropic]"
     ```
 
 === "From a checkout"
@@ -51,7 +51,7 @@ Check it works:
 
 ```console
 $ evidence-judge version
-evidence-judge 0.1.0.dev0
+evidence-judge 0.1.0
 ```
 
 ## Extras

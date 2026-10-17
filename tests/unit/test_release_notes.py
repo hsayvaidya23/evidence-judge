@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -9,10 +8,12 @@ MARKER = "not released yet"
 STALE = re.compile(r"on PyPI yet|tagged yet|untagged|until v0\.1\.0 is", re.IGNORECASE)
 
 
-def _version() -> str:
-    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
-        "version"
-    ]
+def _released() -> bool:
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    return (
+        re.search(r"^## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{2}$", changelog, re.MULTILINE)
+        is not None
+    )
 
 
 def _pages() -> list[Path]:
@@ -34,9 +35,8 @@ def _notes() -> list[str]:
 
 
 def test_a_release_leaves_no_pre_release_note() -> None:
-    version = _version()
-    if ".dev" not in version:
-        assert not _notes(), f"version {version} is a release; update these notes: {_notes()}"
+    if _released():
+        assert not _notes(), f"a release is out; update these notes: {_notes()}"
 
 
 def test_pre_release_notes_use_the_shared_marker() -> None:
@@ -55,7 +55,7 @@ PYPI_REQUIREMENT = re.compile(
 
 
 def test_pre_release_snippets_install_from_the_repository() -> None:
-    if ".dev" not in _version():
+    if _released():
         return
     pages = [
         *_pages(),

@@ -17,7 +17,7 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | `schema` | Print the JSON Schema of the verdict format |
 | `version` | Print the evidence-judge version (also `evidence-judge --version`) |
 
-v0.1.0 is not released yet, so install from GitHub: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`. Add `@<sha>` to the URL to pin a commit.
+Install from PyPI: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"`. Add `==0.1.0` to pin the version.
 
 Settings (models, budget, redaction, cache) come from environment variables, plus a dotenv file
 only when you name one with the global `--env-file PATH` option (before the command) or
@@ -141,7 +141,7 @@ Offline, redaction tokens are keyed by a digest of the files in the run director
 ## `evidence-judge mcp`
 
 Runs an MCP server exposing `judge_run`, `judge_session`, `inspect_run`, `explain_verdict`,
-`validate_spec` and `find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`); without it the
+`validate_spec` and `find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp]"`); without it the
 command exits `3`. See the [MCP server guide](guides/mcp.md) for client setup.
 
 ```bash

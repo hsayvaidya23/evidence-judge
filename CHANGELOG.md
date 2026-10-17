@@ -8,6 +8,8 @@ the names exported from `evidence_judge`) is defined under
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-18
+
 The first release. Nothing was released before it, so this entry lists what the tool does;
 fixes made during development are in the [security history](docs/security-history.md).
 
@@ -165,4 +167,5 @@ every attack that worked became a recorded fixture or benchmark forgery kind and
 [docs/security-history.md](docs/security-history.md) keeps that record, including the
 pre-release fixes once listed here.
 
-[Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main
+[Unreleased]: https://github.com/hsayvaidya23/evidence-judge/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/hsayvaidya23/evidence-judge/releases/tag/v0.1.0
