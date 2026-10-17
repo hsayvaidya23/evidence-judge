@@ -33,6 +33,7 @@ from evidence_judge.forgery.planting import (
 
 INJECTION_VARIANTS: Final = ("evaluate", "init_script")
 MOCK_VARIANTS: Final = ("product_api", "order")
+READ_MOCK_VARIANTS: Final = MOCK_VARIANTS[:1]
 STORAGE_VARIANTS: Final = ("local_storage", "cookie")
 CHANNEL_VARIANTS: Final = ("cdp_fetch", "websocket")
 SCREENSHOT_VARIANTS: Final = ("style", "mask")
@@ -83,7 +84,7 @@ def _mocked(event: NetworkEvent) -> NetworkEvent:
 
 def mocked_response(run: Run, seed: int, targets: Targets) -> Run:
     """The agent's route handler answers the shop's requests with what the story needs."""
-    variants = MOCK_VARIANTS if targets.write else MOCK_VARIANTS[:1]
+    variants = MOCK_VARIANTS if targets.write else READ_MOCK_VARIANTS
     variant = pick_variant(run, seed, variants)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"

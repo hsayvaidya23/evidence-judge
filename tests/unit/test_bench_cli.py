@@ -83,9 +83,10 @@ def test_baseline_runs_with_a_configured_llm(monkeypatch: pytest.MonkeyPatch) ->
     )
 
     assert result.exit_code == ExitCode.PASS, result.output
-    assert "| `llm-transcript` | **all manipulations** | 498 | 498 | 100% |" in result.output
+    assert "| `llm-transcript` | **all manipulations** | 1692 | 1692 | 100% |" in result.output
     assert budgets[0] is not None
-    forged = 8 * 49 + 3 * 39
+    one_per_variant = 1194
+    forged = 8 * 49 + 3 * 39 + one_per_variant
     assert budgets[0].max_cost_usd == pytest.approx(Settings().max_cost_usd * (17 + 6 * 8 + forged))
 
 

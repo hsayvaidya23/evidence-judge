@@ -532,7 +532,12 @@ def bench(
         ),
     ],
     seeds: Annotated[
-        int, typer.Option(min=1, metavar="<n>", help="Forgeries per failed run and kind")
+        int,
+        typer.Option(
+            min=1,
+            metavar="<n>",
+            help="Forgeries per failed run and kind (at least one per variant of the kind)",
+        ),
     ] = 3,
     out: Annotated[
         Path | None, typer.Option(help="Write the results JSON here", **OUT_FILE)

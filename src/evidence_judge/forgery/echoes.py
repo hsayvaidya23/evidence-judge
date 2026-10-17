@@ -33,9 +33,12 @@ from evidence_judge.forgery.planting import (
 )
 
 ECHO_VARIANTS: Final = ("search_box", "typed_search_url", "confirmation_url")
+READ_ECHO_VARIANTS: Final = ECHO_VARIANTS[:2]
 BYPASS_VARIANTS: Final = ("maxlength", "markup", "upload", "send_keys")
 RESPONSE_VARIANTS: Final = ("search_api", "api_url", "contact_form")
+READ_RESPONSE_VARIANTS: Final = RESPONSE_VARIANTS[:2]
 LINK_VARIANTS: Final = ("path_echo", "search_url", "confirmation_url")
+READ_LINK_VARIANTS: Final = LINK_VARIANTS[:2]
 TRANSFORMED_VARIANTS: Final = ("did_you_mean", "slug_url")
 DERIVED_VARIANTS: Final = (
     "misspelt",
@@ -73,7 +76,7 @@ def self_planted_text(run: Run, seed: int) -> Run:
 
 
 def expect_echo(run: Run, seed: int, targets: Targets) -> Run:
-    variants = ECHO_VARIANTS if targets.write else ECHO_VARIANTS[:2]
+    variants = ECHO_VARIANTS if targets.write else READ_ECHO_VARIANTS
     variant = pick_variant(run, seed, variants)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"
@@ -133,7 +136,7 @@ def echo_bypass(run: Run, seed: int, targets: Targets) -> Run:
 
 def response_echo(run: Run, seed: int, targets: Targets) -> Run:
     """The shop's API repeats the claimed phrase and the expected response texts back."""
-    variants = RESPONSE_VARIANTS if targets.write else RESPONSE_VARIANTS[:2]
+    variants = RESPONSE_VARIANTS if targets.write else READ_RESPONSE_VARIANTS
     variant = pick_variant(run, seed, variants)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"
@@ -227,7 +230,7 @@ def transformed_echo(run: Run, seed: int, targets: Targets) -> Run:
 
 def data_url_link(run: Run, seed: int, targets: Targets) -> Run:
     """A link on a `data:` page the agent wrote leads to a shop URL that repeats the texts."""
-    variants = LINK_VARIANTS if targets.write else LINK_VARIANTS[:2]
+    variants = LINK_VARIANTS if targets.write else READ_LINK_VARIANTS
     variant = pick_variant(run, seed, variants)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"

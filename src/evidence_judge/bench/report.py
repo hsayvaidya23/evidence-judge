@@ -99,6 +99,7 @@ def to_markdown(result: BenchResult) -> str:
     lines = [
         *_header(result),
         *_forgery_table(result),
+        *_variant_table(result),
         *_accuracy_table(result),
         *_control_verdicts(result),
         *_should_pass(result),
@@ -121,8 +122,9 @@ def _header(result: BenchResult) -> list[str]:
         f"{len(edited)} honest edits of the passing ones = "
         f"{len(result.scenarios) + len(edited)} honest controls; "
         f"{len(forged_bases)} failed runs forged ({', '.join(forged_bases) or 'none'})",
-        f"- Forgeries: up to {len(result.kinds)} kinds x {result.seeds} seeds per failed run = "
-        f"{forged_cases} forged runs, forger `{result.forger}`",
+        f"- Forgeries: up to {len(result.kinds)} kinds x {result.seeds} seeds per failed run, or "
+        f"one seed per variant for a kind with more variants = {forged_cases} forged runs, "
+        f"forger `{result.forger}`",
         *_judge_notes(result),
     ]
 
@@ -153,6 +155,35 @@ def _forgery_table(result: BenchResult) -> list[str]:
         "",
         f"`{ALL_MANIPULATIONS}` pools every kind except the `style_only` control.",
     ]
+
+
+def _variant_table(result: BenchResult) -> list[str]:
+    judges = [j for j in result.judges if j in (EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC)]
+    rows: dict[tuple[ForgeryKind, str], list[int]] = {}
+    for m in result.variant_metrics:
+        if m.judge not in judges:
+            continue
+        row = rows.setdefault((m.kind, m.variant), [0, 0, 0, 0])
+        row[0] = max(row[0], m.runs)
+        row[1] += m.false_pass
+        row[2] += m.needs_review
+        row[3] += m.fail
+    if not rows:
+        return []
+    lines = [
+        "",
+        "## Forgery variants",
+        "",
+        "Every variant of every kind runs on every failed run that can carry it. Runs counts the "
+        "forged runs of a variant; the verdicts pool every Evidence Judge configuration that "
+        f"judged them ({', '.join(f'`{j}`' for j in judges)}).",
+        "",
+        "| Forgery kind | Variant | Runs | False PASS | NEEDS_REVIEW | FAIL |",
+        "| --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    for (kind, variant), (runs, false_pass, review, fail) in rows.items():
+        lines.append(f"| {kind.value} | {variant} | {runs} | {false_pass} | {review} | {fail} |")
+    return lines
 
 
 def _accuracy_table(result: BenchResult) -> list[str]:
