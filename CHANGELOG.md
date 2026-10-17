@@ -117,7 +117,8 @@ fixes made during development are in the [security history](docs/security-histor
 
 - Secrets and PII are redacted from evidence, answers, specs and reports by default (CLI, MCP
   server, Action and Python API alike), with HMAC fingerprints so redacted values still match
-  and a stable per-installation key so LLM cache hits survive restarts.
+  and a stable per-installation key so LLM cache hits survive restarts. A fingerprint is never
+  read as text the agent typed, so a verdict does not depend on the key.
 - Credentials on command lines (`mysql -pX`, `curl -u user:X`, `sshpass -p`, `docker login -p`,
   `htpasswd -b`, `npm`/`aws` `config set`, `--token X`) are redacted by tool and flag, while
   paths, file names and test ids after a secret's name stay readable.

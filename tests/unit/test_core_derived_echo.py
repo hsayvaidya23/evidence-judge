@@ -26,6 +26,12 @@ def test_other_words_are_not_folded_into_the_texts(typed: str) -> None:
     assert mask_covered("Out of stock In stock", ("in stock",), (normalize(typed),)) is None
 
 
+@pytest.mark.parametrize("fingerprint", ["f1140042", "52009f32", "5c900ba5", "a0504125"])
+def test_a_redaction_fingerprint_is_not_near_the_text(fingerprint: str) -> None:
+    token = f"[REDACTED:secret_input:{fingerprint}]"
+    assert mask_covered("Total $24.00", ("$24.00",), (normalize(token),)) is None
+
+
 def test_a_folded_echo_maps_back_to_the_text_it_came_from() -> None:
     assert mask("Résultats: Ïn ştöck, merci", ("1n 5t0ck",)) == f"résultats: {MASK}, merci"
 
