@@ -36,6 +36,7 @@ from evidence_judge.sessions.checks import (
     SessionIndex,
     check,
     compile_failure,
+    place,
     ran_with,
 )
 from evidence_judge.sessions.checks.push import PushTarget, check_push_target
@@ -332,6 +333,7 @@ class SessionJudge:
         run, options, _ = self.redact(run, options)
         state = _State()
         spec = options.spec
+        run = place(run, spec.cwd if spec else None)
         with run_budget(Budget(self._settings.max_cost_usd)):
             claim_set = await self._claims(run, options, state)
         if spec and spec.trusted_wrappers:

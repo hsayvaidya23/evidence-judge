@@ -18,6 +18,7 @@ from evidence_judge.sessions.checks.common import (
     Result,
     RunOutcome,
     path_matches,
+    place,
 )
 from evidence_judge.sessions.checks.edits import check_edit, check_only
 from evidence_judge.sessions.checks.index import SessionIndex
@@ -61,6 +62,7 @@ __all__ = [
     "judge_test_run",
     "names_test",
     "path_matches",
+    "place",
     "ran_with",
     "stopped_early",
     "suite_size",
