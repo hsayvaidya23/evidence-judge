@@ -926,3 +926,63 @@ def test_a_full_screen_box_an_animation_or_a_state_rule_may_show_covers_the_page
 
     assert (page.unsure_text == "Order confirmed") is covers
     assert (page.text == "") is covers
+
+
+_FADE = "@keyframes out{from{opacity:1}to{opacity:0;visibility:hidden}}"
+
+
+@pytest.mark.parametrize(
+    ("css", "covers"),
+    [
+        (".ov{animation:out .5s forwards}", False),
+        (".ov{animation:out .5s both}", False),
+        (".ov{animation:out .5s 1s ease-in forwards}", False),
+        (".ov{animation:out .5s forwards}.ov:hover{color:red}", False),
+        (".ov{animation:out .5s forwards}.ov:hover{opacity:1}", False),
+        (".ov{animation:out .5s 1 alternate forwards}", False),
+        ("@keyframes up{to{transform:translateY(-100%)}}.ov{animation:up .5s forwards}", False),
+        ("@keyframes in{from{opacity:0}to{opacity:1}}.ov{animation:in .5s forwards}", True),
+        (".ov{animation:out .5s}", True),
+        (".ov{animation:out .5s 10s}", True),
+        (".ov{animation:out .5s 10s forwards}", True),
+        (".ov{animation:out 9999s forwards}", True),
+        (".ov{animation:out .5s infinite forwards}", True),
+        (".ov{animation:out .5s infinite alternate forwards}", True),
+        (".ov{animation:out .5s 2 alternate forwards}", True),
+        (".ov{animation:out .5s reverse forwards}", True),
+        (".ov{animation:out .5s forwards paused}", True),
+        (".ov{animation:out .5s forwards}.ov:hover{animation-play-state:paused}", True),
+        (".ov{animation:out .5s forwards}.ov:hover{animation:none}", True),
+        (".ov{animation:out .5s forwards}.ov:target{animation-name:none}", True),
+        (".ov{animation:out .5s forwards}.ov:hover{visibility:visible!important}", False),
+        (
+            "@keyframes o{to{opacity:0}}.ov{animation:o .5s forwards}.ov:hover{opacity:1!important}",
+            True,
+        ),
+        ("@keyframes o{to{opacity:0}}.ov{opacity:1!important;animation:o .5s forwards}", True),
+        ("@keyframes s{to{rotate:1turn}}.ov{animation:out .5s forwards,s 1s infinite}", True),
+        (".ov{animation:out .5s forwards,out .5s forwards}", True),
+        (".ov{--o:0;animation:out .5s forwards}@keyframes out{to{opacity:var(--o)}}", True),
+        (".ov{animation:var(--a,out .5s forwards)}", True),
+        (".ov{animation:out .5s steps(2) forwards}", True),
+    ],
+)
+def test_a_preloader_that_fades_out_and_stays_out_covers_nothing(css: str, covers: bool) -> None:
+    style = ["STYLE", {}, f"{_FADE}.ov{{{_COVER}}}{css}"]
+    page = _rendered(["P", {}, "Order confirmed"], ["DIV", {"class": "ov"}], head=(style,))
+
+    assert (page.unsure_text == "Order confirmed") is covers
+    assert (page.text == "") is covers
+
+
+@pytest.mark.parametrize(("classes", "covers"), [("ov done", False), ("ov", True)])
+def test_a_preloader_a_class_hides_reads_as_the_recorded_classes_leave_it(
+    classes: str, covers: bool
+) -> None:
+    css = (
+        f".ov{{{_COVER};transition:opacity .5s,visibility .5s}}.done{{opacity:0;visibility:hidden}}"
+    )
+    style = ["STYLE", {}, css]
+    page = _rendered(["P", {}, "Order confirmed"], ["DIV", {"class": classes}], head=(style,))
+
+    assert (page.unsure_text == "Order confirmed") is covers

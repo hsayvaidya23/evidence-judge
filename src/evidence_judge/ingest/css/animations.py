@@ -141,6 +141,12 @@ def resting(cascade: Cascade, frames: Keyframes) -> tuple[int, ...] | None:
     return tuple(sorted(ends))
 
 
+def fills_forwards(cascade: Cascade) -> bool:
+    """Whether an element's only animation certainly fills forwards (``forwards`` or ``both``),
+    so that where it comes to rest (`resting`) is what the element keeps."""
+    return all(v in ("forwards", "both") for v in _firsts(cascade, "animation-fill-mode", "none"))
+
+
 def _all(found: list[float | None]) -> list[float] | None:
     known = [value for value in found if value is not None]
     return known if len(known) == len(found) else None
