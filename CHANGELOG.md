@@ -56,7 +56,9 @@ fixes made during development are in the [security history](docs/security-histor
   `config/app.yaml`, test fixtures) unless a Makefile the session showed may read them; Makefile
   fragments, wrapper configuration and files of unknown kind still void it.
 - Spec and claim regexes run under the browser checks' 50 ms budget; a search that runs past
-  it needs review. Path globs match in linear time.
+  it needs review. Path globs match in linear time, support `[...]` and `[!...]` classes, and
+  reject `{a,b}` and backslash escapes; a path outside the session directory matches no glob, so
+  `only` fails an edit outside the project and `ignore_edits` never ignores one.
 
 **Independent re-run**
 
