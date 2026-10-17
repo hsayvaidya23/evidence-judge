@@ -14,6 +14,19 @@ version: all of it happened before v0.1.0. The threat model and its current limi
 
 ## Findings and fixes
 
+- **Writing a data file no longer voids a silent wrapper's count floor.** Since the floor rule
+  voided it for any written file but source code or prose, an honest session that wrote
+  `.gitignore`, `config/app.yaml`, `data/sample.csv` or `tests/fixtures/cases.json` before a
+  silent `make test` needed review. Data files now void it only when a Makefile the session
+  showed names them in an `include` or a recipe, or picks files at run time; forgery kinds
+  `wrapper_redefined_shown_include_yaml`, `wrapper_redefined_shown_recipe_csv` and
+  `wrapper_redefined_shown_shell_json` cover that case.
+- **Session spec regexes run under the 50 ms budget.** A `command` predicate's `regex` was
+  searched with no timeout, so `(a|aa)+$` against a 38-character command took 21.8 s, through
+  the CLI, the MCP `judge_session` tool and the Action alike. The search now stops at
+  `REGEX_TIMEOUT_SECONDS` and the predicate is no evidence (needs review). Edit globs, which
+  compiled to backtracking regexes (`*a*a*a*a*a*a*a*a*b` against a long file name never
+  finished), are matched in linear time.
 - **An order's JSON total counts only on the order's own path.** "I bought the red kettle for
   $4.00." passed on `{"total": 28.0, "delivery": {"total": 4.0}}`, because a total key counted
   anywhere unless a parent key named a part of the price; `vat`, `savings`, `monthly`,

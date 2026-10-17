@@ -232,6 +232,13 @@ def test_bad_spec_and_claims(tmp_path: Path) -> None:
     )
     assert result.exit_code == 3 and "invalid session spec" in result.output
     assert "expect.0" in result.output and "(line 1, column" in result.output
+    spec.write_text("expect:\n  - id: a\n    kind: command\n    regex: 'pytest ((a|aa)+'\n")
+    result = runner.invoke(
+        app, ["session", "judge", "--offline", "--claude-code", str(SUCCESS), "--spec", str(spec)]
+    )
+    output = " ".join(result.output.split())
+    assert result.exit_code == 3 and "command.regex (line 4, column 12)" in output
+    assert "invalid regex" in output
     claims = tmp_path / "claims.json"
     claims.write_text('{"claims": [{"id": 1}]}')
     result = runner.invoke(

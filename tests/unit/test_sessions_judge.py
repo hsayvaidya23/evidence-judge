@@ -189,6 +189,17 @@ async def test_spec_without_claims_and_unmet_expectations() -> None:
     assert verdict.expectations[0].met is None
 
 
+@pytest.mark.parametrize("kind", ["expect", "forbid"])
+async def test_a_spec_regex_that_runs_too_long_needs_review(kind: str) -> None:
+    item = {"id": "slow", "kind": "command", "regex": "(a|aa)+$"}
+    spec = SessionSpec.model_validate({kind: [item]})
+    run = session(edit("calc.py"), bash("pytest " + "a" * 40 + "!", GREEN), answer="All pass.")
+    verdict = await SessionJudge().judge(run, SessionJudgeOptions(offline=True, spec=spec))
+    assert verdict.outcome is Outcome.NEEDS_REVIEW
+    assert verdict.expectations[0].met is None
+    assert "ran past 50 ms" in verdict.expectations[0].reason
+
+
 def test_spec_validation(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match="unique"):
         SessionSpec.model_validate(

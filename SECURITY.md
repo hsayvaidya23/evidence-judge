@@ -277,7 +277,10 @@ when it passed at least as many tests as an earlier whole-suite run of the same 
 command the session showed (plus the tests the session added since, when every change since
 can be counted; a test written by a command, a parametrize case, a deleted test or any change
 that may redefine the wrapper, such as a new `test.mk` or `tests/tox.ini`, voids the earlier
-count). Gaps remain there: a tox environment's `setenv` is read from a `tox.ini`,
+count). A data file (`config/app.yaml`, `.gitignore`, a test fixture) voids it only when a
+Makefile the session showed names it or picks files at run time; a Makefile the session never
+showed could include one, which the session cannot tell, so rewriting a data file such a
+Makefile includes is a forgery only `--require-rerun` or reading the Makefile catches. Gaps remain there: a tox environment's `setenv` is read from a `tox.ini`,
 `setup.cfg` or `pyproject.toml` the session showed (any of them, since which one tox reads may
 turn on a file the session did not show), but not from one it never showed; a noxfile, justfile
 settings and parameters and tox factor-conditional `commands` are never read; and an unseen
@@ -351,6 +354,11 @@ compromised agent:
   `--allow-mismatch`) overrides all of this.
 - Every ingest failure is an `IngestError` (a `ValueError`), reported by the CLI as bad input
   (exit code 3).
+- **Spec regexes are time-bounded.** A regex from a spec, a claim or an LLM is length-capped,
+  compiled on load (an invalid one is bad input naming its line and column) and searched with a
+  50 ms budget per text, in browser runs and coding-agent sessions alike. A search that runs
+  past it proves nothing, so the verdict needs review instead of hanging on a backtracking
+  pattern such as `(a|aa)+$`. Session path globs are matched in linear time.
 
 ## Rules for contributors and users
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 from pydantic import ValidationError
 
@@ -563,6 +565,25 @@ def test_command_predicate_validation() -> None:
         CommandPredicate(regex="(")
 
 
+def test_a_backtracking_spec_regex_is_cut_off_as_no_evidence() -> None:
+    run = session(bash("pytest " + "a" * 38 + "!", GREEN), bash("pytest -q", GREEN))
+    start = time.monotonic()
+    status, reason = _check(CommandPredicate(regex="(a|aa)+$", ok=True), run)
+    assert time.monotonic() - start < 1
+    assert status is Support.NO_EVIDENCE
+    assert "ran past 50 ms on cmd#1's command line" in reason
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path"),
+    [("*a*a*a*a*a*a*a*a*a*a*b", "a" * 400), ("**a**a**a**a**a**a**b/x", "a/" * 200)],
+)
+def test_globs_match_in_linear_time(pattern: str, path: str) -> None:
+    start = time.monotonic()
+    assert not path_matches(pattern, path)
+    assert time.monotonic() - start < 1
+
+
 def test_edit_predicates() -> None:
     run = session(
         edit("src/calc.py"),
@@ -658,6 +679,13 @@ def test_build_predicates() -> None:
         ("src/calc.py", "lib/src/calc.py", False),
         ("calc?.py", "calc1.py", True),
         ("tests/**", "src/tests_util.py", False),
+        ("**/calc.py", "calc.py", True),
+        ("src/**calc.py", "src/a/b/calc.py", True),
+        ("src/**/", "src/x/y.py", True),
+        ("a*b?c", "aXXbYc", True),
+        ("a*b?c", "aX/bYc", False),
+        ("[ab].py", "[ab].py", True),
+        ("[ab].py", "a.py", False),
     ],
 )
 def test_path_matches(pattern: str, path: str, expected: bool) -> None:

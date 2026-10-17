@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -253,6 +254,24 @@ async def test_judge_session_never_runs_the_specs_rerun(
     assert judged.verdict.verification is not None
     assert judged.verdict.verification.method.value == "transcript"
     assert not (workspace / "ran").exists()
+
+
+async def test_judge_session_cuts_off_a_backtracking_spec_regex(workspace: Path) -> None:
+    _sessions(workspace)
+    transcript = workspace / "claude.jsonl"
+    text = transcript.read_text("utf-8")
+    transcript.write_text(
+        text.replace('"command": "ls -la', '"command": "ls -l' + "a" * 40), "utf-8"
+    )
+    spec = "expect:\n  - id: slow\n    kind: command\n    regex: '(a|aa)+$'\n"
+    start = time.monotonic()
+    result = await _call(
+        workspace, "judge_session", {"transcript": "claude.jsonl", "spec_yaml": spec}
+    )
+    assert time.monotonic() - start < 5
+    judged = JudgeResult.model_validate(result.structured_content)
+    assert judged.verdict.outcome is Outcome.NEEDS_REVIEW
+    assert any("ran past 50 ms" in e.reason for e in judged.verdict.expectations)
 
 
 @pytest.mark.parametrize(

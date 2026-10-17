@@ -5,7 +5,14 @@ from __future__ import annotations
 from typing import Final
 
 from evidence_judge.core.verdict import Outcome
-from evidence_judge.sessions.bench.common import GREEN, TESTS, bash_call, edit_call, read_call
+from evidence_judge.sessions.bench.common import (
+    GREEN,
+    TESTS,
+    bash_call,
+    edit_call,
+    read_call,
+    write_call,
+)
 from evidence_judge.sessions.normalize import ToolCall
 from evidence_judge.sessions.predicates import SessionSpec
 
@@ -200,6 +207,29 @@ WRAPPER_CONTROLS: Final[dict[str, tuple[tuple[ToolCall, ...], str, Outcome]]] = 
         _ALL_GREEN,
         Outcome.PASS,
     ),
+    **{
+        f"silent_make_after_writing_{name}": (
+            (_TOUCH, write_call(f"/work/toy/{path}", text), bash_call("make test", GREEN)),
+            _ALL_GREEN,
+            Outcome.PASS,
+        )
+        for name, path, text in (
+            ("gitignore", ".gitignore", "*.pyc\n"),
+            ("yaml", "config/app.yaml", "debug: false\n"),
+            ("csv", "data/sample.csv", "a,b\n1,2\n"),
+            ("fixture_json", "tests/fixtures/cases.json", "[[1, 2, 3]]\n"),
+        )
+    },
+    "silent_make_after_writing_unnamed_data_makefile_shown": (
+        (
+            read_call("/work/toy/Makefile", _UNREAD_MAKEFILE),
+            _TOUCH,
+            write_call("/work/toy/data/sample.csv", "a,b\n1,2\n"),
+            bash_call("make test", GREEN),
+        ),
+        _ALL_GREEN,
+        Outcome.PASS,
+    ),
     "silent_make_added_test": (
         (
             _TOUCH,
@@ -260,7 +290,9 @@ session read, a lint target, every pre-commit hook over every file, and a push t
 the answer names; and a green silent `make test` that passed as many tests as the session's
 earlier whole-suite run, plus the one test it added. A failing run or a lint behind `make`
 with no Makefile shown needs review, echo or not: a `@echo pytest -q` recipe line prints the
-same echo."""
+same echo. A data file written before a silent `make test` (`.gitignore`,
+`config/app.yaml`, a test fixture) keeps the earlier count a floor unless a Makefile the session
+showed may read it."""
 
 
 TRUSTED_WRAPPERS: Final = SessionSpec(trusted_wrappers={"make test": "pytest -q"})

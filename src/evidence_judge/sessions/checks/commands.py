@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import re
 
+import regex
+
+from evidence_judge.checks.matching import REGEX_TIMEOUT_SECONDS
 from evidence_judge.core.predicates import compile_pattern
 from evidence_judge.core.verdict import PredicateResult, Support
 from evidence_judge.sessions.checks.common import result
@@ -14,13 +17,16 @@ from evidence_judge.sessions.predicates import CommandPredicate
 from evidence_judge.sessions.shell.env import INSTALLERS, installs_from_manifest
 
 
-def _command_matches(predicate: CommandPredicate, event: CommandEvent) -> bool:
+def _command_matches(
+    predicate: CommandPredicate, pattern: regex.Pattern[str] | None, event: CommandEvent
+) -> bool:
+    """Raises TimeoutError when the spec's regex runs past REGEX_TIMEOUT_SECONDS."""
     if predicate.category is not None:
         return Category(predicate.category) in event.analysis.categories
     if predicate.contains is not None:
         return _squash(predicate.contains) in _squash(event.command)
-    assert predicate.regex is not None
-    return compile_pattern(predicate.regex).search(event.command) is not None
+    assert pattern is not None
+    return pattern.search(event.command, timeout=REGEX_TIMEOUT_SECONDS) is not None
 
 
 _SPACES = re.compile(r"\s+")
@@ -57,11 +63,22 @@ def _manifest_install(
 
 
 def check_command(predicate: CommandPredicate, index: SessionIndex) -> PredicateResult:
-    matches = [
-        c
-        for c in index.commands
-        if c.status is not CallStatus.DENIED and _command_matches(predicate, c)
-    ]
+    pattern = None if predicate.regex is None else compile_pattern(predicate.regex)
+    matches: list[CommandEvent] = []
+    for event in index.commands:
+        try:
+            if event.status is not CallStatus.DENIED and _command_matches(
+                predicate, pattern, event
+            ):
+                matches.append(event)
+        except TimeoutError:
+            budget = round(REGEX_TIMEOUT_SECONDS * 1000)
+            return result(
+                Support.NO_EVIDENCE,
+                f"regex /{predicate.regex}/ ran past {budget} ms on {event.id}'s command line, "
+                "so which commands match is unknown",
+                event,
+            )
     target = predicate.contains or predicate.category or f"/{predicate.regex}/"
     if predicate.scope == "after_last_edit":
         matches = [m for m in matches if index.fresh(m)]

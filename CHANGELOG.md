@@ -49,6 +49,11 @@ fixes made during development are in the [security history](docs/security-histor
   the HTML report.
 - A session spec's `trusted_wrappers` (`{"make test": "pytest -q"}`) declares what a project
   wrapper runs; the declaration stops applying once the session may have changed it.
+- A silent wrapper's count floor survives writes of data files (`.gitignore`,
+  `config/app.yaml`, test fixtures) unless a Makefile the session showed may read them; Makefile
+  fragments, wrapper configuration and files of unknown kind still void it.
+- Spec and claim regexes run under the browser checks' 50 ms budget; a search that runs past
+  it needs review. Path globs match in linear time.
 
 **Independent re-run**
 
