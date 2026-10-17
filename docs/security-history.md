@@ -14,6 +14,26 @@ version: all of it happened before v0.1.0. The threat model and its current limi
 
 ## Findings and fixes
 
+- **A lowercase currency code no longer turns a total into cents.** `{"order": {"total": 2400,
+  "currency_code": "usd"}}` supported "It cost $24.00." and passed, because any object naming
+  its currency in lowercase was read in minor units, while Medusa writes lowercase codes with
+  major-unit totals ($2,400 there). Minor units now apply only to Stripe-shaped objects: a
+  lowercase code plus an `object` type or a Stripe amount key (`amount`, `amount_total`,
+  `amount_subtotal`, `amount_received`, `amount_captured`). Medusa order and cart shapes are
+  fixtures in `tests/fixtures/prices/order_answers.json`.
+- **A failure nested in an order answer no longer proves the order or its price.** POST
+  `/api/orders` answered 201 with `{"order": {"id": "A1", "status": "payment_declined",
+  "total": 24.0}}`, the next page said "Order A1 is confirmed", and "It cost $24.00." passed:
+  the order's doubt read only top-level keys, and the price's failure check matched an exact
+  word list, so `not_paid`, `insufficient_funds`, `pending_payment`, `abandoned`, `draft`,
+  `PAYMENT-DECLINED`, `result: "declined"`, `declined: true`, `failed: true`, `is_paid: false`,
+  `isSuccess: false`, `payment_success: false`, `"message": "Your card was declined."` and
+  Stripe charges with `refunded: true` or `outcome.type: "issuer_declined"` got through. One
+  detector (`json_failure`) now serves both, at every depth: status-like values by the fuzzy
+  failure-word rule plus unpaid and abandoned states, success and failure flags by their key
+  words, set failure and decline codes, decline messages, and uncaptured Stripe charges.
+  Product names, empty errors, counts and fields about something else (`email_status`) report
+  nothing. Fixtures in `tests/fixtures/prices/failed_orders.json` cover each shape end to end.
 - **Command redaction handles continued lines and open quotes, in linear time.** `curl \` with
   `-u alice:Hunter22` on the next line, `curl -u "alice:s3cr3t` and `curl -u alice:'unbal` were
   left unchanged, because a word could not cross a line or start at an unmatched quote. Every

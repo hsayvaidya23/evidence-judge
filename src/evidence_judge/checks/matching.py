@@ -122,33 +122,84 @@ _PAID_OBJECTS: Final[dict[str, str | None]] = {
 of any other type (`refund`, `invoice_item`, `coupon`, `payout`) states no price paid."""
 _FAILED_STATES: Final = frozenset(
     {
-        "failed",
         "failure",
-        "payment_failed",
-        "declined",
-        "card_declined",
-        "canceled",
-        "cancelled",
-        "voided",
         "void",
-        "denied",
-        "expired",
-        "rejected",
+        "voided",
         "refunded",
-        "unpaid",
-        "error",
         "errored",
+        "unpaid",
+        "not_paid",
+        "pending_payment",
+        "payment_pending",
+        "awaiting_payment",
+        "abandoned",
+        "draft",
+        "incomplete",
         "requires_payment_method",
         "requires_action",
         "requires_confirmation",
     }
 )
-_FAILED_FLAGS: Final = frozenset({"success", "succeeded", "ok", "paid"})
+"""Status values that name a payment that did not go through, besides any `failure_mark`."""
+_STATUS_WORDS: Final = frozenset({"status", "state", "result", "outcome"})
+_SUBJECT_WORDS: Final = frozenset(
+    {
+        "is",
+        "has",
+        "was",
+        "fully",
+        "order",
+        "payment",
+        "charge",
+        "transaction",
+        "checkout",
+        "purchase",
+        "financial",
+        "invoice",
+    }
+)
+"""Words a status or flag key may start with and still be about the order's payment
+(`payment_status`, `is_paid`, `orderDeclined`); any other (`email_status`, `coupon_expired`)
+names something else."""
+_SUCCESS_FLAGS: Final = frozenset({"ok", "success", "succeeded", "successful", "paid"})
+_FAILURE_FLAGS: Final = frozenset(
+    {"declined", "failed", "refunded", "voided", "canceled", "cancelled", "rejected", "denied"}
+)
+_FAILURE_FIELDS: Final = frozenset({"failure", "failed", "decline", "declined"})
+_OUTCOME_WORDS: Final = frozenset({"outcome", "error", "failure", "decline"})
+_FAILED_OUTCOMES: Final = frozenset({"issuer_declined", "blocked", "invalid"})
+_MESSAGE_WORDS: Final = frozenset({"message", "msg"})
+_DECLINE_PHRASE = re.compile(
+    r"\b(?:(?:was|were|been|is|are)\s+(?:declined|refused|rejected|denied|cancell?ed)"
+    r"|(?:payment|charge|transaction|card|order|purchase|checkout)s?\s+(?:has\s+|have\s+)?"
+    r"(?:failed|declined|refused|rejected|denied|unsuccessful"
+    r"|not\s+(?:be\s+)?(?:processed|completed|placed|paid))"
+    r"|insufficient\s+funds|could\s?n[o']t\s+be\s+(?:processed|completed|charged)"
+    r"|unable\s+to\s+(?:process|charge|complete))\b",
+    re.IGNORECASE,
+)
+_LETTER_BEFORE = r"(?<![^\W\d_])"
+_LETTER_AFTER = r"(?![^\W\d_])"
+_FAILURE_WORD = re.compile(
+    _LETTER_BEFORE + r"(?:errors?|err|fail(?:s|ed|ures?)?|declin(?:e|es|ed)|refus(?:al|ed|e|ée?s?)?"
+    r"|reject(?:s|ed|ion)?|cancel(?:l?ed|lation)|invalid|denied|unauthori[sz]ed|expired"
+    r"|insufficient|try[\s_-]*again|problems?|unable|unsuccessful|timed?[\s_-]*out"
+    r"|abgelehnt|fehl(?:er|geschlagen)?|rechaz(?:ad[oa]s?|o)|rifiut(?:at[oaie]|o)"
+    r"|[ée]checs?|[ée]chou[ée]e?s?"
+    r"|not[\s_-]+(?:be[\s_-]+)?(?:processed|completed|placed))" + _LETTER_AFTER,
+    re.IGNORECASE,
+)
+_CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")
+UNSET: Final = frozenset({"", "0", "false", "no", "none", "null", "off"})
+"""Values that leave a field unset (`?error=`, `"errors": "none"`)."""
 _CURRENCY_WORDS: Final = frozenset({"currency", "code", "iso", "symbol"})
 _PAYPAL_AMOUNT: Final = frozenset({"value", "currency_code", "breakdown"})
 _PLAIN_DECIMAL = re.compile(r"\d+(?:\.\d{1,2})?")
 _MINOR_UNIT_KEYS: Final = frozenset({"cents", "minor", "pence", "paise"})
 _STRIPE_CURRENCY = re.compile(r"[a-z]{3}")
+_STRIPE_AMOUNT_KEYS: Final = frozenset(
+    {"amount", "amount_total", "amount_subtotal", "amount_received", "amount_captured"}
+)
 _KEY_CASE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _KEY_WORD = re.compile(r"[a-z]+")
 _INDEX_BRACKETS = re.compile(r"\[(-?\d+)\]")
@@ -209,13 +260,13 @@ def shows_amount(body: str | None, phrase: str) -> bool:
     (`order`, `checkout`, `payment`, `invoice`, `data`, `result`), outside any array (a line
     item). A total under any other object (`shipping`, `delivery`, `vat`, `item`, `cart`,
     `refund`, `gift_card`) never shows it. Minor units count only when the key says so
-    (`total_cents`: 2950 is 29.50), or in an object that names its currency in lowercase as
-    Stripe does (`{"amount": 2950, "currency": "usd"}`), whose `object` type, if any, is a
-    payment that went through, or in a `total_money` as Square writes it; a PayPal `amount` is
+    (`total_cents`: 2950 is 29.50), or in a Stripe-shaped object, one that names its currency
+    in lowercase and has an `object` type or a Stripe amount key (`{"amount": 2950,
+    "currency": "usd"}`), whose `object` type, if any, is a payment that went through, or in a `total_money` as Square writes it; a PayPal `amount` is
     `{"value": "29.50", "currency_code": "USD"}`; a bare `amount` shows nothing anywhere else.
-    The document must state one total and no failure (a `status` of `payment_failed` or
-    `declined`, an `error`, `"success": false`), and every currency it names, as a code, a
-    currency object or a formatted amount ('29,50 €'), must be the phrase's."""
+    The document must state one total and no failure at any depth (json_failure), and every
+    currency it names, as a code, a currency object or a formatted amount ('29,50 €'), must be
+    the phrase's."""
     wanted = _money(normalize(phrase))
     if wanted is None or body is None:
         return False
@@ -224,7 +275,7 @@ def shows_amount(body: str | None, phrase: str) -> bool:
     except (json.JSONDecodeError, RecursionError):
         return False
     currency, amount = wanted
-    if _json_failed(tree) or any(c != currency for c in _json_currencies(tree)):
+    if json_failure(tree) is not None or any(c != currency for c in _json_currencies(tree)):
         return False
     return _json_totals(tree) == {amount}
 
@@ -243,23 +294,97 @@ def _json_nodes(tree: object) -> list[dict[str, object]]:
     return found
 
 
-def _json_failed(tree: object) -> bool:
-    """Whether any object of a JSON tree reports a failure: a status or state that names one, an
-    `error` or `errors` with content, or a `success`, `ok` or `paid` that is false."""
-    for fields in _json_nodes(tree):
+def failure_mark(value: str) -> str | None:
+    """The failure word in a status-like value or URL part ('failed', 'DECLINED',
+    'payment_refused', 'paymentDeclined', 'abgelehnt'), or None. Words are whole words."""
+    found = _FAILURE_WORD.search(_CAMEL.sub(" ", value))
+    return found.group() if found else None
+
+
+def reported(value: object) -> bool:
+    """Whether an `errors` or `error` field holds something: not null, empty or unset."""
+    if isinstance(value, str):
+        return value.strip().casefold() not in UNSET
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, list | dict):
+        return bool(cast(list[object] | dict[object, object], value))
+    return value is not None
+
+
+def json_failure(tree: object) -> tuple[str, object] | None:
+    """The first field, at any depth of a JSON tree, that reports a payment or order that did not
+    go through, as its key and value, or None (field_failure). A Stripe `charge` must also have
+    been captured: `"captured": false` reports one."""
+    queue: list[tuple[object, list[str]]] = [(tree, [])]
+    for node, parent in queue:
+        if isinstance(node, list):
+            queue.extend((v, parent) for v in cast(list[object], node))
+            continue
+        if not isinstance(node, dict):
+            continue
+        fields = cast(dict[str, object], node)
+        if fields.get("object") == "charge" and fields.get("captured") is False:
+            return "captured", False
         for key, value in fields.items():
-            words = _key_words(key)
-            if words[-1:] in (["error"], ["errors"]) and value:
-                return True
-            if (
-                words[-1:] in (["status"], ["state"])
-                and isinstance(value, str)
-                and re.sub(r"[^a-z]+", "_", value.casefold()).strip("_") in _FAILED_STATES
-            ):
-                return True
-            if value is False and "_".join(words) in _FAILED_FLAGS:
-                return True
-    return False
+            if field_failure(key, value, parent):
+                return key, value
+        queue.extend((v, _key_words(k)) for k, v in fields.items())
+    return None
+
+
+def field_failure(key: str, value: object, parent: list[str] | None = None) -> bool:
+    """Whether one JSON field reports a failure, by the words of its key:
+
+    - an `error` or `errors` (`checkoutUserErrors`) that holds something (reported);
+    - a status-like field (`status`, `state`, `result`, `outcome`, `payment_status`,
+      `financialStatus`) whose value names a failure (failure_mark, or 'unpaid', 'not_paid',
+      'pending_payment', 'abandoned', 'draft', 'refunded', 'voided', ...);
+    - a success flag (`ok`, `success`, `paid`, `is_paid`, `isSuccess`, `payment_success`) that
+      is false, or a failure flag (`declined`, `failed`, `refunded`, `payment_failed`) that is
+      true;
+    - a `failure_code`, `decline_code` or `failure_message` that is set, or the `type` of an
+      `outcome` or error that names a decline (`issuer_declined`, `card_error`);
+    - a `message` (`error_message`, `declineMessage`) that says a payment was declined.
+
+    A status or flag key with other leading words (`email_status`, `coupon_expired`) speaks of
+    something else, and a count (`failed_attempts: 0`) is no flag."""
+    words = _key_words(key)
+    if not words:
+        return False
+    last, subject = words[-1], set(words[:-1]) <= _SUBJECT_WORDS
+    if last in ("error", "errors"):
+        return reported(value)
+    flag = _flag(value)
+    if flag is not None:
+        return subject and (
+            (flag is False and last in _SUCCESS_FLAGS) or (flag and last in _FAILURE_FLAGS)
+        )
+    if not isinstance(value, str):
+        return False
+    if last in _STATUS_WORDS and subject:
+        return _failed_state(value)
+    if _FAILURE_FIELDS & set(words):
+        return value.strip().casefold() not in UNSET
+    if last == "type" and _OUTCOME_WORDS & {*words, *(parent or [])}:
+        return _failed_state(value) or _state(value) in _FAILED_OUTCOMES
+    return last in _MESSAGE_WORDS and _DECLINE_PHRASE.search(value) is not None
+
+
+def _flag(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and (folded := value.strip().casefold()) in ("true", "false"):
+        return folded == "true"
+    return None
+
+
+def _state(value: str) -> str:
+    return re.sub(r"[^a-z]+", "_", value.casefold()).strip("_")
+
+
+def _failed_state(value: str) -> bool:
+    return failure_mark(value) is not None or _state(value) in _FAILED_STATES
 
 
 def _json_currencies(tree: object) -> set[str]:
@@ -350,8 +475,12 @@ def _has_currency(fields: dict[str, object]) -> bool:
 
 
 def _stripe_minor(fields: dict[str, object]) -> bool:
-    """Whether this object names its currency in lowercase, as Stripe does for minor units."""
-    return any(
+    """Whether this object is Stripe-shaped and so states amounts in minor units: it names its
+    currency in lowercase, and it has an `object` type or a Stripe amount key (`amount`,
+    `amount_total`, ...). A lowercase code alone is no sign: Medusa writes
+    `{"total": 2400, "currency_code": "usd"}` for $2,400."""
+    stripe = isinstance(fields.get("object"), str) or not _STRIPE_AMOUNT_KEYS.isdisjoint(fields)
+    return stripe and any(
         isinstance(v, str) and _STRIPE_CURRENCY.fullmatch(v) and _currency_code(k, v)
         for k, v in fields.items()
     )
