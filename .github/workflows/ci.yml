@@ -128,6 +128,7 @@ jobs:
           har: tests/fixtures/runs/honest_success/run.har
           answer-file: tests/fixtures/runs/honest_success/answer.txt
           spec: tests/fixtures/runs/honest_success/spec.yaml
+          site: http://127.0.0.1:56432/
           fail-on-review: "True"
           upload-report: "TRUE"
           report-artifact: evidence-judge-honest-report
@@ -151,6 +152,13 @@ jobs:
         with:
           trace: tests/fixtures/runs/honest_success/trace.zip
           offline: "yes"
+      - name: Reject a site that is not a URL or host
+        id: badsite
+        continue-on-error: true
+        uses: $/
+        with:
+          trace: tests/fixtures/runs/honest_success/trace.zip
+          site: https://shop.example.com/checkout
       - name: Judge a missing trace with the action (bad input must fail, not reuse a verdict)
         id: broken
         continue-on-error: true
@@ -175,6 +183,7 @@ jobs:
           BROKEN_STEP: ${{ steps.broken.outcome }}
           BADFLAG: ${{ steps.badflag.outputs.outcome }}
           BADFLAG_STEP: ${{ steps.badflag.outcome }}
+          BADSITE_STEP: ${{ steps.badsite.outcome }}
           SESSION: ${{ steps.session.outputs.outcome }}
           MIXED_STEP: ${{ steps.mixed.outcome }}
         run: |
@@ -185,6 +194,7 @@ jobs:
           test "$BROKEN_STEP" = failure
           test -z "$BADFLAG"
           test "$BADFLAG_STEP" = failure
+          test "$BADSITE_STEP" = failure
           test "$SESSION" = pass
           test "$MIXED_STEP" = failure
 
