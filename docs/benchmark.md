@@ -225,16 +225,20 @@ From Python:
 ```python
 import asyncio
 from pathlib import Path
+from evidence_judge import read_settings
 from evidence_judge.bench import BenchConfig, BenchmarkRunner, load_scenarios, to_markdown
-from evidence_judge.config import Settings
 
 result = asyncio.run(
-    BenchmarkRunner(Settings(), BenchConfig(seeds=3)).run(
+    BenchmarkRunner(read_settings(), BenchConfig(seeds=3)).run(
         load_scenarios(Path("tests/fixtures/runs"), Path("tests/fixtures/sites"))
     )
 )
 print(to_markdown(result))
 ```
+
+`BenchmarkRunner` redacts like `Judge` when `settings.redact` is on, with the key `judge` would
+use; pass `redactor=Redactor(redaction_key(*runs_dirs))` (from `evidence_judge.bench.dataset`)
+for the CLI's byte-reproducible tokens.
 
 ## Current results (offline, recorded fixtures)
 

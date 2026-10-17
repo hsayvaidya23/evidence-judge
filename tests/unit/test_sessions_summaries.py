@@ -235,6 +235,35 @@ def test_test_config_paths() -> None:
     assert not is_test_config("pyproject.toml")
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "test.mk",
+        "mk/test.mk",
+        "Makefile.test",
+        "makefile.local",
+        "GNUmakefile",
+        "rules.mak",
+        "test.make",
+        "tests/Makefile",
+        "tests/tox.ini",
+        "test/pytest.ini",
+        "tests/.env",
+        "tests/noxfile.py",
+        "tests/justfile",
+        "tests/package.json",
+        "tests/pyproject.toml",
+        "tests/setup.cfg",
+        "tests/.npmrc",
+    ],
+)
+def test_configuration_is_never_a_test_file(path: str) -> None:
+    assert not is_test_path(path)
+    assert is_test_config(path) or path.endswith(
+        ("package.json", "pyproject.toml", "setup.cfg", ".npmrc")
+    )
+
+
 def test_line_diff_and_patches() -> None:
     assert line_diff("a\nb\nc", "a\nc\nd") == (["b"], ["d"])
     hunks = [{"lines": [" keep", "-    assert add(2, 3) == 5", "+    assert add(2, 3) == -1"]}]

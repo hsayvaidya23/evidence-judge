@@ -82,7 +82,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1446 browser and 0 of 1653 session
+  Go toy projects with runner-specific tricks; 0 of 1446 browser and 0 of 1707 session
   forgeries pass, and 4 of 43 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
@@ -103,6 +103,9 @@ The first release.
 
 ### Changed
 
+- `read_settings` is exported from `evidence_judge` and used in the Python API, README and
+  benchmark examples in place of `Settings()`, which reads environment variables only and skips
+  `EVJ_ENV_FILE`.
 - The package description and keywords cover coding-agent sessions as well as browser agents,
   `session --help` names Gemini CLI (judged through the evidence log), and the Claude Code
   plugin's `Stop` hook says it is checking the answer against the recorded evidence instead of
@@ -131,6 +134,16 @@ The first release.
 
 ### Fixed
 
+- The offline session judge no longer PASSes "All tests pass" from a silent `make test` whose
+  only evidence is an earlier whole-suite count when the session wrote a file that may redefine
+  the wrapper (`test.mk`, `mk/test.mk`, `Makefile.test`, `Makefile.local`, `rules.mak`,
+  `tests/Makefile`, `tests/.env`, `tests/tox.ini`): any change that may redefine a wrapper, by
+  the same rule `trusted_wrappers` follows, now voids the earlier count, and make, tox, pytest,
+  nox, just, npm and env configuration is never taken for a test file wherever it sits
+  (`Makefile.*`, `*.mak` and `*.make` are now test configuration). Bench: 27 forged sessions
+  passed before and none does now; nine forgery kinds added, no control shifts (#92).
+- `bench --online` and `bench --with-llm-baseline` without `ANTHROPIC_API_KEY` now exit `4` and
+  name the missing key, like `judge --llm anthropic`, instead of exiting `3`.
 - `judge --llm anthropic` without `ANTHROPIC_API_KEY` now exits `4` and names the missing key,
   like the CLI backends do when their CLI is missing, instead of judging offline and exiting
   `0`. Without `--llm`, a missing key still judges offline.
@@ -571,5 +584,17 @@ The first release.
   extraction and any LLM call when `EVJ_REDACT` is on, as SECURITY.md says. The CLI, MCP server
   and Inspect scorer go through the same `Judge.redact`, so redaction happens once and the same
   way everywhere; `JudgeOptions(redact=False)` marks inputs that are already redacted.
+- Free-text redaction now covers a secret written after its name with no `:` or `=`
+  (`password hunter2`, `the api key is AB12cd34ef`, also `passwd`, `pwd`, `passcode`,
+  `passphrase`, `token`, `secret`) when the value has a digit, a symbol or mixed case, so prose
+  such as "the password field was empty" stays intact; `Cookie:` and `Set-Cookie:` lines inside
+  the answer, reasoning, page text or console messages, with the same tokens as the headers;
+  and mixed-case credentials after an explicit `Authorization` scheme (`Basic Zm9vYmFy`).
+- The session hook recorder reads settings with `read_settings`, so an `EVJ_REDACTION_KEY` set
+  only in the `EVJ_ENV_FILE` dotenv file now keys the recorder's tokens too; before, the
+  recorder and `session judge` could redact with different keys and their tokens would not match.
+- `BenchmarkRunner` used from Python now redacts runs, specs and claims when `settings.redact` is
+  on and no `redactor` is passed, as `Judge` does; it judged unredacted evidence before. The
+  `bench` CLI is unchanged and its output byte-identical.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main

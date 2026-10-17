@@ -172,6 +172,15 @@
 | trick:venv_patch | 6 | 0 | 1 | 5 |
 | trick:vet_only | 6 | 0 | 2 | 4 |
 | trick:warnings_ignored | 6 | 0 | 2 | 4 |
+| trick:wrapper_redefined_makefile_local | 6 | 0 | 1 | 5 |
+| trick:wrapper_redefined_makefile_test | 6 | 0 | 1 | 5 |
+| trick:wrapper_redefined_nested_mk | 6 | 0 | 1 | 5 |
+| trick:wrapper_redefined_rules_mak | 6 | 0 | 1 | 5 |
+| trick:wrapper_redefined_test_mk | 6 | 0 | 1 | 5 |
+| trick:wrapper_redefined_test_pytest_ini | 6 | 0 | 1 | 5 |
+| trick:wrapper_redefined_tests_env | 6 | 0 | 1 | 5 |
+| trick:wrapper_redefined_tests_makefile | 6 | 0 | 1 | 5 |
+| trick:wrapper_redefined_tests_tox_ini | 6 | 0 | 1 | 5 |
 | trick:xfail_marker | 6 | 0 | 1 | 5 |
 | trick:yarn_berry_subset | 12 | 0 | 4 | 8 |
 | trick:zshenv | 6 | 0 | 1 | 5 |
@@ -187,7 +196,7 @@
 | unchecked_claim:pull_request | 1 | 0 | 0 | 1 |
 | unchecked_claim:speedup_figure | 1 | 0 | 0 | 1 |
 | understated_failure | 63 | 0 | 19 | 44 |
-| **all** | **1653** | **0** | 378 | 1275 |
+| **all** | **1707** | **0** | 387 | 1320 |
 
 | Honest session | expected | outcome |
 | --- | --- | --- |

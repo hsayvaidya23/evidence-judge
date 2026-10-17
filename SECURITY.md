@@ -27,11 +27,11 @@ same way. It covers:
 
 | Category | What is redacted |
 | --- | --- |
-| `auth` / `bearer` / `jwt` | `Authorization` and `Proxy-Authorization` credentials (also written in free text, as in `Authorization: Token 9f8e...`), `Basic` credentials (base64 of `user:password`), bearer tokens and JWTs anywhere |
-| `cookie` | Every value in `Cookie` / `Set-Cookie` (cookie names are kept) |
+| `auth` / `bearer` / `jwt` | `Authorization` and `Proxy-Authorization` credentials (also written in free text, as in `Authorization: Token 9f8e...`, where after an explicit scheme a value with a digit, a symbol or mixed case counts, such as `Basic Zm9vYmFy`), `Basic` credentials (base64 of `user:password`), bearer tokens and JWTs anywhere |
+| `cookie` | Every value in `Cookie` / `Set-Cookie` headers (cookie names and `Set-Cookie` attributes such as `Path` are kept), and in `Cookie:` / `Set-Cookie:` lines written inside free text (the answer, reasoning, page text, console messages, bodies) when they hold `name=value` pairs; the same value gets the same token in a header and in text |
 | `secret_header` | `X-API-Key`, `X-Auth-Token` and headers whose names contain token, secret, session, auth, password, api-key |
 | `api_key` | Common key formats: `sk-...`, `ghp_...`, `github_pat_...`, `AKIA...`, `xox[bp]-...`, `AIza...`, Stripe keys, GitLab tokens |
-| `secret_param` | The value of a URL query, fragment, path (`;jsessionid=`), form or JSON field (string or number) whose name is a credential, session id or payment/identity secret: `password`, `passwd`, `pwd`, `pass`, `pw`, `passcode`, `passphrase`, `secret`, `token` (and names ending in `token`, `secret`, `password`), `api_key`, `apikey`, `client_secret`, `access_token`, `refresh_token`, `id_token`, `session_id`, `sessionid`, `jsessionid`, `phpsessid`, `aspsessionid`, `csrf`, `xsrf`, `otp`, `otp_code`, `totp`, `mfa`, `2fa`, `two_factor_code`, `recovery_code`, `backup_code`, `pin`, `cvv`, `cvv2`, `cvc`, `cvc2`, `csc`, `cvn`, `security_code`, `verification_code`, `one_time_code`, `ssn`, `social_security_number`, AWS and Google signature fields; names are split into words, so `card[cvc]`, `cardCvv`, `twoFactorCode` and `payment.pin` count, but `shipping` or `passenger` do not. In URLs also `key`, `code`, `session`, `sig`, `signature`, `auth`, `sid`, including URLs written inside text, JSON strings (escaped `\/` too), console messages, bodies and the agent's answer. Free-text pairs such as `password: hunter2` or `api_key = 'ab12...'` count when the value has a digit or symbol (or is 20+ characters), so prose like "Password: required" or "password reset link sent" is left alone; `pass:` and `pw:` count only in `=`-pairs, forms and JSON |
+| `secret_param` | The value of a URL query, fragment, path (`;jsessionid=`), form or JSON field (string or number) whose name is a credential, session id or payment/identity secret: `password`, `passwd`, `pwd`, `pass`, `pw`, `passcode`, `passphrase`, `secret`, `token` (and names ending in `token`, `secret`, `password`), `api_key`, `apikey`, `client_secret`, `access_token`, `refresh_token`, `id_token`, `session_id`, `sessionid`, `jsessionid`, `phpsessid`, `aspsessionid`, `csrf`, `xsrf`, `otp`, `otp_code`, `totp`, `mfa`, `2fa`, `two_factor_code`, `recovery_code`, `backup_code`, `pin`, `cvv`, `cvv2`, `cvc`, `cvc2`, `csc`, `cvn`, `security_code`, `verification_code`, `one_time_code`, `ssn`, `social_security_number`, AWS and Google signature fields; names are split into words, so `card[cvc]`, `cardCvv`, `twoFactorCode` and `payment.pin` count, but `shipping` or `passenger` do not. In URLs also `key`, `code`, `session`, `sig`, `signature`, `auth`, `sid`, including URLs written inside text, JSON strings (escaped `\/` too), console messages, bodies and the agent's answer. Free-text pairs such as `password: hunter2` or `api_key = 'ab12...'` count when the value has a digit or symbol (or is 20+ characters), so prose like "Password: required" or "password reset link sent" is left alone; `pass:` and `pw:` count only in `=`-pairs, forms and JSON. A value written after `password`, `passwd`, `pwd`, `passcode`, `passphrase`, `token`, `secret` or `api key` with only spaces (or `is` / `was`) between them, on the same line, counts too (`password hunter2`, `the api key is AB12cd34ef`) when it has 6+ characters and a digit, a symbol other than `-` or `'`, mixed case inside the word, or 20+ characters; ordinary words ("the password field was empty", "token expired", "password-protected"), URLs and paths (`pwd /home/agent`) are left alone |
 | `phone` | Phone numbers (7 to 15 digits, with `+ ( ) - .` and spaces) in a JSON, form or query field named for one: `phone`, `phone_number`, `mobile`, `tel`, `telephone`, `cell`, `msisdn`, `fax`. Phone-shaped numbers anywhere else are left alone |
 | `ssn` | US Social Security numbers written `###-##-####` (valid area, group and serial) when `SSN` or `social security` appears just before them or the field is named for one |
 | `url_password` | Passwords in `user:password@host` URLs |
@@ -77,6 +77,12 @@ by guessing.
 - Redaction is pattern-based. Secrets in unusual formats (custom tokens, secrets in fields
   with unrecognised names), names, postal addresses, dates of birth, non-US national ids and
   phone numbers outside phone-named fields pass through. Review reports before sharing them.
+- Free text is matched conservatively to keep prose intact, so some secrets written in prose
+  pass through: an all-letter password that is a plain word or Title-case word under 20
+  characters (`password sunshine`, `token Expired`), a value under 6 characters after a name
+  with no separator (`pwd abc12`), a value on the line after its label (a page showing
+  `Password` above `hunter2`), a secret introduced by other words (`my login is hunter2`,
+  `use hunter2 to sign in`), and a `Cookie:` line with no `name=value` pair.
 - `--no-redact` (or `EVJ_REDACT=false`) disables all of the above. Use it only on synthetic data.
 
 ## Trust assumptions
@@ -265,8 +271,9 @@ before the run is checked like a command of its own. Otherwise its pass or fail 
 no "`test_x` is not among the failures", and its green run proves the whole suite passes only
 when it passed at least as many tests as an earlier whole-suite run of the same framework whose
 command the session showed (plus the tests the session added since, when every change since
-can be counted; a test written by a command, a parametrize case or a deleted test voids the
-earlier count). Gaps remain there: a tox environment's `setenv` is read from a `tox.ini`,
+can be counted; a test written by a command, a parametrize case, a deleted test or any change
+that may redefine the wrapper, such as a new `test.mk` or `tests/tox.ini`, voids the earlier
+count). Gaps remain there: a tox environment's `setenv` is read from a `tox.ini`,
 `setup.cfg` or `pyproject.toml` the session showed (any of them, since which one tox reads may
 turn on a file the session did not show), but not from one it never showed; a noxfile, justfile
 settings and parameters and tox factor-conditional `commands` are never read; and an unseen

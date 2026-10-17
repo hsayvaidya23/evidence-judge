@@ -79,11 +79,11 @@ itself to LLM claim extraction. The LLM budget (`EVJ_MAX_COST_USD`) applies per 
 import asyncio
 from pathlib import Path
 
+from evidence_judge import read_settings
 from evidence_judge.bench import BenchConfig, BenchmarkRunner, load_scenarios, to_markdown
-from evidence_judge.config import Settings
 
 result = asyncio.run(
-    BenchmarkRunner(Settings(), BenchConfig(seeds=3)).run(load_scenarios(Path("my-runs")))
+    BenchmarkRunner(read_settings(), BenchConfig(seeds=3)).run(load_scenarios(Path("my-runs")))
 )
 print(to_markdown(result))
 ```
