@@ -11,16 +11,17 @@ from importlib import resources
 from typing import Final
 from urllib.parse import urljoin
 
+from evidence_judge.ingest.css.animations import Keyframes, read_keyframes, settles_shown
+from evidence_judge.ingest.css.backgrounds import UnreadableError, background_images
 from evidence_judge.ingest.css.colors import parse_color
 from evidence_judge.ingest.css.conditions import media_holds, supports
 from evidence_judge.ingest.css.matching import matches
 from evidence_judge.ingest.css.model import (
+    BLACK,
     HTML,
     MATHML,
     MAYBE,
     NO,
-    ROOT,
-    SHOWN,
     SVG,
     YES,
     Compound,
@@ -68,7 +69,7 @@ from evidence_judge.ingest.css.variables import (
     references,
     resolve_rule,
 )
-from evidence_judge.ingest.css.visibility import Cascade, compute
+from evidence_judge.ingest.css.visibility import Cascade, compute, stowed
 
 _NAMESPACES: Final = {
     "http://www.w3.org/1999/xhtml": HTML,
@@ -180,8 +181,8 @@ class StyleSheets:
         """A ``::details-content`` rule may show or hide closed ``<details>`` bodies."""
         self.generators: list[Selector] = []
         """The elements a ``::before`` or ``::after`` rule gives text (`generates_text`)."""
-        self.animations: dict[str, bool] = {}
-        """The ``@keyframes`` of the scope by name, and whether a keyframe may hide text."""
+        self.animations: dict[str, Keyframes] = {}
+        """The ``@keyframes`` of the scope by name: what they do to text."""
         self.registered: dict[str, Registration | None] = {}
         """The custom properties the scope's ``@property`` rules register. Outside the document
         (a shadow tree, the browser's own sheet), and under a condition the reader cannot
@@ -257,15 +258,16 @@ class StyleSheets:
 
     def covers(self, element: Element) -> bool:
         """The page's styles certainly make `element` a fixed or absolute box with an opaque
-        background colour that spans the whole viewport (or its containing block): ``inset:
+        background (`_opaque`) that spans the whole viewport (or its containing block): ``inset:
         0``, or ``top`` and ``left`` 0 with a ``width`` and ``height`` of 100%."""
         values = self._certain(element)
         if values.get("position") not in ("absolute", "fixed"):
             return False
-        colour = parse_color(values.get("background-color") or "")
-        if colour is None or colour[3] < 1:
+        if not _opaque(values):
             return False
         viewport = self._viewport
+        if stowed(values, viewport):
+            return False
         return all(
             _flush(values.get(start), viewport)
             and (_flush(values.get(end), viewport) or _full(values.get(size), viewport, side))
@@ -371,7 +373,9 @@ class StyleSheets:
             self._register(condition.strip(), body, context)
             return
         if name in ("keyframes", "-webkit-keyframes"):
-            self._keyframes(unescape(condition).strip().strip("\"'").lower(), body)
+            name = unescape(condition).strip().strip("\"'").lower()
+            before = self.animations.get(name, Keyframes())
+            self.animations[name] = read_keyframes(body, self._viewport, before)
             return
         if name in _SKIPPED_AT_RULES:
             return
@@ -433,34 +437,19 @@ class StyleSheets:
             return
         self._sheet(text, _Context(url, context.maybe or holds is None, layer, context.depth + 1))
 
-    def _keyframes(self, name: str, body: str) -> None:
-        """Read an ``@keyframes`` rule: whether a keyframe may remove, hide or obscure text."""
-        hides = self.animations.get(name, False)
-        for _, frame in blocks(body):
-            if hides or frame is None:
-                continue
-            best = {
-                prop: Rule(_UNIVERSAL, prop, value, (1, 1, 0, (_TOP,), (0, 0, 0), 0), False)
-                for prop, value, _ in (
-                    found
-                    for text, nested in blocks(frame)
-                    if nested is None
-                    for found in parse_declaration(text)
-                )
-            }
-            computed = compute(Cascade(best, {}, frozenset(best)), ROOT, self._viewport)
-            hides = computed.removed or computed.text != SHOWN
-        self.animations[name] = hides
-
     def _animated(self, best: dict[str, Rule], maybe: dict[str, list[Rule]]) -> bool:
-        """Whether an animation the element may run may hide its text at some point: one whose
-        keyframes may, or one the reader cannot name."""
+        """Whether an animation the element may run may leave its text hidden: one whose
+        keyframes may hide it and that may not come to rest where it shows (`settles_shown`),
+        one of several, or one the reader cannot name."""
         cascade = Cascade(best, maybe, frozenset(best).union(maybe))
-        for value in (*cascade.values("animation"), *cascade.values("animation-name")):
+        for value in cascade.values("animation-name"):
             if value is None:
-                return any(self.animations.values())
-            names = (token.strip("\"'") for token in re.split(r"[\s,]+", value))
-            if any(self.animations.get(name) for name in names):
+                return any(frames.hides for frames in self.animations.values())
+            names = [name.strip("\"'") for name in split_commas(value)]
+            hiding = [
+                frames for name in names if (frames := self.animations.get(name)) and frames.hides
+            ]
+            if hiding and (len(names) > 1 or not settles_shown(cascade, hiding[0])):
                 return True
         return False
 
@@ -590,6 +579,24 @@ def _z_index(rule: Rule | None) -> int | None:
     if found is None or found[1] or found[0] != int(found[0]):
         return None
     return int(found[0])
+
+
+def _opaque(values: dict[str, str]) -> bool:
+    """Whether a box's certain `values` paint its background opaque all over: an opaque colour,
+    or an image layer that covers it with an opaque gradient or a picture (a ``url()`` the
+    reader cannot see counts as opaque), or a gradient it cannot read."""
+    colour = parse_color(values.get("background-color") or "")
+    if colour is not None and colour[3] >= 1:
+        return True
+    sizes = split_commas(values.get("background-size") or "")
+    for at, layer in enumerate(split_commas(values.get("background-image") or "none")):
+        size = sizes[at % len(sizes)] if sizes else None
+        try:
+            if background_images(layer, [size], None, None, (BLACK,)) is not None:
+                return True
+        except UnreadableError:
+            return True
+    return False
 
 
 def _flush(value: str | None, viewport: Viewport | None) -> bool:

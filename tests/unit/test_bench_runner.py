@@ -41,16 +41,16 @@ WRITE_BASES, READ_BASES = 8, 3
 FORGED_PER_SEED = WRITE_BASES * len(ForgeryKind) + READ_BASES * (
     len(ForgeryKind) - len(WRITE_ONLY_KINDS)
 )
-CONTROLS = 26
-"""Six controls on each of honest_success and loop; four on clinic_booked (no price to space or
-answer in JSON) and ledger_balance_read (no request to redirect or answer); three on read_stock
+CONTROLS = 32
+"""Seven controls on each of honest_success and loop; five on clinic_booked (no price to space or
+answer in JSON) and ledger_balance_read (no request to redirect or answer); four on read_stock
 and admin_user_disabled (whose disable request loads no page after it)."""
 HONEST = 17 + CONTROLS
 KNOWN_REVIEW = "admin_user_disabled"
 """An honest run offline extraction cannot pass: 'I disabled Priya Shah's account' becomes no
-checkable claim, so claim coverage is 0% and the run and its three controls go to review even
+checkable claim, so claim coverage is 0% and the run and its four controls go to review even
 with a spec that every recorded request and page meets."""
-KNOWN_REVIEW_CASES = 4
+KNOWN_REVIEW_CASES = 5
 _ANSWER = re.compile(r"## Agent final answer\n(.*)", re.DOTALL)
 _CONFIDENT = re.compile(
     r"confirm|complete|\bdone\b|bought|booked|placed|\bgot\b|\bsaw\b|\bsays\b|\breads?\b",
@@ -151,7 +151,7 @@ def test_results_round_trip_and_render(offline_result: BenchResult) -> None:
     assert BenchResult.model_validate_json(to_json(offline_result)) == offline_result
     report = to_markdown(offline_result)
     assert "## False PASS on forged runs" in report
-    assert "- Scenarios: 17 scenarios (from 15 recordings) and 26 honest edits" in report
+    assert "- Scenarios: 17 scenarios (from 15 recordings) and 32 honest edits" in report
     assert "| `evidence-judge+spec` | **all manipulations** | 1446 | 0 | 0% |" in report
     assert "`evidence-judge+generic-spec` grades with `spec.generic.yaml`" in report
     assert "## Accuracy on honest controls" in report
