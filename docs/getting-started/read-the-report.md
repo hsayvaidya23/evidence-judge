@@ -100,7 +100,7 @@ llm calls 0 · tokens 0 in / 0 out · cost $0.0000 · coverage 100% · determini
 ```json
 {
   "schema_id": "evidence-judge/run-verdict@1",
-  "judge_version": "0.1.0.dev0",
+  "judge_version": "0.1.0",
   "run_id": "trace",
   "task": "Buy a red kettle under $30",
   "outcome": "fail",

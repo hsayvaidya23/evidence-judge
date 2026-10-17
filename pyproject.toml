@@ -1,6 +1,6 @@
 [project]
 name = "evidence-judge"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Grade browser-agent runs and coding-agent sessions by checking every claim against recorded evidence: network, page state, screenshots, commands and test runs."
 dynamic = ["readme"]
 requires-python = ">=3.12"

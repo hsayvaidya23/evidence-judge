@@ -91,11 +91,11 @@ with a strict Content-Security-Policy: no scripts, no external requests. Keep it
 
 ## Releasing
 
-Before the first release, check that the `evidence-judge` project on PyPI is ours, with this
-repository's `release.yml` as its trusted publisher. Until a release is published, every install
-command in the docs uses `git+https://github.com/hsayvaidya23/evidence-judge`, never the bare
-PyPI name, so a squatted name cannot run anyone's code; `tests/unit/test_release_notes.py` fails
-a `.dev` version whose docs say otherwise.
+The `evidence-judge` project on PyPI publishes only from this repository's `release.yml`
+through trusted publishing; no PyPI token exists. `tests/unit/test_release_notes.py` keeps the
+docs honest about it: until `CHANGELOG.md` has a dated release section, every install command
+must use `git+https://github.com/hsayvaidya23/evidence-judge`, and once it has one, no
+"not released yet" note may remain.
 
 A maintainer cuts releases from `main`:
 

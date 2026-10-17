@@ -5,18 +5,16 @@ Langfuse, Arize Phoenix and Inspect AI. Each integration is an optional extra, s
 stays small:
 
 ```bash
-pip install "evidence-judge[otel] @ git+https://github.com/hsayvaidya23/evidence-judge"       # OpenTelemetry API + SDK
-pip install "evidence-judge[langfuse] @ git+https://github.com/hsayvaidya23/evidence-judge"   # Langfuse Python SDK
-pip install "evidence-judge[phoenix] @ git+https://github.com/hsayvaidya23/evidence-judge"    # arize-phoenix-client (no pandas needed)
-pip install "evidence-judge[inspect] @ git+https://github.com/hsayvaidya23/evidence-judge"    # Inspect AI
-pip install "evidence-judge[all] @ git+https://github.com/hsayvaidya23/evidence-judge"        # all of the above plus anthropic and mcp
+pip install "evidence-judge[otel]"       # OpenTelemetry API + SDK
+pip install "evidence-judge[langfuse]"   # Langfuse Python SDK
+pip install "evidence-judge[phoenix]"    # arize-phoenix-client (no pandas needed)
+pip install "evidence-judge[inspect]"    # Inspect AI
+pip install "evidence-judge[all]"        # all of the above plus anthropic and mcp
 ```
 
-!!! info "Not released yet"
+!!! tip "With uv"
 
-    v0.1.0 is not released yet, so these commands install from GitHub, not PyPI; add `@<sha>`
-    to the URL to pin a commit. With uv: `uv tool install --python 3.12 "evidence-judge[otel] @ git+https://github.com/hsayvaidya23/evidence-judge"`
-    (see [Install](getting-started/install.md)).
+    `uv tool install --python 3.12 "evidence-judge[otel]"` (see [Install](getting-started/install.md)).
 
 To let a coding agent call Evidence Judge as tools, see the [MCP server](guides/mcp.md) guide
 (`evidence-judge[mcp]`).
@@ -94,7 +92,7 @@ environment variables with an OTLP exporter, and exits with code 3 before judgin
 exporter is not installed. A W3C `TRACEPARENT` environment variable names the judged span:
 
 ```bash
-pip install "evidence-judge[otel] @ git+https://github.com/hsayvaidya23/evidence-judge" opentelemetry-exporter-otlp
+pip install "evidence-judge[otel]" opentelemetry-exporter-otlp
 export OTEL_SERVICE_NAME=agent-evals
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 export TRACEPARENT=00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01   # optional

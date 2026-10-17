@@ -30,7 +30,7 @@ fire-and-forget and cannot block.
 ## Install
 
 ```bash
-uv tool install --python 3.12 "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
+uv tool install --python 3.12 "evidence-judge[mcp]"
 ```
 
 ## Register the MCP server

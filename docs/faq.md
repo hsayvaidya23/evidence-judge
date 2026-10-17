@@ -93,4 +93,4 @@ description: Frequently asked questions about Evidence Judge - LLM judges, NEEDS
 
 ??? question "Is it on PyPI?"
 
-    No: v0.1.0 is not released yet. Install from the GitHub repository; see [Install](getting-started/install.md).
+    Yes: `pip install evidence-judge`, or `uv tool install --python 3.12 "evidence-judge[anthropic]"`; see [Install](getting-started/install.md).

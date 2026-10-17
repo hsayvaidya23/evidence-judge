@@ -31,12 +31,11 @@ The hooks and the MCP server run `evidence-judge` from your `PATH`, so install i
 with the `mcp` extra:
 
 ```bash
-uv tool install --python 3.12 "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
+uv tool install --python 3.12 "evidence-judge[mcp]"
 evidence-judge version
 ```
 
-v0.1.0 is not released yet, so this installs from GitHub; add `@<sha>` to the URL to pin a
-commit. Add the `anthropic` extra too (`evidence-judge[anthropic,mcp]`) if you want LLM claim
+Add `==0.1.0` to pin the version. Add the `anthropic` extra too (`evidence-judge[anthropic,mcp]`) if you want LLM claim
 extraction with an API key; the CLI backends below need no extra.
 
 ## 2. Wire up the hooks and the MCP server
@@ -269,12 +268,11 @@ the stop with a one-line notice.
     one. `EVJ_HOOK_ALLOW_MISSING_JUDGE=1` in the agent's own environment allows unchecked stops
     with a notice instead.
 
-??? question "`uv tool install` or `/plugin marketplace add` cannot reach the repository"
+??? question "`uv tool install` or `/plugin marketplace add` cannot reach PyPI or GitHub"
 
-    While the repository is private, both need GitHub access: `git+https://` uses your git
-    credentials (a credential helper or `gh auth setup-git`), and Claude Code fetches the
-    marketplace with git, so the same credentials apply. Without access, clone the repository however you can and
-    install from the checkout: `uv tool install --python 3.12 "evidence-judge[mcp] @ ./evidence-judge"` and
+    Behind a proxy or offline mirror, point uv at your package index (`UV_INDEX_URL`) and give
+    git the proxy settings Claude Code fetches the marketplace with. Without network access,
+    copy a clone of the repository over and install from the checkout: `uv tool install --python 3.12 "evidence-judge[mcp] @ ./evidence-judge"` and
     `/plugin marketplace add ./evidence-judge`.
 
 ??? question "A Codex session is NEEDS REVIEW although the tests pass"
