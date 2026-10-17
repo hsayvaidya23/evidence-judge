@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import re
 
 import pytest
@@ -8,6 +9,7 @@ from evidence_judge.core.verdict import Support
 from evidence_judge.redact import Redactor
 from evidence_judge.redact.commands import (
     MAX_COMMAND_WORDS,
+    WINDOW_OVERLAP,
     command_secrets,
     is_secret_long_flag,
 )
@@ -162,7 +164,7 @@ def test_the_line_after_an_unclosed_quote_is_kept(r: Redactor) -> None:
     assert out.endswith("\nnext line") and "s3cr3t" not in out
 
 
-def test_words_past_the_command_cap_fall_back_to_the_text_detectors(r: Redactor) -> None:
+def test_words_past_one_window_are_read_against_the_tool(r: Redactor) -> None:
     flags = [f"--token Tok{i}x9Z" for i in range(MAX_COMMAND_WORDS)]
     out = red(r, "curl " + " ".join(flags))
     assert out.count("--token [REDACTED:secret_param:") == len(flags)
@@ -266,3 +268,42 @@ def test_labels_ending_an_identifier_still_redact(r: Redactor, text: str, secret
     out = red(r, text)
     assert secret not in out
     assert "[REDACTED:secret_param:" in out
+
+
+SECRET = "Hunter22xx"
+FORMS = [
+    ("curl", "curl", "", "-u alice:" + SECRET),
+    ("curl", "curl", "", "--user alice:" + SECRET),
+    ("curl", "curl", "", "--password " + SECRET),
+    ("mysql", "mysql", "", "-p" + SECRET),
+    ("docker", "docker login", "", "-p " + SECRET),
+    ("sshpass", "sshpass", "", "-p " + SECRET),
+    ("htpasswd", "htpasswd -b", "-B", "f user " + SECRET),
+]
+
+
+def _boundaries() -> list[int]:
+    step = MAX_COMMAND_WORDS - WINDOW_OVERLAP
+    return sorted({n + d for n in (MAX_COMMAND_WORDS, step, 2 * step) for d in range(-3, 3)})
+
+
+@pytest.mark.parametrize(("tool", "head", "filler", "pair"), FORMS)
+def test_a_secret_at_any_word_of_a_long_command_is_redacted(
+    r: Redactor, tool: str, head: str, filler: str, pair: str
+) -> None:
+    rng = random.Random(tool + pair)
+    positions = [*_boundaries(), *(rng.randrange(3 * MAX_COMMAND_WORDS) for _ in range(20))]
+    for at in positions:
+        words = [filler or f"w{rng.randrange(10**6)}" for _ in range(at)]
+        text = " ".join([head, *words, pair, filler or "tail"])
+        out = red(r, text)
+        assert SECRET not in out, (tool, at)
+        assert out.count("[REDACTED:") == 1, (tool, at)
+
+
+@pytest.mark.perf
+def test_a_long_command_redacts_in_linear_time(r: Redactor) -> None:
+    text = "curl " + " ".join(f"w{i}" for i in range(100_000)) + " -u alice:" + SECRET
+    with within(2.0):
+        out = red(r, text)
+    assert SECRET not in out

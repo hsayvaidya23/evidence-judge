@@ -14,6 +14,20 @@ version: all of it happened before v0.1.0. The threat model and its current limi
 
 ## Findings and fixes
 
+- **Text typed beside a redaction token is an echo again.** Since inputs with a token were
+  dropped from the near-echo check, and the words around a token were not covered,
+  `Order confirmed [REDACTED:email:ab12cd34]` typed into a gift note no longer masked
+  `Gift note: Order confirmed` on the page, so a page or request predicate could be met by the
+  agent's own words.
+  The text between tokens now counts as an input of its own for both checks; the fingerprint is
+  still never compared.
+- **Command redaction reads past the first 1,024 words.** A known tool's command was read
+  against its flags for at most 1,024 words, and the free-text rules do not know tool-specific
+  forms, so `curl <1,030 words> -u alice:X`, `mysql … -pX`, `docker login … -p X`,
+  `sshpass … -p X`, `htpasswd -b … user X`, `curl --user alice:X` and a `-u` at word 1,024
+  with its value at word 1,025 were left unchanged. The rest of the command is now read in
+  windows of 1,024 words that overlap by two, with the tool's context (a `login` subcommand, the
+  `htpasswd` positionals) taken from the whole command.
 - **A redaction token's fingerprint is no longer read as text the agent typed.** An honest
   3-D Secure checkout failed to pass about once in 700 runs: the one-time code it typed was
   redacted to `[REDACTED:secret_input:f1140042]`, and the near-echo check (an occurrence a few

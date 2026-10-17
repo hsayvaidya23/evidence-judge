@@ -48,7 +48,9 @@ quotes an email still matches the request that sent it without the email ever be
 right inbox."
 ```
 
-**Redaction never changes a verdict**; that invariance is tested.
+**Redaction never changes a verdict**; that invariance is tested. A fingerprint is never read
+as text the agent typed: when a typed value contains a token, only the text around the token is
+compared with the page, so an echo of that text is still masked.
 
 The HMAC key comes from `EVJ_REDACTION_KEY`; otherwise, when a run uses the LLM cache, from a
 random key file at `<EVJ_CACHE_DIR>/redaction.key` (mode 0600); otherwise a per-process key.
@@ -77,6 +79,6 @@ pass through. Free text is matched conservatively so prose stays readable: a pla
 name, test id or call after a secret's name (`grep -rn token src/auth`) is kept as written (see
 [SECURITY.md](../../SECURITY.md#limits)). Command lines are read as a shell reads them: a
 trailing backslash continues a command on the next line and an unclosed quote runs to the end of
-its line. Only the first 1,024 words of one command are read by tool; the rest get the free-text
-rules. Review reports before sharing them. `--no-redact` (or
+its line. A long command is read by tool in overlapping windows of 1,024 words, so a
+tool-specific form such as `curl -u user:X` is found at any word. Review reports before sharing them. `--no-redact` (or
 `EVJ_REDACT=false`) disables all of it; use it only on synthetic data.
