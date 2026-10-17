@@ -39,6 +39,10 @@ Dimension names are `success`, `side_effects`, `state`, `guardrails`, `recovery`
 Claims carry their id, key flag, kind, confidence, checker and cited evidence ids (`net#3`,
 `snap#6`, ...). Every result carries `run_id`, `schema_id` and `judge_version`.
 
+`judge` and `session judge` both take `--otel` and `--langfuse-trace-id`, and a session verdict
+exports under the same names and attributes as a browser one (its claims cite `cmd#N` and
+`edit#N` evidence ids).
+
 The CLI and the Inspect scorer redact runs before judging, so exported reasons and summaries
 contain redaction tokens, not raw secrets. When you call `Judge` yourself, redact the run first
 (`Redactor.redact_run`) if the verdict will leave the process.
