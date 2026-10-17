@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
+from evidence_judge.core.verdict import Support
 from evidence_judge.redact import Redactor
-from evidence_judge.redact.commands import command_secrets, is_secret_long_flag
+from evidence_judge.redact.commands import (
+    MAX_COMMAND_WORDS,
+    command_secrets,
+    is_secret_long_flag,
+)
+from evidence_judge.sessions.checks import SessionIndex, check
+from evidence_judge.sessions.predicates import CommandPredicate
+from evidence_judge.sessions.redaction import redact_session
+from tests.unit.sessions_helpers import bash, session
+from tests.unit.test_perf_ingest import within
 
 KEY = b"unit-test-key"
 AWS_SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
@@ -57,6 +69,17 @@ def red(r: Redactor, text: str) -> str:
         ("vault login --api-key 'k3y with space'", "k3y with space", "--api-key [REDACTED:"),
         ("gh secret set X --client-secret s3cr3tval", "s3cr3tval", "--client-secret [REDACTED:"),
         ("cd app && mysql --password db && run --password Hunter22", "Hunter22", "run --pass"),
+        ("curl \\\n  -u alice:Hunter22 https://api.test", "Hunter22", "-u alice:[REDACTED:"),
+        ("curl -u \\\n alice:Hunter22 https://api.test", "Hunter22", "alice:[REDACTED:"),
+        ("curl \\\r\n -u alice:Hunter22 x\r\n", "Hunter22", "-u alice:[REDACTED:"),
+        ("docker login \\\n  --password Hunter22 reg", "Hunter22", "--password [REDACTED:"),
+        ("cd app &&\n  curl -u alice:Hunter22 x", "Hunter22", "-u alice:[REDACTED:"),
+        ("curl -u alice:Hunter22 x |\n  grep ok", "Hunter22", "-u alice:[REDACTED:"),
+        ('curl -u "alice:s3cr3t', "s3cr3t", '-u "alice:[REDACTED:'),
+        ("curl -u alice:'unbal https://api.test", "unbal", "-u alice:[REDACTED:"),
+        ("curl -u 'alice:s3cr3t pass\nnext", "s3cr3t", "[REDACTED:secret_param:"),
+        ('deploy --token "s3cr3t', "s3cr3t", "--token [REDACTED:"),
+        ("mysql \\\n --password db && run --password Hunter22", "Hunter22", "run --pass"),
     ],
 )
 def test_credentials_on_a_command_line_are_redacted(
@@ -104,6 +127,11 @@ def test_a_url_credential_in_a_command_is_redacted(r: Redactor) -> None:
         "pass --token to the cli",
         "I used curl to fetch the page and npm test passed",
         "sshpass -e ssh host",
+        "curl --token tests/test_x.py::test_a https://api.test",
+        "curl --password ./fixtures/pw.txt https://api.test",
+        "npm test --password 2 failed",
+        "pass --token it's fine",
+        "curl -u alice https://api.test\r\n",
     ],
 )
 def test_commands_without_a_credential_are_left_alone(r: Redactor, text: str) -> None:
@@ -127,6 +155,43 @@ def test_command_redaction_is_idempotent(r: Redactor) -> None:
     once = red(r, text)
     assert red(r, once) == once
     assert "S3cretPass9" not in once and "Pw9" not in once
+
+
+def test_the_line_after_an_unclosed_quote_is_kept(r: Redactor) -> None:
+    out = red(r, "curl -u 'alice:s3cr3t pass\nnext line")
+    assert out.endswith("\nnext line") and "s3cr3t" not in out
+
+
+def test_words_past_the_command_cap_fall_back_to_the_text_detectors(r: Redactor) -> None:
+    flags = [f"--token Tok{i}x9Z" for i in range(MAX_COMMAND_WORDS)]
+    out = red(r, "curl " + " ".join(flags))
+    assert out.count("--token [REDACTED:secret_param:") == len(flags)
+    assert "Tok" not in out
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pytest --token tests/test_x.py::test_a",
+        "npm test --password 2 failed",
+        "curl --token tests/test_auth.py https://api.test",
+    ],
+)
+def test_command_predicates_match_an_honest_command_after_redaction(command: str) -> None:
+    run, _ = redact_session(Redactor(KEY), session(bash(command)))
+    index = SessionIndex(run)
+    assert check(CommandPredicate(contains=command), index).status is Support.SUPPORTED
+    pattern = CommandPredicate(regex=re.escape(command) + "$")
+    assert check(pattern, index).status is Support.SUPPORTED
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("tool", ["echo", "curl", "mysql"])
+def test_many_secret_flags_redact_in_linear_time(r: Redactor, tool: str) -> None:
+    text = tool + " " + " ".join(f"--token Tok{i}x9Z" for i in range(5000))
+    with within(2.0):
+        out = red(r, text)
+    assert (tool == "mysql") is ("Tok1x9Z" in out)
 
 
 def test_command_secret_spans_follow_the_words() -> None:

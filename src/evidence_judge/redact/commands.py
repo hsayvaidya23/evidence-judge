@@ -1,15 +1,20 @@
 """Credentials passed on a command line: which argument of which tool holds a secret.
 
 A command is split into shell words with their offsets, each word unquoted with ``shlex`` (or
-kept as written when its quoting is unbalanced), then matched against per-tool flag tables.
+kept as written when its quoting is unbalanced), then matched against per-tool flag tables. A
+backslash before a line break joins the lines as a shell does, and a quote left open runs to the
+end of its line. A command is read for at most ``MAX_COMMAND_WORDS`` words; the rest of a longer
+one is left to the free-text detectors.
 """
 
 from __future__ import annotations
 
 import re
 import shlex
+from bisect import bisect_right
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import lru_cache
 
 from evidence_judge.redact.detectors import (
     is_secret_param,
@@ -42,14 +47,22 @@ _SECRET_LONG_FLAG_SUFFIXES = (
 )
 _BOOLEAN_FLAG_PREFIXES = ("no_", "with_", "without_", "use_", "skip_", "ask_", "prompt_", "show_")
 """``--no-password`` or ``--with-token`` switch a behaviour on or off and take no value."""
-_WORD = r"""(?:'[^'\n]*'|"(?:[^"\\\n]|\\.)*"|\\.|[^\s'"\\|;&<>`()])+"""
+MAX_COMMAND_WORDS = 1024
+"""Words of one command read against its tool's flag tables, so its cost stays linear."""
+_COUNT_MAX_DIGITS = 3
+"""A number this short after a secret-named flag is a count (``--password 2 failed``)."""
+_SPACE = r"(?:[ \t]|\\\r?\n)+"
+_WORD = r"""(?:'[^'\r\n]*'?|"(?:[^"\\\r\n]|\\[^\r\n])*"?|\\[^\r\n]|[^\s'"\\|;&<>`()])+"""
 _WORD_RE = re.compile(_WORD)
 _TOOL_NAMES = "|".join(sorted(map(re.escape, _TOOLS), key=len, reverse=True))
-COMMAND_RE = re.compile(rf"(?<![\w.\\=:@-])({_TOOL_NAMES})(?![\w./-])((?:[ \t]+{_WORD})+)")
+COMMAND_RE = re.compile(
+    rf"(?<![\w.\\=:@-])({_TOOL_NAMES})(?![\w./-])((?:{_SPACE}{_WORD}){{1,{MAX_COMMAND_WORDS}}})"
+)
 """A known tool's name and the words after it, up to the end of its shell command."""
-LONG_FLAG_RE = re.compile(rf"(?<![\w-])(--[A-Za-z][\w-]{{0,63}})([ \t]+)({_WORD})")
+LONG_FLAG_RE = re.compile(rf"(?<![\w-])(--[A-Za-z][\w-]{{0,63}})({_SPACE})({_WORD})")
 """``--name value`` on any command line, for flags named like a credential."""
-_SEGMENT_START_RE = re.compile(r"[\n;|&`(]")
+_SEGMENT_START_RE = re.compile(r"[;|&`(]|(?<!\\)(?<!\\\r)\n")
+_QUOTES = str.maketrans("", "", "'\"")
 
 
 @dataclass(frozen=True)
@@ -71,21 +84,33 @@ class Secret:
         return Secret(self.start, self.end, value, self.raw, prefix=self.prefix + lead)
 
 
+def _unquote(raw: str) -> str | None:
+    """A shell word without its quoting, or None when a quote in it is never closed."""
+    try:
+        return "".join(shlex.split(raw))
+    except ValueError:
+        return None
+
+
 def _split_words(text: str) -> list[Secret]:
     words: list[Secret] = []
     for m in _WORD_RE.finditer(text):
         raw = m.group(0)
-        try:
-            value = "".join(shlex.split(raw))
-        except ValueError:
-            value = raw
-        words.append(Secret(m.start(), m.end(), value, raw))
+        value = _unquote(raw)
+        words.append(Secret(m.start(), m.end(), raw if value is None else value, raw))
     return words
 
 
 def _is_value(value: str) -> bool:
     """A flag's value that is itself the secret, not another flag or a variable reference."""
     return bool(value) and not value.startswith(("-", "$", "[REDACTED:"))
+
+
+def _is_flag_secret(value: str) -> bool:
+    """A secret-named flag's value that is not a path, test id, call or small count."""
+    if not _is_value(value) or looks_like_code_reference(value):
+        return False
+    return not (value.isascii() and value.isdigit() and len(value) <= _COUNT_MAX_DIGITS)
 
 
 def is_secret_long_flag(name: str) -> bool:
@@ -125,7 +150,10 @@ def _long_flag_value(words: list[Secret], i: int) -> Secret | None:
     if not word.value.startswith("--"):
         return None
     name = word.value.partition("=")[0]
-    return _flag_value(words, i, name, separate=True) if is_secret_long_flag(name) else None
+    if not is_secret_long_flag(name):
+        return None
+    found = _flag_value(words, i, name, separate=True)
+    return found if found is not None and _is_flag_secret(found.value) else None
 
 
 def _flag_secrets(tool: str, words: list[Secret]) -> Iterator[Secret]:
@@ -198,11 +226,33 @@ def long_flag_secret(text: str, start: int, name: str, value: str) -> str | None
     """
     if not is_secret_long_flag(name):
         return None
-    segment = _SEGMENT_START_RE.split(text[:start])[-1]
-    if any(w.value.rsplit("/", 1)[-1] in _MYSQL_TOOLS for w in _split_words(segment)):
+    starts, mysql_ends = _mysql_runs(text)
+    if mysql_ends[bisect_right(starts, start) - 1] <= start:
         return None
-    words = _split_words(value)
-    unquoted = words[0].value if words else value
-    if not _is_value(unquoted) or looks_like_code_reference(unquoted):
+    unquoted = _unquote(value)
+    probe = value.split()[0].translate(_QUOTES) if unquoted is None else unquoted
+    if not _is_flag_secret(probe) or not looks_like_secret(probe):
         return None
-    return unquoted if looks_like_secret(unquoted) else None
+    return value if unquoted is None else unquoted
+
+
+def _segments(text: str) -> Iterator[tuple[int, int]]:
+    pos = 0
+    for m in _SEGMENT_START_RE.finditer(text):
+        yield pos, m.start()
+        pos = m.end()
+    yield pos, len(text)
+
+
+@lru_cache(maxsize=1)
+def _mysql_runs(text: str) -> tuple[list[int], list[int]]:
+    """Where each shell command in ``text`` starts, and where its first MySQL client word ends
+    (past the end of ``text`` when it has none), read once for all of its flags."""
+    starts: list[int] = []
+    ends: list[int] = []
+    for seg_start, seg_end in _segments(text):
+        words = _split_words(text[seg_start:seg_end])
+        mysql = next((w.end for w in words if w.value.rsplit("/", 1)[-1] in _MYSQL_TOOLS), None)
+        starts.append(seg_start)
+        ends.append(len(text) + 1 if mysql is None else seg_start + mysql)
+    return starts, ends
