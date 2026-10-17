@@ -57,11 +57,13 @@ def mask_covered(text: str, needles: tuple[str, ...], inputs: tuple[str, ...]) -
     input too short for them): "In" typed in one field and
     "stock" in another make "In stock" between them. One word the agent did not put in leaves the
     occurrence alone, so "Red Kettle" searched for does not cover "Thank you for your order".
+    An input with a redaction token also counts as the text on either side of each token.
     """
     norm = normalize(text)
     found = [(at, at + len(n)) for at, n in _occurrences(norm, [*dict.fromkeys(needles)]) if n]
     if not found:
         return None
+    inputs = _with_token_free_parts(inputs)
     covered = _union(_cover_spans(norm, inputs))
     return _replaced(
         norm,
@@ -71,6 +73,18 @@ def mask_covered(text: str, needles: tuple[str, ...], inputs: tuple[str, ...]) -
             if _words_covered(norm, span, covered) or _near_input(norm[slice(*span)], inputs)
         ],
     )
+
+
+def _with_token_free_parts(inputs: tuple[str, ...]) -> tuple[str, ...]:
+    """`inputs` and, for each with a redaction token, the text between its tokens: a token ends a
+    word, and its fingerprint is random, not letters the agent typed, so it is never compared."""
+    parts = [
+        part.strip()
+        for value in inputs
+        if _REDACTION_TOKEN.search(value)
+        for part in _REDACTION_TOKEN.split(value)
+    ]
+    return tuple(dict.fromkeys([*inputs, *(part for part in parts if part)]))
 
 
 NEAR_EDITS: Final = 2
@@ -88,7 +102,8 @@ def _near_input(occurrence: str, inputs: tuple[str, ...]) -> bool:
     dropped: "instok" typed and "Did you mean: In stock?" shown, "Ins stocks" typed and "Showing
     results for In stock" shown, "kcots ni" typed and the page turning it round. Inputs with a
     redaction token never count: its fingerprint is random, not letters the agent typed, so
-    "[REDACTED:secret_input:f1140042]" is not near "$24.00"."""
+    "[REDACTED:secret_input:f1140042]" is not near "$24.00" (`mask_covered` adds the text
+    around each token as inputs of its own)."""
     folded = _Folded(occurrence).text
     return bool(folded) and any(
         _near(folded, value) for value in inputs if not _REDACTION_TOKEN.search(value)
