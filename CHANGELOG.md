@@ -118,6 +118,9 @@ The first release.
   `evidence-log`) and `session-spec` run `evidence-judge session judge` instead of `judge`, with
   the same job summary, report upload and exit behaviour. Mixing it with browser inputs or an
   unknown format fails the step before anything is installed.
+- The Codex CLI guide opens with its main limit: a `codex exec --json` stream records no diff,
+  so a session that changed code goes to NEEDS_REVIEW (code not checkable) whatever its tests
+  show, and the rollout file or the evidence log should be judged instead.
 
 ### Changed
 
