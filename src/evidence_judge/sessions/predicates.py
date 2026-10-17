@@ -7,6 +7,7 @@ predicate every session satisfies (an empty substring, a `**` glob) cannot prove
 
 from __future__ import annotations
 
+import posixpath
 import re
 from pathlib import Path
 from typing import Annotated, Final, Literal, Self
@@ -263,6 +264,11 @@ class SessionSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task: str | None = None
+    cwd: str | None = Field(
+        default=None,
+        description="The session directory (an absolute path), for a record that has none (a "
+        "Codex `exec --json` stream): paths are then placed in the project exactly",
+    )
     expect: list[SpecItem] = Field(default_factory=list[SpecItem])
     forbid: list[SpecItem] = Field(default_factory=list[SpecItem])
     ignore_edits: list[Glob] = Field(
@@ -290,6 +296,13 @@ class SessionSpec(BaseModel):
         "-q`): a run through it whose command the session does not show is judged as that "
         "command, until the session may have changed the wrapper's definition",
     )
+
+    @field_validator("cwd")
+    @classmethod
+    def _cwd(cls, value: str | None) -> str | None:
+        if value is not None and not posixpath.isabs(value):
+            raise ValueError(f"cwd must be an absolute path, not {value!r}")
+        return None if value is None else posixpath.normpath(value)
 
     @field_validator("trusted_wrappers")
     @classmethod

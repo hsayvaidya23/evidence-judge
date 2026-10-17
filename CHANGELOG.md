@@ -61,6 +61,10 @@ fixes made during development are in the [security history](docs/security-histor
   it needs review. Path globs match in linear time, support `[...]` and `[!...]` classes, and
   reject `{a,b}` and backslash escapes; a path outside the session directory matches no glob, so
   `only` fails an edit outside the project and `ignore_edits` never ignores one.
+- A Codex `exec --json` stream gets its session directory from the spec's `cwd`, the directory
+  its commands ran in, or a bare `pwd` / `git rev-parse --show-toplevel`. Without one, a
+  same-named file elsewhere (`/home/u/other/src/app.py` for `src/app.py`) no longer proves an
+  edit: a suffix match must sit below a directory that holds every change.
 
 **Independent re-run**
 

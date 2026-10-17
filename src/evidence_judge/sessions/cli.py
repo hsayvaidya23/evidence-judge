@@ -45,6 +45,7 @@ from evidence_judge.integrations import exporters
 from evidence_judge.llm.base import LLMConfigError, LLMError
 from evidence_judge.report.console import StdoutConsole, print_verdict
 from evidence_judge.report.json_report import write_json
+from evidence_judge.sessions.checks import place
 from evidence_judge.sessions.html import write_session_html
 from evidence_judge.sessions.ingest import load_session, locate
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
@@ -284,6 +285,7 @@ def judge_command(
         )
         if task is not None:
             run = run.model_copy(update={"task": task})
+        run = place(run, session_spec.cwd if session_spec else None)
         rerun_result = (
             _rerun(_rerun_spec(session_spec), project, rerun_base, run.cwd, quiet, rerun_baseline)
             if rerun

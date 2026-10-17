@@ -523,10 +523,17 @@ the session directory (a command's relative path from the directory it ran in) b
 matched, and a path outside the project (an absolute path elsewhere, or one that climbs out with
 `..`) matches no glob: with `only` it is a change outside the allowed files, and `ignore_edits`
 never ignores it. Scratch space (`/tmp`, `/dev/null`) is not a project change. When the session
-directory is unknown (a Codex `exec --json` stream), an absolute path may lie anywhere in the
-project, so it is placed at every suffix: `path` predicates match it if any suffix matches, an
-`only` glob that only a suffix matches is *no evidence* rather than *supported*, and
-`ignore_edits` never ignores it.
+directory is unknown, it is taken, in order of trust, from the spec's `cwd`, the one directory
+a Codex `exec --json` stream records its commands running in, or what every bare `pwd` (then
+`git rev-parse --show-toplevel`) printed; two different answers give none, and the source is
+noted. With none of them, an absolute path may lie anywhere in the project, so it is placed at
+every suffix: `touched: false` fails if any suffix matches, an `only` glob that only a suffix
+matches is *no evidence* rather than *supported*, and `ignore_edits` never ignores it. For
+`touched: true` the suffix must start below the deepest directory holding every unplaceable
+changed path (the root is that directory or an ancestor only if every change is in the
+project): a same-named file in an unrelated tree or a nested copy (`vendor/x/src/app.py` for
+`src/app.py`) is *no evidence*. That directory is never used as the root itself: it may lie
+deeper than the session directory, and then `touched: false` and `only` would wrongly pass.
 
 ### Soundness rules
 
