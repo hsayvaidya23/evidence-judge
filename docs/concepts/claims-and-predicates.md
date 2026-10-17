@@ -333,13 +333,18 @@ The agent's claims are untrusted, so a satisfied predicate is turned into `no_ev
 
 A price the agent says it paid ("bought it for $29.00", "Order #1001 total $29.00", or any
 price or stated amount in a run whose answer or reasoning says it bought something: "It was
-$29.00", or "Total: $29.00" in a reasoning step and "Bought it." as the answer) is proven only by
+$29.00", or "Total: $29.00" in a reasoning step and "Bought it." as the answer, or in a run
+whose evidence shows an order placed, however the answer words it: "Checkout complete. It cost
+$29.00." after a successful write to an order, checkout, payment or booking URL, or one the
+spec's `expect` entries name) is proven only by
 what the site answered the purchase with, never by any page of the run: a listing that shows
 another item at $29.00 says nothing about the charge. The offline extractor turns such an amount
 into one `request` predicate, a `POST` to an order, checkout, payment or booking path with
 `result_contains: ["$29.00"]`; with Claude, a claim whose predicates check such an amount keeps
-only predicates of that form (a `POST`, `PUT` or `PATCH` to a named URL with the amount in
-`result_contains` or `response_contains`) and otherwise gets the offline one. It holds when the
+only predicates of that form (a `POST`, `PUT` or `PATCH` to the same order URL pattern, or with a
+`path_contains` that names an order, checkout, payment or booking, with the amount in
+`result_contains` or `response_contains`) and otherwise gets the offline one: a `POST
+/api/cart` answered with the price proves nothing about the order. It holds when the
 response body, or the page the request led to, shows the amount. A JSON response shows it as a
 bare number too, but only as the total paid: under a key from a closed list that names the
 order's total (`total`, `grand_total`, `totalPrice`, `amount_total`, `amount_paid`, `charged`,

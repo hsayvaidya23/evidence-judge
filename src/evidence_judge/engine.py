@@ -17,9 +17,10 @@ from evidence_judge.checks.dimensions import assess_dimensions
 from evidence_judge.checks.expectations import evaluate_spec, spec_scope
 from evidence_judge.checks.outcome import decide
 from evidence_judge.checks.registry import CheckerRegistry, default_registry
+from evidence_judge.checks.request import matching_requests
 from evidence_judge.config import Settings
 from evidence_judge.core.claims import ClaimSet
-from evidence_judge.core.evidence import Channel, Run, har_contribution
+from evidence_judge.core.evidence import MUTATION_METHODS, Channel, Run, har_contribution
 from evidence_judge.core.index import EvidenceIndex
 from evidence_judge.core.provenance import (
     mark_agent_page_navigations,
@@ -35,7 +36,14 @@ from evidence_judge.core.verdict import (
     TamperLevel,
     Usage,
 )
-from evidence_judge.extract import ClaimExtractor, HeuristicExtractor, LLMClaimExtractor, coverage
+from evidence_judge.extract import (
+    ClaimExtractor,
+    HeuristicExtractor,
+    LLMClaimExtractor,
+    coverage,
+    order_scoped,
+)
+from evidence_judge.extract.heuristic import ORDER_URL
 from evidence_judge.llm.base import (
     BudgetExceededError,
     LLMClient,
@@ -51,6 +59,7 @@ log = logging.getLogger(__name__)
 
 _HALLUCINATED = re.compile(r"hallucinated_quotes=(\d+)")
 _CORE_CHANNELS = (Channel.NETWORK, Channel.SNAPSHOTS, Channel.FINAL_STATE)
+_ORDER_URL = re.compile(ORDER_URL, re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -187,6 +196,20 @@ def _tamper_warnings(detection: TamperDetection) -> list[str]:
     return [f"tamper detection is {detection.level.value}: {detection.reason}"]
 
 
+def _placed_order(index: EvidenceIndex, spec: TaskSpec | None) -> bool:
+    """Whether the run placed an order: a write to an order, checkout, payment or booking URL
+    that succeeded, or one the spec's `expect` entries name."""
+    if any(e.ok and _ORDER_URL.match(e.url) for e in index.mutations()):
+        return True
+    writes = [
+        p
+        for e in (spec.expect if spec else [])
+        for p in e.request_predicates()
+        if (p.method or "").upper() in MUTATION_METHODS
+    ]
+    return any(matching_requests(p, index) for p in writes)
+
+
 class Judge:
     """Grades one run. Stateless between runs; safe to reuse."""
 
@@ -246,6 +269,10 @@ class Judge:
 
         extraction = await self._extract(run, task, llm, opts)
         ctx = CheckContext(index=EvidenceIndex(run), llm=llm)
+        if opts.claims is None and _placed_order(ctx.index, spec):
+            extraction.claims = order_scoped(
+                extraction.claims, run.agent_answer, run.agent_reasoning
+            )
         ctx.usage.add(extraction.usage)
 
         scope = spec_scope(spec, ctx.index, site)

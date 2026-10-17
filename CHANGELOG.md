@@ -82,7 +82,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1470 browser and 0 of 1653 session
+  Go toy projects with runner-specific tricks; 0 of 1494 browser and 0 of 1653 session
   forgeries pass, and 4 of 43 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
@@ -534,6 +534,18 @@ The first release.
   shipping, the tax, a line item, the original price, a refund, Stripe minor units or a total
   in an order whose metadata names EUR: 4 false PASSes before the fix, none after. Bench: 0 of
   1470 attacks pass (48 kinds); honest controls unchanged at 39, 32 and 2 of 43.
+- A purchase price is checked against the order whatever the answer calls the purchase:
+  "Checkout complete, the kettle arrives tomorrow. It cost $19.00." passed on a home page that
+  listed another kettle at $19.00 while the order was charged $24.00, because no purchase word
+  named it. In a run whose evidence shows an order placed (a successful write to an order,
+  checkout, payment or booking URL, or one the spec's `expect` entries name), every amount
+  stated as a price is now checked against what the order was answered with. With Claude, a
+  purchase-price predicate on a write that is not the order (`POST /api/cart` answered with the
+  price) is no longer kept: only a request to the order URL pattern, or with a `path_contains`
+  naming an order, checkout, payment or booking, is; otherwise the claim gets the offline order
+  predicate. New forgery kind `unworded_purchase` (write) gives the `listed_price` evidence a
+  story with no purchase word: 18 false PASSes before the fix, none after. Bench: 0 of 1494
+  attacks pass (49 kinds); honest controls unchanged at 39, 32 and 2 of 43.
 
 ### Security
 

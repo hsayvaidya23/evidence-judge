@@ -111,7 +111,8 @@ _SECRET_FIELD = re.compile(r"password|passcode|pin\b|card|cvv|cvc|ssn|secret|tok
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _VALUE_WORD = re.compile(r"[^\W_]{2,}")
 _FROM = re.compile(r"\s+from\s+")
-ORDER_URL = r"^\w+://[^/?#]*/[^?#]*(?:order|checkout|pay|purchase|book|reserv|appointment)"
+ORDER_WORDS = r"(?:order|checkout|pay|purchase|book|reserv|appointment)"
+ORDER_URL = rf"^\w+://[^/?#]*/[^?#]*{ORDER_WORDS}"
 
 PredicateBuilder = Callable[[Sentence, re.Match[str], str | None], list[Predicate]]
 
