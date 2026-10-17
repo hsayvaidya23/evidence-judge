@@ -356,14 +356,26 @@ order's total (`total`, `grand_total`, `totalPrice`, `amount_total`, `amount_pai
 the key says the number is in cents. A part of the price or an adjustment to it never shows the
 amount paid: `shipping_cost`, `tax_amount`, `total_tax`, `discount_amount`, `refund_amount`,
 `original_price`, `compare_at_price`, `msrp`, `subtotal`, a unit or line-item price, anything
-inside an array (line items) or inside an object such a key names (`{"shipping": {"total":
-4}}`). A bare `amount` counts only in minor units, in an object that names its currency in
+inside an array (line items). A total counts only at the root of the document or under keys
+that name the order or a wrapper of it (`order`, `orders`, `checkout`, `checkout_session`,
+`payment`, `charge`, `invoice`, `receipt`, `data`, `result`, `response`, `purchase`,
+`transaction`, `booking`, `reservation`): the total of any other object (`{"delivery":
+{"total": 4}}`, `vat`, `item`, `cart`, `quote`, `last_order`, `gift_card`, `refunded`) shows
+nothing. A bare `amount` counts only in minor units, in an object that names its currency in
 lowercase as Stripe does (`{"amount": 2950, "currency": "usd"}` shows `$29.50`, never
-`$2,950.00`) or as the `amount` of Square's `total_money`; anywhere else it shows nothing. Every
-`currency` the document names, at any depth, must be the claimed one (`{"order": {"total":
-29.5}, "meta": {"currency": "EUR"}}` does not show `$29.50`), and a number under any other key
-(`order_id`, `qty`, `item_count`) shows no price. A price written as a string (`"total":
-"29.50"`) is read only as text. That page is the one its redirect named, else the next page load, but only if
+`$2,950.00`) or as the `amount` of Square's `total_money`; a Stripe object counts only when its
+`object` is a `checkout.session`, a `charge`, a `payment_intent` whose `status` is `succeeded`
+or an `invoice` whose `status` is `paid`. PayPal's `"amount": {"value": "29.50",
+"currency_code": "USD"}` shows `$29.50`. A total written as a string counts only when it is a
+plain decimal number (`"total_price": "29.50"`, as Shopify and WooCommerce write it). The
+document must state one total: two that differ (`{"order": {"total": 45}, "total_paid": 29.5}`)
+show neither. A document that reports a failure anywhere (a `status` or `state` such as
+`payment_failed`, `declined`, `canceled`, `refunded` or `requires_payment_method`, an `error`
+or `errors` with content, or `"success": false`) shows no price. Every currency the document
+names, at any depth, must be the claimed one: a `currency`, `currency_code`, `currency_iso` or
+`currencySymbol`, a currency object's `code`, or a formatted amount (`"total_formatted": "29,50
+€"`); `{"order": {"total": 29.5}, "meta": {"currency": "EUR"}}` does not show `$29.50`. A
+number under any other key (`order_id`, `qty`, `item_count`) shows no price. That page is the one its redirect named, else the next page load, but only if
 the agent did nothing that can move the browser first (anything but `fill`, `hover`, `check`,
 `uncheck` or `upload`): a page the agent opened itself is its choice, not the site's answer. A
 landing away from the site's own pages (a payment provider's 3-D Secure challenge) is passed

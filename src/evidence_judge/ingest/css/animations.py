@@ -16,6 +16,10 @@ SETTLED: Final = 5.0
 resting state as the one the text shows in."""
 
 
+Frame = tuple[tuple[float | None, ...], tuple[tuple[str, str | None], ...]]
+"""A keyframe: its offsets (None for one the reader cannot place) and its declarations."""
+
+
 @dataclass(frozen=True, slots=True)
 class Keyframes:
     """What an ``@keyframes`` rule (every one of the name) does to text."""
@@ -30,6 +34,8 @@ class Keyframes:
     unread: bool = False
     """A keyframe the reader cannot place or follow: an offset it does not know, a ``var()``,
     a custom property, or a stepped timing function."""
+    frames: tuple[Frame, ...] = ()
+    """Each keyframe's offsets and declarations, in source order."""
 
 
 _FRAME: Final = Selector((Compound(),), ())
@@ -39,6 +45,7 @@ def read_keyframes(body: str, viewport: Viewport | None, before: Keyframes) -> K
     """`before` with the keyframes of one more ``@keyframes`` rule of its name."""
     hides, starts, ends = before.hides, before.starts_hidden, before.ends_hidden
     unread = before.unread
+    frames = list(before.frames)
     for prelude, frame in blocks(body):
         if frame is None:
             continue
@@ -60,7 +67,8 @@ def read_keyframes(body: str, viewport: Viewport | None, before: Keyframes) -> K
         hides = hides or hiding
         starts = starts or (hiding and 0 in offsets)
         ends = ends or (hiding and 100 in offsets)
-    return Keyframes(hides, starts, ends, unread)
+        frames.append((tuple(offsets), tuple((prop, value) for prop, value, _ in declared)))
+    return Keyframes(hides, starts, ends, unread, tuple(frames))
 
 
 def _offset(selector: str) -> float | None:
@@ -84,40 +92,53 @@ def _unreadable(prop: str, value: str | None) -> bool:
 def settles_shown(cascade: Cascade, frames: Keyframes) -> bool:
     """Whether an element's only animation, one whose `frames` may hide its text, certainly ends
     within `SETTLED` seconds and leaves the text as it is without it, or at a keyframe that
-    shows it: it runs a known number of times, is not paused, steps or follows a scroll, and
-    fills forwards only onto an end keyframe that shows the text."""
+    shows it (`resting`)."""
+    rest = resting(cascade, frames)
+    return rest is not None and not any(
+        frames.starts_hidden if offset == 0 else frames.ends_hidden for offset in rest
+    )
+
+
+def resting(cascade: Cascade, frames: Keyframes) -> tuple[int, ...] | None:
+    """The end keyframes (0 or 100) an element's only animation, of `frames`, may come to rest
+    on: none when it fills nothing, None when it may not certainly end within `SETTLED` seconds.
+    It ends when it runs a known number of times, is not paused, steps or follows a scroll; it
+    rests on an end keyframe when it fills forwards, for its direction and count."""
     if frames.unread:
-        return False
+        return None
     plays = _firsts(cascade, "animation-play-state", "running")
     timelines = _firsts(cascade, "animation-timeline", "auto")
     triggers = _firsts(cascade, "animation-trigger", "none")
     easings = _firsts(cascade, "animation-timing-function", "ease")
     if not all(v == "running" for v in plays) or not all(v == "auto" for v in timelines):
-        return False
+        return None
     if not all(v == "none" for v in triggers):
-        return False
+        return None
     if any(v is None or "step" in v for v in easings):
-        return False
+        return None
     durations = _all([_seconds(v) for v in _firsts(cascade, "animation-duration", "0s")])
     delays = _all([_seconds(v) for v in _firsts(cascade, "animation-delay", "0s")])
     counts = _all([_count(v) for v in _firsts(cascade, "animation-iteration-count", "1")])
     if not durations or not delays or not counts or min(*durations, *counts) < 0:
-        return False
+        return None
     if max(delays) + max(durations) * max(counts) > SETTLED:
-        return False
+        return None
     fills = _firsts(cascade, "animation-fill-mode", "none")
     if all(v in ("none", "backwards") for v in fills):
-        return True
+        return ()
     compositions = _firsts(cascade, "animation-composition", "replace")
     if not all(v in ("none", "backwards", "forwards", "both") for v in fills):
-        return False
+        return None
     if not all(v == "replace" for v in compositions):
-        return False
-    return all(
-        not _ends_hidden(frames, direction, count)
-        for direction in _firsts(cascade, "animation-direction", "normal")
-        for count in counts
-    )
+        return None
+    ends: set[int] = set()
+    for direction in _firsts(cascade, "animation-direction", "normal"):
+        for count in counts:
+            end = _end(direction, count)
+            if end is None:
+                return None
+            ends.add(end)
+    return tuple(sorted(ends))
 
 
 def _all(found: list[float | None]) -> list[float] | None:
@@ -125,20 +146,20 @@ def _all(found: list[float | None]) -> list[float] | None:
     return known if len(known) == len(found) else None
 
 
-def _ends_hidden(frames: Keyframes, direction: str | None, count: float) -> bool:
-    """Whether the keyframe a filling animation ends on may hide text."""
+def _end(direction: str | None, count: float) -> int | None:
+    """The keyframe (0 or 100) a filling animation ends on; None when the reader cannot tell."""
     if count < 1 or count != int(count):
-        return True
+        return None
     odd = int(count) % 2 == 1
     if direction == "normal":
-        return frames.ends_hidden
+        return 100
     if direction == "reverse":
-        return frames.starts_hidden
+        return 0
     if direction == "alternate":
-        return frames.ends_hidden if odd else frames.starts_hidden
+        return 100 if odd else 0
     if direction == "alternate-reverse":
-        return frames.starts_hidden if odd else frames.ends_hidden
-    return True
+        return 0 if odd else 100
+    return None
 
 
 def _firsts(cascade: Cascade, prop: str, initial: str) -> list[str | None]:

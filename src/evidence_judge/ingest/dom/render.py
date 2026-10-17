@@ -12,7 +12,6 @@ from urllib.parse import urljoin, urlsplit
 from evidence_judge.core.site import registrable_domain
 from evidence_judge.ingest._json import JsonObject, as_list, as_str
 from evidence_judge.ingest.css import (
-    FAINT_ALPHA,
     HIDDEN,
     REMOVED,
     ROOT,
@@ -208,7 +207,7 @@ class Renderer:
         if style.removed:
             return
         if style.boxes and style.boxes[-1][0] is element:
-            self._positioned(style, scope)
+            self._positioned(style, visit.inherited, scope)
         if ("-" in tag and not children) or (
             style.text != HIDDEN and scope.sheets.generates(element)
         ):
@@ -367,17 +366,16 @@ class Renderer:
             return None
         return scope.slots.get(as_str(attrs.get("name")) or "")
 
-    def _positioned(self, style: Computed, scope: Scope) -> None:
+    def _positioned(self, style: Computed, parent: Computed, scope: Scope) -> None:
         """Note a positioned element's tree order, and whether it may paint over the page: an
-        opaque box over the viewport (or its containing block) that the page does not hide."""
+        opaque box over the viewport (or its containing block) that the page may show
+        (`StyleSheets.covers`)."""
         box = style.boxes[-1]
         element, z, position = box
         self._order[id(element)] = len(self._order)
         if position not in ("absolute", "fixed") or (z is not None and z < 0):
             return
-        if style.visibility == HIDDEN or style.alpha <= FAINT_ALPHA:
-            return
-        if not scope.sheets.covers(element):
+        if not scope.sheets.covers(element, parent):
             return
         outer = style.boxes[:-1]
         block = outer[-1] if position == "absolute" and outer else None

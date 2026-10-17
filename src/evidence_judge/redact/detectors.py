@@ -133,12 +133,74 @@ AUTH_TEXT_RE = re.compile(
     rf"(?!{_AUTH_SCHEMES}\b)([^\s\"'<>,;]+)"
 )
 AUTH_SCHEME_END_RE = re.compile(rf"(?i){_AUTH_SCHEMES}\s+$")
+_CHOSEN_LABELS = r"password|passwd|pwd|passcode|passphrase"
 LABELLED_SECRET_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9_\-.])((?:password|passwd|pwd|passcode|passphrase|token|secret"
-    r"|api[ _-]?key)[ \t]+(?:(?:is|was)[ \t]+)?)([^\s\"'<>,;=(\[{/~.][^\s\"'<>,;=]*+)(?!=)"
+    rf"(?i)(?<![A-Za-z0-9_\-.])((?:[A-Za-z0-9]+[_-])*({_CHOSEN_LABELS}|token|secret"
+    r"|api[ _-]?key)(?:[_-](?:access[_-])?key)?[ \t]+(?:(?:is|was)[ \t]+)?)"
+    r"([^\s\"'<>,;=(\[{/~.][^\s\"'<>,;=]*+)(?!=)"
 )
-"""``password hunter2`` or ``api key is 9f8e...``: a secret's name and its value with no ``:`` or
-``=`` between them."""
+"""``password hunter2``, ``api key is 9f8e...`` or ``aws_secret_access_key wJalr...``: a secret's
+name, alone or ending an identifier, and its value with no ``:`` or ``=`` between them."""
+_CHOSEN_LABEL_RE = re.compile(rf"(?i){_CHOSEN_LABELS}")
+_CODE_EXTENSIONS = frozenset(
+    {
+        "py",
+        "pyi",
+        "js",
+        "jsx",
+        "mjs",
+        "cjs",
+        "ts",
+        "tsx",
+        "go",
+        "rs",
+        "java",
+        "kt",
+        "rb",
+        "php",
+        "c",
+        "h",
+        "cc",
+        "cpp",
+        "hpp",
+        "cs",
+        "swift",
+        "scala",
+        "sh",
+        "bash",
+        "zsh",
+        "ps1",
+        "json",
+        "yaml",
+        "yml",
+        "toml",
+        "ini",
+        "cfg",
+        "conf",
+        "env",
+        "xml",
+        "html",
+        "css",
+        "scss",
+        "md",
+        "rst",
+        "txt",
+        "csv",
+        "log",
+        "lock",
+        "sql",
+        "pem",
+        "crt",
+        "key",
+        "pub",
+        "vue",
+    }
+)
+_FILE_NAME_RE = re.compile(r"[\w.\-]+\.([A-Za-z0-9]{1,5})")
+_TEST_NAME_RE = re.compile(r"test_\w+|Test[A-Z_]\w*|\w+_test")
+_CALL_RE = re.compile(r"[A-Za-z_][\w.]*\(")
+_WORD_WITH_COUNTER_RE = re.compile(r"[a-z]{2,}[0-9]{1,3}")
+"""``bucket2`` or ``abc123``: a lower-case word with a short number, a name rather than a token."""
 _COOKIE_PAIR = r"[!#$%&*+\-.^_`|~0-9A-Za-z]+=[^\s;,\"'<>\\]*"
 COOKIE_TEXT_RE = re.compile(
     rf"(?i)(?<![A-Za-z0-9_\-.])((set-)?cookie2?[\"']?[ \t]*:[ \t]*[\"']?)"
@@ -165,6 +227,7 @@ API_KEY_RE = re.compile(
     r"|AIza[0-9A-Za-z_\-]{35}"
     r"|(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"
     r"|glpat-[A-Za-z0-9_\-]{20,}"
+    r"|npm_[A-Za-z0-9]{36}"
     r")(?![A-Za-z0-9_-])"
 )
 JSON_SECRET_RE = re.compile(r'("([A-Za-z0-9_\-.\[\]]{1,64})"\s*:\s*")((?:[^"\\]|\\.)+)(")')
@@ -322,6 +385,43 @@ def looks_like_labelled_secret(value: str) -> bool:
         return True
     rest = value[1:]
     return any(ch.isupper() for ch in rest) and any(ch.islower() for ch in value)
+
+
+def looks_like_code_reference(value: str) -> bool:
+    """A path, file name, test id or call that follows a secret's name in code or a command
+    (``grep token src/auth``, ``cp token tests/test_calc.py``, ``token parse(raw)``).
+
+    A value with ``/`` counts as a path unless it is a 20+ character run of mixed case and
+    digits with no ``.``, the shape of a key such as AWS's ``wJalrXUtnFEMI/K7MDENG/...``.
+    """
+    if value.startswith(("/", "./", "../", "~")) or "::" in value:
+        return True
+    if "/" in value and not (
+        len(value) >= 20
+        and "." not in value
+        and any(ch.isupper() for ch in value)
+        and any(ch.islower() for ch in value)
+        and any(ch.isdigit() for ch in value)
+    ):
+        return True
+    file_name = _FILE_NAME_RE.fullmatch(value)
+    if file_name is not None and file_name.group(1).lower() in _CODE_EXTENSIONS:
+        return True
+    return _TEST_NAME_RE.fullmatch(value) is not None or _CALL_RE.match(value) is not None
+
+
+def is_labelled_secret(label: str, value: str) -> bool:
+    """Whether ``value``, written after the secret name ``label`` with no separator, is one.
+
+    Tokens, secrets and keys are machine-made, so a lower-case word with a short number
+    (``token bucket2``, ``assert token abc123``) is a name there; it still counts after a
+    password label (``password hunter2``).
+    """
+    if not looks_like_labelled_secret(value) or looks_like_code_reference(value):
+        return False
+    if _CHOSEN_LABEL_RE.fullmatch(label):
+        return True
+    return _WORD_WITH_COUNTER_RE.fullmatch(value) is None
 
 
 def is_basic_credential(value: str) -> bool:

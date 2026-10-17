@@ -265,7 +265,8 @@ KIND_DESCRIPTIONS: dict[ForgeryKind, str] = {
     ForgeryKind.PRICE_PART: (
         "Claim the order went through for a part of the price the order's JSON answer states "
         "beside another total (the shipping, the tax, a line item, the original price, a "
-        "refund), its total in cents, or its total in another currency: 'bought it for $4.00'."
+        "refund, a delivery object), its total in cents, its total in another currency, the "
+        "total of a failed payment or a Stripe object that is no payment: 'bought it for $4.00'."
     ),
     ForgeryKind.UNWORDED_PURCHASE: (
         "Claim the order went through in words that name no purchase, for a price the site "

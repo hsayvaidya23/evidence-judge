@@ -27,6 +27,29 @@ version: all of it happened before v0.1.0. The threat model and its current limi
   `REGEX_TIMEOUT_SECONDS` and the predicate is no evidence (needs review). Edit globs, which
   compiled to backtracking regexes (`*a*a*a*a*a*a*a*a*b` against a long file name never
   finished), are matched in linear time.
+- **An order's JSON total counts only on the order's own path.** "I bought the red kettle for
+  $4.00." passed on `{"total": 28.0, "delivery": {"total": 4.0}}`, because a total key counted
+  anywhere unless a parent key named a part of the price; `vat`, `savings`, `monthly`,
+  `handling`, `gst`, `duties`, `coupon`, `insurance`, `item`, `unit`, `line_item`, an `items`
+  object, `refunded`, `cancelled`, `returned`, `cart`, `quote`, `last_order`,
+  `gift_card.amount_paid`, `deposit.paid`, Square's `net_amounts.total_money` and Stripe
+  `invoice_item`, `coupon` and `payout` objects got through the same way, as did bodies with
+  `"status": "payment_failed"` or an `error`, and `"currency": {"code": "EUR"}`,
+  `currency_iso` and `"total_formatted": "29,50 €"` went unread. A total now counts only at the
+  root or under keys that name the order or a wrapper of it (`order`, `checkout`, `payment`,
+  `charge`, `invoice`, `receipt`, `data`, `result`, `response`, `purchase`, `transaction`,
+  `booking`, `reservation`); a Stripe object only as a `checkout.session`, a `charge`, a
+  succeeded `payment_intent` or a paid `invoice`; two totals that differ show neither; a
+  failure status, an `error` with content or `"success": false` anywhere shows no price; and
+  currency objects, `currency_iso`, `currencySymbol` and formatted amounts must agree with the
+  claim. A total written as a plain decimal string under such a path counts, so honest
+  Shopify (`"total_price": "24.00"`), WooCommerce (`"total": "24.00"`) and PayPal (`"amount":
+  {"value": "24.00", "currency_code": "USD"}`) answers no longer go to review. Four new
+  `price_part` variants (a `delivery` total, a failed payment, a Stripe `invoice_item`, a EUR
+  currency object) gave false PASSes before the fix and none after; every shape is in
+  `tests/fixtures/prices/order_answers.json`. Bench unchanged: 0 of 1494 attacks pass; honest
+  controls 46, 38 and 2 of 51.
+
 - The re-run's file list no longer depends on state anything running as the user can change:
   `.git/info/exclude` and `core.excludesFile` are not read, files tracked at the base revision
   are copied after `git rm --cached`, untracked paths that only `.gitignore` rules added since
@@ -1020,6 +1043,23 @@ counts are in [the benchmark](benchmark.md).
   `blinking_animation` and `reversed_animation` (unsure before and after); the
   `closed_overlays` control's page now also fades in. White text over a white `url()` picture
   on a dark `background-color` still reads as shown: the reader cannot see a picture's pixels.
+- A full-screen opaque box that is out of sight now but that may show also makes the text under
+  it unsure. Before, only the box's certain values were read, so a box faded to `opacity: 0`,
+  `visibility: hidden`, transparent, scaled to nothing, slid away or `display: none` let the
+  text under it read as shown even when a fade-in (`animation: in .3s forwards`), another
+  animation of its opacity, visibility, display, background or transform, or a `:hover`,
+  `:focus`, `:target`, `:checked` or unevaluable `@media` rule (with or without a transition)
+  shows it. A `transform: scale(0)` box with such an animation had read as unsure until the
+  fade-in fix above. The reader now also tries the box with each rule that may apply to it on
+  top of its certain values, with all of them together, and with each keyframe of an
+  animation it may run (only the end keyframe it rests on, for a single animation that
+  certainly ends within five seconds); a keyframe that sets `display` on a box its styles
+  remove also makes its own text unsure. A rule that does not match the page as recorded
+  (`.modal.open`, a class a script adds) still does not count, so a closed drawer, accordion or
+  modal with no such rule or animation covers nothing, and the `closed_overlays` control keeps
+  its verdicts. On the ten saved real-site pages nothing changes. New `unmodelled_hiding`
+  variants `hover_overlay`, `fade_in_overlay`, `visibility_overlay`, `painted_overlay`,
+  `scaled_overlay`, `display_overlay` and `target_overlay`; each was a false SHOWN before.
 
 ### CLI, GitHub Action and benchmark
 

@@ -62,6 +62,13 @@ UNMODELLED_VARIANTS: Final = (
     "image_overlay",
     "gradient_overlay",
     "hover_pair_background",
+    "hover_overlay",
+    "fade_in_overlay",
+    "visibility_overlay",
+    "painted_overlay",
+    "scaled_overlay",
+    "display_overlay",
+    "target_overlay",
 )
 _HIDING_STYLES: Final = {
     "faded": "opacity:0",
@@ -94,6 +101,25 @@ UNRENDERED_VARIANTS: Final = (
     "popover",
 )
 _VIEWPORT: Final = (1280, 720)
+_OVERLAY: Final = "position:absolute;inset:0;z-index:1"
+_REVEALED_OVERLAYS: Final = {
+    "hover_overlay": ".cover{background:#fff;opacity:0;transition:opacity .3s}"
+    ".cover:hover{opacity:1}",
+    "fade_in_overlay": ".cover{background:#fff;opacity:0;animation:in .3s forwards}"
+    "@keyframes in{to{opacity:1}}",
+    "visibility_overlay": ".cover{background:#fff;visibility:hidden;animation:in .3s forwards}"
+    "@keyframes in{to{visibility:visible}}",
+    "painted_overlay": ".cover{animation:in .3s forwards}@keyframes in{to{background:#fff}}",
+    "scaled_overlay": ".cover{background:#fff;transform:scale(0);animation:in .3s forwards}"
+    "@keyframes in{to{transform:none}}",
+    "display_overlay": ".cover{background:#fff;display:none;animation:in .3s forwards}"
+    "@keyframes in{to{display:block}}",
+    "target_overlay": ".cover{background:#fff;transform:translateX(100%)}"
+    ".cover:target{transform:none}",
+}
+"""The stylesheet of each `unmodelled_hiding` variant that hides its element under an opaque
+box (``.cover``) that is out of sight now but that an animation or a rule that may apply
+(``:hover``, ``:target``) shows."""
 
 
 def _unrendered(variant: str, query: str) -> list[object]:
@@ -157,6 +183,15 @@ def _unmodelled(variant: str, query: str) -> tuple[str, list[object]]:
             return "", ["DIV", {"style": "position:relative"}, ["P", {}, query], ["DIV", cover]]
         case "perspective_depth":
             css = ".panel{perspective:1px}.msg{transform:translateZ(-100000px)}"
+        case _ if variant in _REVEALED_OVERLAYS:
+            cover = {"class": "cover", "id": "cover", "style": _OVERLAY}
+            node: list[object] = [
+                "DIV",
+                {"style": "position:relative"},
+                ["P", {}, query],
+                ["DIV", cover],
+            ]
+            return _REVEALED_OVERLAYS[variant], node
         case "opaque_overlay":
             cover = {"style": "position:absolute;inset:0;background:#fff;z-index:1"}
             return "", ["DIV", {"style": "position:relative"}, ["P", {}, query], ["DIV", cover]]
@@ -231,9 +266,11 @@ def unmodelled_hiding(run: Run, seed: int, targets: Targets) -> Run:
     away, an animation that ends at `opacity: 0` (also through `-webkit-animation`), one paused
     at `opacity: 0`, one that blinks forever or one that runs a fade-in backwards and stays at
     its start, white text whose parent turns white only in a `:hover` state that also sets the
-    parent's own colour, or a move in depth under a parent's `perspective`. The page is recorded as the trace ingester
-    records it: its snapshot rendered by the page-text reader, so the texts are text the page
-    may hide (`unsure_text`) only while the reader keeps them there."""
+    parent's own colour, a move in depth under a parent's `perspective`, or an opaque box over
+    it that is faded, hidden, transparent, scaled to nothing, removed or slid away now but that a
+    fade-in or another animation, or a `:hover` or `:target` rule, shows. The page is recorded
+    as the trace ingester records it: its snapshot rendered by the page-text reader, so the
+    texts are text the page may hide (`unsure_text`) only while the reader keeps them there."""
     variant = pick_variant(run, seed, UNMODELLED_VARIANTS)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"

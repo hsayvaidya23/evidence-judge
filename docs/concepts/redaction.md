@@ -24,8 +24,8 @@ flowchart LR
 | `auth` / `bearer` / `jwt` | `Authorization` and `Proxy-Authorization` credentials, bearer tokens, JWTs anywhere |
 | `cookie` | Every value in `Cookie` / `Set-Cookie` headers, and in `Cookie:` / `Set-Cookie:` lines written in free text (names are kept) |
 | `secret_header` | `X-API-Key`, `X-Auth-Token` and headers whose names contain token, secret, session, auth, password, api-key |
-| `api_key` | Common key formats: `sk-...`, `ghp_...`, `github_pat_...`, `AKIA...`, `xox[bp]-...`, `AIza...`, Stripe keys, GitLab tokens |
-| `secret_param` | Secret-looking URL query, fragment, form and JSON fields, URLs written inside text, and secrets written after their name in free text, with a separator (`password: hunter2`) or without one (`password hunter2`) |
+| `api_key` | Common key formats: `sk-...`, `ghp_...`, `github_pat_...`, `AKIA...`, `xox[bp]-...`, `AIza...`, Stripe keys, GitLab tokens, npm tokens |
+| `secret_param` | Secret-looking URL query, fragment, form and JSON fields, URLs written inside text, and secrets written after their name in free text, with a separator (`password: hunter2`) or without one (`password hunter2`, `aws_secret_access_key wJalr...`), and credentials on command lines (`mysql -pX`, `curl -u user:X`, `sshpass -p X`, `docker login -p X`, `htpasswd -b`, `npm config set ...:_authToken X`, `--token X`) |
 | `url_password` | Passwords in `user:password@host` URLs |
 | `secret_input` | Values typed into password, OTP, PIN or card-security-code fields |
 | `html_secret` | The `value` of password, one-time-code and token `<input>`s in page HTML, hidden CSRF tokens included |
@@ -73,6 +73,7 @@ To keep sensitive pixels out:
 
 Redaction is pattern-based: secrets in unusual formats, names, addresses and phone numbers may
 pass through. Free text is matched conservatively so prose stays readable: a plain-word password
-(`password sunshine`) or a secret not introduced by its name is not redacted (see
+(`password sunshine`) or a secret not introduced by its name is not redacted, and a path, file
+name, test id or call after a secret's name (`grep -rn token src/auth`) is kept as written (see
 [SECURITY.md](../../SECURITY.md#limits)). Review reports before sharing them. `--no-redact` (or
 `EVJ_REDACT=false`) disables all of it; use it only on synthetic data.
