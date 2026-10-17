@@ -37,7 +37,7 @@ from evidence_judge.sessions.models import (
 from evidence_judge.sessions.normalize import relative
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import regenerates_env
-from evidence_judge.sessions.shell.wrappers import may_redefine
+from evidence_judge.sessions.shell.wrappers import may_redefine, wrapper_reads
 
 _SHELL_STATE: Final = re.compile(
     r"\A(?:defines a shell function|(?:un)?alias |hash -p|(?:export|declare|typeset|readonly|set"
@@ -353,7 +353,14 @@ class SessionIndex:
     def _redefined_before(self, event: CommandEvent) -> SessionEvent | None:
         """The first event before `event` that may have changed what a wrapper runs: the rule
         `trusted_wrappers` follows."""
-        return next((e for e in self.run.events if e.seq < event.seq and may_redefine(e)), None)
+        reads = self._wrapper_reads
+        return next(
+            (e for e in self.run.events if e.seq < event.seq and may_redefine(e, reads)), None
+        )
+
+    @cached_property
+    def _wrapper_reads(self) -> frozenset[str]:
+        return wrapper_reads(self.run.events)
 
     def _counted(self, event: CommandEvent, minimum: int | None = None) -> RunOutcome:
         judged = self._scoped(event)

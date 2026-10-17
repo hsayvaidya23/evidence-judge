@@ -181,6 +181,12 @@ class CommandAnalysis(BaseModel):
         description="Files the test run reads as its configuration although no name rule "
         "marks them (`make -f ci/rules`), as written",
     )
+    wrapper_reads: list[str] = Field(
+        default_factory=list[str],
+        description="Names of the files a Makefile the session showed but the judge cannot read "
+        "may include or name in a recipe (`include config/app.yaml`); `*` when it may read any "
+        "file (`include $(CONF)`, `$(shell ...)`)",
+    )
     test_paths: list[str] | None = Field(
         default=None,
         description="The files and directories a single test run selects when plain paths are "

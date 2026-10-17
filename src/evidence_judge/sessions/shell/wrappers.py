@@ -25,7 +25,11 @@ from dataclasses import dataclass
 from typing import Final
 
 from evidence_judge.ingest._json import as_list, as_object
-from evidence_judge.sessions.edits.paths import is_code_path
+from evidence_judge.sessions.edits.paths import (
+    is_code_path,
+    is_config_path,
+    session_config_reason,
+)
 from evidence_judge.sessions.models import (
     CallStatus,
     Category,
@@ -55,6 +59,14 @@ _PM_FLAGS: Final = frozenset({"--silent", "-s", "--if-present", "-w", "--workspa
 _CHECKS: Final = frozenset({Category.LINT, Category.TYPECHECK})
 _ENV_NAME: Final = re.compile(r"[A-Za-z_]\w*")
 _PROSE: Final = re.compile(r"\.(?:md|rst|txt)$")
+_DATA: Final = re.compile(r"\.(?:json|ya?ml|csv|tsv|xml)$|^\.git(?:ignore|attributes|keep)$")
+"""Data and repository files, which make reads only through an `include` or a recipe that names
+them."""
+_ANY_READ: Final = "*"
+_MAKE_READS_ANY: Final = re.compile(
+    r"\$[({](?:shell|file|wildcard)\b|^[ \t]*(?:-?include|sinclude)\b.*\$", re.M
+)
+_MAKE_WORD: Final = re.compile(r"[\w./-]+")
 _MAX_LINES: Final = 400
 _MAX_DEPTH: Final = 5
 
@@ -752,21 +764,57 @@ def resolve(
         steps = defined(wrapper, files) or _tox_echoed(words, output, files)
     else:
         steps = defined(wrapper, files) or echoed(wrapper, output, files)
-    return _merge(analysis, steps, cwd) if steps else analysis
+    if steps:
+        return _merge(analysis, steps, cwd)
+    if prog in _MAKES and (text := next((files[n] for n in _MAKE_FILES if n in files), None)):
+        return analysis.model_copy(update={"wrapper_reads": _make_reads(text)})
+    return analysis
 
 
-def _redefines(path: str) -> bool:
-    """A change to `path` may change what a wrapper runs: anything but source code or prose
-    (a Makefile, a file it includes, a package manager's settings)."""
+def _make_reads(text: str) -> list[str]:
+    """The names of the files a Makefile may include or name in a recipe: every path-like
+    word; `*` when an include or a function picks the file at run time."""
+    if _MAKE_READS_ANY.search(text):
+        return [_ANY_READ]
+    words = (w.rstrip(".") for w in _MAKE_WORD.findall(text) if "." in w.strip("."))
+    return sorted({posixpath.basename(w) for w in words if w})
+
+
+def wrapper_reads(events: list[SessionEvent]) -> frozenset[str]:
+    """The names every Makefile the session showed but the judge cannot read may read."""
+    return frozenset(
+        name
+        for event in events
+        if isinstance(event, CommandEvent)
+        for name in event.analysis.wrapper_reads
+    )
+
+
+def _redefines(path: str, reads: frozenset[str]) -> bool:
+    """A change to `path` may change what a wrapper runs: a Makefile or a file make may include
+    by its name (`*.mk`, `Makefile.local`), wrapper or tool configuration (`.env`, `tox.ini`,
+    `.npmrc`), a file a Makefile the session showed may read, or a file the judge cannot place
+    (`ci/rules`, `run.sh`). Source code and prose never do; data files (`config/app.yaml`,
+    `.gitignore`) only when a shown Makefile may read them. A Makefile the session never showed
+    could include a data file too; the judge cannot know, and trusts data files there."""
     name = posixpath.basename(path)
-    return name in DEFINITION_FILES or not (is_code_path(name) or _PROSE.search(name))
+    if (
+        name in DEFINITION_FILES
+        or is_config_path(path)
+        or session_config_reason(path) is not None
+        or name in reads
+    ):
+        return True
+    if is_code_path(name) or _PROSE.search(name):
+        return False
+    return _ANY_READ in reads or not _DATA.search(name)
 
 
-def may_redefine(event: SessionEvent) -> bool:
+def may_redefine(event: SessionEvent, reads: frozenset[str] = frozenset()) -> bool:
     """The event may have changed a wrapper's definition, its settings, how the shell runs it,
-    or the directory it runs in."""
+    or the directory it runs in; `reads` are the names shown Makefiles may read."""
     if isinstance(event, FileEditEvent):
-        return event.status is not CallStatus.DENIED and _redefines(event.path)
+        return event.status is not CallStatus.DENIED and _redefines(event.path, reads)
     if isinstance(event, SubagentEvent):
         return not event.transcript_loaded
     if isinstance(event, OtherToolEvent):
@@ -782,7 +830,7 @@ def may_redefine(event: SessionEvent) -> bool:
         or analysis.harness_change
         or analysis.cd_targets
         or (analysis.mutation and not paths)
-        or any(_redefines(path) for path in paths)
+        or any(_redefines(path, reads) for path in paths)
     )
 
 
@@ -793,6 +841,7 @@ def trust(
     session does not show, analysed as the declared command; not once the session may have
     changed what the wrapper runs, nor a run in another directory."""
     declared = {shlex.join(_words(k)): v for k, v in trusted.items()}
+    reads = wrapper_reads(events)
     out: list[SessionEvent] = []
     changed = False
     for event in events:
@@ -807,6 +856,6 @@ def trust(
         ):
             analysis = _merge(event.analysis, [_Step(command)], event.cwd or cwd)
             event = event.model_copy(update={"analysis": analysis})
-        changed = changed or may_redefine(event)
+        changed = changed or may_redefine(event, reads)
         out.append(event)
     return out
