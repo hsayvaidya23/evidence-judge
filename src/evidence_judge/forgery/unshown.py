@@ -55,6 +55,13 @@ UNMODELLED_VARIANTS: Final = (
     "backface_flip",
     "ending_animation",
     "perspective_depth",
+    "paused_animation",
+    "blinking_animation",
+    "reversed_animation",
+    "webkit_animation",
+    "image_overlay",
+    "gradient_overlay",
+    "hover_pair_background",
 )
 _HIDING_STYLES: Final = {
     "faded": "opacity:0",
@@ -127,6 +134,27 @@ def _unmodelled(variant: str, query: str) -> tuple[str, list[object]]:
             css = ".panel:hover{background:#000}.msg{color:#fff}"
         case "ending_animation":
             css = ".msg{animation:done 1ms forwards}@keyframes done{to{opacity:0}}"
+        case "paused_animation":
+            css = ".msg{animation:show 1s paused}@keyframes show{from{opacity:0}}"
+        case "blinking_animation":
+            css = ".msg{animation:blink 1s infinite}@keyframes blink{0%,95%{opacity:0}}"
+        case "reversed_animation":
+            css = (
+                ".msg{animation:show 1s reverse forwards}"
+                "@keyframes show{from{opacity:0}to{opacity:1}}"
+            )
+        case "webkit_animation":
+            css = ".msg{-webkit-animation:done 1ms forwards}@keyframes done{to{opacity:0}}"
+        case "hover_pair_background":
+            css = ".panel{background:#000}.panel:hover{background:#fff;color:#000}.msg{color:#fff}"
+        case "image_overlay" | "gradient_overlay":
+            paint = (
+                "url(/img/sale.png) center/cover"
+                if variant == "image_overlay"
+                else "linear-gradient(#fff,#f4f4f4)"
+            )
+            cover = {"style": f"position:absolute;inset:0;background:{paint};z-index:1"}
+            return "", ["DIV", {"style": "position:relative"}, ["P", {}, query], ["DIV", cover]]
         case "perspective_depth":
             css = ".panel{perspective:1px}.msg{transform:translateZ(-100000px)}"
         case "opaque_overlay":
@@ -199,8 +227,11 @@ def unmodelled_hiding(run: Run, seed: int, targets: Targets) -> Run:
     no size included), a fixed box above the viewport, a logical offset, an image-replacement
     indent, an SVG `font-size` attribute of 0, white text whose dark background only a `:hover`
     rule sets, white text over a background picture with no colour behind it, an opaque box
-    positioned over it, a back face turned away, an animation that ends at `opacity: 0`,
-    or a move in depth under a parent's `perspective`. The page is recorded as the trace ingester
+    positioned over it (or one painted with a picture or an opaque gradient), a back face turned
+    away, an animation that ends at `opacity: 0` (also through `-webkit-animation`), one paused
+    at `opacity: 0`, one that blinks forever or one that runs a fade-in backwards and stays at
+    its start, white text whose parent turns white only in a `:hover` state that also sets the
+    parent's own colour, or a move in depth under a parent's `perspective`. The page is recorded as the trace ingester
     records it: its snapshot rendered by the page-text reader, so the texts are text the page
     may hide (`unsure_text`) only while the reader keeps them there."""
     variant = pick_variant(run, seed, UNMODELLED_VARIANTS)

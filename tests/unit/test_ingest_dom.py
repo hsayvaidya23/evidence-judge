@@ -830,6 +830,30 @@ def test_a_full_screen_box_its_own_styles_put_out_of_sight_covers_nothing(
 
 
 @pytest.mark.parametrize(
+    ("background", "covers"),
+    [
+        ("background:url(/img/sale.png) center/cover", True),
+        ("background-image:url(/img/a.png),linear-gradient(transparent,transparent)", True),
+        ("background-image:linear-gradient(#fff,#000)", True),
+        ("background:rgb(0 0 0/50%) url(/img/a.png)", True),
+        ("background-image:linear-gradient(var(--a),#fff)", True),
+        ("background-image:linear-gradient(#fff,transparent)", False),
+        ("background:url(data:,)", False),
+        ("background:url(/img/a.png) 0 0/0 0", False),
+        ("background:url(/img/a.png);transform:scale(0)", False),
+        ("background:none", False),
+    ],
+)
+def test_a_full_screen_box_painted_with_a_picture_or_an_opaque_gradient_covers_the_page(
+    background: str, covers: bool
+) -> None:
+    box = ["DIV", {"style": f"position:fixed;inset:0;{background}"}]
+    page = _rendered(["P", {}, "Order confirmed"], box)
+
+    assert (page.unsure_text == "Order confirmed") is covers
+
+
+@pytest.mark.parametrize(
     "children",
     [
         (

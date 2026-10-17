@@ -29,14 +29,16 @@ from evidence_judge.ingest.css.model import (
     UNSURE,
     WHITE,
     YES,
+    Compound,
     Computed,
+    Hovered,
     Rgba,
     Rule,
     Viewport,
     faint,
     words,
 )
-from evidence_judge.ingest.css.syntax import EXTENTS, TRACKED
+from evidence_judge.ingest.css.syntax import ANIMATIONS, EXTENTS, TRACKED
 from evidence_judge.ingest.css.values import (
     FAINT,
     FAR,
@@ -145,12 +147,7 @@ _DEPTH: Final = words("transform rotate scale backface-visibility perspective")
 
 
 _TEXT: Final = (
-    TRACKED
-    - _REMOVERS
-    - _BOX
-    - _DEPTH
-    - EXTENTS
-    - words("visibility z-index animation animation-name")
+    TRACKED - _REMOVERS - _BOX - _DEPTH - ANIMATIONS - EXTENTS - words("visibility z-index")
 )
 
 
@@ -215,8 +212,21 @@ def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Co
         for p in ("background-clip", "-webkit-background-clip")
         for v in cascade.values(p)
     )
-    if not clip_text and not unsure:
-        unsure = any(_state_faint(state, parent, alpha) for state in states)
+    hovered: list[Hovered] = []
+    for grounds, compounds in parent.hovered:
+        if cascade.sets(*_GROUNDS):
+            grounds = _backdrop(rest, grounds, colors)[0]
+        if cascade.sets(*_INKS) and not clip_text and not unsure:
+            unsure = _hover_faint(
+                cascade, compounds, parent, (paints or colors, clear), grounds, alpha
+            )
+        if grounds != background:
+            hovered.append((grounds, compounds))
+    for state, compounds in states:
+        faded, grounds = _state_faint(state, parent, alpha)
+        unsure = unsure or (faded and not clip_text)
+        if grounds != background:
+            hovered.append((grounds, compounds))
     indent_far = parent.indent_far
     if cascade.sets("text-indent"):
         indent_far = any(
@@ -248,6 +258,7 @@ def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Co
         svg=parent.svg,
         custom=parent.custom,
         registered=parent.registered,
+        hovered=tuple(dict.fromkeys(hovered)),
     )
 
 
@@ -257,11 +268,12 @@ _INKS: Final = ("color", "-webkit-text-fill-color")
 _GROUNDS: Final = ("background-color", "background-image", "background-size")
 
 
-def _states(cascade: Cascade) -> tuple[Cascade, list[Cascade]]:
+def _states(cascade: Cascade) -> tuple[Cascade, list[tuple[Cascade, frozenset[Compound]]]]:
     """`cascade` split by the states in which rules that may apply set both the text colour and
     the background (``:hover`` rules that swap them): the cascade without those rules, and the
-    cascade in each such state. Rules make one state when the same selector state decides them:
-    the same selector but for the classes, id and tag of the element itself."""
+    cascade in each such state, with the compounds that name the element in it. Rules make one
+    state when the same selector state decides them: the same selector but for the classes, id
+    and tag of the element itself."""
     groups: dict[tuple[object, ...], dict[str, list[Rule]]] = {}
     for prop in (*_INKS, *_GROUNDS):
         for rule in cascade.maybe.get(prop, ()):
@@ -283,7 +295,7 @@ def _states(cascade: Cascade) -> tuple[Cascade, list[Cascade]]:
         {prop: [r for r in rules if id(r) not in taken] for prop, rules in cascade.maybe.items()},
         cascade.present,
     )
-    states: list[Cascade] = []
+    states: list[tuple[Cascade, frozenset[Compound]]] = []
     for group in paired:
         best = dict(cascade.best)
         for prop, rules in group.items():
@@ -291,18 +303,48 @@ def _states(cascade: Cascade) -> tuple[Cascade, list[Cascade]]:
             winner = best.get(prop)
             if winner is None or top.rank >= winner.rank:
                 best[prop] = top
-        states.append(Cascade(best, rest.maybe, cascade.present))
+        named = frozenset(r.selector.parts[-1] for rules in group.values() for r in rules)
+        states.append((Cascade(best, rest.maybe, cascade.present), named))
     return rest, states
 
 
-def _state_faint(state: Cascade, parent: Computed, alpha: float) -> bool:
-    """Whether text may be unreadable in `state`: a colour the reader cannot read, or one that
-    barely stands out from the background the state paints."""
+def _state_faint(state: Cascade, parent: Computed, alpha: float) -> tuple[bool, Backdrop | None]:
+    """Whether text may be unreadable in `state` (a colour the reader cannot read, or one that
+    barely stands out from the background the state paints), and that background."""
     colors, clear, paints = _paint(state, parent)
     background, unreadable = _backdrop(state, parent.background, colors)
     if clear or unreadable:
+        return True, background
+    return background is not None and faint(paints or colors, alpha, background), background
+
+
+def _hover_faint(
+    cascade: Cascade,
+    compounds: frozenset[Compound],
+    parent: Computed,
+    ink: tuple[tuple[Rgba, ...], bool],
+    grounds: Backdrop | None,
+    alpha: float,
+) -> bool:
+    """Whether the text colour an element sets for itself may be unreadable over `grounds`, a
+    background an ancestor paints only in a state (named by `compounds`) whose rules also set
+    the ancestor's text colour: the colours rules for that same state give the element (a rule
+    through one of `compounds`), or else the colours `ink` it has outside it."""
+    colors, clear = ink
+    stated = [
+        rule.value
+        for prop in _INKS
+        for rule in cascade.maybe.get(prop, ())
+        if not compounds.isdisjoint(rule.selector.parts[:-1])
+    ]
+    if stated:
+        found = [None if v is None else _colours(v, parent.colors) for v in stated]
+        if any(f is None for f in found):
+            return True
+        colors, clear = tuple(c for f in found if f is not None for c in f), False
+    if clear:
         return True
-    return background is not None and faint(paints or colors, alpha, background)
+    return grounds is not None and faint(colors, alpha, grounds)
 
 
 def _inherits(cascade: Cascade, prop: str, inherited: bool, test: Callable[[str], bool]) -> bool:

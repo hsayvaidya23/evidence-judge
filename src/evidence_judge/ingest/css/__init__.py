@@ -29,7 +29,8 @@ fully model:
   its ancestors' multiplied), a tiny ``font-size``, a text colour (or text fill, or SVG
   ``fill``) whose contrast with the background is below 1.2 (with any stop of a background
   gradient, and any background a rule it cannot evaluate may set, but for a rule that sets the
-  text colour in the same state; an empty or zero-size image paints nothing, and a gradient
+  text colour in the same state; a descendant that sets its own colour is checked against an
+  ancestor's state background too, unless a rule for that same state sets its colour; an empty or zero-size image paints nothing, and a gradient
   whose colours it cannot tell is unsure), a near-white or near-black text colour over a
   background picture with no solid colour beneath it, any ``mask``, a ``filter`` other
   than slight or luminance-keeping ones, a motion path, ``clip`` or a ``clip-path`` that cuts
@@ -39,15 +40,25 @@ fully model:
   outside the viewport), margins or ``text-indent``, a zero-size box that clips, scrolls
   or contains the paint of its overflow, ``backface-visibility: hidden`` on a box it or an
   ancestor may turn to show its back, a 3D transform under an ancestor's ``perspective``, and
-  an ``animation`` whose ``@keyframes`` may hide text at any point (or that it cannot name).
+  an ``animation`` (``-webkit-animation`` too) whose ``@keyframes`` may hide text at some point
+  and that may not come to rest showing it (`animations.settles_shown`), or that it cannot
+  name. An element's only animation rests showing its text when it certainly ends within
+  five seconds (a known iteration count, not paused, no stepped easing, no scroll or view
+  timeline or trigger) and either fills nothing (the element's own value returns) or fills
+  forwards onto an end keyframe, for its direction and count, that shows the text: a fade-in
+  ``from{opacity:0}`` with ``both`` reads as shown, but not one run ``reverse``, ``infinite``
+  or with ``paused``, not several animations at once, and not keyframes that set a custom
+  property, hold a ``var()`` or an offset it does not know.
   SVG presentation attributes are read like the properties they name.
 
 Each element's positioned ancestors and their ``z-index`` ride on its `Computed` (``boxes``),
-and `StyleSheets.covers` says whether a fixed or absolute box has an opaque background over the
-whole viewport or its containing block, and is not put out of sight by its own styles (moved by
+and `StyleSheets.covers` says whether a fixed or absolute box has an opaque background (a colour,
+an opaque gradient, or a ``url()`` picture it takes for opaque) over the whole viewport or its
+containing block, and is not put out of sight by its own styles (moved by
 its whole size, scaled to nothing, clipped away or collapsed: a closed drawer or modal); the
-page renderer makes the text such a box may paint over unsure. It does not lay the page out: a smaller box painted over the text, or one sized
-some other way, is not seen. Nor does it see images: a background ``url()`` (or
+page renderer makes the text such a box may paint over unsure. It does not lay the page out
+(the snapshot holds no box geometry but for frames), so a smaller box painted over the text,
+or one sized some other way, is not seen. Nor does it see images: a background ``url()`` (or
 ``image-set()``, ...) over a solid ``background-color`` is taken to look like that colour, so
 white text over a white picture on a dark colour shows.
 

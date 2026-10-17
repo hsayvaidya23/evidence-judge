@@ -282,6 +282,11 @@ Box = tuple[Element, int | None, str]
 and its ``position``."""
 
 
+Hovered = tuple[tuple[Rgba, ...] | None, frozenset[Compound]]
+"""A background an ancestor paints only in a state whose rules also set its text colour (None
+when the reader cannot tell it), and the compounds that name the ancestor in that state."""
+
+
 @dataclass(frozen=True, slots=True)
 class Computed:
     """What the cascade decides for an element, with what its children inherit."""
@@ -327,6 +332,9 @@ class Computed:
     """The custom properties its children inherit (`variables.Custom`)."""
     registered: Registered = field(default=NOT_REGISTERED, compare=False)
     """The custom properties ``@property`` rules register."""
+    hovered: tuple[Hovered, ...] = ()
+    """The backgrounds ancestors paint behind it only in a state that also sets their text
+    colour (`Hovered`): a text colour of its own must stand out from them too."""
 
     @property
     def text(self) -> int:
