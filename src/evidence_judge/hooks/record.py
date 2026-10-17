@@ -38,7 +38,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal, cast
 
-from evidence_judge.config import Settings, stable_redaction_key
+from evidence_judge.config import read_settings, stable_redaction_key
 from evidence_judge.hooks.state import LOG_CHAIN, key_id, line_mac, log_key, write_log_head
 from evidence_judge.redact import Redactor
 
@@ -96,7 +96,7 @@ def resolve_log_dir(option: str | None) -> Path:
 def redactor() -> Redactor:
     """The installation's stable redactor, so equal values get equal tokens across hooks."""
     try:
-        settings = Settings()
+        settings = read_settings()
         key = stable_redaction_key(settings)
         return Redactor(key) if key is not None else Redactor.from_settings(settings)
     except Exception:

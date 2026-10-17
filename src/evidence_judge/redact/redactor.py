@@ -28,12 +28,14 @@ from evidence_judge.redact.detectors import (
     API_KEY_RE,
     ATTR_RE,
     AUTH_HEADERS,
+    AUTH_SCHEME_END_RE,
     AUTH_TEXT_RE,
     BASIC_RE,
     BEARER_RE,
     CARD_PREFIX_RE,
     CARD_RE,
     COOKIE_HEADERS,
+    COOKIE_TEXT_RE,
     EMAIL_RE,
     ESCAPED_URL_RE,
     INPUT_TAG_RE,
@@ -41,6 +43,7 @@ from evidence_judge.redact.detectors import (
     JSON_SECRET_RE,
     JWT_RE,
     KV_SECRET_RE,
+    LABELLED_SECRET_RE,
     PAIR_EXCLUDED_NAMES,
     SECRET_INPUT_HINTS,
     SSN_RE,
@@ -53,6 +56,7 @@ from evidence_judge.redact.detectors import (
     is_secret_input,
     is_secret_param,
     looks_like_card,
+    looks_like_labelled_secret,
     looks_like_secret,
     luhn_ok,
     norm_param,
@@ -272,8 +276,10 @@ class Redactor:
             (JSON_SECRET_RE, self._sub_json_secret),
             (JSON_SECRET_NUMBER_RE, self._sub_json_number),
             (AUTH_TEXT_RE, self._sub_auth_text),
+            (COOKIE_TEXT_RE, self._sub_cookie_text),
             (KV_SECRET_RE, self._sub_kv_secret),
             (TEXT_PAIR_RE, self._sub_text_pair),
+            (LABELLED_SECRET_RE, self._sub_labelled_secret),
             (EMAIL_RE, self._sub_email),
             (CARD_RE, self._sub_card),
             (SSN_RE, self._sub_ssn),
@@ -335,9 +341,22 @@ class Redactor:
         return m.group(1) + self._token("auth", m.group(2), counts)
 
     def _sub_auth_text(self, counts: Counter[str], m: re.Match[str]) -> str:
-        if not looks_like_secret(m.group(2)):
+        value = m.group(2)
+        with_scheme = AUTH_SCHEME_END_RE.search(m.group(1)) is not None
+        if not (looks_like_secret(value) or (with_scheme and looks_like_labelled_secret(value))):
             return m.group(0)
-        return m.group(1) + self._token("auth", m.group(2), counts)
+        return m.group(1) + self._token("auth", value, counts)
+
+    def _sub_cookie_text(self, counts: Counter[str], m: re.Match[str]) -> str:
+        set_cookie = m.group(2) is not None
+        return m.group(1) + self._cookie_pairs(m.group(3), counts, attributes=set_cookie)
+
+    def _sub_labelled_secret(self, counts: Counter[str], m: re.Match[str]) -> str:
+        prefix, value = m.group(1, 2)
+        kept = value.rstrip(URL_TRAILING)
+        if not looks_like_labelled_secret(kept):
+            return m.group(0)
+        return prefix + self._token("secret_param", kept, counts) + value[len(kept) :]
 
     def _sub_text_pair(self, counts: Counter[str], m: re.Match[str]) -> str:
         prefix, name, quote_char, value = m.group(1, 2, 3, 4)

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 from evidence_judge.baselines import TranscriptLLMJudge
 from evidence_judge.bench import (
@@ -276,3 +276,20 @@ def test_injected_vacuous_predicates_never_pass(offline_result: BenchResult) -> 
     assert all(c.outcome is not Outcome.PASS for c in injected)
     no_spec = [c for c in injected if c.judge == EJ_NO_SPEC]
     assert all(c.outcome is Outcome.NEEDS_REVIEW for c in no_spec)
+
+
+def test_a_library_runner_redacts_by_default_like_the_judge() -> None:
+    keyed = settings().model_copy(update={"redaction_key": SecretStr("bench-key")})
+    runner = BenchmarkRunner(keyed)
+    assert runner.redactor is not None
+    assert runner.redactor.fingerprint("v") == Redactor(b"bench-key").fingerprint("v")
+    assert BenchmarkRunner(settings().model_copy(update={"redact": False})).redactor is None
+
+
+async def test_a_library_runner_judges_redacted_evidence(scenarios: list[Scenario]) -> None:
+    run = scenarios[0].run.model_copy(update={"agent_answer": "Done, password hunter2"})
+    scenario = Scenario(name="s", run=run, expected=scenarios[0].expected)
+    prepared = BenchmarkRunner(settings())._prepare(  # pyright: ignore[reportPrivateUsage]
+        (await BenchmarkRunner(settings(), BenchConfig(seeds=1)).build_cases([scenario]))[0]
+    )
+    assert "hunter2" not in (prepared.run.agent_answer or "")

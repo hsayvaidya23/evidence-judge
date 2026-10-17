@@ -227,9 +227,9 @@ Full references: [docs/cli.md](docs/cli.md) (every command and option) and
 ```python
 import asyncio
 
-from evidence_judge import Judge, JudgeOptions, Settings, TaskSpec, build_llm, load_run
+from evidence_judge import Judge, JudgeOptions, TaskSpec, build_llm, load_run, read_settings
 
-settings = Settings()
+settings = read_settings()  # EVJ_* variables plus EVJ_ENV_FILE, like the CLI
 run = load_run(trace="trace.zip", har="run.har", answer_file="answer.txt")
 judge = Judge(settings, build_llm(settings))  # redacts run, spec and claims, like the CLI
 verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yaml"))))
