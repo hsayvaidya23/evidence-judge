@@ -234,6 +234,7 @@ def test_action_session_mode_checks_its_format(tmp_path: Path, given: str, read:
         ({"session_transcript": "s.jsonl", "trace": "t.zip"}, "drop trace"),
         ({"session_transcript": "s.jsonl", "spec": "spec.yaml"}, "use session-spec"),
         ({"session_spec": "s.yaml"}, "session-spec needs session-transcript"),
+        ({"session_transcript": "s.jsonl", "site": "shop.test"}, "spec and site"),
     ],
 )
 def test_action_rejects_mixed_or_unknown_session_inputs(
@@ -243,6 +244,37 @@ def test_action_rejects_mixed_or_unknown_session_inputs(
     code, stdout, written = _check_inputs(tmp_path, **flags, **inputs)
     assert code != 0
     assert error in stdout
+    assert "mode" not in written
+
+
+@pytest.mark.parametrize(
+    "site", ["shop.test", "HTTPS://Shop.test/", "shop.test:8000", "http://[::1]:8000", ""]
+)
+def test_action_accepts_a_site_url_or_host(tmp_path: Path, site: str) -> None:
+    flags = {"offline": "true", "fail_on_review": "false", "upload_report": "false"}
+    code, stdout, written = _check_inputs(tmp_path, **flags, trace="t.zip", site=site)
+    assert code == 0, stdout
+    assert written["mode"] == "browser"
+
+
+@pytest.mark.parametrize(
+    "site",
+    [
+        " ",
+        "shop test",
+        "https://shop.test/checkout",
+        "shop.test?q=1",
+        "ftp://shop.test",
+        "user@shop.test",
+        "https://",
+        "shop.test:port",
+    ],
+)
+def test_action_rejects_a_site_that_is_not_a_url_or_host(tmp_path: Path, site: str) -> None:
+    flags = {"offline": "true", "fail_on_review": "false", "upload_report": "false"}
+    code, stdout, written = _check_inputs(tmp_path, **flags, trace="t.zip", site=site)
+    assert code != 0
+    assert "::error::input site must be an http(s) URL or a host" in stdout
     assert "mode" not in written
 
 
@@ -302,6 +334,41 @@ def test_action_session_mode_runs_session_judge(tmp_path: Path) -> None:
     assert "--trace" not in args and "--html" in args
 
 
+@pytest.mark.parametrize(("site", "passed"), [("https://shop.test:8443/", True), ("", False)])
+def test_action_browser_mode_passes_the_site(tmp_path: Path, site: str, passed: bool) -> None:
+    step = next(s for s in _action()["runs"]["steps"] if s.get("id") == "judge")
+    assert step["env"]["EJ_SITE"] == "${{ inputs.site }}"
+    assert "inputs.site" not in step["run"]
+    bin_dir = _fake_tools(tmp_path)
+    (tmp_path / "runner").mkdir()
+    verdict = tmp_path / "verdict.json"
+    write_json(make_verdict(Outcome.PASS), verdict)
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(tmp_path / "runner"),
+        "GITHUB_OUTPUT": str(tmp_path / "outputs"),
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
+        "PYTHONPATH": str(ROOT / "src"),
+        "EJ_ARGS": str(tmp_path / "args"),
+        "EJ_VERDICT": str(verdict),
+        "EJ_MODE": "browser",
+        "EJ_TRACE": "trace.zip",
+        "EJ_SITE": site,
+        "EJ_OFFLINE": "true",
+        "EJ_FAIL_ON_REVIEW": "false",
+    }
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = (tmp_path / "args").read_text(encoding="utf-8").splitlines()
+    assert args[0] == "judge" and "--trace" in args
+    if passed:
+        assert args[args.index("--site") + 1] == site
+    else:
+        assert "--site" not in args
+
+
 def test_action_steps_use_the_checked_inputs() -> None:
     action = _action()
     steps = action["runs"]["steps"]
@@ -339,6 +406,11 @@ def test_ci_exercises_the_action_failure_path() -> None:
     assert badflag["continue-on-error"] is True
     assert badflag["with"]["offline"] == "yes"
     assert 'test "$BADFLAG_STEP" = failure' in steps[-1]["run"]
+    badsite = next(s for s in steps if s.get("id") == "badsite")
+    assert badsite["continue-on-error"] is True and "/" in badsite["with"]["site"].split("//")[1]
+    assert 'test "$BADSITE_STEP" = failure' in steps[-1]["run"]
+    honest = next(s for s in steps if s.get("id") == "honest")
+    assert honest["with"]["site"]
     session = next(s for s in steps if s.get("id") == "session")
     assert "session-transcript" in session["with"]
     assert 'test "$SESSION" = pass' in steps[-1]["run"]
