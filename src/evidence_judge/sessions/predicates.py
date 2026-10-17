@@ -30,7 +30,9 @@ from evidence_judge.sessions.rerun import RerunSpec
 from evidence_judge.sessions.shell import analyse
 
 MIN_TEXT = 3
-_GLOB_LITERAL = re.compile(r"[^*?/.\[\]{}]")
+_GLOB_LITERAL = re.compile(r"[^*?/.]")
+_GLOB_CLASS = re.compile(r"\[!?\]?[^\]]*\]")
+_GLOB_UNSUPPORTED = re.compile(r"[{}\\\[]")
 
 
 def _text(value: str) -> str:
@@ -51,12 +53,18 @@ def _glob(value: str) -> str:
     stripped = value.strip().removeprefix("./")
     if not stripped:
         raise ValueError("glob must not be empty")
+    if found := _GLOB_UNSUPPORTED.search(_GLOB_CLASS.sub("", stripped)):
+        what = "an unclosed '['" if found[0] == "[" else repr(found[0])
+        raise ValueError(
+            f"glob {stripped!r} has {what}; globs support *, **, ? and [...] / [!...] classes, "
+            "not {a,b} alternatives or backslash escapes (list each path as its own glob)"
+        )
     return stripped
 
 
 def broad(glob: str) -> bool:
-    """True for a glob that names no file in particular (`*`, `**`, `**/*.*`)."""
-    return len(_GLOB_LITERAL.findall(glob)) < 2
+    """True for a glob that names no file in particular (`*`, `**`, `**/*.*`, `[!_]*`)."""
+    return len(_GLOB_LITERAL.findall(_GLOB_CLASS.sub("", glob))) < 2
 
 
 Text = Annotated[str, AfterValidator(_text)]

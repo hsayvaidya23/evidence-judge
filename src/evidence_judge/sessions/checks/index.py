@@ -86,7 +86,10 @@ class SessionIndex:
         ]
 
     def _ignored(self, edit: FileEditEvent) -> bool:
-        return any(path_matches(g, edit.path) for g in self.ignore_edits) and not edit.test_findings
+        return (
+            any(path_matches(g, edit.path, self.run.cwd) for g in self.ignore_edits)
+            and not edit.test_findings
+        )
 
     @cached_property
     def changes(self) -> list[tuple[float, SessionEvent, str]]:

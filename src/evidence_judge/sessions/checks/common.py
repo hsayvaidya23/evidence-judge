@@ -11,6 +11,7 @@ from typing import Final
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 from evidence_judge.sessions.edits import NO_DIFF
 from evidence_judge.sessions.models import CommandEvent, SessionEvent
+from evidence_judge.sessions.normalize import relative
 
 CHECKER: Final = "session"
 EXCERPT: Final = 160
@@ -45,10 +46,49 @@ _ANY: Final = "**"
 _DIRS: Final = "**/"
 
 
-def _glob_tokens(pattern: str) -> tuple[str, ...]:
-    tokens: list[str] = []
+@dataclass(frozen=True, slots=True)
+class _Class:
+    negated: bool
+    members: str
+    ranges: tuple[tuple[str, str], ...]
+
+    def matches(self, char: str) -> bool:
+        inside = char in self.members or any(lo <= char <= hi for lo, hi in self.ranges)
+        return char != "/" and inside is not self.negated
+
+
+def _class(pattern: str, start: int) -> tuple[_Class, int] | None:
+    """The `[...]` or `[!...]` class at `start` and the index after it, or None when the
+    bracket is never closed (then it is a literal `[`, as in fnmatch)."""
+    i = start + 1
+    negated = i < len(pattern) and pattern[i] == "!"
+    i += negated
+    first = i
+    members: list[str] = []
+    ranges: list[tuple[str, str]] = []
+    while i < len(pattern) and (pattern[i] != "]" or i == first):
+        if i + 2 < len(pattern) and pattern[i + 1] == "-" and pattern[i + 2] != "]":
+            ranges.append((pattern[i], pattern[i + 2]))
+            i += 3
+        else:
+            members.append(pattern[i])
+            i += 1
+    if i >= len(pattern):
+        return None
+    return _Class(negated, "".join(members), tuple(ranges)), i + 1
+
+
+_Token = str | _Class
+
+
+def _glob_tokens(pattern: str) -> tuple[_Token, ...]:
+    tokens: list[_Token] = []
     i = 0
     while i < len(pattern):
+        if pattern[i] == "[" and (found := _class(pattern, i)):
+            tokens.append(found[0])
+            i = found[1]
+            continue
         token = next(
             (t for t in (_DIRS, _ANY, _SEGMENT, _ONE) if pattern.startswith(t, i)), pattern[i]
         )
@@ -57,13 +97,13 @@ def _glob_tokens(pattern: str) -> tuple[str, ...]:
     return tuple(tokens)
 
 
-def _glob_fullmatch(tokens: tuple[str, ...], text: str) -> bool:
+def _glob_fullmatch(tokens: tuple[_Token, ...], text: str) -> bool:
     """Whether `tokens` match all of `text`, by stepping every live position at once.
 
     Each character advances the whole set of pattern positions, so the time is the pattern
     length times the text length whatever the glob: a spec glob cannot make it backtrack.
-    `**/` matches nothing or anything ending in '/', `**` anything, `*` and `?` anything
-    within a path segment.
+    `**/` matches nothing or anything ending in '/', `**` anything, `*`, `?` and a `[...]`
+    class anything within a path segment.
     """
     end = len(tokens)
 
@@ -85,7 +125,10 @@ def _glob_fullmatch(tokens: tuple[str, ...], text: str) -> bool:
             if i >= end:
                 continue
             token = tokens[i]
-            if token == _DIRS:
+            if isinstance(token, _Class):
+                if token.matches(char):
+                    after.add(i + 1)
+            elif token == _DIRS:
                 within.add(i)
                 if char == "/":
                     after.add(i + 1)
@@ -99,21 +142,30 @@ def _glob_fullmatch(tokens: tuple[str, ...], text: str) -> bool:
     return end in states
 
 
-def path_matches(pattern: str, path: str) -> bool:
+def project_path(path: str, root: str | None, here: str | None = None) -> str | None:
+    """`path` relative to the session directory `root`, resolved from the directory `here` it
+    was named in; None when it lies outside the project (an absolute path not under `root`,
+    or a relative one that climbs out with `..`) or cannot be placed (`root` unknown)."""
+    if root and here and not posixpath.isabs(path):
+        path = posixpath.join(here, path)
+    rel = relative(path, root)
+    if posixpath.isabs(rel) or rel == ".." or rel.startswith("../"):
+        return None
+    return rel.removeprefix("./")
+
+
+def path_matches(pattern: str, path: str, root: str | None = None, here: str | None = None) -> bool:
     """Gitignore-like: a pattern without '/' matches a file or directory name at any depth; a
     pattern with '/' matches from the session directory, and a directory pattern matches
-    everything under it. Absolute paths outside the session directory match by suffix."""
-    norm = posixpath.normpath(path).removeprefix("./")
+    everything under it. A path outside the project matches no pattern."""
+    rel = project_path(path, root, here)
+    if rel is None:
+        return False
     pat = pattern.rstrip("/")
-    parts = [part for part in norm.split("/") if part]
     tokens = _glob_tokens(pat)
     if "/" not in pat:
-        return any(_glob_fullmatch(tokens, part) for part in parts)
-    under = _glob_tokens(pat + "/**")
-    candidates = [norm]
-    if norm.startswith(("/", "../")):
-        candidates.extend("/".join(parts[i:]) for i in range(1, len(parts)))
-    return any(_glob_fullmatch(tokens, c) or _glob_fullmatch(under, c) for c in candidates)
+        return any(_glob_fullmatch(tokens, part) for part in rel.split("/") if part)
+    return _glob_fullmatch(tokens, rel) or _glob_fullmatch(_glob_tokens(pat + "/**"), rel)
 
 
 def cite(event: SessionEvent, excerpt: str | None = None) -> Citation:
