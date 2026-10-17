@@ -114,6 +114,10 @@ The first release.
   evidence log (with its key and anchor) inside the server's roots, with the same parameters
   as `session judge` (`answer`, `spec` or `spec_yaml`, `offline`, `require_tamper_evidence`,
   `run_id`, JSON and HTML reports). It never runs commands: a spec's `rerun` block is ignored.
+- GitHub Action session mode: `session-transcript`, `session-format` (`claude-code`, `codex` or
+  `evidence-log`) and `session-spec` run `evidence-judge session judge` instead of `judge`, with
+  the same job summary, report upload and exit behaviour. Mixing it with browser inputs or an
+  unknown format fails the step before anything is installed.
 
 ### Changed
 

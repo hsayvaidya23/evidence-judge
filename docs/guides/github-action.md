@@ -1,11 +1,11 @@
 ---
-description: Gate pull requests on recorded agent runs with the Evidence Judge GitHub Action - inputs, outputs, job summary, exit behaviour and the workflow-command injection guard.
+description: Gate pull requests on recorded browser-agent runs or coding-agent sessions with the Evidence Judge GitHub Action - inputs, outputs, job summary, exit behaviour and the workflow-command injection guard.
 ---
 
 # CI with the GitHub Action
 
 The repository is also a composite GitHub Action. It installs Evidence Judge, judges one recorded
-run, writes the verdict to the job summary and fails the step on FAIL.
+run or coding-agent session, writes the verdict to the job summary and fails the step on FAIL.
 
 ```yaml title=".github/workflows/agent-evals.yml"
 name: agent evals
@@ -48,6 +48,9 @@ jobs:
 | `answer-file` | | File with the agent's final answer |
 | `reasoning-file` | | File with the agent's reasoning, one step per paragraph (steps separated by a blank line) |
 | `spec` | | Task spec YAML (required for write tasks to PASS) |
+| `session-transcript` | | A coding-agent session to judge with `evidence-judge session judge` instead of a browser run (see [Judge a coding-agent session](#judge-a-coding-agent-session)) |
+| `session-format` | `"claude-code"` | What `session-transcript` is: `claude-code`, `codex` (`exec --json` output or a rollout) or `evidence-log`, in any case |
+| `session-spec` | | Session spec YAML for `session-transcript` |
 | `offline` | `"true"` | No LLM calls (heuristic claim extraction). `"false"` needs an API key (see [LLM extraction in CI](#llm-extraction-in-ci)) |
 | `fail-on-review` | `"false"` | Also fail the job when the verdict is NEEDS_REVIEW |
 | `anthropic-api-key` | `""` | Anthropic API key for LLM extraction; pass a secret. Empty keeps `ANTHROPIC_API_KEY` from the job environment |
@@ -56,7 +59,7 @@ jobs:
 | `version` | `""` | Git tag, branch or commit SHA of this repository to install (`git+https://github.com/hsayvaidya23/evidence-judge@<version>`); empty installs the action's own source, the ref you put after `@` in `uses:` |
 | `python-version` | `"3.13"` | Python version to run with |
 
-At least one of `trace`, `har` or `browser-use` is needed. `offline`, `fail-on-review` and
+At least one of `trace`, `har` or `browser-use` is needed, or `session-transcript`. `offline`, `fail-on-review` and
 `upload-report` take `true` or `false` in any case (`"True"`, `"FALSE"`); any other value
 (`"yes"`, `"1"`, an empty string) fails the step before anything is installed, instead of being
 read as `false`.
@@ -71,8 +74,9 @@ read as `false`.
 
 ## What the step does
 
-1. Checks the boolean inputs, then installs `uv` and evidence-judge with the `anthropic` extra.
-2. Runs `evidence-judge judge` with the inputs you gave, writing `verdict.json` and
+1. Checks the boolean and session inputs, then installs `uv` and evidence-judge with the `anthropic` extra.
+2. Runs `evidence-judge judge` (or `evidence-judge session judge` for `session-transcript`)
+   with the inputs you gave, writing `verdict.json` and
    `report.html` to a fresh `$RUNNER_TEMP/evidence-judge.XXXXXX` directory, so a second
    invocation in the same job never reads the first one's verdict.
 3. Writes the outcome, score and summary to the **job summary** (with
@@ -82,6 +86,31 @@ read as `false`.
    written, the step fails with evidence-judge's exit code.
 5. With `upload-report: "true"`, uploads `report.html` as the `report-artifact` artifact,
    whatever the outcome.
+
+## Judge a coding-agent session
+
+With `session-transcript`, the step judges a coding agent's session instead of a browser run:
+the agent's final answer ("all tests pass", "I fixed `calc.py`") against the commands, exit
+codes, output and edits the session recorded. `answer-file`, `offline`, `fail-on-review`,
+`anthropic-api-key` and `upload-report` work as for a browser run; `session-spec` takes a
+session spec.
+
+```yaml
+      - name: Judge the agent's session
+        uses: hsayvaidya23/evidence-judge@v0.1.0
+        with:
+          session-transcript: codex-run.jsonl # saved with `codex exec --json > codex-run.jsonl`
+          session-format: codex
+          session-spec: .evidence-judge/session.yaml
+          fail-on-review: "true"
+```
+
+`session-transcript` cannot be combined with `trace`, `har`, `browser-use`, `reasoning-file` or
+`spec`, `session-spec` needs `session-transcript`, and `session-format` must be one of the three
+formats; each of these fails the step before anything is installed. The action never re-runs
+the session's tests (`session judge --rerun`): run that as its own step if you need it. A Codex
+`exec --json` stream records no diff, so a session that changed code goes to NEEDS_REVIEW (see
+the [Codex CLI guide](codex.md)).
 
 ## LLM extraction in CI
 
