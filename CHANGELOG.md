@@ -28,8 +28,8 @@ fixes made during development are in the [security history](docs/security-histor
   but a fade-in or another animation, or a `:hover` or `:target` rule, may show it.
 - A claimed price is matched in an order's JSON answer only as its one total, on the order's
   own path (the root, `order`, `checkout`, `payment`, `invoice`, `data`, ...), never in a
-  sub-object, a line item, a non-payment Stripe object or a body that reports a failure, and
-  only in the currency every field names. Plain decimal string totals (Shopify, WooCommerce,
+  sub-object, a line item, a non-payment Stripe object or a body that reports a failure at
+  any depth (which also leaves the order unproven), and only in the currency every field names. Plain decimal string totals (Shopify, WooCommerce,
   PayPal) count.
 - Task specs (`expect`, `forbid`, `constraints`, `allow`, `site`, `allowed_hosts`,
   `failure_markers`, `trusted_scripts`) are validated on load, with errors naming line and

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import re
 from dataclasses import dataclass
@@ -20,12 +21,16 @@ from evidence_judge.checks._common import (
 )
 from evidence_judge.checks.base import CheckContext, EvidenceScope
 from evidence_judge.checks.matching import (
+    UNSET,
     body_values,
     compile_regex,
     contains,
+    failure_mark,
     is_truncated,
+    json_failure,
     parse_body,
     regex_search,
+    reported,
     shows_amount,
     status_matches,
     url_host,
@@ -361,17 +366,6 @@ STILL_ACTIONS: Final = frozenset({FILL, HOVER, CHECK, UNCHECK, UPLOAD})
 """Actions that cannot take the browser to another page."""
 MAX_OFF_SITE_HOPS: Final = 3
 """Off-site pages (a payment provider's) an order's answer may pass through on its way back."""
-_LETTER_BEFORE = r"(?<![^\W\d_])"
-_LETTER_AFTER = r"(?![^\W\d_])"
-_URL_FAILURE = re.compile(
-    _LETTER_BEFORE + r"(?:errors?|err|fail(?:s|ed|ures?)?|declin(?:e|es|ed)|refus(?:al|ed|e|ée?s?)?"
-    r"|reject(?:s|ed|ion)?|cancel(?:l?ed|lation)|invalid|denied|unauthori[sz]ed|expired"
-    r"|insufficient|try[\s_-]*again|problems?|unable|unsuccessful|timed?[\s_-]*out"
-    r"|abgelehnt|fehl(?:er|geschlagen)?|rechaz(?:ad[oa]s?|o)|rifiut(?:at[oaie]|o)"
-    r"|[ée]checs?|[ée]chou[ée]e?s?"
-    r"|not[\s_-]+(?:be[\s_-]+)?(?:processed|completed|placed))" + _LETTER_AFTER,
-    re.IGNORECASE,
-)
 _STATUS_KEY = re.compile(r"(?:status|state|result|outcome)$", re.IGNORECASE)
 _STATUS_FAILURE: Final = frozenset({"ko", "nok", "nack"})
 _SUCCESS_KEY = re.compile(r"^(?:ok|success|succeeded|successful|paid|approved)$", re.IGNORECASE)
@@ -385,8 +379,6 @@ _TEXT_FAILURE = re.compile(
     re.IGNORECASE,
 )
 _NEGATED = re.compile(r"\b(?:no|not|zero|0|without|never)\s+(?:\w+\s+){0,2}$", re.IGNORECASE)
-_UNSET = frozenset({"", "0", "false", "no", "none", "null", "off"})
-_CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")
 
 
 def url_failure(url: str) -> str | None:
@@ -406,11 +398,11 @@ def url_failure(url: str) -> str | None:
             return value
         if _SUCCESS_KEY.match(key) and folded in _FALSE:
             return f"{key}={value}"
-        if folded not in _UNSET:
+        if folded not in UNSET:
             fields.append(f"{key} {value}")
     for field in fields:
-        if found := _URL_FAILURE.search(_CAMEL.sub(" ", field)):
-            return found.group()
+        if found := failure_mark(field):
+            return found
     return None
 
 
@@ -633,17 +625,6 @@ _FLAG_KEYS: Final = ("ok", "success", "succeeded")
 _STATE_KEYS: Final = ("status", "state", "result", "outcome")
 
 
-def _reported(value: object) -> bool:
-    """Whether an `errors` or `error` field holds something: not null, empty or unset."""
-    if isinstance(value, str):
-        return value.strip().casefold() not in _UNSET
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, list | dict):
-        return bool(cast(list[object] | dict[object, object], value))
-    return value is not None
-
-
 def _fields(value: object) -> dict[str, object] | None:
     """A JSON object's fields by case-folded name, or None for anything else."""
     if not isinstance(value, dict):
@@ -673,8 +654,9 @@ def response_doubt(event: NetworkEvent) -> str | None:
     GraphQL `{"data": {"placeOrder": null}, "errors": [...]}`, a REST `{"ok": false}`. A JSON
     (or form-encoded) response object whose top-level `errors` or `error` holds something,
     whose `ok`, `success` or `succeeded` is false, or whose `status`, `state`, `result` or
-    `outcome` is a failure word ('failed', 'declined', 'error', ...) does not prove the
-    mutation took effect. Requests that are not mutations, redirects and unrecorded or
+    `outcome` is a failure word ('failed', 'declined', 'error', ...), or that reports a failure
+    at any depth (matching.json_failure: `{"order": {"status": "payment_declined"}}`), does
+    not prove the mutation took effect. Requests that are not mutations, redirects and unrecorded or
     unparseable bodies return None.
     """
     if not event.is_mutation or event.status is None or 300 <= event.status < 400:
@@ -687,7 +669,7 @@ def response_doubt(event: NetworkEvent) -> str | None:
     values = _all_values(event.response_body, cast(dict[object, object], parsed))
     for key in ("errors", "error"):
         for value in values.get(key, []):
-            if _reported(value):
+            if reported(value):
                 nulls = _null_fields(fields.get("data"))
                 null = f", with {', '.join(map(quoted, nulls))} null" if nulls else ""
                 return f"{answered} reports an error ({quoted(_first_message(value))}){null}"
@@ -697,9 +679,18 @@ def response_doubt(event: NetworkEvent) -> str | None:
                 return f"{answered} says {key}: false"
     for key in _STATE_KEYS:
         for value in values.get(key, []):
-            if isinstance(value, str) and failure_word(value):
+            if isinstance(value, str) and failure_mark(value):
                 return f"{answered} says {key}: {quoted(value)}"
+    if (found := json_failure(parsed)) is not None:
+        return _failure_doubt(answered, *found)
     return None
+
+
+def _failure_doubt(answered: str, key: str, value: object) -> str:
+    if key.casefold().endswith(("error", "errors")):
+        return f"{answered} reports an error ({quoted(_first_message(value))})"
+    shown = quoted(value) if isinstance(value, str) else json.dumps(value)
+    return f"{answered} says {key}: {shown}"
 
 
 def _all_values(body: str | None, parsed: dict[object, object]) -> dict[str, list[object]]:
@@ -710,11 +701,6 @@ def _all_values(body: str | None, parsed: dict[object, object]) -> dict[str, lis
         values = body_values(body, str(name)) or [parsed[name]]
         out.setdefault(str(name).casefold(), []).extend(values)
     return out
-
-
-def failure_word(value: str) -> bool:
-    """Whether a status-like value ('failed', 'DECLINED', 'payment_refused') names a failure."""
-    return _URL_FAILURE.search(_CAMEL.sub(" ", value)) is not None
 
 
 def _only_off_site(misses: list[Miss]) -> bool:

@@ -14,6 +14,19 @@ version: all of it happened before v0.1.0. The threat model and its current limi
 
 ## Findings and fixes
 
+- **A failure nested in an order answer no longer proves the order or its price.** POST
+  `/api/orders` answered 201 with `{"order": {"id": "A1", "status": "payment_declined",
+  "total": 24.0}}`, the next page said "Order A1 is confirmed", and "It cost $24.00." passed:
+  the order's doubt read only top-level keys, and the price's failure check matched an exact
+  word list, so `not_paid`, `insufficient_funds`, `pending_payment`, `abandoned`, `draft`,
+  `PAYMENT-DECLINED`, `result: "declined"`, `declined: true`, `failed: true`, `is_paid: false`,
+  `isSuccess: false`, `payment_success: false`, `"message": "Your card was declined."` and
+  Stripe charges with `refunded: true` or `outcome.type: "issuer_declined"` got through. One
+  detector (`json_failure`) now serves both, at every depth: status-like values by the fuzzy
+  failure-word rule plus unpaid and abandoned states, success and failure flags by their key
+  words, set failure and decline codes, decline messages, and uncaptured Stripe charges.
+  Product names, empty errors, counts and fields about something else (`email_status`) report
+  nothing. Fixtures in `tests/fixtures/prices/failed_orders.json` cover each shape end to end.
 - **Writing a data file no longer voids a silent wrapper's count floor.** Since the floor rule
   voided it for any written file but source code or prose, an honest session that wrote
   `.gitignore`, `config/app.yaml`, `data/sample.csv` or `tests/fixtures/cases.json` before a
