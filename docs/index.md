@@ -127,6 +127,14 @@ flowchart LR
 
     [:octicons-arrow-right-24: GitHub Action](guides/github-action.md)
 
+-   :material-robot-outline:{ .lg .middle } __Inside your coding agent__
+
+    ---
+
+    Claude Code, Codex CLI and Gemini CLI can't stop on *"all tests pass"* unless the evidence agrees: a stop hook sends a contradicted answer back, a recorder keeps a hash-chained log, MCP tools judge runs.
+
+    [:octicons-arrow-right-24: Connect your coding agent](getting-started/connect-coding-agent.md)
+
 -   :material-connection:{ .lg .middle } __Plugs into your stack__
 
     ---

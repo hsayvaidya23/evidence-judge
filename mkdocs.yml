@@ -147,6 +147,7 @@ nav:
   - Getting started:
       - getting-started/index.md
       - Install: getting-started/install.md
+      - Connect your coding agent: getting-started/connect-coding-agent.md
       - Record a run: getting-started/record-a-run.md
       - Your first judgement: getting-started/first-judge.md
       - Read the report: getting-started/read-the-report.md

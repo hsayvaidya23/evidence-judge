@@ -43,6 +43,12 @@ needs an API key.
 
 </div>
 
+!!! tip "Using Claude Code, Codex or Gemini CLI?"
+
+    [Connect your coding agent](connect-coding-agent.md) wires the judge into the agent itself:
+    a stop hook sends a contradicted answer back, a recorder keeps a hash-chained evidence log,
+    and the MCP server lets the agent judge runs. No API key needed.
+
 !!! tip "Judging a coding agent instead?"
 
     [Judge a coding-agent session](judge-a-session.md) does the same for a Claude Code or Codex
