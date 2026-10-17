@@ -14,6 +14,14 @@ version: all of it happened before v0.1.0. The threat model and its current limi
 
 ## Findings and fixes
 
+- **A redaction token's fingerprint is no longer read as text the agent typed.** An honest
+  3-D Secure checkout failed to pass about once in 700 runs: the one-time code it typed was
+  redacted to `[REDACTED:secret_input:f1140042]`, and the near-echo check (an occurrence a few
+  letter edits from an input) folded the random fingerprint's `00` and digits into letters close
+  to `$24.00`, so the claimed price only held on an echo of the agent's input and the run needed
+  review. Whether it did depended on the per-process redaction key, not on machine load. Inputs
+  with a redaction token now count for that check only as exact echoes, as they already did for
+  folded echoes.
 - **A lowercase currency code no longer turns a total into cents.** `{"order": {"total": 2400,
   "currency_code": "usd"}}` supported "It cost $24.00." and passed, because any object naming
   its currency in lowercase was read in minor units, while Medusa writes lowercase codes with

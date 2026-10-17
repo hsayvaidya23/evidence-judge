@@ -86,9 +86,13 @@ def _near_input(occurrence: str, inputs: tuple[str, ...]) -> bool:
     letters (`_Folded`) are at most NEAR_EDITS edits from the letters of one input, read forwards
     or backwards from one of its word starts, with words joined or split, a letter added or
     dropped: "instok" typed and "Did you mean: In stock?" shown, "Ins stocks" typed and "Showing
-    results for In stock" shown, "kcots ni" typed and the page turning it round."""
+    results for In stock" shown, "kcots ni" typed and the page turning it round. Inputs with a
+    redaction token never count: its fingerprint is random, not letters the agent typed, so
+    "[REDACTED:secret_input:f1140042]" is not near "$24.00"."""
     folded = _Folded(occurrence).text
-    return bool(folded) and any(_near(folded, value) for value in inputs)
+    return bool(folded) and any(
+        _near(folded, value) for value in inputs if not _REDACTION_TOKEN.search(value)
+    )
 
 
 @functools.lru_cache(maxsize=4096)

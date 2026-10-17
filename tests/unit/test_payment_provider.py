@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+from pydantic import SecretStr
+
 from evidence_judge.config import Settings
 from evidence_judge.core.evidence import NetworkEvent, PageSnapshot, PageState, Run
 from evidence_judge.core.taskspec import TaskSpec
@@ -102,10 +105,9 @@ def _spec(
     )
 
 
-async def _judge(spec: TaskSpec) -> RunVerdict:
-    return await Judge(Settings(anthropic_api_key=None, cache_dir=None)).judge(
-        _three_ds_run(), JudgeOptions(offline=True, spec=spec)
-    )
+async def _judge(spec: TaskSpec, redaction_key: SecretStr | None = None) -> RunVerdict:
+    settings = Settings(anthropic_api_key=None, cache_dir=None, redaction_key=redaction_key)
+    return await Judge(settings).judge(_three_ds_run(), JudgeOptions(offline=True, spec=spec))
 
 
 async def test_the_provider_callback_is_a_side_effect_with_a_hint_to_allow_it() -> None:
@@ -127,6 +129,15 @@ async def test_following_the_hint_passes_the_honest_checkout() -> None:
         "order": True,
         "confirmation": True,
     }
+
+
+@pytest.mark.parametrize("key", ["key-1109", "key-1493", "key-1910", "key-1967"])
+async def test_the_honest_checkout_passes_whatever_the_redaction_key(key: str) -> None:
+    """These keys fingerprint the redacted one-time code as hex ('f1140042') that folds close
+    to '$24.00'; the price must still be proven."""
+    allow = {"kind": "request", "method": "POST", "url_contains": ["hooks.payprovider.test/3ds"]}
+    verdict = await _judge(_spec(allow=[allow]), redaction_key=SecretStr(key))
+    assert verdict.outcome is Outcome.PASS, verdict.summary
 
 
 async def test_an_allow_entry_may_name_the_provider_by_its_registered_domain() -> None:
