@@ -13,6 +13,7 @@
 <p align="center">
   <a href="#-see-it-catch-a-lie">Demo</a> ·
   <a href="#-quick-start">Quick start</a> ·
+  <a href="#-use-it-with-claude-code-codex-and-gemini-cli">Coding agents</a> ·
   <a href="#-how-it-works">How it works</a> ·
   <a href="#-benchmark-can-a-forged-story-fool-it">Benchmark</a> ·
   <a href="docs/">Docs</a>
@@ -212,6 +213,99 @@ Other commands: `evidence-judge inspect --trace trace.zip --har run.har` (what w
 Full references: [docs/cli.md](docs/cli.md) (every command and option) and
 [docs/task-specs.md](docs/task-specs.md).
 
+## 🤖 Use it with Claude Code, Codex and Gemini CLI
+
+Your coding agent says *"Fixed, all tests pass"*. With Evidence Judge wired in, it can't stop on
+that line unless the evidence agrees. When the agent finishes, a **stop hook** (`Stop` in
+Claude Code and Codex, `AfterAgent` in Gemini CLI) judges its final answer against what was
+recorded: the Playwright trace of any browser it drove and, with a session spec, **a re-run of
+your test suite the judge does itself** on a clean copy of the project. On FAIL the agent is sent
+back with the failing claims and their evidence as its next instruction. A **recorder hook**
+keeps a hash-chained evidence log of every prompt and tool call, outside the workspace, a
+**guard hook** stops the agent from switching the hooks off, and the **MCP server** lets the agent
+judge runs itself. Judging is offline by default; for LLM claim extraction, the judge can use the
+CLI you're already logged into (`--llm claude-code`, `codex` or `gemini`), so no API key is needed.
+
+| | Claude Code | Codex CLI | Gemini CLI |
+| --- | --- | --- | --- |
+| Packaged as | Plugin (marketplace) | Hook entries in `~/.codex/hooks.json` | Extension (`gemini extensions link`) |
+| Sends a contradicted answer back | ✅ `Stop` / `SubagentStop` blocks | ✅ `Stop` blocks | ✅ `AfterAgent` denies, Gemini retries |
+| Re-runs your tests at stop (`rerun:` spec) | ✅ | ✅ | ✅ |
+| Hash-chained evidence recorder | ✅ | ✅ | ✅ |
+| Guard against disabling the hooks | ✅ | ✅ | ✅ |
+| MCP tools (`judge_run`, `judge_session`, …) | ✅ bundled | ✅ `codex mcp add` | ✅ bundled |
+| Judge a finished session | `--claude-code` transcript | `--codex` rollout or `exec --json`¹ | `--evidence-log` |
+| Logged-in CLI as the judge's LLM | `--llm claude-code` | `--llm codex` | `--llm gemini` |
+| Setup | 1 install + 2 slash commands | 1 install + 1 command + paste hooks | 1 install + clone + link |
+
+¹ A `codex exec --json` stream records no diffs, so a session that edited code is NEEDS_REVIEW;
+judge the rollout file or the evidence log instead.
+
+Every agent needs the CLI on your `PATH` first (v0.1.0 is not released yet, so it installs from GitHub):
+
+```bash
+uv tool install --python 3.12 "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"
+evidence-judge version
+```
+
+<details open>
+<summary><b>Claude Code</b>: plugin with hooks, MCP server and a skill</summary>
+
+```text
+/plugin marketplace add hsayvaidya23/evidence-judge
+/plugin install evidence-judge@evidence-judge
+```
+
+From a shell: `claude plugin marketplace add hsayvaidya23/evidence-judge` and
+`claude plugin install evidence-judge@evidence-judge --scope user`. For browser tasks, let
+Playwright MCP record traces: `claude mcp add playwright -- npx @playwright/mcp@latest --caps=devtools`.
+
+**Verify:** `claude plugin list` shows `evidence-judge`, and `/mcp` lists the `evidence-judge` server.
+[Full guide →](docs/guides/claude-code.md)
+</details>
+
+<details>
+<summary><b>Codex CLI</b>: Stop, recorder and guard hooks plus the MCP server</summary>
+
+```bash
+codex mcp add evidence-judge -- evidence-judge mcp
+```
+
+Then paste the hook entries from the [Codex guide](docs/guides/codex.md#add-the-hooks) into
+`~/.codex/hooks.json` (`codex-turn-start`, `codex-record`, `codex-guard`, `codex-stop`) and approve
+them once in the TUI with `/hooks`; Codex runs only trusted hooks.
+
+**Verify:** `codex mcp list` shows `evidence-judge`, and `/hooks` lists the four commands.
+[Full guide →](docs/guides/codex.md)
+</details>
+
+<details>
+<summary><b>Gemini CLI</b>: extension with AfterAgent, recorder and guard hooks plus the MCP server</summary>
+
+```bash
+git clone https://github.com/hsayvaidya23/evidence-judge
+gemini extensions link evidence-judge/plugins/gemini-cli/evidence-judge
+```
+
+**Verify:** `gemini extensions list` shows `evidence-judge`, and `/mcp` inside Gemini lists its tools.
+[Full guide →](docs/guides/gemini-cli.md)
+</details>
+
+**See a block without an agent.** From a clone of this repository, this replays a session offline and gives the failed run a
+success story; the judge contradicts it from the recorded test output and exits `1`:
+
+```bash
+evidence-judge session judge --offline \
+  --claude-code tests/fixtures/sessions/claude_code/honest_failure.jsonl \
+  --answer "Done: all 3 tests pass."
+# FAIL  score 0/100 ... Contradicted: the whole suite passes (cmd#2: pytest: 1 passed, 2 failed).
+```
+
+Step by step, with what a blocked answer looks like and troubleshooting:
+[Connect your coding agent](docs/getting-started/connect-coding-agent.md). Using a logged-in CLI
+as the judge's LLM: [LLM backends](docs/guides/llm-backends.md). Every MCP tool:
+[MCP server](docs/guides/mcp.md).
+
 ## 📥 Inputs
 
 | Source | Flag | Notes |
@@ -294,13 +388,7 @@ Send verdicts to the tools you already use (each is an optional extra; see [docs
 | Arize Phoenix | `evidence-judge[phoenix]` | `push_to_phoenix(verdict, span_id=...)`: span annotations |
 | Inspect AI | `evidence-judge[inspect]` | `scorer=evidence_judge_scorer()`: C / I / N per sample |
 
-MCP server: `evidence-judge mcp` (extra `evidence-judge[mcp]`) serves `judge_run`, `judge_session`, `inspect_run`, `explain_verdict`, `validate_spec` and `find_recordings` as MCP tools for Claude Code, Codex CLI, Gemini CLI or any MCP client; see [docs/guides/mcp.md](docs/guides/mcp.md).
-
-Coding agents: check the agent's answer against its own browser trace and, with a session spec, an independent re-run of the session's tests before it is allowed to stop.
-
-- **Claude Code**: `/plugin marketplace add hsayvaidya23/evidence-judge`, then `/plugin install evidence-judge@evidence-judge` (or `/plugin install evidence-judge --marketplace hsayvaidya23/evidence-judge`). A Stop hook blocks on FAIL, recorder hooks keep a hash-chained evidence log, and the plugin adds the MCP server and a skill. The plugin runs `evidence-judge` from your `PATH`, so install the CLI with the `mcp` extra first (as in [Install](#-install)). See [docs/guides/claude-code.md](docs/guides/claude-code.md).
-- **Codex CLI**: `evidence-judge hook codex-stop` as a blocking `Stop` hook, `codex-record` as a `PostToolUse` recorder, and `codex mcp add evidence-judge -- evidence-judge mcp`. See [docs/guides/codex.md](docs/guides/codex.md).
-- **Gemini CLI**: an extension whose `AfterAgent` hook makes Gemini retry a contradicted answer, plus an `AfterTool` recorder and the MCP server. See [docs/guides/gemini-cli.md](docs/guides/gemini-cli.md).
+Coding agents (Claude Code, Codex CLI, Gemini CLI): stop hooks, an evidence recorder and the MCP server (`evidence-judge mcp`, extra `evidence-judge[mcp]`, tools `judge_run`, `judge_session`, `inspect_run`, `explain_verdict`, `validate_spec`, `find_recordings`). Setup is in [Use it with Claude Code, Codex and Gemini CLI](#-use-it-with-claude-code-codex-and-gemini-cli); MCP details in [docs/guides/mcp.md](docs/guides/mcp.md).
 
 Coding-agent sessions: `evidence-judge session judge` checks "all tests pass", "I fixed the bug" and "I didn't touch the tests" against the session's tool-call log. With `--rerun` (or a `rerun:` block in the session spec the stop hooks use) it does not trust the recorded test output at all: it runs the suite itself on a copy of the project, in a clean environment, and reads the runner's own report. See [Coding-agent sessions](docs/design/coding-agent-sessions.md#independent-re-run). On the [session forgery benchmark](bench/results/sessions.md) (`make bench-sessions`), 1725 sessions forged on Python, Node and Go projects with rewritten answers, 135 kinds of test-run tricks (among them a partial green run behind a silent `make test` or a yarn 2+ script, a `make test` redefined by a new `test.mk`, `Makefile.local`, `tests/tox.ini` or a data file a shown Makefile includes echoing a count, and a Makefile whose prerequisite or parse-time `$(shell ...)` deletes a test), lint and type-check claims backed by partial runs (directly, behind `make lint`, `npm run lint` or `pre-commit`, behind an echo the wrapper did not print itself, or after a suppression comment written from the shell), git, install, deploy and figure claims no command shows, pushes to another remote or branch than the answer names and fixes reported against runs that stopped early, were filtered (directly, behind `make test` or `npm test`, behind a decoy echo from `make -s`, `npm --silent`, an `.npmrc` with `loglevel=silent` or an `@echo` recipe, behind a Makefile that sets `SHELL`, `.EXPORT_ALL_VARIABLES` or a variable target, or behind a tox `set_env` in `setup.cfg` or `pyproject.toml`) or could not count every failure get 0 false PASS (390 FAIL, 1335 NEEDS_REVIEW), and all 91 honest controls keep their expected outcome, thirty of them with the answer reworded ("Not all tests pass: 2 fail.", "I fixed `test_add`. `test_add_negative` still fails.").
 

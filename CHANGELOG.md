@@ -136,6 +136,9 @@ fixes made during development are in the [security history](docs/security-histor
 - A documentation site: getting started for browser runs and Claude Code sessions, concepts,
   a spec cookbook, guides for every integration, the CLI, configuration, verdict schema and
   Python API references, the benchmark, the security policy and the security history.
+- Connect your coding agent: a README section and a getting-started page that set up Claude
+  Code, Codex CLI and Gemini CLI (stop, recorder and guard hooks, MCP, a logged-in CLI as the
+  judge's LLM), with a try-it walkthrough, a real blocked answer and troubleshooting.
 
 ### Changed
 
