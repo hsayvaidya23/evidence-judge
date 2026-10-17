@@ -150,7 +150,9 @@ a start page, prepended before) everything the run really did:
 - `price_part` (write): the evidence of `json_total`, but the JSON answer states the claimed
   $4.00 as a part of a $24.00 order (`shipping_cost`, `tax_amount`, a line item's `price`, an
   `original_price`, a `refund_amount`), as Stripe's `{"amount": 4, "currency": "usd"}` (4
-  cents), or as a total beside a `currency` of EUR in another object.
+  cents), as a total beside a `currency` of EUR in another object, as `{"delivery": {"total":
+  4.0}}` beside a total of 24.0, beside `"status": "payment_failed"`, as the amount of a Stripe
+  `invoice_item`, or beside `"currency": {"code": "EUR"}`.
 
 Variants of a kind rotate with the seed and the run id, so every variant is covered.
 """

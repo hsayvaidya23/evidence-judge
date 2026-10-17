@@ -91,31 +91,62 @@ _TOTAL_KEYS: Final = frozenset(
 )
 """Keys that name the total an order was charged, as joined lowercase words; a closed list, so
 no part of the price (`shipping_total`, `total_tax`, `total_discounts`) reads as the total."""
-_PRICE_PARTS: Final = frozenset(
+_ORDER_KEYS: Final = frozenset(
     {
-        "shipping",
-        "tax",
-        "taxes",
-        "fee",
-        "fees",
-        "discount",
-        "discounts",
-        "refund",
-        "refunds",
-        "original",
-        "list",
-        "compare",
-        "msrp",
-        "subtotal",
-        "tip",
-        "error",
-        "errors",
-        "previous",
-        "balance",
+        "order",
+        "orders",
+        "checkout",
+        "checkout_session",
+        "payment",
+        "charge",
+        "invoice",
+        "receipt",
+        "data",
+        "result",
+        "response",
+        "purchase",
+        "transaction",
+        "booking",
+        "reservation",
     }
 )
-"""Words of a key whose object is a part of the price or an adjustment to it, never the total
-paid: `{"shipping": {"total": 4}}` or `{"refund": {"amount": 2400, "currency": "usd"}}`."""
+"""Keys whose object is the order or a wrapper of it: a total counts only at the root or under
+these, so the total of a `delivery`, `vat`, `item`, `cart`, `quote` or `gift_card` never does."""
+_PAID_OBJECTS: Final[dict[str, str | None]] = {
+    "checkout.session": None,
+    "charge": None,
+    "payment_intent": "succeeded",
+    "invoice": "paid",
+}
+"""Stripe `object` types whose amount is a payment, with the `status` they must have; an object
+of any other type (`refund`, `invoice_item`, `coupon`, `payout`) states no price paid."""
+_FAILED_STATES: Final = frozenset(
+    {
+        "failed",
+        "failure",
+        "payment_failed",
+        "declined",
+        "card_declined",
+        "canceled",
+        "cancelled",
+        "voided",
+        "void",
+        "denied",
+        "expired",
+        "rejected",
+        "refunded",
+        "unpaid",
+        "error",
+        "errored",
+        "requires_payment_method",
+        "requires_action",
+        "requires_confirmation",
+    }
+)
+_FAILED_FLAGS: Final = frozenset({"success", "succeeded", "ok", "paid"})
+_CURRENCY_WORDS: Final = frozenset({"currency", "code", "iso", "symbol"})
+_PAYPAL_AMOUNT: Final = frozenset({"value", "currency_code", "breakdown"})
+_PLAIN_DECIMAL = re.compile(r"\d+(?:\.\d{1,2})?")
 _MINOR_UNIT_KEYS: Final = frozenset({"cents", "minor", "pence", "paise"})
 _STRIPE_CURRENCY = re.compile(r"[a-z]{3}")
 _KEY_CASE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -171,16 +202,20 @@ def _money(text: str) -> tuple[str, float] | None:
 
 
 def shows_amount(body: str | None, phrase: str) -> bool:
-    """Whether JSON `body` holds the amount of money `phrase` states as the price paid: a bare
-    number under a key that names the order's total and nothing else (`total`, `grand_total`,
-    `totalPrice`, `amount_paid`, `amount_total`), outside any array (a line item) and any
-    object a key names as a part or an adjustment of the price (`shipping`, `tax`, `discount`,
-    `refund`, `original`). Shipping, tax, fees, discounts, refunds, subtotals, list and unit
-    prices never show it. Minor units count only when the key says so (`total_cents`: 2950 is
-    29.50), or in an object that names its currency in lowercase as Stripe does (`{"amount":
-    2950, "currency": "usd"}`) or holds a `total_money` as Square does; a bare `amount` shows
-    nothing anywhere else. Every currency the document names must be the phrase's ('$29.50' is
-    not `{"order": {"total": 29.5}, "meta": {"currency": "EUR"}}`)."""
+    """Whether JSON `body` holds the amount of money `phrase` states as the price paid: a number,
+    or a string that is only a plain decimal number ('24.00'), under a key that names the
+    order's total and nothing else (`total`, `grand_total`, `totalPrice`, `amount_paid`,
+    `amount_total`), at the root or under keys that name the order or a wrapper of it
+    (`order`, `checkout`, `payment`, `invoice`, `data`, `result`), outside any array (a line
+    item). A total under any other object (`shipping`, `delivery`, `vat`, `item`, `cart`,
+    `refund`, `gift_card`) never shows it. Minor units count only when the key says so
+    (`total_cents`: 2950 is 29.50), or in an object that names its currency in lowercase as
+    Stripe does (`{"amount": 2950, "currency": "usd"}`), whose `object` type, if any, is a
+    payment that went through, or in a `total_money` as Square writes it; a PayPal `amount` is
+    `{"value": "29.50", "currency_code": "USD"}`; a bare `amount` shows nothing anywhere else.
+    The document must state one total and no failure (a `status` of `payment_failed` or
+    `declined`, an `error`, `"success": false`), and every currency it names, as a code, a
+    currency object or a formatted amount ('29,50 €'), must be the phrase's."""
     wanted = _money(normalize(phrase))
     if wanted is None or body is None:
         return False
@@ -189,14 +224,13 @@ def shows_amount(body: str | None, phrase: str) -> bool:
     except (json.JSONDecodeError, RecursionError):
         return False
     currency, amount = wanted
-    if any(c != currency for c in _json_currencies(tree)):
+    if _json_failed(tree) or any(c != currency for c in _json_currencies(tree)):
         return False
-    return amount in _json_totals(tree)
+    return _json_totals(tree) == {amount}
 
 
-def _json_currencies(tree: object) -> set[str]:
-    """Every currency a JSON tree names under a `currency` or `currency_code` key, anywhere."""
-    found: set[str] = set()
+def _json_nodes(tree: object) -> list[dict[str, object]]:
+    found: list[dict[str, object]] = []
     stack: list[object] = [tree]
     while stack:
         node = stack.pop()
@@ -204,63 +238,130 @@ def _json_currencies(tree: object) -> set[str]:
             stack.extend(cast(list[object], node))
         elif isinstance(node, dict):
             fields = cast(dict[str, object], node)
-            found.update(c for c in (_currency_code(k, v) for k, v in fields.items()) if c)
+            found.append(fields)
             stack.extend(fields.values())
     return found
 
 
-def _currency_code(key: str, value: object) -> str | None:
+def _json_failed(tree: object) -> bool:
+    """Whether any object of a JSON tree reports a failure: a status or state that names one, an
+    `error` or `errors` with content, or a `success`, `ok` or `paid` that is false."""
+    for fields in _json_nodes(tree):
+        for key, value in fields.items():
+            words = _key_words(key)
+            if words[-1:] in (["error"], ["errors"]) and value:
+                return True
+            if (
+                words[-1:] in (["status"], ["state"])
+                and isinstance(value, str)
+                and re.sub(r"[^a-z]+", "_", value.casefold()).strip("_") in _FAILED_STATES
+            ):
+                return True
+            if value is False and "_".join(words) in _FAILED_FLAGS:
+                return True
+    return False
+
+
+def _json_currencies(tree: object) -> set[str]:
+    """Every currency a JSON tree names, anywhere: under a currency key (`currency`,
+    `currency_code`, `currencyIso`, `currency_symbol`) as a string or as an object's `code`, and
+    in any string that is a formatted amount ('29,50 €')."""
+    found: set[str] = set()
+    for fields in _json_nodes(tree):
+        for key, value in fields.items():
+            if isinstance(value, dict):
+                if _is_currency_key(key):
+                    inner = cast(dict[str, object], value).values()
+                    found.update(c for c in (_currency_of(v) for v in inner) if c)
+            elif (code := _currency_code(key, value)) is not None:
+                found.add(code)
+            elif isinstance(value, str) and (formatted := _money(normalize(value))) is not None:
+                found.add(formatted[0])
+    return found
+
+
+def _is_currency_key(key: str) -> bool:
     words = _key_words(key)
-    if not isinstance(value, str) or not words:
-        return None
-    if words[-1] != "currency" and words[-2:] != ["currency", "code"]:
+    return "currency" in words and words[-1] in _CURRENCY_WORDS
+
+
+def _currency_code(key: str, value: object) -> str | None:
+    return _currency_of(value) if _is_currency_key(key) else None
+
+
+def _currency_of(value: object) -> str | None:
+    if not isinstance(value, str):
         return None
     code = normalize(value).rstrip(". ")
     return _CURRENCIES.get(code, code) or None
 
 
 def _json_totals(tree: object) -> set[float]:
-    """Every amount a JSON tree states as an order's total, outside arrays and outside objects
-    a key or their `object` type names as part of the price or an adjustment to it (Stripe's
-    `{"object": "refund", "amount": 2400, "currency": "usd"}`)."""
+    """Every amount a JSON tree states as an order's total, at its root or under keys that name
+    the order (`_ORDER_KEYS`), outside arrays and outside Stripe objects that are no payment."""
     found: set[float] = set()
-    stack: list[tuple[object, list[str]]] = [(tree, [])]
+    stack: list[tuple[object, bool]] = [(tree, False)]
     while stack:
-        node, parent = stack.pop()
+        node, money = stack.pop()
         if not isinstance(node, dict):
             continue
         fields = cast(dict[str, object], node)
-        kind = fields.get("object")
-        if isinstance(kind, str) and _PRICE_PARTS & set(_key_words(kind)):
+        if not _paid_object(fields):
             continue
-        minor = _minor_object(fields, parent)
+        minor = money or _stripe_minor(fields)
+        priced = _has_currency(fields)
         for key, value in fields.items():
             words = _key_words(key)
-            amount = _total_amount(words, value, minor, _has_currency(fields))
+            amount = _total_amount(words, value, minor, priced)
             if amount is not None:
                 found.add(amount)
-            elif isinstance(value, dict) and not _PRICE_PARTS & set(words):
-                stack.append((cast(object, value), words))
+            elif isinstance(value, dict) and not money:
+                child = cast(dict[str, object], value)
+                joined = "_".join(words)
+                if joined in _ORDER_KEYS:
+                    stack.append((child, False))
+                elif words[-1:] == ["money"] and "_".join(words[:-1]) in _TOTAL_KEYS:
+                    stack.append((child, True))
+                elif (joined in _TOTAL_KEYS or words == ["amount"]) and (
+                    paypal := _paypal_amount(child)
+                ) is not None:
+                    found.add(paypal)
     return found
+
+
+def _paid_object(fields: dict[str, object]) -> bool:
+    kind = fields.get("object")
+    if not isinstance(kind, str):
+        return True
+    if kind not in _PAID_OBJECTS:
+        return False
+    status = _PAID_OBJECTS[kind]
+    return status is None or fields.get("status") == status
+
+
+def _paypal_amount(fields: dict[str, object]) -> float | None:
+    if not {"value", "currency_code"} <= fields.keys() <= _PAYPAL_AMOUNT:
+        return None
+    return _total_amount(["total"], fields["value"], False, True)
 
 
 def _has_currency(fields: dict[str, object]) -> bool:
     return any(_currency_code(k, v) for k, v in fields.items())
 
 
-def _minor_object(fields: dict[str, object], parent: list[str]) -> bool:
-    """Whether the amounts of this object are in minor units: it names its currency in
-    lowercase (Stripe) or is the money object of a total (Square's `total_money`)."""
-    stripe = any(
+def _stripe_minor(fields: dict[str, object]) -> bool:
+    """Whether this object names its currency in lowercase, as Stripe does for minor units."""
+    return any(
         isinstance(v, str) and _STRIPE_CURRENCY.fullmatch(v) and _currency_code(k, v)
         for k, v in fields.items()
     )
-    square = parent[-1:] == ["money"] and "_".join(parent[:-1]) in _TOTAL_KEYS
-    return stripe or square
 
 
 def _total_amount(words: list[str], value: object, minor: bool, priced: bool) -> float | None:
-    """The amount a JSON number under the key `words` states as the order's total, or None."""
+    """The amount a JSON number, or plain decimal string, under the key `words` states as the
+    order's total, or None."""
+    if isinstance(value, str):
+        value = float(value) if _PLAIN_DECIMAL.fullmatch(value) else None
     if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
         return None
     if len(words) > 1 and words[-1] in _MINOR_UNIT_KEYS:

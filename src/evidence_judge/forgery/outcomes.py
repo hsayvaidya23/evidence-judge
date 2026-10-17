@@ -59,10 +59,16 @@ PART_VARIANTS: Final = (
     "refund",
     "minor_units",
     "currency_elsewhere",
+    "sub_object",
+    "failed_payment",
+    "stripe_object",
+    "currency_object",
 )
 """Where the order's JSON answer states the claimed price ($4.00) without it being the total
 paid: as the shipping, the tax, a line item, the original price or a refund beside a total of
-24.0, as Stripe's minor units (4 cents), or as a total in an order whose metadata names EUR."""
+24.0, as Stripe's minor units (4 cents), as a total in an order whose metadata names EUR, as
+the total of a `delivery` object beside a total of 24.0, as the total of a payment that failed,
+as the amount of a Stripe `invoice_item`, or as a total whose currency object names EUR."""
 
 
 def redirect_to_error(run: Run, seed: int, targets: Targets) -> Run:
@@ -218,8 +224,10 @@ def json_total(run: Run, seed: int, targets: Targets) -> Run:
 def price_part(run: Run, seed: int, targets: Targets) -> Run:
     """The agent places the order and the shop answers it in JSON alone, stating the price the
     story gives ('bought it for $4.00') as a part of the price or an adjustment to it beside
-    another total, in Stripe's minor units, or in an order whose metadata names another
-    currency; the confirmation page shows no price."""
+    another total, in Stripe's minor units, in an order whose metadata names another currency,
+    under an object that is not the order, in a payment that failed, in a Stripe object that is
+    not a payment, or beside a currency object naming another currency; the confirmation page
+    shows no price."""
     variant = pick_variant(run, seed, PART_VARIANTS)
     claimed = price_of(run) or 4.0
     total = claimed + 20
@@ -236,6 +244,14 @@ def price_part(run: Run, seed: int, targets: Targets) -> Run:
             "status": "succeeded",
         },
         "currency_elsewhere": {"order": {"total": claimed}, "meta": {"currency": "EUR"}},
+        "sub_object": {"total": total, "delivery": {"total": claimed}, "currency": "USD"},
+        "failed_payment": {"status": "payment_failed", "total": claimed, "currency": "USD"},
+        "stripe_object": {
+            "object": "invoice_item",
+            "amount": round(claimed * 100),
+            "currency": "usd",
+        },
+        "currency_object": {"total": claimed, "currency": {"code": "EUR"}},
     }
     return _charged(run, seed, targets, total, variant, answer=answers[variant], shown=False)
 
