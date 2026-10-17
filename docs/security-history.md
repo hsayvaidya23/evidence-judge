@@ -14,6 +14,12 @@ version: all of it happened before v0.1.0. The threat model and its current limi
 
 ## Findings and fixes
 
+- **Session spec regexes run under the 50 ms budget.** A `command` predicate's `regex` was
+  searched with no timeout, so `(a|aa)+$` against a 38-character command took 21.8 s, through
+  the CLI, the MCP `judge_session` tool and the Action alike. The search now stops at
+  `REGEX_TIMEOUT_SECONDS` and the predicate is no evidence (needs review). Edit globs, which
+  compiled to backtracking regexes (`*a*a*a*a*a*a*a*a*b` against a long file name never
+  finished), are matched in linear time.
 - The re-run's file list no longer depends on state anything running as the user can change:
   `.git/info/exclude` and `core.excludesFile` are not read, files tracked at the base revision
   are copied after `git rm --cached`, untracked paths that only `.gitignore` rules added since

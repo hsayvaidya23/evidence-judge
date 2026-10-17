@@ -496,7 +496,11 @@ tests).
 
 Strings are validated when a predicate is built, like the browser predicates: regexes are
 length-capped and compiled with the same engine; substrings need at least three characters; a
-glob must name something (`*` or `**` alone is rejected).
+glob must name something (`*` or `**` alone is rejected). A spec or claim regex is searched
+against each command line with the browser checks' 50 ms budget (`REGEX_TIMEOUT_SECONDS`); past
+it the predicate is *no evidence* naming the command, so the session needs review. Globs are
+matched by stepping every pattern position at once, in time linear in the path, so no glob can
+backtrack.
 
 ### Soundness rules
 

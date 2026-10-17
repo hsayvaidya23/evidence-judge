@@ -4,7 +4,6 @@ glob matching of session paths."""
 from __future__ import annotations
 
 import posixpath
-import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
@@ -40,26 +39,64 @@ def blocker(finding: str) -> str:
     return "the code could not be checked" if NO_DIFF in finding else "the suite was weakened"
 
 
-def glob_regex(pattern: str) -> re.Pattern[str]:
-    out: list[str] = []
+_ONE: Final = "?"
+_SEGMENT: Final = "*"
+_ANY: Final = "**"
+_DIRS: Final = "**/"
+
+
+def _glob_tokens(pattern: str) -> tuple[str, ...]:
+    tokens: list[str] = []
     i = 0
     while i < len(pattern):
-        if pattern.startswith("**/", i):
-            out.append("(?:.*/)?")
-            i += 3
-        elif pattern.startswith("**", i):
-            out.append(".*")
-            i += 2
-        elif pattern[i] == "*":
-            out.append("[^/]*")
-            i += 1
-        elif pattern[i] == "?":
-            out.append("[^/]")
-            i += 1
-        else:
-            out.append(re.escape(pattern[i]))
-            i += 1
-    return re.compile("".join(out))
+        token = next(
+            (t for t in (_DIRS, _ANY, _SEGMENT, _ONE) if pattern.startswith(t, i)), pattern[i]
+        )
+        tokens.append(token)
+        i += len(token)
+    return tuple(tokens)
+
+
+def _glob_fullmatch(tokens: tuple[str, ...], text: str) -> bool:
+    """Whether `tokens` match all of `text`, by stepping every live position at once.
+
+    Each character advances the whole set of pattern positions, so the time is the pattern
+    length times the text length whatever the glob: a spec glob cannot make it backtrack.
+    `**/` matches nothing or anything ending in '/', `**` anything, `*` and `?` anything
+    within a path segment.
+    """
+    end = len(tokens)
+
+    def closure(states: set[int]) -> set[int]:
+        stack = list(states)
+        while stack:
+            i = stack.pop()
+            if i < end and tokens[i] in (_DIRS, _ANY, _SEGMENT) and i + 1 not in states:
+                states.add(i + 1)
+                stack.append(i + 1)
+        return states
+
+    states = closure({0})
+    inside: set[int] = set()
+    for char in text:
+        after: set[int] = set()
+        within: set[int] = set()
+        for i in states | inside:
+            if i >= end:
+                continue
+            token = tokens[i]
+            if token == _DIRS:
+                within.add(i)
+                if char == "/":
+                    after.add(i + 1)
+            elif token == _ANY or (token == _SEGMENT and char != "/"):
+                after.add(i)
+            elif (token == _ONE and char != "/") or token == char:
+                after.add(i + 1)
+        states, inside = closure(after), within
+        if not states and not inside:
+            return False
+    return end in states
 
 
 def path_matches(pattern: str, path: str) -> bool:
@@ -69,14 +106,14 @@ def path_matches(pattern: str, path: str) -> bool:
     norm = posixpath.normpath(path).removeprefix("./")
     pat = pattern.rstrip("/")
     parts = [part for part in norm.split("/") if part]
-    regex = glob_regex(pat)
+    tokens = _glob_tokens(pat)
     if "/" not in pat:
-        return any(regex.fullmatch(part) for part in parts)
-    under = glob_regex(pat + "/**")
+        return any(_glob_fullmatch(tokens, part) for part in parts)
+    under = _glob_tokens(pat + "/**")
     candidates = [norm]
     if norm.startswith(("/", "../")):
         candidates.extend("/".join(parts[i:]) for i in range(1, len(parts)))
-    return any(regex.fullmatch(c) or under.fullmatch(c) for c in candidates)
+    return any(_glob_fullmatch(tokens, c) or _glob_fullmatch(under, c) for c in candidates)
 
 
 def cite(event: SessionEvent, excerpt: str | None = None) -> Citation:

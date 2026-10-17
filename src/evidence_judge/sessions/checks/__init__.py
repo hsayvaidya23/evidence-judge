@@ -17,7 +17,6 @@ from evidence_judge.sessions.checks.common import (
     CHECKER,
     Result,
     RunOutcome,
-    glob_regex,
     path_matches,
 )
 from evidence_judge.sessions.checks.edits import check_edit, check_only
@@ -58,7 +57,6 @@ __all__ = [
     "every_failing_test",
     "failure_count",
     "failure_counts",
-    "glob_regex",
     "judge_check_run",
     "judge_test_run",
     "names_test",

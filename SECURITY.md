@@ -347,6 +347,11 @@ compromised agent:
   `--allow-mismatch`) overrides all of this.
 - Every ingest failure is an `IngestError` (a `ValueError`), reported by the CLI as bad input
   (exit code 3).
+- **Spec regexes are time-bounded.** A regex from a spec, a claim or an LLM is length-capped,
+  compiled on load (an invalid one is bad input naming its line and column) and searched with a
+  50 ms budget per text, in browser runs and coding-agent sessions alike. A search that runs
+  past it proves nothing, so the verdict needs review instead of hanging on a backtracking
+  pattern such as `(a|aa)+$`. Session path globs are matched in linear time.
 
 ## Rules for contributors and users
 
