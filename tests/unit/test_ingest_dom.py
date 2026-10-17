@@ -882,3 +882,47 @@ def test_closed_storefront_drawers_accordions_and_modals_cover_nothing(
     page = _rendered(["STYLE", {}, css], *children)
 
     assert "Order confirmed" in page.text
+
+
+@pytest.mark.parametrize(
+    ("css", "covers"),
+    [
+        (".ov{opacity:0}.ov:hover{opacity:1}", True),
+        (".ov{opacity:0}body:hover .ov{opacity:1}", True),
+        (".ov{opacity:0;transition:opacity 1s}.ov:hover{opacity:1}", True),
+        (".ov{visibility:hidden}@media (resolution:2dppx){.ov{visibility:visible}}", True),
+        (".ov{transform:translateX(100%)}.ov:target{transform:none}", True),
+        (".ov{display:none}.ov:hover{display:block}", True),
+        (".ov{opacity:0;transform:scale(0)}.ov:hover{opacity:1}.ov:focus{transform:none}", True),
+        (".ov:hover{opacity:0}", True),
+        ("@keyframes in{to{opacity:1}}.ov{opacity:0;animation:in .3s forwards}", True),
+        ("@keyframes in{50%{opacity:1}}.ov{opacity:0;animation:in 1s infinite}", True),
+        ("@keyframes in{50%{opacity:1}}.ov{opacity:0;animation:in 100s}", True),
+        ("@keyframes in{to{visibility:visible}}.ov{visibility:hidden;animation:in .3s both}", True),
+        (
+            "@keyframes in{to{transform:none}}.ov{transform:scale(0);animation:in .3s forwards}",
+            True,
+        ),
+        ("@keyframes in{to{display:block}}.ov{display:none;animation:in .3s forwards}", True),
+        ("@keyframes a{}@keyframes in{to{opacity:1}}.ov{opacity:0;animation:a 1s,in 1s}", True),
+        ("@keyframes in{to{opacity:1}}.ov{opacity:0;animation:var(--a) 1s}", True),
+        (".ov{opacity:0}", False),
+        (".ov{opacity:0}.ov.open{opacity:1}", False),
+        (".ov{transform:scale(0);transition:transform .3s}.ov.open{transform:none}", False),
+        (".ov{visibility:hidden}@media print{.ov{visibility:visible}}", False),
+        ("@keyframes in{50%{opacity:1}}.ov{opacity:0;animation:in .3s}", False),
+        ("@keyframes out{to{opacity:0}}.ov{opacity:0;animation:out .3s forwards}", False),
+        ("@keyframes in{to{opacity:1}}.ov{opacity:0!important;animation:in .3s forwards}", False),
+        (".ov{opacity:0;animation:missing .3s forwards}", False),
+        (".ov{opacity:0}.ov:hover{opacity:1}.wrap{opacity:0}", False),
+    ],
+)
+def test_a_full_screen_box_an_animation_or_a_state_rule_may_show_covers_the_page(
+    css: str, covers: bool
+) -> None:
+    style = ["STYLE", {}, f".ov{{{_COVER}}}{css}"]
+    box = ["DIV", {"class": "wrap"}, ["DIV", {"class": "ov"}]]
+    page = _rendered(["P", {}, "Order confirmed"], box, head=(style,))
+
+    assert (page.unsure_text == "Order confirmed") is covers
+    assert (page.text == "") is covers

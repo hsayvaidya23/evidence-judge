@@ -11,13 +11,15 @@ from importlib import resources
 from typing import Final
 from urllib.parse import urljoin
 
-from evidence_judge.ingest.css.animations import Keyframes, read_keyframes, settles_shown
+from evidence_judge.ingest.css.animations import Keyframes, read_keyframes, resting, settles_shown
 from evidence_judge.ingest.css.backgrounds import UnreadableError, background_images
 from evidence_judge.ingest.css.colors import parse_color
 from evidence_judge.ingest.css.conditions import media_holds, supports
 from evidence_judge.ingest.css.matching import matches
 from evidence_judge.ingest.css.model import (
     BLACK,
+    FAINT_ALPHA,
+    HIDDEN,
     HTML,
     MATHML,
     MAYBE,
@@ -245,6 +247,12 @@ class StyleSheets:
         custom = _substitute(best, maybe, parent.custom, unknown)
         present = frozenset(best).union(maybe)
         computed = compute(Cascade(best, maybe, present), parent, self._viewport)
+        if computed.removed and self.animations:
+            shown = self._animated_display(Cascade(best, maybe, present))
+            if shown:
+                maybe = {**maybe, "display": [*maybe.get("display", ()), *shown]}
+                present = present.union(("display",))
+                computed = compute(Cascade(best, maybe, present), parent, self._viewport)
         if computed.removed:
             return computed
         if self.animations and not computed.unsure and self._animated(best, maybe):
@@ -256,19 +264,47 @@ class StyleSheets:
             return computed
         return replace(computed, svg=svg, custom=custom, registered=registered)
 
-    def covers(self, element: Element) -> bool:
-        """The page's styles certainly make `element` a fixed or absolute box with an opaque
-        background (`_opaque`) that spans the whole viewport (or its containing block): ``inset:
-        0``, or ``top`` and ``left`` 0 with a ``width`` and ``height`` of 100%."""
-        values = self._certain(element)
-        if values.get("position") not in ("absolute", "fixed"):
+    def covers(self, element: Element, parent: Computed) -> bool:
+        """The page's styles may make `element`, under `parent`, a fixed or absolute box with
+        an opaque background (`_opaque`) that spans the whole viewport (or its containing
+        block), ``inset: 0`` or ``top`` and ``left`` 0 with a ``width`` and ``height`` of 100%,
+        and that is not removed, hidden, faded or put out of sight (`stowed`). They may when
+        its certain values do, or when the values one rule that may apply to it gives it on top
+        of them do (a ``:hover`` or ``:target`` rule, an ``@media`` query the reader cannot
+        evaluate), or all of those rules together, or a keyframe of an animation it may run
+        (`_keyframes`): an overlay a fade-in or a hover reveals."""
+        best: dict[str, Rule] = {}
+        maybe: dict[str, list[Rule]] = {}
+        for rule in self._candidates(element):
+            _offer(rule, matches(rule.selector, element), best, maybe)
+        inline = declarations(element.attrs.get("style") or "")
+        for order, (prop, value, important) in enumerate(inline):
+            rank: Rank = (2 if important else 1, 1, 1, (_TOP,), (0, 0, 0), order)
+            _offer(Rule(_UNIVERSAL, prop, value, rank, False), YES, best, maybe)
+        if self._covering(best, parent):
+            return True
+        if not maybe and "animation-name" not in best and "animation" not in best:
             return False
-        if not _opaque(values):
+        groups: dict[int, list[Rule]] = {}
+        for rules in maybe.values():
+            for rule in rules:
+                groups.setdefault(id(rule.selector), []).append(rule)
+        changes = list(groups.values())
+        if len(groups) > 1:
+            changes.append(sorted((r for rules in maybe.values() for r in rules), key=_rank))
+        if self.animations:
+            changes.extend(self._keyframes(Cascade(best, maybe, frozenset(best).union(maybe))))
+        return any(self._covering(_over(best, change), parent) for change in changes)
+
+    def _covering(self, rules: dict[str, Rule], parent: Computed) -> bool:
+        """Whether a box styled by `rules` alone, under `parent`, covers what is under it."""
+        values = {prop: rule.value for prop, rule in rules.items() if rule.value is not None}
+        if values.get("position") not in ("absolute", "fixed") or not _opaque(values):
             return False
         viewport = self._viewport
         if stowed(values, viewport):
             return False
-        return all(
+        spans = all(
             _flush(values.get(start), viewport)
             and (_flush(values.get(end), viewport) or _full(values.get(size), viewport, side))
             for start, end, size, side in (
@@ -276,6 +312,44 @@ class StyleSheets:
                 ("left", "right", "width", 0),
             )
         )
+        if not spans:
+            return False
+        seen = compute(Cascade(rules, {}, frozenset(rules)), parent, viewport)
+        return not seen.removed and seen.visibility != HIDDEN and seen.alpha > FAINT_ALPHA
+
+    def _keyframes(self, cascade: Cascade) -> Iterator[list[Rule]]:
+        """The declarations of each keyframe an animation the element may run may give it, as
+        rules that beat all but ``!important`` ones: for an element's only animation that comes
+        to rest (`resting`), the end keyframes it rests on; else each keyframe in turn, and all
+        of them together. An ``animation`` shorthand that holds a ``var()`` may run any."""
+        held = (None,) if cascade.sets("animation") else ()
+        for value in (*cascade.values("animation-name"), *held):
+            if value is None:
+                named, only = list(self.animations.values()), False
+            else:
+                names = [name.strip("\"'") for name in split_commas(value)]
+                named = [frames for name in names if (frames := self.animations.get(name))]
+                only = len(names) == 1
+            for frames in named:
+                rest = resting(cascade, frames) if only else None
+                if rest is None:
+                    yield from (_animated(declared) for _, declared in frames.frames)
+                    yield _animated(d for _, declared in frames.frames for d in declared)
+                    continue
+                for end in rest:
+                    yield _animated(
+                        d for offsets, declared in frames.frames if end in offsets for d in declared
+                    )
+
+    def _animated_display(self, cascade: Cascade) -> list[Rule]:
+        """The ``display`` values other than ``none`` a keyframe of an animation the element may
+        run gives it: an element its own styles remove that an animation may show."""
+        return [
+            rule
+            for rules in self._keyframes(cascade)
+            for rule in rules
+            if rule.prop == "display" and rule.value != "none"
+        ]
 
     def _certain(self, element: Element) -> dict[str, str]:
         """The values the rules that certainly apply to `element` give it."""
@@ -670,6 +744,29 @@ def _offer(rule: Rule, matched: int, best: dict[str, Rule], maybe: dict[str, lis
             best[rule.prop] = rule
     else:
         maybe.setdefault(rule.prop, []).append(rule)
+
+
+_ANIMATION: Final[Rank] = (1, 2, 0, (_TOP,), (0, 0, 0), 0)
+"""The rank of a keyframe's declaration: above every normal declaration, below important
+ones."""
+
+
+def _animated(declared: Iterable[tuple[str, str | None]]) -> list[Rule]:
+    return [Rule(_UNIVERSAL, prop, value, _ANIMATION, False) for prop, value in declared]
+
+
+def _rank(rule: Rule) -> Rank:
+    return rule.rank
+
+
+def _over(best: dict[str, Rule], rules: Iterable[Rule]) -> dict[str, Rule]:
+    """`best` with each of `rules` that would beat its winner put in its place."""
+    state = dict(best)
+    for rule in rules:
+        current = state.get(rule.prop)
+        if rule.value is not None and (current is None or rule.rank >= current.rank):
+            state[rule.prop] = rule
+    return state
 
 
 def _substitute(

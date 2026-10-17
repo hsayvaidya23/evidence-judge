@@ -55,8 +55,11 @@ Each element's positioned ancestors and their ``z-index`` ride on its `Computed`
 and `StyleSheets.covers` says whether a fixed or absolute box has an opaque background (a colour,
 an opaque gradient, or a ``url()`` picture it takes for opaque) over the whole viewport or its
 containing block, and is not put out of sight by its own styles (moved by
-its whole size, scaled to nothing, clipped away or collapsed: a closed drawer or modal); the
-page renderer makes the text such a box may paint over unsure. It does not lay the page out
+its whole size, scaled to nothing, clipped away or collapsed: a closed drawer or modal), nor
+removed, hidden or faded: with its certain values, or with a rule that may apply to it
+(``:hover``, ``:target``, an ``@media`` query it cannot evaluate) or a keyframe of an animation
+it may run on top of them, so a box a fade-in or a hover shows counts; the page renderer makes
+the text such a box may paint over unsure. It does not lay the page out
 (the snapshot holds no box geometry but for frames), so a smaller box painted over the text,
 or one sized some other way, is not seen. Nor does it see images: a background ``url()`` (or
 ``image-set()``, ...) over a solid ``background-color`` is taken to look like that colour, so

@@ -1007,6 +1007,23 @@ counts are in [the benchmark](benchmark.md).
   `blinking_animation` and `reversed_animation` (unsure before and after); the
   `closed_overlays` control's page now also fades in. White text over a white `url()` picture
   on a dark `background-color` still reads as shown: the reader cannot see a picture's pixels.
+- A full-screen opaque box that is out of sight now but that may show also makes the text under
+  it unsure. Before, only the box's certain values were read, so a box faded to `opacity: 0`,
+  `visibility: hidden`, transparent, scaled to nothing, slid away or `display: none` let the
+  text under it read as shown even when a fade-in (`animation: in .3s forwards`), another
+  animation of its opacity, visibility, display, background or transform, or a `:hover`,
+  `:focus`, `:target`, `:checked` or unevaluable `@media` rule (with or without a transition)
+  shows it. A `transform: scale(0)` box with such an animation had read as unsure until the
+  fade-in fix above. The reader now also tries the box with each rule that may apply to it on
+  top of its certain values, with all of them together, and with each keyframe of an
+  animation it may run (only the end keyframe it rests on, for a single animation that
+  certainly ends within five seconds); a keyframe that sets `display` on a box its styles
+  remove also makes its own text unsure. A rule that does not match the page as recorded
+  (`.modal.open`, a class a script adds) still does not count, so a closed drawer, accordion or
+  modal with no such rule or animation covers nothing, and the `closed_overlays` control keeps
+  its verdicts. On the ten saved real-site pages nothing changes. New `unmodelled_hiding`
+  variants `hover_overlay`, `fade_in_overlay`, `visibility_overlay`, `painted_overlay`,
+  `scaled_overlay`, `display_overlay` and `target_overlay`; each was a false SHOWN before.
 
 ### CLI, GitHub Action and benchmark
 

@@ -24,6 +24,8 @@ fixes made during development are in the [security history](docs/security-histor
   offline by heuristics, and checked by deterministic predicates (`request`, `page_text`,
   `url`, `action`, `value`, `screenshot`). Evidence counts only from the named site, text that
   echoes the agent's own input proves nothing, and text the page may hide is unsure.
+- Text under a full-screen opaque box reads as unsure, also when the box is out of sight now
+  but a fade-in or another animation, or a `:hover` or `:target` rule, may show it.
 - Task specs (`expect`, `forbid`, `constraints`, `allow`, `site`, `allowed_hosts`,
   `failure_markers`, `trusted_scripts`) are validated on load, with errors naming line and
   column. A PASS needs a named site. Verdicts report `tamper_detection`, and
