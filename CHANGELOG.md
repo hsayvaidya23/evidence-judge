@@ -24,6 +24,8 @@ fixes made during development are in the [security history](docs/security-histor
   offline by heuristics, and checked by deterministic predicates (`request`, `page_text`,
   `url`, `action`, `value`, `screenshot`). Evidence counts only from the named site, text that
   echoes the agent's own input proves nothing, and text the page may hide is unsure.
+- Text under a full-screen opaque box reads as unsure, also when the box is out of sight now
+  but a fade-in or another animation, or a `:hover` or `:target` rule, may show it.
 - A claimed price is matched in an order's JSON answer only as its one total, on the order's
   own path (the root, `order`, `checkout`, `payment`, `invoice`, `data`, ...), never in a
   sub-object, a line item, a non-payment Stripe object or a body that reports a failure, and
