@@ -110,6 +110,10 @@ The first release.
 - `session judge --llm BACKEND` picks the backend for session claim extraction, as `judge --llm`
   does; a chosen backend that cannot be used (such as `anthropic` without `ANTHROPIC_API_KEY`)
   exits `4` instead of judging offline.
+- MCP tool `judge_session` judges a Claude Code transcript, a Codex stream or rollout, or an
+  evidence log (with its key and anchor) inside the server's roots, with the same parameters
+  as `session judge` (`answer`, `spec` or `spec_yaml`, `offline`, `require_tamper_evidence`,
+  `run_id`, JSON and HTML reports). It never runs commands: a spec's `rerun` block is ignored.
 
 ### Changed
 

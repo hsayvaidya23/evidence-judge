@@ -1,5 +1,5 @@
 ---
-description: Run Evidence Judge as an MCP server so Claude Code, Codex CLI, Gemini CLI or any MCP client can judge, inspect and explain recorded browser-agent runs as tools.
+description: Run Evidence Judge as an MCP server so Claude Code, Codex CLI, Gemini CLI or any MCP client can judge, inspect and explain recorded browser-agent runs and judge coding-agent sessions as tools.
 ---
 
 # MCP server
@@ -114,14 +114,15 @@ message that says what to change; it never ends the session.
 | Tool | Inputs | Returns |
 | --- | --- | --- |
 | `judge_run` | `trace`, `har`, `browser_use` (at least one); `answer` or `answer_file`; `reasoning_file`; `task`; `spec` or `spec_yaml`; `site`; `offline` (default `true`); `require_tamper_evidence`; `allow_mismatch`; `run_id`; `json_report`; `html_report`; `overwrite` (default `false`) | `verdict` (the [verdict JSON](../reference/verdict-schema.md): outcome, score, summary, `tamper_detection`, each claim and expectation with its citations), `reports` written, `redaction`, `used_llm` |
+| `judge_session` | `transcript` (the session record); `format`: `claude_code` (default), `codex` (`exec --json` output or a rollout) or `evidence_log` (needs `log_key` and `log_anchor`); `answer`; `spec` or `spec_yaml` (a session spec); `offline` (default `true`); `require_tamper_evidence`; `run_id`; `json_report`; `html_report`; `overwrite` (default `false`) | The same as `judge_run`, for a coding-agent session: each claim cites the tool calls (`cmd#2`, `edit#1`) that decide it, and `verification.method` is `transcript`. It never runs the tests or any other command, and ignores a spec's `rerun` block: re-run with `evidence-judge session judge --rerun` |
 | `inspect_run` | `trace`, `har`, `browser_use` | `sources` with their metadata, `captured` channels, `counts` (actions, requests, mutations, snapshots, screenshots, console), state-changing requests, `injections` (calls that made evidence the agent's own, with script sha256), load `warnings` |
 | `explain_verdict` | `verdict_path` (a verdict JSON) | Each contradicted or unproven claim, unmet or unknown spec entry, dimension finding and tamper-detection limit with the evidence it cites, most decisive first, plus the same as Markdown in `text` |
 | `validate_spec` | `path` or `spec_yaml` | `valid`, the spec's id and entry counts, and `errors` with dotted `location`, `line` and `column`. An invalid spec is a result, not a tool error |
 | `find_recordings` | `directory` (default: the first root), `limit` (1 to 200, default 20) | Playwright trace zips, HAR files and browser-use histories, newest first, plus unzipped trace directories |
 
 `tools/list` carries the full input and output JSON Schemas, with a description for every
-parameter. `judge_run` is annotated `destructiveHint: true` because it can replace an earlier
-report; every other tool is read-only.
+parameter. `judge_run` and `judge_session` are annotated `destructiveHint: true` because they
+can replace an earlier report; every other tool is read-only.
 
 Text the tools quote from the recorded pages or from the agent (the verdict summary, claim
 quotes, reasons, evidence excerpts and warnings) comes wrapped in `<untrusted_data>` tags in
@@ -166,7 +167,9 @@ pass `site` so a run can pass; see [Task specs](../task-specs.md).
   (trace entry, total and compression-ratio caps, 200 MB HAR, 50 MB browser-use history);
   specs over 1 MB and YAML anchors or aliases are refused, and verdict files over 50 MB are not
   read.
-- **Offline by default.** `judge_run` calls a model only when the client passes
+- **No commands run.** `judge_session` reads what a session recorded and never re-runs its
+  tests, even when the spec has a `rerun` block.
+- **Offline by default.** `judge_run` and `judge_session` call a model only when the client passes
   `offline: false` and the server has one configured (`ANTHROPIC_API_KEY` in the server's
   environment). `--offline-only` refuses such calls outright.
 - **Redaction** follows `EVJ_REDACT` (on by default): evidence, answers and specs are redacted

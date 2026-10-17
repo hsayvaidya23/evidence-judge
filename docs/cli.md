@@ -140,8 +140,8 @@ Offline, redaction tokens are keyed by a digest of the files in the run director
 
 ## `evidence-judge mcp`
 
-Runs an MCP server exposing `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and
-`find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`); without it the
+Runs an MCP server exposing `judge_run`, `judge_session`, `inspect_run`, `explain_verdict`,
+`validate_spec` and `find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`); without it the
 command exits `3`. See the [MCP server guide](guides/mcp.md) for client setup.
 
 ```bash
@@ -153,7 +153,7 @@ evidence-judge mcp [--root DIR]... [--http] [--port 8000] [--offline-only]
 | `--root DIR` | Directory clients may read and write files in; repeat for more. Paths resolve with every symlink followed, and anything outside every root is refused. Relative paths in tool calls resolve against the first root. Default: the working directory |
 | `--http` | Serve streamable HTTP at `http://127.0.0.1:<port>/mcp` instead of stdio. Binds to loopback only, with DNS-rebinding protection and no authentication |
 | `--port N` | Port for `--http` (default 8000) |
-| `--offline-only` | Refuse `judge_run` calls with `offline: false`, so the server never calls a model even when `ANTHROPIC_API_KEY` is set |
+| `--offline-only` | Refuse `judge_run` and `judge_session` calls with `offline: false`, so the server never calls a model even when `ANTHROPIC_API_KEY` is set |
 
 Settings come from the server's environment as for every command; `EVJ_REDACT` decides whether
 tool results are redacted.

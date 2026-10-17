@@ -37,8 +37,8 @@ command = "evidence-judge"
 args = ["mcp"]
 ```
 
-The server's tools are `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and
-`find_recordings`.
+The server's tools are `judge_run`, `judge_session`, `inspect_run`, `explain_verdict`,
+`validate_spec` and `find_recordings`.
 
 ## Add the hooks
 

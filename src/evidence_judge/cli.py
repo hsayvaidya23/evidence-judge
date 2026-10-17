@@ -475,7 +475,9 @@ def mcp_server(
     ] = 8000,
     offline_only: Annotated[
         bool,
-        typer.Option("--offline-only", help="Refuse judge_run calls that ask for a model"),
+        typer.Option(
+            "--offline-only", help="Refuse judge_run and judge_session calls that ask for a model"
+        ),
     ] = False,
 ) -> None:
     """Run an MCP server so coding agents can judge, inspect and explain runs as tools."""

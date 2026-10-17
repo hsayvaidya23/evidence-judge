@@ -67,6 +67,8 @@ With the Evidence Judge MCP server (registered by this plugin):
 - `find_recordings`: list the traces recorded in the project, newest first.
 - `inspect_run`: summarise what a trace captured, without judging.
 - `judge_run`: judge a trace against your answer (and the spec, if any).
+- `judge_session`: judge a coding session's transcript against your answer; it reads the
+  recorded commands and edits and never runs anything.
 - `explain_verdict`: explain why a claim or expectation failed, with evidence ids.
 - `validate_spec`: check a spec file.
 
