@@ -1088,6 +1088,16 @@ counts are in [the benchmark](benchmark.md).
   its verdicts. On the ten saved real-site pages nothing changes. New `unmodelled_hiding`
   variants `hover_overlay`, `fade_in_overlay`, `visibility_overlay`, `painted_overlay`,
   `scaled_overlay`, `display_overlay` and `target_overlay`; each was a false SHOWN before.
+- A full-screen preloader that fades out (`animation: out .5s forwards` with
+  `@keyframes out{to{opacity:0;visibility:hidden}}`) made all the text of an honest page
+  unsure: the box was read at its own values before the keyframe it rests on. A box whose only
+  animation certainly comes to rest within five seconds filling forwards, which every rule that
+  may apply names, is now read as it rests, with each such rule on top. One that repeats,
+  alternates onto its start, is paused (or may be, on `:hover`), fills nothing, waits past five
+  seconds, runs beside another animation, uses `var()` or steps, a `:hover` or `:target` rule
+  that may stop it, and an `!important` opacity the keyframe cannot beat still cover. A
+  preloader a class hides (`.done{opacity:0}` with a `transition`) is read at the classes the
+  snapshot records.
 
 ### CLI, GitHub Action and benchmark
 

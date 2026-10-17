@@ -11,7 +11,13 @@ from importlib import resources
 from typing import Final
 from urllib.parse import urljoin
 
-from evidence_judge.ingest.css.animations import Keyframes, read_keyframes, resting, settles_shown
+from evidence_judge.ingest.css.animations import (
+    Keyframes,
+    fills_forwards,
+    read_keyframes,
+    resting,
+    settles_shown,
+)
 from evidence_judge.ingest.css.backgrounds import UnreadableError, background_images
 from evidence_judge.ingest.css.colors import parse_color
 from evidence_judge.ingest.css.conditions import media_holds, supports
@@ -272,7 +278,9 @@ class StyleSheets:
         its certain values do, or when the values one rule that may apply to it gives it on top
         of them do (a ``:hover`` or ``:target`` rule, an ``@media`` query the reader cannot
         evaluate), or all of those rules together, or a keyframe of an animation it may run
-        (`_keyframes`): an overlay a fade-in or a hover reveals."""
+        (`_keyframes`): an overlay a fade-in or a hover reveals. A box whose only animation
+        certainly comes to rest filling forwards (`_rested`) is read as it rests: a preloader
+        that fades out."""
         best: dict[str, Rule] = {}
         maybe: dict[str, list[Rule]] = {}
         for rule in self._candidates(element):
@@ -281,7 +289,9 @@ class StyleSheets:
         for order, (prop, value, important) in enumerate(inline):
             rank: Rank = (2 if important else 1, 1, 1, (_TOP,), (0, 0, 0), order)
             _offer(Rule(_UNIVERSAL, prop, value, rank, False), YES, best, maybe)
-        if self._covering(best, parent):
+        cascade = Cascade(best, maybe, frozenset(best).union(maybe))
+        bases = self._rested(best, cascade) if self.animations else [best]
+        if any(self._covering(base, parent) for base in bases):
             return True
         if not maybe and "animation-name" not in best and "animation" not in best:
             return False
@@ -293,8 +303,36 @@ class StyleSheets:
         if len(groups) > 1:
             changes.append(sorted((r for rules in maybe.values() for r in rules), key=_rank))
         if self.animations:
-            changes.extend(self._keyframes(Cascade(best, maybe, frozenset(best).union(maybe))))
-        return any(self._covering(_over(best, change), parent) for change in changes)
+            changes.extend(self._keyframes(cascade))
+        return any(
+            self._covering(_over(base, change), parent) for base in bases for change in changes
+        )
+
+    def _rested(self, best: dict[str, Rule], cascade: Cascade) -> list[dict[str, Rule]]:
+        """`best` with the end keyframes the element's only animation rests on put over it, one
+        state for each, when the animation certainly comes to rest filling forwards (`resting`,
+        `fills_forwards`) and every rule that may apply names the same one; else `best`
+        alone."""
+        names = set(cascade.values("animation-name"))
+        if cascade.sets("animation") or len(names) != 1:
+            return [best]
+        (value,) = names
+        items = split_commas(value) if value is not None else []
+        frames = self.animations.get(items[0].strip("\"'")) if len(items) == 1 else None
+        if frames is None or not fills_forwards(cascade):
+            return [best]
+        rest = resting(cascade, frames)
+        if not rest:
+            return [best]
+        return [
+            _over(
+                best,
+                _animated(
+                    d for offsets, declared in frames.frames if end in offsets for d in declared
+                ),
+            )
+            for end in rest
+        ]
 
     def _covering(self, rules: dict[str, Rule], parent: Computed) -> bool:
         """Whether a box styled by `rules` alone, under `parent`, covers what is under it."""
