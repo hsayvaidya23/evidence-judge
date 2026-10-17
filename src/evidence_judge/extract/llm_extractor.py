@@ -11,7 +11,14 @@ from evidence_judge.core.evidence import MUTATION_METHODS
 from evidence_judge.core.predicates import Predicate, RequestPredicate, ValuePredicate
 from evidence_judge.core.verdict import Usage
 from evidence_judge.extract.base import MAX_CLAIMS, MAX_PREDICATES_PER_CLAIM
-from evidence_judge.extract.heuristic import order_results, priced_amounts
+from evidence_judge.extract.heuristic import (
+    ORDER_URL,
+    ORDER_WORDS,
+    answer_priced,
+    listed_amount,
+    order_results,
+    priced_amounts,
+)
 from evidence_judge.extract.merge import cap_claims, dedupe_claims, renumber
 from evidence_judge.extract.prompts import EXTRACTION_SYSTEM_PROMPT, build_extraction_prompt
 from evidence_judge.extract.schema import ClaimExtraction, ExtractedClaim
@@ -26,6 +33,7 @@ from evidence_judge.extract.text import (
 from evidence_judge.llm.base import LLMClient, LLMRequest, Tier
 
 _STEP_MARKER = re.compile(r"^\s*\[step \d+\]\s*", re.IGNORECASE)
+_ORDER_PATH = re.compile(ORDER_WORDS, re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,14 +155,27 @@ def _ground(proposed: ExtractedClaim, sources: dict[Origin, str]) -> Claim | Non
     return None
 
 
+def order_scoped(claims: ClaimSet, answer: str | None, reasoning: list[str]) -> ClaimSet:
+    """`claims` of a run whose evidence shows an order placed, with every amount stated as a
+    price proven only by the order (`_order_scoped`), however the answer words the purchase:
+    "Checkout complete. It cost $19.00." names no purchase, but the order it placed is what the
+    amount is checked against, not any page that lists it."""
+    told = sentences(answer, reasoning)
+    scoped = [_order_scoped(claim, told, True) for claim in claims.claims]
+    return claims.model_copy(update={"claims": scoped})
+
+
 def _order_scoped(claim: Claim, told: list[Sentence], bought: bool) -> Claim:
     """`claim` proven only by the order, when it is about what a purchase cost.
 
     An amount the claim's sentence states as a price (heuristic.priced_amounts), in a run that
     asserts a purchase, is what the purchase cost: any page of the run could list it for another
     item. When a predicate checks such an amount, or a value claim quotes one, only a mutation
-    request to a named URL whose answer shows it (`result_contains` or `response_contains`)
-    is kept; without one the claim gets the heuristic's predicate (heuristic.order_results).
+    request to an order's URL (`url_regex` heuristic.ORDER_URL, or a `path_contains` that names
+    an order, checkout, payment or booking) whose answer shows it (`result_contains` or
+    `response_contains`) is kept: a `POST /api/cart` answered with the price proves nothing
+    about the order. Without one the claim gets the heuristic's predicate
+    (heuristic.order_results).
     """
     paid = [a for a in _paid_amounts(claim, told, bought) if _about(claim, a)]
     if not paid:
@@ -166,11 +187,13 @@ def _order_scoped(claim: Claim, told: list[Sentence], bought: bool) -> Claim:
 def _paid_amounts(claim: Claim, told: list[Sentence], bought: bool) -> list[str]:
     said = [s for s in told if s.origin == claim.origin and quote_in(claim.quote, s.text)]
     said = said or [Sentence(t, claim.origin) for t in split_sentences(claim.quote)]
+    priced = answer_priced(told)
     amounts = [
         match.group(0).strip()
         for sentence in said
         if bought or names_purchase(sentence.text)
         for match, _ in priced_amounts(sentence, purchase=True)
+        if not listed_amount(sentence, match, priced)
     ]
     return list(dict.fromkeys(amounts))
 
@@ -193,7 +216,9 @@ def _answered_with(predicate: Predicate, amounts: list[str]) -> bool:
         return False
     if (predicate.method or "").upper() not in MUTATION_METHODS:
         return False
-    if not (predicate.url_contains or predicate.path_contains or predicate.url_regex):
+    if predicate.url_regex != ORDER_URL and not any(
+        _ORDER_PATH.search(p) for p in predicate.path_contains
+    ):
         return False
     answered = [*predicate.result_contains, *predicate.response_contains]
     return all(any(contains(text, a) for text in answered) for a in amounts)

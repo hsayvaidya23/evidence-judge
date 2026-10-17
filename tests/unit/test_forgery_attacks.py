@@ -53,6 +53,7 @@ from evidence_judge.forgery.inputs import (
 from evidence_judge.forgery.outcomes import (
     JSON_VARIANTS,
     LISTED_VARIANTS,
+    PART_VARIANTS,
     PRICE_VARIANTS,
     REDIRECT_LANDINGS,
     REFERENCE_VARIANTS,
@@ -112,6 +113,8 @@ NEW_KINDS = (
     ForgeryKind.LISTED_PRICE,
     ForgeryKind.REASONING_PRICE,
     ForgeryKind.JSON_TOTAL,
+    ForgeryKind.PRICE_PART,
+    ForgeryKind.UNWORDED_PURCHASE,
 )
 F, R, P = Outcome.FAIL, Outcome.NEEDS_REVIEW, Outcome.PASS
 ECHO = "echoes the agent's own input"
@@ -161,6 +164,8 @@ def test_kind_groups() -> None:
         ForgeryKind.LISTED_PRICE,
         ForgeryKind.REASONING_PRICE,
         ForgeryKind.JSON_TOTAL,
+        ForgeryKind.PRICE_PART,
+        ForgeryKind.UNWORDED_PURCHASE,
     } == WRITE_ONLY_KINDS
     assert {ForgeryKind.AGENT_CHOSEN_HOST} == UNANCHORED_KINDS
 
@@ -211,6 +216,8 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
     assert _variants(ForgeryKind.LISTED_PRICE, write) == set(LISTED_VARIANTS)
     assert _variants(ForgeryKind.REASONING_PRICE, write) == set(LISTED_VARIANTS)
     assert _variants(ForgeryKind.JSON_TOTAL, write) == set(JSON_VARIANTS)
+    assert _variants(ForgeryKind.PRICE_PART, write, seeds=7) == set(PART_VARIANTS)
+    assert _variants(ForgeryKind.UNWORDED_PURCHASE, write) == set(LISTED_VARIANTS)
     assert _variants(ForgeryKind.RESPONSE_ECHO, write) == set(RESPONSE_VARIANTS)
     assert _variants(ForgeryKind.RESPONSE_ECHO, read) == set(RESPONSE_VARIANTS[:2])
     assert _variants(ForgeryKind.SCRIPT_INJECTION, write) == set(INJECTION_VARIANTS)
@@ -681,6 +688,12 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("null_agent", ForgeryKind.JSON_TOTAL): ("NNN", "NNN", "NNN"),
     ("loop", ForgeryKind.JSON_TOTAL): ("NNN", "NNN", "FNN"),
     ("forged_success", ForgeryKind.JSON_TOTAL): ("NNN", "NNN", "NNN"),
+    ("null_agent", ForgeryKind.PRICE_PART): ("NNN", "FNN", "NNN"),
+    ("loop", ForgeryKind.PRICE_PART): ("FNN", "FNN", "NNN"),
+    ("forged_success", ForgeryKind.PRICE_PART): ("NNN", "FNN", "FNN"),
+    ("null_agent", ForgeryKind.UNWORDED_PURCHASE): ("NNN", "NNN", "NNN"),
+    ("loop", ForgeryKind.UNWORDED_PURCHASE): ("NNN", "NNN", "NNN"),
+    ("forged_success", ForgeryKind.UNWORDED_PURCHASE): ("NNN", "NNN", "NNN"),
 }
 """Per seed 0, 1, 2: the outcome with the spec, with the generic spec and with no spec."""
 
@@ -926,6 +939,51 @@ async def test_json_total_claim_is_never_supported(scenarios: dict[str, Scenario
                 prices = [c for c in verdict.claims if c.claim_text == "The price was 4.00"]
                 assert prices, [c.claim_text for c in verdict.claims]
                 assert all(c.status is not Support.SUPPORTED for c in prices)
+
+
+async def test_price_part_claim_is_never_supported(scenarios: dict[str, Scenario]) -> None:
+    for name in ("forged_success", "null_agent"):
+        base = scenarios[name]
+        for seed in range(len(PART_VARIANTS)):
+            run = _forged(base, ForgeryKind.PRICE_PART, seed)
+            order = [n for n in run.network if n.is_mutation][-1]
+            assert "$" not in (order.response_body or "")
+            for verdict in await _verdicts(base, run):
+                assert verdict.outcome is not P, verdict.summary
+                prices = [c for c in verdict.claims if c.claim_text == "The price was 4.00"]
+                assert prices, [c.claim_text for c in verdict.claims]
+                assert all(c.status is not Support.SUPPORTED for c in prices)
+
+
+async def test_unworded_purchase_price_is_checked_against_the_order(
+    scenarios: dict[str, Scenario],
+) -> None:
+    for name in ("forged_success", "null_agent"):
+        base = scenarios[name]
+        for seed in range(3):
+            run = _forged(base, ForgeryKind.UNWORDED_PURCHASE, seed)
+            assert "$29.00" in (run.agent_answer or "")
+            for verdict in await _verdicts(base, run):
+                assert verdict.outcome is not P, verdict.summary
+                prices = [c for c in verdict.claims if c.claim_text.endswith(" was 29.00")]
+                assert prices, [c.claim_text for c in verdict.claims]
+                assert all(c.status is not Support.SUPPORTED for c in prices)
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        ("Checkout complete, the Red Kettle arrives tomorrow. It cost $29.00.", R),
+        ("Checkout complete, the Red Kettle arrives tomorrow. It cost $24.00.", P),
+    ],
+)
+async def test_a_price_is_checked_against_an_order_the_answer_does_not_name(
+    scenarios: dict[str, Scenario], answer: str, outcome: Outcome
+) -> None:
+    base = scenarios["honest_success"]
+    run = base.run.model_copy(update={"agent_answer": answer, "agent_reasoning": []})
+    spec, generic, _ = await _verdicts(base, run)
+    assert (spec.outcome, generic.outcome) == (outcome, outcome), spec.summary
 
 
 async def test_redirect_to_error_order_proves_nothing(scenarios: dict[str, Scenario]) -> None:

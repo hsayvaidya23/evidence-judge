@@ -273,7 +273,7 @@ async def test_a_price_checked_against_the_order_answer_is_kept():
     scoped = {
         "kind": "request",
         "method": "POST",
-        "url_contains": ["order"],
+        "path_contains": ["/api/orders"],
         "result_contains": ["$24.00"],
     }
     llm = _llm(
@@ -288,8 +288,34 @@ async def test_a_price_checked_against_the_order_answer_is_kept():
         task=None, answer="I bought the kettle for $24.00.", reasoning=[]
     )
     assert claim_set.claims[0].predicates == [
-        RequestPredicate(method="POST", url_contains=["order"], result_contains=["$24.00"])
+        RequestPredicate(method="POST", path_contains=["/api/orders"], result_contains=["$24.00"])
     ]
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        {"method": "POST", "url_contains": ["/api/cart"], "response_contains": ["$24.00"]},
+        {"method": "PUT", "path_contains": ["/wishlist"], "result_contains": ["$24.00"]},
+        {"method": "POST", "url_contains": ["order"], "result_contains": ["$24.00"]},
+        {"method": "POST", "url_regex": "/api/", "result_contains": ["$24.00"]},
+    ],
+)
+async def test_a_price_answered_by_a_request_that_is_not_the_order_is_replaced(
+    predicate: dict[str, Any],
+):
+    llm = _llm(
+        _claim(
+            "Paid $24.00",
+            "I bought the kettle for $24.00",
+            kind="value",
+            predicates=[{"kind": "request", **predicate}],
+        )
+    )
+    claim_set, _ = await LLMClaimExtractor(llm).extract(
+        task="Buy a kettle", answer="I bought the kettle for $24.00.", reasoning=[]
+    )
+    assert claim_set.claims[0].predicates == [ORDER_PAID]
 
 
 @pytest.mark.parametrize(

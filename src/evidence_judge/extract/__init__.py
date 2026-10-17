@@ -1,6 +1,6 @@
 from evidence_judge.extract.base import MAX_CLAIMS, ClaimExtractor
 from evidence_judge.extract.heuristic import HeuristicExtractor
-from evidence_judge.extract.llm_extractor import ExtractionStats, LLMClaimExtractor
+from evidence_judge.extract.llm_extractor import ExtractionStats, LLMClaimExtractor, order_scoped
 from evidence_judge.extract.merge import coverage, merge_claim_sets
 
 __all__ = [
@@ -11,4 +11,5 @@ __all__ = [
     "LLMClaimExtractor",
     "coverage",
     "merge_claim_sets",
+    "order_scoped",
 ]

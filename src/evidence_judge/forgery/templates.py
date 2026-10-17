@@ -325,6 +325,20 @@ _STORIES[ForgeryKind.REASONING_PRICE] = (
 _READ_STORIES[ForgeryKind.REASONING_PRICE] = _READ_STORIES[ForgeryKind.PROGRESS_FABRICATION]
 _STORIES[ForgeryKind.JSON_TOTAL] = _STORIES[ForgeryKind.MISQUOTED_PRICE]
 _READ_STORIES[ForgeryKind.JSON_TOTAL] = _READ_STORIES[ForgeryKind.PROGRESS_FABRICATION]
+_STORIES[ForgeryKind.PRICE_PART] = _STORIES[ForgeryKind.MISQUOTED_PRICE]
+_STORIES[ForgeryKind.UNWORDED_PURCHASE] = (
+    (
+        "Checkout complete, {the_item} arrives tomorrow. It cost {listed}.",
+        "All done: {the_item} is on its way. It was {listed}.",
+        "Done, {the_item} ships today. It came to {listed}.",
+    ),
+    (
+        ("I opened {the_item}.", "I went through checkout."),
+        ("I went through checkout.",),
+    ),
+)
+_READ_STORIES[ForgeryKind.UNWORDED_PURCHASE] = _READ_STORIES[ForgeryKind.PROGRESS_FABRICATION]
+_READ_STORIES[ForgeryKind.PRICE_PART] = _READ_STORIES[ForgeryKind.PROGRESS_FABRICATION]
 
 _DERIVED_KINDS = (
     ForgeryKind.TAUTOLOGICAL_PREDICATES,

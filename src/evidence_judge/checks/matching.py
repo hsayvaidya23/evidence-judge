@@ -71,9 +71,53 @@ MONEY: Final = re.compile(
 )
 """An amount of money in normalised text: a currency symbol or code before or after it."""
 _SPACE_GROUPED = re.compile(r"^\d{1,3} \d{3}$")
-_PRICE_KEYS: Final = frozenset({"price", "total", "subtotal", "amount", "cost", "charged", "paid"})
+_TOTAL_KEYS: Final = frozenset(
+    {
+        "total",
+        "grand_total",
+        "amount_total",
+        "total_amount",
+        "total_price",
+        "order_total",
+        "total_paid",
+        "amount_paid",
+        "paid",
+        "paid_amount",
+        "charged",
+        "amount_charged",
+        "charged_amount",
+        "current_total_price",
+    }
+)
+"""Keys that name the total an order was charged, as joined lowercase words; a closed list, so
+no part of the price (`shipping_total`, `total_tax`, `total_discounts`) reads as the total."""
+_PRICE_PARTS: Final = frozenset(
+    {
+        "shipping",
+        "tax",
+        "taxes",
+        "fee",
+        "fees",
+        "discount",
+        "discounts",
+        "refund",
+        "refunds",
+        "original",
+        "list",
+        "compare",
+        "msrp",
+        "subtotal",
+        "tip",
+        "error",
+        "errors",
+        "previous",
+        "balance",
+    }
+)
+"""Words of a key whose object is a part of the price or an adjustment to it, never the total
+paid: `{"shipping": {"total": 4}}` or `{"refund": {"amount": 2400, "currency": "usd"}}`."""
 _MINOR_UNIT_KEYS: Final = frozenset({"cents", "minor", "pence", "paise"})
-_CURRENCY_KEYS: Final = frozenset({("currency",), ("currency", "code")})
+_STRIPE_CURRENCY = re.compile(r"[a-z]{3}")
 _KEY_CASE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _KEY_WORD = re.compile(r"[a-z]+")
 _INDEX_BRACKETS = re.compile(r"\[(-?\d+)\]")
@@ -127,11 +171,16 @@ def _money(text: str) -> tuple[str, float] | None:
 
 
 def shows_amount(body: str | None, phrase: str) -> bool:
-    """Whether JSON `body` holds the amount of money `phrase` states as a bare number: under a
-    key that names a price or total (`total`, `grand_total`, `unitPrice`, `amount`), in
-    minor units only when the key says so (`amount_cents`: 2950 is 29.50), and in the
-    currency the nearest `currency` field names, if any ('$29.50' is not `{"total": 29.5,
-    "currency": "EUR"}`). A number under any other key (an id, a quantity) shows no amount."""
+    """Whether JSON `body` holds the amount of money `phrase` states as the price paid: a bare
+    number under a key that names the order's total and nothing else (`total`, `grand_total`,
+    `totalPrice`, `amount_paid`, `amount_total`), outside any array (a line item) and any
+    object a key names as a part or an adjustment of the price (`shipping`, `tax`, `discount`,
+    `refund`, `original`). Shipping, tax, fees, discounts, refunds, subtotals, list and unit
+    prices never show it. Minor units count only when the key says so (`total_cents`: 2950 is
+    29.50), or in an object that names its currency in lowercase as Stripe does (`{"amount":
+    2950, "currency": "usd"}`) or holds a `total_money` as Square does; a bare `amount` shows
+    nothing anywhere else. Every currency the document names must be the phrase's ('$29.50' is
+    not `{"order": {"total": 29.5}, "meta": {"currency": "EUR"}}`)."""
     wanted = _money(normalize(phrase))
     if wanted is None or body is None:
         return False
@@ -140,54 +189,97 @@ def shows_amount(body: str | None, phrase: str) -> bool:
     except (json.JSONDecodeError, RecursionError):
         return False
     currency, amount = wanted
-    return any(a == amount and c in (None, currency) for c, a in _json_amounts(tree))
+    if any(c != currency for c in _json_currencies(tree)):
+        return False
+    return amount in _json_totals(tree)
 
 
-def _json_amounts(tree: object) -> list[tuple[str | None, float]]:
-    """Every (currency, amount) a JSON tree states under a price key; the currency is that of
-    the nearest object with a `currency` field, or None."""
-    found: list[tuple[str | None, float]] = []
-    stack: list[tuple[object, str | None]] = [(tree, None)]
+def _json_currencies(tree: object) -> set[str]:
+    """Every currency a JSON tree names under a `currency` or `currency_code` key, anywhere."""
+    found: set[str] = set()
+    stack: list[object] = [tree]
     while stack:
-        node, currency = stack.pop()
+        node = stack.pop()
         if isinstance(node, list):
-            stack.extend((item, currency) for item in cast(list[object], node))
-            continue
+            stack.extend(cast(list[object], node))
+        elif isinstance(node, dict):
+            fields = cast(dict[str, object], node)
+            found.update(c for c in (_currency_code(k, v) for k, v in fields.items()) if c)
+            stack.extend(fields.values())
+    return found
+
+
+def _currency_code(key: str, value: object) -> str | None:
+    words = _key_words(key)
+    if not isinstance(value, str) or not words:
+        return None
+    if words[-1] != "currency" and words[-2:] != ["currency", "code"]:
+        return None
+    code = normalize(value).rstrip(". ")
+    return _CURRENCIES.get(code, code) or None
+
+
+def _json_totals(tree: object) -> set[float]:
+    """Every amount a JSON tree states as an order's total, outside arrays and outside objects
+    a key or their `object` type names as part of the price or an adjustment to it (Stripe's
+    `{"object": "refund", "amount": 2400, "currency": "usd"}`)."""
+    found: set[float] = set()
+    stack: list[tuple[object, list[str]]] = [(tree, [])]
+    while stack:
+        node, parent = stack.pop()
         if not isinstance(node, dict):
             continue
         fields = cast(dict[str, object], node)
-        currency = _currency_of(fields) or currency
+        kind = fields.get("object")
+        if isinstance(kind, str) and _PRICE_PARTS & set(_key_words(kind)):
+            continue
+        minor = _minor_object(fields, parent)
         for key, value in fields.items():
-            amount = _key_amount(key, value)
+            words = _key_words(key)
+            amount = _total_amount(words, value, minor, _has_currency(fields))
             if amount is not None:
-                found.append((currency, amount))
-            elif isinstance(value, dict | list):
-                stack.append((cast(object, value), currency))
+                found.add(amount)
+            elif isinstance(value, dict) and not _PRICE_PARTS & set(words):
+                stack.append((cast(object, value), words))
     return found
+
+
+def _has_currency(fields: dict[str, object]) -> bool:
+    return any(_currency_code(k, v) for k, v in fields.items())
+
+
+def _minor_object(fields: dict[str, object], parent: list[str]) -> bool:
+    """Whether the amounts of this object are in minor units: it names its currency in
+    lowercase (Stripe) or is the money object of a total (Square's `total_money`)."""
+    stripe = any(
+        isinstance(v, str) and _STRIPE_CURRENCY.fullmatch(v) and _currency_code(k, v)
+        for k, v in fields.items()
+    )
+    square = parent[-1:] == ["money"] and "_".join(parent[:-1]) in _TOTAL_KEYS
+    return stripe or square
+
+
+def _total_amount(words: list[str], value: object, minor: bool, priced: bool) -> float | None:
+    """The amount a JSON number under the key `words` states as the order's total, or None."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return None
+    if len(words) > 1 and words[-1] in _MINOR_UNIT_KEYS:
+        stem = words[:-2] if words[-2] == "in" else words[:-1]
+        named = "_".join(stem) in _TOTAL_KEYS or (stem == ["amount"] and priced)
+        return _from_minor(value) if named else None
+    if words == ["amount"]:
+        return _from_minor(value) if priced and minor else None
+    if "_".join(words) not in _TOTAL_KEYS:
+        return None
+    return _from_minor(value) if minor else round(float(value), 2)
+
+
+def _from_minor(value: float) -> float | None:
+    return round(value / 100, 2) if float(value).is_integer() else None
 
 
 def _key_words(key: str) -> list[str]:
     return _KEY_WORD.findall(_KEY_CASE.sub("_", key).casefold())
-
-
-def _currency_of(fields: dict[str, object]) -> str | None:
-    for key, value in fields.items():
-        if tuple(_key_words(key)) in _CURRENCY_KEYS and isinstance(value, str):
-            code = normalize(value).rstrip(". ")
-            return _CURRENCIES.get(code, code or None)
-    return None
-
-
-def _key_amount(key: str, value: object) -> float | None:
-    """The amount a JSON number under `key` states, or None when `key` names no price."""
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
-        return None
-    words = _key_words(key)
-    if words and words[-1] in _PRICE_KEYS:
-        return round(float(value), 2)
-    if len(words) > 1 and words[-1] in _MINOR_UNIT_KEYS and _PRICE_KEYS & set(words[:-1]):
-        return round(value / 100, 2) if float(value).is_integer() else None
-    return None
 
 
 def excerpt(text: str, needle: str, width: int = 80) -> str:

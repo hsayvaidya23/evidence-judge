@@ -586,7 +586,7 @@ amount that cannot be read unambiguously (`$1.500`: 1.5 or 1500) is matched as t
 one space between two digit groups with nothing to settle it (`$24 100` may be $24,100 or $24
 and then 100): it meets neither `$24` nor `$24,100`. A second group or a decimal part settles
 it (`$1 024 100`, `24 100,00 €`). `result_contains` also reads an amount from a JSON response
-that holds it as a bare number under a price key (see
+that holds it as a bare number under a key that names the total paid (see
 [what a purchase cost](concepts/claims-and-predicates.md#what-a-purchase-cost)). Letters without case
 (Chinese, Japanese) have no word boundary the judge can see, so a phrase that ends in one is
 matched as a substring at that end (`注文1001` is met by `新注文1001`, but not by `注文10012`).

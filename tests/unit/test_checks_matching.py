@@ -3,6 +3,8 @@ from __future__ import annotations
 import contextlib
 import json
 import time
+from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -430,8 +432,9 @@ def test_one_space_between_digit_groups_is_neither_one_amount_nor_two(
         ('{"grand_total": 1249.5, "currency": "EUR"}', "€1.249,50"),
         ('{"totalPrice": 29.5}', "$29.50"),
         ('{"amount_cents": 2950, "currency": "usd"}', "$29.50"),
-        ('{"order": {"currency": "GBP", "lines": [{"unit_price": 4}]}}', "£4.00"),
-        ('[{"subtotal": 24}]', "24 USD"),
+        ('{"amount": 2950, "currency": "usd"}', "$29.50"),
+        ('{"order": {"currency": "GBP", "amount_paid": 4}}', "£4.00"),
+        ('{"total_money": {"amount": 2400, "currency": "USD"}}', "24 USD"),
     ],
 )
 def test_a_json_answer_shows_a_price_as_a_bare_number(body: str, phrase: str) -> None:
@@ -452,7 +455,32 @@ def test_a_json_answer_shows_a_price_as_a_bare_number(body: str, phrase: str) ->
         ("<p>Total: 29.50</p>", "$29.50"),
         ('{"total": 29.5}', "29.50"),
         ('{"total": 24100}', "$24 100"),
+        ('{"order": {"currency": "GBP", "lines": [{"unit_price": 4}]}}', "£4.00"),
+        ('[{"subtotal": 24}]', "24 USD"),
+        ('[{"total": 24}]', "$24.00"),
+        ('{"total": 30, "shipping_cost": 4, "tax_amount": 2.5}', "$4.00"),
+        ('{"total": 30, "shipping_total": 4, "total_tax": 2.5}', "$2.50"),
+        ('{"total": 24, "items": [{"total": 4}]}', "$4.00"),
+        ('{"amount": 4}', "$4.00"),
+        ('{"amount": 4, "currency": "USD"}', "$4.00"),
+        ('{"amount": 2400, "currency": "usd"}', "$2,400.00"),
+        ('{"order": {"total": 24}, "meta": {"currency": "EUR"}}', "$24.00"),
+        ('{"shipping": {"total": 4}, "total": 30}', "$4.00"),
+        ('{"object": "refund", "amount": 400, "currency": "usd"}', "$4.00"),
     ],
 )
 def test_no_other_number_or_currency_shows_the_price(body: str, phrase: str) -> None:
     assert not shows_amount(body, phrase)
+
+
+ORDER_ANSWERS = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "prices" / "order_answers.json").read_text()
+)
+
+
+@pytest.mark.parametrize("answer", ORDER_ANSWERS, ids=[a["name"] for a in ORDER_ANSWERS])
+def test_a_real_order_answer_shows_only_the_total_paid(answer: dict[str, object]) -> None:
+    body = json.dumps(answer["body"])
+    shown = [p for p in cast(list[str], answer["shows"]) if shows_amount(body, p)]
+    hidden = [p for p in cast(list[str], answer["hides"]) if shows_amount(body, p)]
+    assert (shown, hidden) == (answer["shows"], [])

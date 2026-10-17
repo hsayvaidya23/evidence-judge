@@ -84,6 +84,8 @@ def test_evidence_kinds() -> None:
         ForgeryKind.LISTED_PRICE,
         ForgeryKind.REASONING_PRICE,
         ForgeryKind.JSON_TOTAL,
+        ForgeryKind.PRICE_PART,
+        ForgeryKind.UNWORDED_PURCHASE,
     } == EVIDENCE_KINDS
 
 
