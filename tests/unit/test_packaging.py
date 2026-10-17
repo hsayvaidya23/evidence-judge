@@ -127,7 +127,10 @@ def test_release_attests_the_distributions_and_ships_an_sbom() -> None:
         s["with"] for s in build["steps"] if str(s.get("uses", "")).startswith("actions/attest@")
     ]
     assert {"subject-path": "dist/*"} in attests
-    assert any("sbom-path" in a for a in attests)
+    [sbom] = [a["sbom-path"] for a in attests if "sbom-path" in a]
+    assert sbom == "${{ steps.sbom.outputs.path }}"
+    [producer] = [s for s in build["steps"] if s.get("id") == "sbom"]
+    assert '>> "$GITHUB_OUTPUT"' in producer["run"]
     assert any("--format cyclonedx" in s.get("run", "") for s in build["steps"])
     release = jobs["github-release"]
     assert release["permissions"] == {"contents": "write"}
