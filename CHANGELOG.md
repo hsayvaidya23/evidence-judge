@@ -82,8 +82,8 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1494 browser and 0 of 1653 session
-  forgeries pass, and 4 of 43 honest browser controls go to review offline.
+  Go toy projects with runner-specific tricks; 0 of 1494 browser and 0 of 1707 session
+  forgeries pass, and 5 of 51 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
   and got order #..."), so a claim reader that carries the negation over shows up in `make
@@ -100,9 +100,33 @@ The first release.
 - `judge`, `inspect`, `bench`, `schema`, `version` (also `--version`), `mcp`, `hook ...` and
   `session judge|rerun|inspect`. Piping the output (`| head -1`) keeps the verdict's exit code.
 - A public Python API exported from `evidence_judge`, and a documentation site.
+- The session judge is part of the public Python API: `SessionJudge`, `SessionJudgeOptions`,
+  `SessionSpec` and `load_session` are exported from `evidence_judge` and documented beside
+  `Judge`.
+- `session judge --html PATH` writes the same self-contained HTML report as `judge --html`, for
+  a session: claims with the tool calls they cite (command and exit code), spec expectations,
+  the verification method (re-run or transcript), warnings, and every recorded tool call as the
+  timeline. It shows the redacted session and escapes all agent text.
+- `session judge --llm BACKEND` picks the backend for session claim extraction, as `judge --llm`
+  does; a chosen backend that cannot be used (such as `anthropic` without `ANTHROPIC_API_KEY`)
+  exits `4` instead of judging offline.
+- MCP tool `judge_session` judges a Claude Code transcript, a Codex stream or rollout, or an
+  evidence log (with its key and anchor) inside the server's roots, with the same parameters
+  as `session judge` (`answer`, `spec` or `spec_yaml`, `offline`, `require_tamper_evidence`,
+  `run_id`, JSON and HTML reports). It never runs commands: a spec's `rerun` block is ignored.
+- GitHub Action session mode: `session-transcript`, `session-format` (`claude-code`, `codex` or
+  `evidence-log`) and `session-spec` run `evidence-judge session judge` instead of `judge`, with
+  the same job summary, report upload and exit behaviour. Mixing it with browser inputs or an
+  unknown format fails the step before anything is installed.
+- The Codex CLI guide opens with its main limit: a `codex exec --json` stream records no diff,
+  so a session that changed code goes to NEEDS_REVIEW (code not checkable) whatever its tests
+  show, and the rollout file or the evidence log should be judged instead.
 
 ### Changed
 
+- `read_settings` is exported from `evidence_judge` and used in the Python API, README and
+  benchmark examples in place of `Settings()`, which reads environment variables only and skips
+  `EVJ_ENV_FILE`.
 - The package description and keywords cover coding-agent sessions as well as browser agents,
   `session --help` names Gemini CLI (judged through the evidence log), and the Claude Code
   plugin's `Stop` hook says it is checking the answer against the recorded evidence instead of
@@ -131,6 +155,16 @@ The first release.
 
 ### Fixed
 
+- The offline session judge no longer PASSes "All tests pass" from a silent `make test` whose
+  only evidence is an earlier whole-suite count when the session wrote a file that may redefine
+  the wrapper (`test.mk`, `mk/test.mk`, `Makefile.test`, `Makefile.local`, `rules.mak`,
+  `tests/Makefile`, `tests/.env`, `tests/tox.ini`): any change that may redefine a wrapper, by
+  the same rule `trusted_wrappers` follows, now voids the earlier count, and make, tox, pytest,
+  nox, just, npm and env configuration is never taken for a test file wherever it sits
+  (`Makefile.*`, `*.mak` and `*.make` are now test configuration). Bench: 27 forged sessions
+  passed before and none does now; nine forgery kinds added, no control shifts (#92).
+- `bench --online` and `bench --with-llm-baseline` without `ANTHROPIC_API_KEY` now exit `4` and
+  name the missing key, like `judge --llm anthropic`, instead of exiting `3`.
 - `judge --llm anthropic` without `ANTHROPIC_API_KEY` now exits `4` and names the missing key,
   like the CLI backends do when their CLI is missing, instead of judging offline and exiting
   `0`. Without `--llm`, a missing key still judges offline.
@@ -556,6 +590,44 @@ The first release.
   honest control `compared_prices` adds such a step: its two runs went to review with every
   spec before the fix and pass after. Bench: 0 of 1494 attacks pass; honest controls 41, 34
   and 2 of 45 correct (39, 32 and 2 of 43 plus the two new ones with each spec).
+- A full-screen opaque box its own styles put out of sight no longer makes the text under it
+  unsure: a closed cart drawer (`transform: translateX(-100%)` or the `translate` property), a
+  modal scaled to nothing, a clip path that keeps almost none of it, or a box at most a pixel
+  wide or high (`width: 0`, `max-height: 0`). Before, an honest order confirmation on a
+  storefront with such a box went to NEEDS_REVIEW. The size and translation cases hold only when
+  nothing paints past the box or keeps it from shrinking (a `box-shadow`, an `outline`, padding,
+  a `min-height`, a border wider than 5px), when the translation is the box's only move (no
+  second translation, offset, margin, `rotate` or `scale`), and never for a value the reader
+  cannot read. New honest control `closed_overlays` (49 honest controls: 44 right with the
+  exact spec, 36 with the generic one; none failed).
+- Fade-in animations no longer make honest text unsure. An element's only `animation` whose
+  `@keyframes` may hide its text now reads as shown when it certainly comes to rest showing
+  it: it ends within five seconds (a known iteration count, not paused, no `steps()`, no
+  scroll or view timeline, no `animation-trigger`) and either fills nothing, so the element's
+  own value returns, or fills forwards onto the end keyframe its direction and count stop on,
+  which shows the text (`from{opacity:0}` with `both`). A paused, infinite, stepped, reversed
+  onto a hidden start, long or far-delayed animation stays unsure, as do several animations
+  at once and keyframes that set a custom property, hold a `var()` or an offset the reader
+  does not know (a keyframe that sets a custom property now counts as one that may hide, since
+  a value of the element may use it). The `animation` shorthand is read into its longhands.
+  On ten saved real-site pages Stripe's unsure share drops from 16.8% to 16.1% and Vercel's
+  from 9.5% to 9.0% (rendered pages: 21.5% to 20.8%, 12.4% to 11.6%); the rest are unchanged.
+  The remaining Stripe animations follow the scroll, run in pairs or fill onto a hidden end.
+- `-webkit-animation` and its longhands, which browsers run like `animation`, were not read,
+  so text an animation ended at `opacity: 0` through them read as shown.
+- An opaque overlay is also seen when its background is an opaque gradient or a `url()`
+  picture (taken for opaque, since the reader cannot see it) or a gradient it cannot read,
+  not only an opaque colour. Smaller overlays are still not seen: a snapshot records no box
+  sizes or positions, so whether a box sits over the text is not decidable.
+- A text colour an element sets for itself is checked against the backgrounds its ancestors
+  paint only in a state (`:hover`) whose rules also set the ancestor's colour: white text in
+  a panel that turns white on hover read as shown. A rule for that same state that sets the
+  element's colour (`.card:hover .title{color:#333}`) is used instead, as for the ancestor.
+- New `unmodelled_hiding` variants `webkit_animation`, `image_overlay`, `gradient_overlay` and
+  `hover_pair_background` (each a false SHOWN before the fix) and `paused_animation`,
+  `blinking_animation` and `reversed_animation` (unsure before and after); the
+  `closed_overlays` control's page now also fades in. White text over a white `url()` picture
+  on a dark `background-color` still reads as shown: the reader cannot see a picture's pixels.
 
 ### Security
 
@@ -572,5 +644,22 @@ The first release.
   extraction and any LLM call when `EVJ_REDACT` is on, as SECURITY.md says. The CLI, MCP server
   and Inspect scorer go through the same `Judge.redact`, so redaction happens once and the same
   way everywhere; `JudgeOptions(redact=False)` marks inputs that are already redacted.
+- `SessionJudge` redacts too: `SessionJudge.judge` redacts the session (commands, outputs,
+  task, answer), spec and claims before claim extraction when `EVJ_REDACT` is on, so a
+  transcript judged from Python no longer reaches an LLM extractor with its secrets. `session
+  judge` goes through the same `SessionJudge.redact`; `SessionJudgeOptions(redact=False)` marks
+  inputs that are already redacted, and `SessionJudge` now takes `Settings` first, like `Judge`.
+- Free-text redaction now covers a secret written after its name with no `:` or `=`
+  (`password hunter2`, `the api key is AB12cd34ef`, also `passwd`, `pwd`, `passcode`,
+  `passphrase`, `token`, `secret`) when the value has a digit, a symbol or mixed case, so prose
+  such as "the password field was empty" stays intact; `Cookie:` and `Set-Cookie:` lines inside
+  the answer, reasoning, page text or console messages, with the same tokens as the headers;
+  and mixed-case credentials after an explicit `Authorization` scheme (`Basic Zm9vYmFy`).
+- The session hook recorder reads settings with `read_settings`, so an `EVJ_REDACTION_KEY` set
+  only in the `EVJ_ENV_FILE` dotenv file now keys the recorder's tokens too; before, the
+  recorder and `session judge` could redact with different keys and their tokens would not match.
+- `BenchmarkRunner` used from Python now redacts runs, specs and claims when `settings.redact` is
+  on and no `redactor` is passed, as `Judge` does; it judged unredacted evidence before. The
+  `bench` CLI is unchanged and its output byte-identical.
 
 [Unreleased]: https://github.com/hsayvaidya23/evidence-judge/commits/main

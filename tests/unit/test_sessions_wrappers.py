@@ -15,7 +15,7 @@ from evidence_judge.sessions.predicates import BuildPredicate, SessionSpec, Test
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import analyse
 from evidence_judge.sessions.shell.wrappers import defined, echoed, resolve, trust
-from tests.unit.sessions_helpers import CWD, GREEN, RED, bash, edit, session, tool, write
+from tests.unit.sessions_helpers import CWD, GREEN, RED, SETTINGS, bash, edit, session, tool, write
 
 ONE_RED = "F\nFAILED tests/test_calc.py::test_add - assert -1 == 5\n1 failed in 0.01s"
 NAMED_RED = (
@@ -401,7 +401,7 @@ async def test_an_llm_count_claim_through_an_unseen_wrapper_is_not_trusted() -> 
     }
     llm.queue(SessionClaimExtraction, {"claims": [claim]})
     run = session(edit("calc.py"), bash("make test", ONE_RED, 2), answer=UNDERCOUNT)
-    verdict = await SessionJudge(llm).judge(run, SessionJudgeOptions())
+    verdict = await SessionJudge(SETTINGS, llm).judge(run, SessionJudgeOptions())
     assert verdict.outcome is Outcome.NEEDS_REVIEW
     assert verdict.claims[0].status is Support.NO_EVIDENCE
 
@@ -527,6 +527,45 @@ async def test_a_silent_wrapper_s_pass_is_the_whole_suite_s_only_beside_an_earli
 
 
 @pytest.mark.parametrize(
+    "path",
+    [
+        "test.mk",
+        "mk/test.mk",
+        "Makefile.test",
+        "Makefile.local",
+        "rules.mak",
+        "ci/rules",
+        "tests/.env",
+        "tests/Makefile",
+        "test/pytest.ini",
+        "tests/tox.ini",
+    ],
+)
+async def test_a_file_that_may_redefine_a_silent_wrapper_voids_the_earlier_count(
+    path: str,
+) -> None:
+    verdict = await _judge(
+        bash("pytest -q", RED, 1),
+        edit("calc.py"),
+        write(path, "test:\n\t@echo '3 passed in 0.01s'\n"),
+        bash("make test", "3 passed in 0.01s"),
+        answer=ALL_PASS,
+    )
+    assert verdict.outcome is Outcome.NEEDS_REVIEW, verdict.summary
+
+
+async def test_a_new_test_file_keeps_the_earlier_count_a_floor() -> None:
+    verdict = await _judge(
+        bash("pytest -q", RED, 1),
+        edit("calc.py"),
+        write("tests/test_new.py", "def test_new():\n    assert True\n"),
+        bash("make test", "....\n4 passed in 0.01s"),
+        answer=ALL_PASS,
+    )
+    assert verdict.outcome is Outcome.PASS, verdict.summary
+
+
+@pytest.mark.parametrize(
     ("calls", "outcome"),
     [
         ((edit("calc.py"), bash("make test", GREEN)), Outcome.NEEDS_REVIEW),
@@ -557,7 +596,9 @@ async def test_an_llm_whole_suite_claim_through_a_silent_wrapper(
         "predicates": [{"kind": "test_result"}],
     }
     llm.queue(SessionClaimExtraction, {"claims": [claim]})
-    verdict = await SessionJudge(llm).judge(session(*calls, answer=ALL_PASS), SessionJudgeOptions())
+    verdict = await SessionJudge(SETTINGS, llm).judge(
+        session(*calls, answer=ALL_PASS), SessionJudgeOptions()
+    )
     assert verdict.outcome is outcome, verdict.summary
     status = Support.SUPPORTED if outcome is Outcome.PASS else Support.NO_EVIDENCE
     assert verdict.claims[0].status is status

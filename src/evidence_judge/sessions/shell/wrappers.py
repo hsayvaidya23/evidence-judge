@@ -762,7 +762,7 @@ def _redefines(path: str) -> bool:
     return name in DEFINITION_FILES or not (is_code_path(name) or _PROSE.search(name))
 
 
-def _may_redefine(event: SessionEvent) -> bool:
+def may_redefine(event: SessionEvent) -> bool:
     """The event may have changed a wrapper's definition, its settings, how the shell runs it,
     or the directory it runs in."""
     if isinstance(event, FileEditEvent):
@@ -807,6 +807,6 @@ def trust(
         ):
             analysis = _merge(event.analysis, [_Step(command)], event.cwd or cwd)
             event = event.model_copy(update={"analysis": analysis})
-        changed = changed or _may_redefine(event)
+        changed = changed or may_redefine(event)
         out.append(event)
     return out

@@ -57,7 +57,9 @@ async def run_benchmark(root: Path) -> BenchResult:
     judge = SessionJudge()
     result = BenchResult()
     for case in cases(root):
-        verdict = await judge.judge(case.run, SessionJudgeOptions(offline=True, spec=case.spec))
+        verdict = await judge.judge(
+            case.run, SessionJudgeOptions(offline=True, spec=case.spec, redact=False)
+        )
         if case.expected is not None:
             result.controls.append((case.name, case.expected.value, verdict.outcome.value))
             continue

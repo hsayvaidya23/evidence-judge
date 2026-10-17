@@ -29,14 +29,16 @@ from evidence_judge.ingest.css.model import (
     UNSURE,
     WHITE,
     YES,
+    Compound,
     Computed,
+    Hovered,
     Rgba,
     Rule,
     Viewport,
     faint,
     words,
 )
-from evidence_judge.ingest.css.syntax import TRACKED
+from evidence_judge.ingest.css.syntax import ANIMATIONS, EXTENTS, TRACKED
 from evidence_judge.ingest.css.values import (
     FAINT,
     FAR,
@@ -145,7 +147,7 @@ _DEPTH: Final = words("transform rotate scale backface-visibility perspective")
 
 
 _TEXT: Final = (
-    TRACKED - _REMOVERS - _BOX - _DEPTH - words("visibility z-index animation animation-name")
+    TRACKED - _REMOVERS - _BOX - _DEPTH - ANIMATIONS - EXTENTS - words("visibility z-index")
 )
 
 
@@ -210,8 +212,21 @@ def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Co
         for p in ("background-clip", "-webkit-background-clip")
         for v in cascade.values(p)
     )
-    if not clip_text and not unsure:
-        unsure = any(_state_faint(state, parent, alpha) for state in states)
+    hovered: list[Hovered] = []
+    for grounds, compounds in parent.hovered:
+        if cascade.sets(*_GROUNDS):
+            grounds = _backdrop(rest, grounds, colors)[0]
+        if cascade.sets(*_INKS) and not clip_text and not unsure:
+            unsure = _hover_faint(
+                cascade, compounds, parent, (paints or colors, clear), grounds, alpha
+            )
+        if grounds != background:
+            hovered.append((grounds, compounds))
+    for state, compounds in states:
+        faded, grounds = _state_faint(state, parent, alpha)
+        unsure = unsure or (faded and not clip_text)
+        if grounds != background:
+            hovered.append((grounds, compounds))
     indent_far = parent.indent_far
     if cascade.sets("text-indent"):
         indent_far = any(
@@ -243,6 +258,7 @@ def compute(cascade: Cascade, parent: Computed, viewport: Viewport | None) -> Co
         svg=parent.svg,
         custom=parent.custom,
         registered=parent.registered,
+        hovered=tuple(dict.fromkeys(hovered)),
     )
 
 
@@ -252,11 +268,12 @@ _INKS: Final = ("color", "-webkit-text-fill-color")
 _GROUNDS: Final = ("background-color", "background-image", "background-size")
 
 
-def _states(cascade: Cascade) -> tuple[Cascade, list[Cascade]]:
+def _states(cascade: Cascade) -> tuple[Cascade, list[tuple[Cascade, frozenset[Compound]]]]:
     """`cascade` split by the states in which rules that may apply set both the text colour and
     the background (``:hover`` rules that swap them): the cascade without those rules, and the
-    cascade in each such state. Rules make one state when the same selector state decides them:
-    the same selector but for the classes, id and tag of the element itself."""
+    cascade in each such state, with the compounds that name the element in it. Rules make one
+    state when the same selector state decides them: the same selector but for the classes, id
+    and tag of the element itself."""
     groups: dict[tuple[object, ...], dict[str, list[Rule]]] = {}
     for prop in (*_INKS, *_GROUNDS):
         for rule in cascade.maybe.get(prop, ()):
@@ -278,7 +295,7 @@ def _states(cascade: Cascade) -> tuple[Cascade, list[Cascade]]:
         {prop: [r for r in rules if id(r) not in taken] for prop, rules in cascade.maybe.items()},
         cascade.present,
     )
-    states: list[Cascade] = []
+    states: list[tuple[Cascade, frozenset[Compound]]] = []
     for group in paired:
         best = dict(cascade.best)
         for prop, rules in group.items():
@@ -286,18 +303,48 @@ def _states(cascade: Cascade) -> tuple[Cascade, list[Cascade]]:
             winner = best.get(prop)
             if winner is None or top.rank >= winner.rank:
                 best[prop] = top
-        states.append(Cascade(best, rest.maybe, cascade.present))
+        named = frozenset(r.selector.parts[-1] for rules in group.values() for r in rules)
+        states.append((Cascade(best, rest.maybe, cascade.present), named))
     return rest, states
 
 
-def _state_faint(state: Cascade, parent: Computed, alpha: float) -> bool:
-    """Whether text may be unreadable in `state`: a colour the reader cannot read, or one that
-    barely stands out from the background the state paints."""
+def _state_faint(state: Cascade, parent: Computed, alpha: float) -> tuple[bool, Backdrop | None]:
+    """Whether text may be unreadable in `state` (a colour the reader cannot read, or one that
+    barely stands out from the background the state paints), and that background."""
     colors, clear, paints = _paint(state, parent)
     background, unreadable = _backdrop(state, parent.background, colors)
     if clear or unreadable:
+        return True, background
+    return background is not None and faint(paints or colors, alpha, background), background
+
+
+def _hover_faint(
+    cascade: Cascade,
+    compounds: frozenset[Compound],
+    parent: Computed,
+    ink: tuple[tuple[Rgba, ...], bool],
+    grounds: Backdrop | None,
+    alpha: float,
+) -> bool:
+    """Whether the text colour an element sets for itself may be unreadable over `grounds`, a
+    background an ancestor paints only in a state (named by `compounds`) whose rules also set
+    the ancestor's text colour: the colours rules for that same state give the element (a rule
+    through one of `compounds`), or else the colours `ink` it has outside it."""
+    colors, clear = ink
+    stated = [
+        rule.value
+        for prop in _INKS
+        for rule in cascade.maybe.get(prop, ())
+        if not compounds.isdisjoint(rule.selector.parts[:-1])
+    ]
+    if stated:
+        found = [None if v is None else _colours(v, parent.colors) for v in stated]
+        if any(f is None for f in found):
+            return True
+        colors, clear = tuple(c for f in found if f is not None for c in f), False
+    if clear:
         return True
-    return background is not None and faint(paints or colors, alpha, background)
+    return grounds is not None and faint(colors, alpha, grounds)
 
 
 def _inherits(cascade: Cascade, prop: str, inherited: bool, test: Callable[[str], bool]) -> bool:
@@ -440,6 +487,109 @@ def _obscured(cascade: Cascade, viewport: Viewport | None) -> bool:
         if clipped and any(_tiny(v, viewport) for p in sizes for v in cascade.values(p)):
             return True
     return False
+
+
+def stowed(values: dict[str, str], viewport: Viewport | None) -> bool:
+    """Whether a box's own certain `values` certainly put it out of sight: a clip path that
+    keeps almost none of it, a ``transform``, ``rotate`` and ``scale`` that squash it to
+    nothing, or, when nothing paints past its edges or keeps it from shrinking, a size of at
+    most a pixel or a single translation by its whole size (a closed drawer, accordion or
+    modal). A value the reader cannot read does not."""
+    clip = functions(values.get("clip-path", "")) or []
+    if len(clip) == 1 and clip[0][0] in ("inset", "circle", "ellipse", "polygon") and viewport:
+        width, height = float(viewport[0]), float(viewport[1])
+        kept = _clip_area(clip[0][0], clip[0][1], width, height)
+        if kept is not None and kept <= FAINT * width * height:
+            return True
+    try:
+        matrix = _multiply(
+            _rotate_property(_plain(values.get("rotate"))),
+            _multiply(
+                _scale_property(_plain(values.get("scale"))),
+                _transform_matrix(_plain(values.get("transform")), None),
+            ),
+        )
+    except _UnreadableError:
+        matrix = _IDENTITY
+    if _degenerate(matrix):
+        return True
+    if any(not _no_extent(prop, value) for prop, value in values.items() if prop in EXTENTS):
+        return False
+    for prop in _SIZES:
+        value = values.get(prop, "")
+        share = parse_percent(value)
+        px = length_px(value, viewport, 16.0, viewport[1] if viewport else None)
+        if share == 0 or (share is None and px is not None and px <= 1):
+            return True
+    return _translated_off(values, viewport)
+
+
+def _no_extent(prop: str, value: str) -> bool:
+    """Whether a value of an `EXTENTS` property certainly adds next to nothing to a box's size
+    or paint: no shadow, no minimum size or padding, and borders and outlines a few pixels wide
+    at most."""
+    if value in _WIDE or value == "none" or (prop.startswith("min-") and value == "auto"):
+        return True
+    if prop == "box-shadow":
+        return False
+    edge = prop.startswith(("border", "outline"))
+    for token in tokens(value):
+        if edge and (token in _EDGE_WORDS or parse_color(token) is not None):
+            continue
+        px = length_px(token, None) if "(" not in token else None
+        if px is None or px > (_EDGE_PX if edge else 0):
+            return False
+    return True
+
+
+_EDGE_WORDS: Final = words(
+    "none hidden solid dashed dotted double groove ridge inset outset auto thin medium thick "
+    "currentcolor"
+)
+
+
+_EDGE_PX: Final = 5.0
+
+
+def _translated_off(values: dict[str, str], viewport: Viewport | None) -> bool:
+    """Whether a box at its containing block's edges is moved by its whole width or height by
+    a single translation (a ``transform`` of one ``translate`` function, or the ``translate``
+    property) and nothing else moves it."""
+    if any(_plain(values.get(prop)) for prop in ("rotate", "scale")):
+        return False
+    for prop in (*_MARGINS, "top", "left", "right", "bottom"):
+        value = values.get(prop, "auto")
+        if value not in _WIDE and value != "auto" and length_px(value, None) != 0:
+            return False
+    transform, translate = _plain(values.get("transform")), _plain(values.get("translate"))
+    found = functions(transform) or []
+    if translate and not transform:
+        moves = tokens(translate)[:2]
+    elif transform and not translate and len(found) == 1 and found[0][0] in _MOVES:
+        name, args = found[0]
+        moves = split_args(args)[:2]
+        if name == "translatey":
+            moves = ["0", *moves[:1]]
+    else:
+        return False
+    return any(_moved_off(move, viewport) for move in moves)
+
+
+_MOVES: Final = words("translate translatex translatey translate3d")
+
+
+def _plain(value: str | None) -> str:
+    return "" if value is None or value in _WIDE or value == "none" else value
+
+
+def _moved_off(value: str, viewport: Viewport | None) -> bool:
+    """Whether a translation certainly moves a box by its own size, or more."""
+    fixed = length_px(value, viewport, 16.0, 0.0)
+    scaled = length_px(value, viewport, 16.0, 100.0)
+    if fixed is None or scaled is None:
+        return False
+    share = scaled - fixed
+    return abs(share) >= 100 and fixed * share >= 0
 
 
 def _offset_far(value: str | None, viewport: Viewport | None, sign: int, side: int | None) -> bool:

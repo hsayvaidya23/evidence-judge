@@ -627,11 +627,18 @@ piece of text three ways:
   offsets too, and a fixed box outside the viewport), margins or `text-indent`, a zero-size
   box that clips, scrolls or contains the paint of its overflow; `backface-visibility: hidden`
   on a box it or an ancestor may turn to show its back; a 3D transform under an ancestor's
-  `perspective`; an `animation` whose `@keyframes` may hide text at any point (a fade-in from
-  `opacity: 0` included); text under a fixed or absolute box with an opaque background
-  colour that covers the whole viewport or its containing block (`inset: 0`, or `top` and
+  `perspective`; an `animation` (or `-webkit-animation`) whose `@keyframes` may hide text and
+  that may not come to rest showing it (a fade-in that ends within five seconds at a keyframe
+  that shows the text, or that fills nothing, reads as shown; one that is paused, repeats
+  forever, steps, follows the scroll, runs backwards onto its hidden start, runs beside
+  another animation or sets a custom property does not); a text colour an element sets for
+  itself over a background its ancestor paints only on `:hover` (or in another state), unless
+  a rule for that state sets the element's colour too; text under a fixed or absolute box
+  with an opaque background (a colour, an opaque gradient or a `url()` picture, which counts
+  as opaque) that covers the whole viewport or its containing block (`inset: 0`, or `top` and
   `left` 0 with 100% or `100vw`/`100vh` sizes) and is painted above it (a higher `z-index`,
-  or a later place in the page for the same one); SVG presentation attributes
+  or a later place in the page for the same one), unless the box's own styles put it out of
+  sight (slid off by its own size, scaled to nothing, clipped away, collapsed); SVG presentation attributes
   (`font-size`, `transform`, `clip-path`, `mask`, `filter`, `fill`, `opacity`, ...) count like
   the properties they name; a hiding utility class (`hidden`, `d-none`, `sr-only`, `visually-hidden`,
   `invisible`) that no recorded stylesheet defines; and all text of a page whose stylesheets
@@ -639,7 +646,7 @@ piece of text three ways:
   cascade gives each element (with fallbacks, cycles, and `@property` initial values and
   inheritance), reads `env()` safe-area insets as 0, and evaluates `calc()`, `min()`, `max()`,
   `clamp()` and `abs()`; a percentage offset counts as a share of the viewport. It does not
-  lay the page out, so an opaque box smaller than its containing block that happens to sit
+  lay the page out (a snapshot records no element sizes or positions), so an opaque box smaller than its containing block that happens to sit
   over the text, or one sized another way, is not seen. Nor does it see images: a
   background picture over a solid colour is taken to look like that colour, so white text over
   a white picture on a dark `background-color` reads as shown. Values, `var()` chains, selectors and blocks nested more than 32

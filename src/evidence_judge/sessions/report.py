@@ -21,7 +21,7 @@ from evidence_judge.sessions.models import (
 _COMMAND_CHARS = 120
 
 
-def _detail(event: SessionEvent) -> str:
+def describe_event(event: SessionEvent) -> str:
     if isinstance(event, CommandEvent):
         command = " ".join(event.command.split())
         if len(command) > _COMMAND_CHARS:
@@ -89,7 +89,7 @@ def summarize(run: SessionRun) -> dict[str, Any]:
                 "id": e.id,
                 "tool": e.tool,
                 "status": _status(e),
-                "detail": _detail(e),
+                "detail": describe_event(e),
                 "flags": _flags(e),
             }
             for e in run.events

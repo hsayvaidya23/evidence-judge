@@ -18,6 +18,7 @@ from evidence_judge import engine, ingest
 from evidence_judge.config import EnvFileError, Settings, describe_settings_error, read_settings
 from evidence_judge.core.evidence import Run
 from evidence_judge.core.site import Site
+from evidence_judge.core.spec_errors import SpecError, load_yaml
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Dimension, RunVerdict, Support, TamperLevel
 from evidence_judge.ingest import IngestError, MismatchedEvidenceError
@@ -41,6 +42,11 @@ from evidence_judge.redact import RedactionReport, Redactor
 from evidence_judge.report.console import summarize_evidence
 from evidence_judge.report.html_report import write_html
 from evidence_judge.report.json_report import write_json
+from evidence_judge.sessions.html import write_session_html
+from evidence_judge.sessions.ingest import load_session
+from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
+from evidence_judge.sessions.models import SessionRun
+from evidence_judge.sessions.predicates import SessionSpec
 
 MAX_VERDICT_BYTES = 50 * 1024 * 1024
 MAX_ANSWER_CHARS = 200_000
@@ -60,7 +66,7 @@ class ServerConfig:
     roots: Roots
     settings: Callable[[], Settings] = read_settings
     allow_llm: bool = True
-    """False makes every judge_run offline whatever the client asks."""
+    """False makes every judge_run and judge_session offline whatever the client asks."""
 
 
 @dataclass(slots=True)
@@ -302,6 +308,134 @@ async def judge(config: ServerConfig, req: JudgeRequest, prepared: PreparedJudge
         redaction=_describe_redaction(report),
         used_llm=llm is not None,
     )
+
+
+SessionFormat = Literal["claude_code", "codex", "evidence_log"]
+
+
+@dataclass(slots=True)
+class SessionRequest:
+    transcript: str
+    format: SessionFormat = "claude_code"
+    log_key: str | None = None
+    log_anchor: str | None = None
+    answer: str | None = None
+    spec: str | None = None
+    spec_yaml: str | None = None
+    offline: bool = True
+    require_tamper_evidence: bool = False
+    run_id: str | None = None
+    json_report: str | None = None
+    html_report: str | None = None
+    overwrite: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedSession:
+    """A judge_session request with its paths checked, spec parsed and session loaded."""
+
+    run: SessionRun
+    spec: SessionSpec | None
+    settings: Settings
+    json_path: Path | None
+    html_path: Path | None
+
+
+def _session_spec(roots: Roots, path: str | None, text: str | None) -> SessionSpec | None:
+    if path is not None and text is not None:
+        raise ToolInputError("use either spec or spec_yaml, not both")
+    if path is not None:
+        spec_path = _opt(roots, path, "spec")
+        assert spec_path is not None
+        text = _read_text(spec_path, "spec")
+    if text is None:
+        return None
+    try:
+        return load_yaml(text, SessionSpec)
+    except SpecError as e:
+        raise ToolInputError(f"invalid session spec:\n{e}") from e
+
+
+def _load_session(roots: Roots, req: SessionRequest) -> SessionRun:
+    transcript = _opt(roots, req.transcript, "transcript")
+    log_key = _opt(roots, req.log_key, "log_key")
+    log_anchor = _opt(roots, req.log_anchor, "log_anchor")
+    if req.format != "evidence_log" and (log_key or log_anchor):
+        raise ToolInputError("log_key and log_anchor apply only to format evidence_log")
+    if req.format == "evidence_log" and not (log_key and log_anchor):
+        raise ToolInputError(
+            "format evidence_log needs log_key and log_anchor inside the allowed roots"
+        )
+    try:
+        return load_session(
+            claude_code=transcript if req.format == "claude_code" else None,
+            codex=transcript if req.format == "codex" else None,
+            evidence_log=transcript if req.format == "evidence_log" else None,
+            answer=req.answer,
+            log_key=log_key,
+            log_anchor=log_anchor,
+        )
+    except (OSError, ValueError) as e:
+        raise ToolInputError(f"could not load the session: {e}") from e
+
+
+def prepare_session(config: ServerConfig, req: SessionRequest) -> PreparedSession:
+    """The blocking half of judge_session: checks paths, reads the spec and loads the session."""
+    roots = config.roots
+    if req.answer is not None and len(req.answer) > MAX_ANSWER_CHARS:
+        raise ToolInputError(f"answer exceeds {MAX_ANSWER_CHARS} characters")
+    json_path = _out(roots, req.json_report, "json_report", "json", req.overwrite)
+    html_path = _out(roots, req.html_report, "html_report", "html", req.overwrite)
+    settings = settings_of(config)
+    spec = _session_spec(roots, req.spec, req.spec_yaml)
+    return PreparedSession(_load_session(roots, req), spec, settings, json_path, html_path)
+
+
+async def judge_session(
+    config: ServerConfig, req: SessionRequest, prepared: PreparedSession
+) -> JudgeResult:
+    """The async half of judge_session: redact, judge (never re-running the tests), and write
+    the requested reports."""
+    llm = _llm(config, prepared.settings, req.offline)
+    session_judge = SessionJudge(prepared.settings, llm)
+    options = SessionJudgeOptions(
+        offline=llm is None,
+        spec=prepared.spec,
+        require_tamper_evidence=req.require_tamper_evidence,
+        run_id=req.run_id,
+    )
+    try:
+        run, options, report = session_judge.redact(prepared.run, options)
+    except ValueError as e:
+        raise ToolInputError(f"redaction key: {e}") from e
+    try:
+        verdict = await session_judge.judge(run, options)
+    except LLMConfigError as e:
+        raise ToolInputError(f"{e} (judge with offline=true to skip the model)") from e
+    except LLMError as e:
+        raise ToolInputError(f"LLM error: {e}") from e
+    return JudgeResult(
+        verdict=verdict,
+        reports=_write_session_reports(verdict, run, prepared.json_path, prepared.html_path),
+        redaction=_describe_redaction(report),
+        used_llm=llm is not None,
+    )
+
+
+def _write_session_reports(
+    verdict: RunVerdict, run: SessionRun, json_path: Path | None, html_path: Path | None
+) -> list[WrittenReport]:
+    written: list[WrittenReport] = []
+    try:
+        if json_path is not None:
+            write_json(verdict, json_path)
+            written.append(WrittenReport(kind="json", path=str(json_path)))
+        if html_path is not None:
+            write_session_html(verdict, run, html_path)
+            written.append(WrittenReport(kind="html", path=str(html_path)))
+    except OSError as e:
+        raise ToolInputError(f"cannot write report: {e.strerror or e}") from e
+    return written
 
 
 def _write_reports(

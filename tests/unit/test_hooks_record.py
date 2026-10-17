@@ -448,3 +448,14 @@ def test_record_skips_other_events(tmp_path: Path) -> None:
 def test_the_redactor_survives_bad_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EVJ_MAX_BODY_CHARS", "lots")
     assert isinstance(record_module.redactor(), Redactor)
+
+
+def test_the_redactor_reads_the_key_from_the_env_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env_file = tmp_path / "evj.env"
+    env_file.write_text("EVJ_REDACTION_KEY=from-the-env-file\n")
+    monkeypatch.delenv("EVJ_REDACTION_KEY", raising=False)
+    monkeypatch.setenv("EVJ_ENV_FILE", str(env_file))
+    expected = Redactor(b"from-the-env-file").fingerprint("hunter2")
+    assert record_module.redactor().fingerprint("hunter2") == expected

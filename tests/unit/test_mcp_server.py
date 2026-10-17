@@ -91,6 +91,7 @@ async def test_tools_are_listed_with_input_and_output_schemas(workspace: Path) -
         tools = {t.name: t for t in (await client.list_tools()).tools}
     assert set(tools) == {
         "judge_run",
+        "judge_session",
         "inspect_run",
         "explain_verdict",
         "validate_spec",
@@ -196,6 +197,101 @@ async def test_judge_run_input_errors_are_tool_errors(
         entry["request"]["url"] = "https://elsewhere.test/unrelated"
     (workspace / "other.har").write_text(json.dumps(har), encoding="utf-8")
     assert message in await _fail(workspace, "judge_run", args)
+
+
+SECRET = "sk-ant-api03-" + "E" * 40
+
+
+def _sessions(workspace: Path) -> None:
+    sessions = FIXTURES / "sessions"
+    shutil.copy(sessions / "claude_code" / "honest_success.jsonl", workspace / "claude.jsonl")
+    shutil.copy(sessions / "claude_code" / "honest_failure.jsonl", workspace / "failure.jsonl")
+    shutil.copy(sessions / "codex" / "honest_success.exec.jsonl", workspace / "codex.jsonl")
+
+
+async def test_judge_session_judges_a_transcript_and_writes_reports(workspace: Path) -> None:
+    _sessions(workspace)
+    args = {"transcript": "claude.jsonl", "json_report": "s.json", "html_report": "s.html"}
+    result = await _call(workspace, "judge_session", args)
+    judged = JudgeResult.model_validate(result.structured_content)
+    assert judged.verdict.outcome is Outcome.PASS, judged.verdict.summary
+    assert judged.verdict.verification is not None
+    assert judged.verdict.verification.method.value == "transcript"
+    assert any(c.citations for c in judged.verdict.claims)
+    assert not judged.used_llm
+    assert [r.kind for r in judged.reports] == ["json", "html"]
+    assert _text(result).startswith("PASS score")
+    saved = RunVerdict.model_validate_json((workspace / "s.json").read_text("utf-8"))
+    assert saved.outcome is Outcome.PASS
+    assert "cmd#" in (workspace / "s.html").read_text("utf-8")
+
+
+async def test_judge_session_reads_codex_and_redacts_the_answer(workspace: Path) -> None:
+    _sessions(workspace)
+    args = {"transcript": "codex.jsonl", "format": "codex", "answer": f"All pass. {SECRET}"}
+    result = await _call(workspace, "judge_session", args)
+    assert SECRET not in json.dumps(result.structured_content) + _text(result)
+    judged = JudgeResult.model_validate(result.structured_content)
+    assert "redacted" in judged.redaction
+    assert judged.verdict.outcome is Outcome.NEEDS_REVIEW
+
+
+async def test_judge_session_never_runs_the_specs_rerun(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("judge_session ran a command")
+
+    monkeypatch.setattr("evidence_judge.sessions.rerun.execute", refuse)
+    monkeypatch.setattr("evidence_judge.sessions.cli.execute", refuse)
+    _sessions(workspace)
+    spec = "rerun:\n  command: [touch, ran]\n"
+    result = await _call(
+        workspace, "judge_session", {"transcript": "claude.jsonl", "spec_yaml": spec}
+    )
+    judged = JudgeResult.model_validate(result.structured_content)
+    assert judged.verdict.verification is not None
+    assert judged.verdict.verification.method.value == "transcript"
+    assert not (workspace / "ran").exists()
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        ({"transcript": "nope.jsonl"}, "does not exist"),
+        ({"transcript": "codex.jsonl"}, "could not load the session"),
+        ({"transcript": "claude.jsonl", "format": "evidence_log"}, "needs log_key and log_anchor"),
+        ({"transcript": "claude.jsonl", "log_key": "claude.jsonl"}, "only to format evidence_log"),
+        ({"transcript": "claude.jsonl", "spec_yaml": "id: x\n"}, "invalid session spec"),
+        ({"transcript": "claude.jsonl", "spec": "x", "spec_yaml": "task: x"}, "either spec"),
+        ({"transcript": "claude.jsonl", "answer": "x" * 200_001}, "answer exceeds"),
+        ({"transcript": "claude.jsonl", "format": "browser"}, "format"),
+    ],
+)
+async def test_judge_session_input_errors_are_tool_errors(
+    workspace: Path, args: dict[str, Any], message: str
+) -> None:
+    _sessions(workspace)
+    assert message in await _fail(workspace, "judge_session", args)
+
+
+async def test_judge_session_refuses_paths_outside_the_roots(
+    workspace: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    outside = tmp_path_factory.mktemp("outside")
+    shutil.copy(FIXTURES / "sessions" / "claude_code" / "honest_success.jsonl", outside / "s.jsonl")
+    message = await _fail(workspace, "judge_session", {"transcript": str(outside / "s.jsonl")})
+    assert "outside the allowed roots" in message
+
+
+async def test_judge_session_online_needs_a_model(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _sessions(workspace)
+    args = {"transcript": "claude.jsonl", "offline": False}
+    assert "--offline-only" in await _fail(workspace, "judge_session", args, allow_llm=False)
+    monkeypatch.setattr(evidence_judge.mcp.service.factory, "build_llm", lambda settings: None)
+    assert "ANTHROPIC_API_KEY" in await _fail(workspace, "judge_session", args)
 
 
 async def test_bad_argument_types_are_tool_errors(workspace: Path) -> None:

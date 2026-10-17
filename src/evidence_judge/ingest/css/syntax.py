@@ -20,13 +20,36 @@ TRACKED: Final = words(
     "background-clip "
     "-webkit-background-clip fill fill-opacity offset offset-path mask mask-image mask-border "
     "mask-border-source -webkit-mask -webkit-mask-image -webkit-mask-box-image z-index "
-    "backface-visibility perspective animation animation-name"
+    "backface-visibility perspective animation-name animation-duration animation-timing-function "
+    "animation-delay animation-iteration-count animation-direction animation-fill-mode "
+    "animation-play-state animation-timeline animation-composition animation-trigger "
+    "min-width min-height min-block-size min-inline-size padding padding-top padding-right "
+    "padding-bottom padding-left padding-block padding-inline padding-block-start "
+    "padding-block-end padding-inline-start padding-inline-end border border-width border-top "
+    "border-right border-bottom border-left border-top-width border-right-width "
+    "border-bottom-width border-left-width border-block border-inline border-block-width "
+    "border-inline-width border-block-start border-block-end border-inline-start "
+    "border-inline-end border-block-start-width border-block-end-width "
+    "border-inline-start-width border-inline-end-width outline outline-width box-shadow"
 )
 """The properties the reader applies: what removes an element, and what can hide its text."""
 
 
+ANIMATIONS: Final = frozenset(prop for prop in TRACKED if prop.startswith("animation-"))
+"""The ``animation`` longhands the reader applies: which ``@keyframes`` an element runs, and
+whether it comes to rest at their end."""
+
+
+EXTENTS: Final = frozenset(
+    prop for prop in TRACKED if prop.startswith(("min-", "padding", "border", "outline", "box-"))
+)
+"""What paints beyond a box's width and height, or keeps it from shrinking: a minimum size,
+padding, borders, an outline and shadows. Only overlays read them (`visibility.stowed`)."""
+
+
 SHORTHANDS: Final = words(
-    "all font background inset inset-inline inset-block margin margin-inline margin-block overflow"
+    "all font background inset inset-inline inset-block margin margin-inline margin-block overflow "
+    "animation"
 )
 """The shorthands whose tracked longhands the reader applies. One whose value holds a
 ``var()`` is kept whole (as a declaration of the shorthand) until the cascade substitutes it."""
@@ -114,6 +137,8 @@ def parse_declaration(text: str) -> Iterator[tuple[str, str | None, bool]]:
     custom = prop.startswith("--")
     if not custom:
         prop = prop.lower()
+        if prop.startswith("-webkit-animation"):
+            prop = prop.removeprefix("-webkit-")
     if not colon or not (custom or prop in TRACKED or prop in SHORTHANDS):
         return
     if "\\" in raw:
@@ -154,7 +179,7 @@ def _lowered(value: str) -> str:
     return "".join(out)
 
 
-def expand(prop: str, value: str) -> Iterator[tuple[str, str]]:
+def expand(prop: str, value: str) -> Iterator[tuple[str, str | None]]:
     """The tracked longhands a declaration sets."""
     match prop:
         case "all":
@@ -180,6 +205,8 @@ def expand(prop: str, value: str) -> Iterator[tuple[str, str]]:
                 yield f"{prop}-start", start
             else:
                 yield from ((f"{prop}-start", start), (f"{prop}-end", rest[0] if rest else start))
+        case "animation":
+            yield from _animation(value)
         case "overflow":
             first, *rest = value.split() or [""]
             yield from (("overflow-x", first), ("overflow-y", rest[0] if rest else first))
@@ -204,6 +231,94 @@ def _background(value: str) -> Iterator[tuple[str, str]]:
     yield "background-size", ", ".join(sizes)
     if "text" in value.split():
         yield "background-clip", "text"
+
+
+_EASINGS: Final = words("linear ease ease-in ease-out ease-in-out step-start step-end")
+
+
+_DIRECTIONS: Final = words("normal reverse alternate alternate-reverse")
+
+
+_FILLS: Final = words("none forwards backwards both")
+
+
+_PLAY_STATES: Final = words("running paused")
+
+
+_ANIMATION_SLOTS: Final = (
+    "animation-duration",
+    "animation-timing-function",
+    "animation-delay",
+    "animation-iteration-count",
+    "animation-direction",
+    "animation-fill-mode",
+    "animation-play-state",
+    "animation-name",
+)
+
+
+def _animation(value: str) -> Iterator[tuple[str, str | None]]:
+    """The longhands an ``animation`` shorthand sets (each a list, one item per animation; None
+    for all of them when one it cannot read), and the ``animation-timeline`` it resets."""
+    if value in ("inherit", "initial", "unset", "revert", "revert-layer"):
+        yield from ((slot, value) for slot in _ANIMATION_SLOTS)
+        yield "animation-timeline", value
+        return
+    listed: dict[str, list[str]] = {slot: [] for slot in _ANIMATION_SLOTS}
+    for layer in split_commas(value) or [value]:
+        found = _animation_layer(layer)
+        if found is None:
+            yield from ((slot, None) for slot in _ANIMATION_SLOTS)
+            yield "animation-timeline", None
+            return
+        for slot, item in found.items():
+            listed[slot].append(item)
+    yield from ((slot, ", ".join(items)) for slot, items in listed.items())
+    yield "animation-timeline", "auto"
+
+
+def _animation_layer(layer: str) -> dict[str, str] | None:
+    """The longhands one animation of the shorthand gives (their initial values where it gives
+    none), None when it cannot tell them apart."""
+    found: dict[str, str] = {}
+    times: list[str] = []
+    for token in tokens(layer):
+        number = parse_number(token)
+        if number is not None and number[1] in ("s", "ms"):
+            times.append(token)
+            continue
+        slot = _animation_slot(token, number is not None and not number[1])
+        if slot is None or slot in found:
+            if "(" in token or "animation-name" in found:
+                return None
+            slot = "animation-name"
+        found[slot] = token
+    if len(times) > 2:
+        return None
+    defaults = ("0s", "ease", "0s", "1", "normal", "none", "running", "none")
+    for slot, default in zip(_ANIMATION_SLOTS, defaults, strict=True):
+        found.setdefault(slot, default)
+    if times:
+        found["animation-duration"] = times[0]
+    if len(times) > 1:
+        found["animation-delay"] = times[1]
+    return found
+
+
+def _animation_slot(word: str, count: bool) -> str | None:
+    """The longhand a keyword or number of the ``animation`` shorthand sets (None for a name)."""
+    if word in _EASINGS or word.startswith(("cubic-bezier(", "steps(", "linear(")):
+        return "animation-timing-function"
+    if count or word == "infinite":
+        return "animation-iteration-count"
+    for slot, keywords in (
+        ("animation-direction", _DIRECTIONS),
+        ("animation-fill-mode", _FILLS),
+        ("animation-play-state", _PLAY_STATES),
+    ):
+        if word in keywords:
+            return slot
+    return None
 
 
 _SIZE_WORDS: Final = frozenset({"auto", "cover", "contain"})

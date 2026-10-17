@@ -1,5 +1,5 @@
 name: Evidence Judge
-description: Grade a recorded browser-agent run by checking every claim against the evidence; fail the job on FAIL.
+description: Grade a recorded browser-agent run or coding-agent session by checking every claim against the evidence; fail the job on FAIL.
 author: Yash Vaidya
 branding:
   icon: check-square
@@ -14,6 +14,16 @@ inputs:
     required: false
   browser-use:
     description: Path to a browser-use history JSON (or its run directory)
+    required: false
+  session-transcript:
+    description: "Coding-agent session record to judge with `evidence-judge session judge` instead of a browser run: a Claude Code transcript, Codex exec --json output or rollout, or an evidence log (see session-format)"
+    required: false
+  session-format:
+    description: "What session-transcript is: claude-code, codex or evidence-log, any case"
+    required: false
+    default: claude-code
+  session-spec:
+    description: Session spec YAML for session-transcript
     required: false
   answer-file:
     description: File with the agent's final answer
@@ -74,6 +84,14 @@ runs:
         EJ_OFFLINE: ${{ inputs.offline }}
         EJ_FAIL_ON_REVIEW: ${{ inputs.fail-on-review }}
         EJ_UPLOAD_REPORT: ${{ inputs.upload-report }}
+        EJ_SESSION_TRANSCRIPT: ${{ inputs.session-transcript }}
+        EJ_SESSION_FORMAT: ${{ inputs.session-format }}
+        EJ_SESSION_SPEC: ${{ inputs.session-spec }}
+        EJ_TRACE: ${{ inputs.trace }}
+        EJ_HAR: ${{ inputs.har }}
+        EJ_BROWSER_USE: ${{ inputs.browser-use }}
+        EJ_REASONING_FILE: ${{ inputs.reasoning-file }}
+        EJ_SPEC: ${{ inputs.spec }}
       run: |
         flag() {
           case "$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" in
@@ -84,6 +102,25 @@ runs:
         flag offline "$EJ_OFFLINE"
         flag fail-on-review "$EJ_FAIL_ON_REVIEW"
         flag upload-report "$EJ_UPLOAD_REPORT"
+        if [ -z "${EJ_SESSION_TRANSCRIPT:-}" ]; then
+          if [ -n "${EJ_SESSION_SPEC:-}" ]; then
+            echo "::error::input session-spec needs session-transcript"; exit 1
+          fi
+          echo "mode=browser" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        for browser in "${EJ_TRACE:-}" "${EJ_HAR:-}" "${EJ_BROWSER_USE:-}" "${EJ_REASONING_FILE:-}" "${EJ_SPEC:-}"; do
+          if [ -n "$browser" ]; then
+            echo "::error::session-transcript judges a session: drop trace, har, browser-use, reasoning-file and spec (use session-spec)"; exit 1
+          fi
+        done
+        format=$(printf '%s' "${EJ_SESSION_FORMAT:-claude-code}" | tr '[:upper:]' '[:lower:]')
+        case "$format" in
+          claude-code | codex | evidence-log) ;;
+          *) echo "::error::input session-format must be claude-code, codex or evidence-log (any case)"; exit 1 ;;
+        esac
+        echo "mode=session" >> "$GITHUB_OUTPUT"
+        echo "session-format=$format" >> "$GITHUB_OUTPUT"
     - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       with:
         python-version: ${{ inputs.python-version }}
@@ -108,6 +145,10 @@ runs:
         EJ_ANSWER_FILE: ${{ inputs.answer-file }}
         EJ_REASONING_FILE: ${{ inputs.reasoning-file }}
         EJ_SPEC: ${{ inputs.spec }}
+        EJ_MODE: ${{ steps.inputs.outputs.mode }}
+        EJ_SESSION_TRANSCRIPT: ${{ inputs.session-transcript }}
+        EJ_SESSION_FORMAT: ${{ steps.inputs.outputs.session-format }}
+        EJ_SESSION_SPEC: ${{ inputs.session-spec }}
         EJ_OFFLINE: ${{ steps.inputs.outputs.offline }}
         EJ_FAIL_ON_REVIEW: ${{ steps.inputs.outputs.fail-on-review }}
         EJ_API_KEY: ${{ inputs.anthropic-api-key }}
@@ -126,13 +167,19 @@ runs:
             echo "::warning::EVJ_REDACT is false: the verdict and uploaded report may contain secrets" ;;
         esac
         out=$(mktemp -d "$RUNNER_TEMP/evidence-judge.XXXXXX")
-        args=(judge --out "$out/verdict.json" --html "$out/report.html")
-        [ -n "$EJ_TRACE" ] && args+=(--trace "$EJ_TRACE")
-        [ -n "$EJ_HAR" ] && args+=(--har "$EJ_HAR")
-        [ -n "$EJ_BROWSER_USE" ] && args+=(--browser-use "$EJ_BROWSER_USE")
+        if [ "$EJ_MODE" = "session" ]; then
+          args=(session judge --out "$out/verdict.json" --html "$out/report.html")
+          args+=("--$EJ_SESSION_FORMAT" "$EJ_SESSION_TRANSCRIPT")
+          [ -n "$EJ_SESSION_SPEC" ] && args+=(--spec "$EJ_SESSION_SPEC")
+        else
+          args=(judge --out "$out/verdict.json" --html "$out/report.html")
+          [ -n "$EJ_TRACE" ] && args+=(--trace "$EJ_TRACE")
+          [ -n "$EJ_HAR" ] && args+=(--har "$EJ_HAR")
+          [ -n "$EJ_BROWSER_USE" ] && args+=(--browser-use "$EJ_BROWSER_USE")
+          [ -n "$EJ_REASONING_FILE" ] && args+=(--reasoning-file "$EJ_REASONING_FILE")
+          [ -n "$EJ_SPEC" ] && args+=(--spec "$EJ_SPEC")
+        fi
         [ -n "$EJ_ANSWER_FILE" ] && args+=(--answer-file "$EJ_ANSWER_FILE")
-        [ -n "$EJ_REASONING_FILE" ] && args+=(--reasoning-file "$EJ_REASONING_FILE")
-        [ -n "$EJ_SPEC" ] && args+=(--spec "$EJ_SPEC")
         [ "$EJ_OFFLINE" = "true" ] && args+=(--offline)
         # Agent text is untrusted: stop workflow-command processing while it can reach the log.
         stop_token="ej-$(python3 -c 'import secrets; print(secrets.token_hex(16))')"

@@ -12,7 +12,7 @@ from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
 from evidence_judge.sessions.models import CommandEvent, SessionRun
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import analyse
-from tests.unit.sessions_helpers import bash, edit, session
+from tests.unit.sessions_helpers import SETTINGS, bash, edit, session
 
 FIX = "I fixed the bug in `calc.py`."
 RED2N = (
@@ -53,7 +53,7 @@ async def _offline(run: SessionRun, **options: object) -> RunVerdict:
 async def _llm(run: SessionRun, *claims: dict[str, Any], **options: object) -> RunVerdict:
     llm = FakeLLM()
     llm.queue(SessionClaimExtraction, {"claims": list(claims)})
-    verdict = await SessionJudge(llm).judge(run, SessionJudgeOptions(**options))  # type: ignore[arg-type]
+    verdict = await SessionJudge(SETTINGS, llm).judge(run, SessionJudgeOptions(**options))  # type: ignore[arg-type]
     assert len(llm.calls) == 1
     return verdict
 

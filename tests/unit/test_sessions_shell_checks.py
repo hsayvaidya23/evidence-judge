@@ -13,7 +13,7 @@ from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
 from evidence_judge.sessions.normalize import ToolCall
 from evidence_judge.sessions.predicates import BuildPredicate
 from evidence_judge.sessions.shell import analyse
-from tests.unit.sessions_helpers import GREEN, bash, edit, session
+from tests.unit.sessions_helpers import GREEN, SETTINGS, bash, edit, session
 
 CLEAN = "All checks passed!"
 LINT_ANSWER = "Fixed `calc.py`. All tests pass and ruff check passes."
@@ -280,7 +280,7 @@ async def _llm_judge(push: ToolCall) -> RunVerdict:
         },
     ]
     llm.queue(SessionClaimExtraction, {"claims": claims})
-    return await SessionJudge(llm).judge(_pushed(push), SessionJudgeOptions())
+    return await SessionJudge(SETTINGS, llm).judge(_pushed(push), SessionJudgeOptions())
 
 
 async def test_an_llm_push_claim_that_drops_the_target_still_gets_it_checked() -> None:

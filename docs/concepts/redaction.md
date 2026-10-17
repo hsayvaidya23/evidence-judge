@@ -22,10 +22,10 @@ flowchart LR
 | Category | What |
 | --- | --- |
 | `auth` / `bearer` / `jwt` | `Authorization` and `Proxy-Authorization` credentials, bearer tokens, JWTs anywhere |
-| `cookie` | Every value in `Cookie` / `Set-Cookie` (names are kept) |
+| `cookie` | Every value in `Cookie` / `Set-Cookie` headers, and in `Cookie:` / `Set-Cookie:` lines written in free text (names are kept) |
 | `secret_header` | `X-API-Key`, `X-Auth-Token` and headers whose names contain token, secret, session, auth, password, api-key |
 | `api_key` | Common key formats: `sk-...`, `ghp_...`, `github_pat_...`, `AKIA...`, `xox[bp]-...`, `AIza...`, Stripe keys, GitLab tokens |
-| `secret_param` | Secret-looking URL query, fragment, form and JSON fields, URLs written inside text, and `password: ...`-style pairs in free text |
+| `secret_param` | Secret-looking URL query, fragment, form and JSON fields, URLs written inside text, and secrets written after their name in free text, with a separator (`password: hunter2`) or without one (`password hunter2`) |
 | `url_password` | Passwords in `user:password@host` URLs |
 | `secret_input` | Values typed into password, OTP, PIN or card-security-code fields |
 | `html_secret` | The `value` of password, one-time-code and token `<input>`s in page HTML, hidden CSRF tokens included |
@@ -72,5 +72,7 @@ To keep sensitive pixels out:
 - Judge with `--offline`, so no model call is made at all.
 
 Redaction is pattern-based: secrets in unusual formats, names, addresses and phone numbers may
-pass through. Review reports before sharing them. `--no-redact` (or `EVJ_REDACT=false`) disables
-all of it; use it only on synthetic data.
+pass through. Free text is matched conservatively so prose stays readable: a plain-word password
+(`password sunshine`) or a secret not introduced by its name is not redacted (see
+[SECURITY.md](../../SECURITY.md#limits)). Review reports before sharing them. `--no-redact` (or
+`EVJ_REDACT=false`) disables all of it; use it only on synthetic data.

@@ -23,9 +23,9 @@ from evidence_judge._cli_common import (
     Debug,
     ExitCode,
     FileOpt,
-    LLMChoice,
-    build_llm,
+    LlmOption,
     chosen_env_file,
+    chosen_llm,
     fail,
     internal,
     load_claims,
@@ -273,19 +273,6 @@ _LangfuseTraceId = Annotated[
 ]
 
 
-_Llm = Annotated[
-    LLMChoice | None,
-    typer.Option(
-        "--llm",
-        metavar="<backend>",
-        help=(
-            "LLM backend: anthropic (ANTHROPIC_API_KEY), or the claude-code, codex or gemini CLI "
-            "you are logged into. Default: EVJ_LLM_BACKEND"
-        ),
-    ),
-]
-
-
 @app.command()
 def judge(
     trace: _Trace = None,
@@ -333,7 +320,7 @@ def judge(
     offline: Annotated[
         bool, typer.Option("--offline", help="No LLM calls; heuristic claim extraction only")
     ] = False,
-    llm_backend: _Llm = None,
+    llm_backend: LlmOption = None,
     no_redact: Annotated[
         bool, typer.Option("--no-redact", help="Keep secrets and PII in evidence and reports")
     ] = False,
@@ -371,13 +358,7 @@ def judge(
             screenshot_root=screenshot_root,
         )
 
-        llm = None if offline else build_llm(settings)
-        if llm is None and not offline and llm_backend is not None:
-            raise CliError(
-                f"--llm {llm_backend.value} needs ANTHROPIC_API_KEY, which is not set "
-                "(set it, or pass --offline to judge without a model)",
-                ExitCode.INTERNAL,
-            )
+        llm = chosen_llm(settings, llm_backend, offline=offline)
         if no_redact:
             settings = settings.model_copy(update={"redact": False})
         redactor = load_redactor(settings, persistent=llm is not None) if settings.redact else None
@@ -494,7 +475,9 @@ def mcp_server(
     ] = 8000,
     offline_only: Annotated[
         bool,
-        typer.Option("--offline-only", help="Refuse judge_run calls that ask for a model"),
+        typer.Option(
+            "--offline-only", help="Refuse judge_run and judge_session calls that ask for a model"
+        ),
     ] = False,
 ) -> None:
     """Run an MCP server so coding agents can judge, inspect and explain runs as tools."""
@@ -527,8 +510,9 @@ def _bench_llm(settings: Settings, calls: int) -> LLMClient | None:
         raise CliError(f"could not initialise the LLM client: {e}", ExitCode.INTERNAL) from e
     if llm is None:
         raise CliError(
-            "--with-llm-baseline and --online need an LLM; set ANTHROPIC_API_KEY or pass --llm",
-            ExitCode.USAGE,
+            "--with-llm-baseline and --online need an LLM: the anthropic backend needs "
+            "ANTHROPIC_API_KEY, which is not set (set it, or pass --llm for a CLI backend)",
+            ExitCode.INTERNAL,
         )
     return llm
 
@@ -570,7 +554,7 @@ def bench(
             "--offline/--online", help="Evidence Judge without (default) or with LLM extraction"
         ),
     ] = True,
-    llm_backend: _Llm = None,
+    llm_backend: LlmOption = None,
     no_redact: Annotated[
         bool, typer.Option("--no-redact", help="Judge unredacted evidence and agent text")
     ] = False,
@@ -599,8 +583,10 @@ def bench(
         config = BenchConfig(seeds=seeds, offline=offline)
         calls = llm_calls_upper_bound(scenarios, config, baseline=with_llm_baseline)
         llm = _bench_llm(settings, calls)
+        if no_redact:
+            settings = settings.model_copy(update={"redact": False})
         redactor = None
-        if settings.redact and not no_redact:
+        if settings.redact:
             redactor = (
                 Redactor(redaction_key(*runs_dirs))
                 if llm is None and settings.redaction_key is None

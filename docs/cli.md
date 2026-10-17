@@ -131,7 +131,7 @@ evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3 \
 | `--with-llm-baseline` | Also judge every case with a transcript LLM judge (needs an LLM: `ANTHROPIC_API_KEY` or `--llm`) |
 | `--baseline-screenshot` | Show the baseline judge the final screenshot (not with `--llm gemini`, which cannot send images) |
 | `--offline` / `--online` | Evidence Judge without (default) or with LLM claim extraction |
-| `--llm BACKEND` | The LLM backend for `--online` and `--with-llm-baseline`: `anthropic`, `claude-code`, `codex` or `gemini`. Default: `EVJ_LLM_BACKEND` |
+| `--llm BACKEND` | The LLM backend for `--online` and `--with-llm-baseline`: `anthropic`, `claude-code`, `codex` or `gemini`. Default: `EVJ_LLM_BACKEND`. As for `judge`, `anthropic` without `ANTHROPIC_API_KEY` or a CLI that is missing or not logged in exits `4` |
 | `--no-redact` | Judge unredacted evidence and agent text |
 | `--quiet`, `-q` | Do not print the report |
 
@@ -140,8 +140,8 @@ Offline, redaction tokens are keyed by a digest of the files in the run director
 
 ## `evidence-judge mcp`
 
-Runs an MCP server exposing `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and
-`find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`); without it the
+Runs an MCP server exposing `judge_run`, `judge_session`, `inspect_run`, `explain_verdict`,
+`validate_spec` and `find_recordings`. Needs the `mcp` extra (`pip install "evidence-judge[mcp] @ git+https://github.com/hsayvaidya23/evidence-judge"`); without it the
 command exits `3`. See the [MCP server guide](guides/mcp.md) for client setup.
 
 ```bash
@@ -153,7 +153,7 @@ evidence-judge mcp [--root DIR]... [--http] [--port 8000] [--offline-only]
 | `--root DIR` | Directory clients may read and write files in; repeat for more. Paths resolve with every symlink followed, and anything outside every root is refused. Relative paths in tool calls resolve against the first root. Default: the working directory |
 | `--http` | Serve streamable HTTP at `http://127.0.0.1:<port>/mcp` instead of stdio. Binds to loopback only, with DNS-rebinding protection and no authentication |
 | `--port N` | Port for `--http` (default 8000) |
-| `--offline-only` | Refuse `judge_run` calls with `offline: false`, so the server never calls a model even when `ANTHROPIC_API_KEY` is set |
+| `--offline-only` | Refuse `judge_run` and `judge_session` calls with `offline: false`, so the server never calls a model even when `ANTHROPIC_API_KEY` is set |
 
 Settings come from the server's environment as for every command; `EVJ_REDACT` decides whether
 tool results are redacted.
@@ -190,7 +190,9 @@ which format the file looks like.
 | `--spec FILE` | Session spec YAML: `task`, `expect` and `forbid` lists of predicates, `ignore_edits` globs, `require_tamper_evidence`, a `rerun` block, `trusted_wrappers` (what a project wrapper runs: `{"make test": "pytest -q"}`; a run through it the session does not show is judged as that command until the session may have changed the wrapper's definition) |
 | `--claims FILE` | Pre-extracted session claims JSON; skips extraction |
 | `--out FILE` | Write the verdict JSON (schema `evidence-judge/run-verdict@1`) here |
+| `--html FILE` | Write the self-contained HTML report here: the claims with the tool calls they cite (command and exit code), spec expectations, how test results were verified (re-run or transcript), warnings and every recorded tool call. It shows the redacted session, and all agent text is escaped |
 | `--offline` | No LLM calls; heuristic claim extraction only |
+| `--llm BACKEND` | Where claim extraction's LLM calls go, as for `judge`: `anthropic`, `claude-code`, `codex` or `gemini`. Default: `EVJ_LLM_BACKEND`. A backend that cannot be used (a missing or logged-out CLI, `anthropic` without `ANTHROPIC_API_KEY`) exits `4`; without `--llm`, a missing key judges offline. `--offline` wins over it |
 | `--no-redact` | Keep secrets in commands, outputs and reports |
 | `--require-tamper-evidence` | Cap the run at needs review unless it comes from an evidence log or a harness stream |
 | `--rerun` | Run the spec's `rerun` command on a copy of `--project` in a clean environment and decide `test_result` predicates from the runner's own report instead of the recorded output; see [Independent re-run](design/coding-agent-sessions.md#independent-re-run) |

@@ -132,6 +132,19 @@ AUTH_TEXT_RE = re.compile(
     rf"(?i)(?<![A-Za-z0-9_-])((?:proxy-)?authorization[\"']?\s*[:=]\s*[\"']?(?:{_AUTH_SCHEMES}\s+)?)"
     rf"(?!{_AUTH_SCHEMES}\b)([^\s\"'<>,;]+)"
 )
+AUTH_SCHEME_END_RE = re.compile(rf"(?i){_AUTH_SCHEMES}\s+$")
+LABELLED_SECRET_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_\-.])((?:password|passwd|pwd|passcode|passphrase|token|secret"
+    r"|api[ _-]?key)[ \t]+(?:(?:is|was)[ \t]+)?)([^\s\"'<>,;=(\[{/~.][^\s\"'<>,;=]*+)(?!=)"
+)
+"""``password hunter2`` or ``api key is 9f8e...``: a secret's name and its value with no ``:`` or
+``=`` between them."""
+_COOKIE_PAIR = r"[!#$%&*+\-.^_`|~0-9A-Za-z]+=[^\s;,\"'<>\\]*"
+COOKIE_TEXT_RE = re.compile(
+    rf"(?i)(?<![A-Za-z0-9_\-.])((set-)?cookie2?[\"']?[ \t]*:[ \t]*[\"']?)"
+    rf"({_COOKIE_PAIR}(?:;[ \t]*{_COOKIE_PAIR})*)"
+)
+"""A ``Cookie:`` or ``Set-Cookie:`` line written in free text, up to the end of its pairs."""
 URL_IN_TEXT_RE = re.compile(r"(?i)\b(?:https?|wss?)://[^\s\"'<>\\`]+")
 ESCAPED_URL_RE = re.compile(r"(?i)\b(?:https?|wss?):\\/\\/(?:[^\s\"'<>\\`]|\\/)+")
 URL_TRAILING = ".,;:!?)]}"
@@ -292,6 +305,23 @@ def looks_like_secret(value: str) -> bool:
     Keeps prose such as "Password: required" or "Authorization: pending" intact.
     """
     return len(value) >= 20 or any(not ch.isalpha() for ch in value)
+
+
+def looks_like_labelled_secret(value: str) -> bool:
+    """A value written after a secret's name without a separator that could be a credential.
+
+    It needs six or more characters and a digit, a symbol other than ``-`` or ``'``, mixed case
+    inside the word, or 20+ characters, so prose such as "password field was empty", "token
+    expired" or "password-protected" is left alone. URLs are redacted by their own rule.
+    """
+    if len(value) < 6 or "://" in value:
+        return False
+    if len(value) >= 20 or any(ch.isdigit() for ch in value):
+        return True
+    if any(not ch.isalnum() and ch not in "-'" for ch in value):
+        return True
+    rest = value[1:]
+    return any(ch.isupper() for ch in rest) and any(ch.islower() for ch in value)
 
 
 def is_basic_credential(value: str) -> bool:

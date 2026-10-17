@@ -21,6 +21,7 @@ Pick one explicitly: Evidence Judge never guesses a backend from what is install
 ```bash
 evidence-judge judge --trace trace.zip --answer-file answer.txt --llm claude-code
 EVJ_LLM_BACKEND=codex evidence-judge judge --trace trace.zip --answer-file answer.txt
+evidence-judge session judge --claude-code latest --llm claude-code
 ```
 
 In Python, set the backend on `Settings` and build the client as usual:

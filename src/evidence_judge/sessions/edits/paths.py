@@ -23,7 +23,8 @@ _TEST_CONFIG: Final = re.compile(
     r"(?:jest|vitest)\.config\.json|vitest\.workspace\.[a-z]+|\.nycrc(?:\.[a-z]+)?|"
     r"\.c8rc(?:\.[a-z]+)?|\.taprc|\.coveragerc|codecov\.ya?ml|nextest\.toml|"
     r"\.cargo/config(?:\.toml)?|"
-    r"(?:GNU)?[Mm]akefile|[^/]+\.mk|\.?[Jj]ustfile|[Tt]askfile(?:\.dist)?\.ya?ml|Rakefile|"
+    r"(?:GNU)?makefile(?:\.[\w.-]+)?|[^/]+\.(?:mk|mak|make)|\.?[Jj]ustfile|"
+    r"[Tt]askfile(?:\.dist)?\.ya?ml|Rakefile|"
     r"magefile\.go|\.envrc|\.env(?:\.[\w.-]+)?)$",
     re.IGNORECASE,
 )
@@ -108,7 +109,11 @@ def session_config_reason(path: str) -> str | None:
 
 def is_test_path(path: str) -> bool:
     """A test file or test directory (`tests.py`, `test_x.py`, `x_test.go`, `x.spec.ts`,
-    `tests/`, `__tests__/`, ...), named with or without a trailing slash."""
+    `tests/`, `__tests__/`, ...), named with or without a trailing slash. Configuration (a
+    Makefile, `tox.ini`, `.env`, `.npmrc`, ...) is never a test, wherever it sits or however it
+    is named (`tests/tox.ini`, `test.mk`)."""
+    if is_config_path(path) or _SESSION_CONFIG.search(path) is not None:
+        return False
     return _TEST_PATH.search(path) is not None or _TEST_PATH.search(path + "/") is not None
 
 

@@ -1,0 +1,88 @@
+<div class="meta">
+        <div><span class="k">Source</span><b>claude_code · transcript</b></div>
+        <div><span class="k">Captured</span><b>command</b></div>
+        <div><span class="k">Claim coverage</span><b>100%</b></div>
+        <div><span class="k">Decided without LLM</span><b>100%</b></div>
+        <div><span class="k">Verified by</span><b>transcript: test results come from the output the session recorded</b></div>
+      </div>
+    </div>
+<section aria-labelledby="claims-h">
+      <header>
+        <h2 id="claims-h">Claims</h2>
+        <span class="count"><span>2 checked</span><span>2 supported</span></span>
+      </header>
+      <div class="claims">
+        <article class="claim panel t-ok" id="claim-1" style="--i: 0">
+          <div class="claim-head">
+            <p class="claim-text">2 tests fail</p>
+            <div class="claim-badges">
+<span class="tag" title="The task's success depends on this claim">Key</span>              <span class="pill badge">Supported</span>
+            </div>
+          </div>
+          <div class="claim-body">
+            <div class="said">
+              <span class="lbl">Agent said</span>
+              <blockquote>The suite ran: 3 tests, 1 passed, 2 failed.</blockquote>
+            </div>
+            <div class="evidence">
+              <span class="lbl">Evidence</span>
+              <p class="reason">cmd#2: pytest: 1 passed, 2 failed</p>
+              <div class="cites" aria-label="Evidence">
+<a class="cite t-bad" href="#ev-cmd-23-2" title=".venv/bin/python -m pytest -q"><span class="cid">cmd#2</span><span class="cdesc">.venv/bin/python -m pytest -q · exit 1</span></a>              </div>
+            </div>
+          </div>
+          <div class="claim-foot">
+            <span>checker <b>session</b></span>
+            <span>confidence <b>100%</b></span>
+            <span>id <b>c1</b></span>
+          </div>
+        </article>
+        <article class="claim panel t-ok" id="claim-2" style="--i: 1">
+          <div class="claim-head">
+            <p class="claim-text">** untouched</p>
+            <div class="claim-badges">
+              <span class="pill badge">Supported</span>
+            </div>
+          </div>
+          <div class="claim-body">
+            <div class="said">
+              <span class="lbl">Agent said</span>
+              <blockquote>I made no file changes.</blockquote>
+            </div>
+            <div class="evidence">
+              <span class="lbl">Evidence</span>
+              <p class="reason">no recorded edit or command changed **</p>
+            </div>
+          </div>
+          <div class="claim-foot">
+<span>No citations</span>            <span>checker <b>session</b></span>
+            <span>confidence <b>100%</b></span>
+            <span>id <b>c2</b></span>
+          </div>
+        </article>
+      </div>
+    </section>
+<section aria-labelledby="tl-h">
+      <header>
+        <h2 id="tl-h">Evidence timeline</h2>
+        <span class="count">tool calls in execution order</span>
+      </header>
+      <div class="trace panel">
+        <ol>
+          <li id="ev-cmd-23-1" class="t-muted" data-kind="command">
+            <span class="time">#0</span>
+            <span class="node" aria-hidden="true"></span>
+            <span class="what"><span class="kind">cmd#1</span><span class="label">.venv/bin/python -m pytest -q 2&gt;&amp;1; echo &#34;EXIT: $?&#34;</span></span>
+            <span class="lane opt" aria-hidden="true"><i style="--x: 0.0%"></i></span>
+            <span class="badge">denied</span>
+          </li>
+          <li id="ev-cmd-23-2" class="t-bad cited" data-kind="command">
+            <span class="time">#1</span>
+            <span class="node" aria-hidden="true"></span>
+            <span class="what"><span class="kind">cmd#2</span><span class="label">.venv/bin/python -m pytest -q</span><span class="detail">pytest: 1 passed, 2 failed</span></span>
+            <span class="lane opt" aria-hidden="true"><i style="--x: 100.0%"></i></span>
+            <span class="badge">exit 1</span>
+          </li>
+        </ol>
+      </div>
+    </section>

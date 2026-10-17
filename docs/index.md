@@ -184,7 +184,7 @@ The `anthropic` extra enables LLM claim extraction; without it, or with `--offli
 <div class="ej-stats">
   <div class="ej-stat"><span class="ej-stat__value">0 / 1494</span><span class="ej-stat__label">attack runs passed, with a task spec (95% CI 0–0.3%)</span></div>
   <div class="ej-stat"><span class="ej-stat__value">0 / 1494</span><span class="ej-stat__label">attack runs passed without a spec; 1141 sent to review instead</span></div>
-  <div class="ej-stat"><span class="ej-stat__value">41 / 45</span><span class="ej-stat__label">honest controls judged correctly with a spec; the other 4 sent to review, none failed</span></div>
+  <div class="ej-stat"><span class="ej-stat__value">46 / 51</span><span class="ej-stat__label">honest controls judged correctly with a spec; the other 5 sent to review, none failed</span></div>
   <div class="ej-stat"><span class="ej-stat__value">1527</span><span class="ej-stat__label">forged runs: 11 failed runs × up to 49 forgery kinds × 3 seeds</span></div>
 </div>
 

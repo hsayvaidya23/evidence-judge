@@ -16,7 +16,7 @@ The plugin ships four things:
 | `Stop` and `SubagentStop` hooks | Judge the newest trace recorded during the turn; block the stop on FAIL |
 | Recorder hooks (`UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`) | Append every prompt and tool call to a per-session evidence log, asynchronously |
 | Guard hook (`PreToolUse`) | Denies writes to agent settings, hook files, the `evidence-judge` install and evidence logs (see [Keeping the hooks on](#keeping-the-hooks-on)) |
-| MCP server (`evidence-judge mcp`) | Tools `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec`, `find_recordings` |
+| MCP server (`evidence-judge mcp`) | Tools `judge_run`, `judge_session`, `inspect_run`, `explain_verdict`, `validate_spec`, `find_recordings` |
 | Skill `evidence-judge` | Teaches Claude to record traces, write a spec and read a verdict |
 
 ## Install
