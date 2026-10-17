@@ -131,6 +131,19 @@ jobs:
           fail-on-review: "True"
           upload-report: "TRUE"
           report-artifact: evidence-judge-honest-report
+      - name: Judge a coding-agent session with the action
+        id: session
+        uses: $/
+        with:
+          session-transcript: tests/fixtures/sessions/claude_code/honest_success.jsonl
+          fail-on-review: "true"
+      - name: Reject a session mixed with a browser run
+        id: mixed
+        continue-on-error: true
+        uses: $/
+        with:
+          session-transcript: tests/fixtures/sessions/claude_code/honest_success.jsonl
+          trace: tests/fixtures/runs/honest_success/trace.zip
       - name: Reject a boolean input that is not true or false
         id: badflag
         continue-on-error: true
@@ -162,6 +175,8 @@ jobs:
           BROKEN_STEP: ${{ steps.broken.outcome }}
           BADFLAG: ${{ steps.badflag.outputs.outcome }}
           BADFLAG_STEP: ${{ steps.badflag.outcome }}
+          SESSION: ${{ steps.session.outputs.outcome }}
+          MIXED_STEP: ${{ steps.mixed.outcome }}
         run: |
           test "$HONEST" = pass
           test "$FORGED" = fail
@@ -170,6 +185,8 @@ jobs:
           test "$BROKEN_STEP" = failure
           test -z "$BADFLAG"
           test "$BADFLAG_STEP" = failure
+          test "$SESSION" = pass
+          test "$MIXED_STEP" = failure
 
   changelog:
     name: changelog updated with src/

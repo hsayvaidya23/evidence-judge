@@ -4,6 +4,16 @@ description: Use Evidence Judge with the OpenAI Codex CLI - a Stop hook that che
 
 # Codex CLI
 
+!!! warning "A `codex exec --json` stream cannot show what an edit changed"
+
+    The `exec --json` stream says which files Codex edited but records no diff, so the judge
+    cannot check the code the session added (an object that equals anything, a patch of the
+    test runner). Any session that changed code therefore scores **NEEDS_REVIEW**, honest ones
+    included, with the warning `code not checkable: edit#1 changed calc.py with no recorded
+    diff`; a passing re-run does not change that. For a verdict that can pass, judge the
+    session's rollout file (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`) or the evidence log
+    `codex-record` writes ([below](#the-evidence-log)): both keep the patches.
+
 Codex CLI (0.162) has a hooks system that is on by default and uses the same shape as Claude
 Code's. Its `Stop` hook can keep Codex working: `{"decision": "block", "reason": ...}` starts
 a continuation turn with `reason` as the prompt. Evidence Judge ships two Codex hooks:
@@ -37,8 +47,8 @@ command = "evidence-judge"
 args = ["mcp"]
 ```
 
-The server's tools are `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and
-`find_recordings`.
+The server's tools are `judge_run`, `judge_session`, `inspect_run`, `explain_verdict`,
+`validate_spec` and `find_recordings`.
 
 ## Add the hooks
 

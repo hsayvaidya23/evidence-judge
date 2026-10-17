@@ -10,7 +10,7 @@ from evidence_judge.sessions.extract import SessionClaimExtraction
 from evidence_judge.sessions.judge import SessionJudge, SessionJudgeOptions
 from evidence_judge.sessions.models import SessionRun
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
-from tests.unit.sessions_helpers import GREEN, RED, bash, edit, session
+from tests.unit.sessions_helpers import GREEN, RED, SETTINGS, bash, edit, session
 
 FAILING_RERUN = RerunResult(
     status=RerunStatus.FAIL, reason="2 failed", failed=2, passed=1, report_read=True
@@ -52,7 +52,7 @@ def _green(answer: str) -> SessionRun:
 async def _judge(run: SessionRun, *claims: dict[str, Any], **options: object) -> RunVerdict:
     llm = FakeLLM()
     llm.queue(SessionClaimExtraction, {"claims": list(claims)})
-    verdict = await SessionJudge(llm).judge(run, SessionJudgeOptions(**options))  # type: ignore[arg-type]
+    verdict = await SessionJudge(SETTINGS, llm).judge(run, SessionJudgeOptions(**options))  # type: ignore[arg-type]
     assert len(llm.calls) == 1 and verdict.usage.llm_calls == 1
     assert not any("used heuristics" in w for w in verdict.warnings)
     return verdict

@@ -3,11 +3,16 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from evidence_judge.core.verdict import Outcome
+from evidence_judge.report.json_report import write_json
+from tests.unit.test_report_fixtures import make_verdict
 
 ROOT = Path(__file__).parents[2]
 
@@ -193,7 +198,12 @@ def test_action_reads_boolean_inputs_in_any_case(tmp_path: Path, given: str, rea
         tmp_path, offline=given, fail_on_review=given, upload_report="false"
     )
     assert code == 0
-    assert written == {"offline": read, "fail-on-review": read, "upload-report": "false"}
+    assert written == {
+        "offline": read,
+        "fail-on-review": read,
+        "upload-report": "false",
+        "mode": "browser",
+    }
 
 
 @pytest.mark.parametrize("given", ["yes", "1", "", "true ", "on"])
@@ -205,6 +215,91 @@ def test_action_rejects_a_boolean_input_that_is_not_true_or_false(
     )
     assert code != 0
     assert "::error::input fail-on-review must be true or false" in stdout
+
+
+@pytest.mark.parametrize(("given", "read"), [("", "claude-code"), ("Codex", "codex")])
+def test_action_session_mode_checks_its_format(tmp_path: Path, given: str, read: str) -> None:
+    flags = {"offline": "true", "fail_on_review": "false", "upload_report": "false"}
+    code, _, written = _check_inputs(
+        tmp_path, **flags, session_transcript="s.jsonl", session_format=given
+    )
+    assert code == 0
+    assert written["mode"] == "session" and written["session-format"] == read
+
+
+@pytest.mark.parametrize(
+    ("inputs", "error"),
+    [
+        ({"session_transcript": "s.jsonl", "session_format": "gemini"}, "session-format must be"),
+        ({"session_transcript": "s.jsonl", "trace": "t.zip"}, "drop trace"),
+        ({"session_transcript": "s.jsonl", "spec": "spec.yaml"}, "use session-spec"),
+        ({"session_spec": "s.yaml"}, "session-spec needs session-transcript"),
+    ],
+)
+def test_action_rejects_mixed_or_unknown_session_inputs(
+    tmp_path: Path, inputs: dict[str, str], error: str
+) -> None:
+    flags = {"offline": "true", "fail_on_review": "false", "upload_report": "false"}
+    code, stdout, written = _check_inputs(tmp_path, **flags, **inputs)
+    assert code != 0
+    assert error in stdout
+    assert "mode" not in written
+
+
+def _fake_tools(tmp_path: Path) -> Path:
+    """An `evidence-judge` that records its arguments and writes a passing verdict, and a `uv`
+    whose tool python is this interpreter."""
+    bin_dir = tmp_path / "bin"
+    tool_python = tmp_path / "tools" / "evidence-judge" / "bin" / "python"
+    for path in (bin_dir, tool_python.parent):
+        path.mkdir(parents=True)
+    fake = bin_dir / "evidence-judge"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$@" > "$EJ_ARGS"\n'
+        'while [ $# -gt 0 ]; do [ "$1" = --out ] && cp "$EJ_VERDICT" "$2"; shift; done\n',
+        encoding="utf-8",
+    )
+    uv = bin_dir / "uv"
+    uv.write_text(f"#!/usr/bin/env bash\necho {tmp_path / 'tools'}\n", encoding="utf-8")
+    tool_python.write_text(f'#!/usr/bin/env bash\nexec {sys.executable} "$@"\n', encoding="utf-8")
+    for path in (fake, uv, tool_python):
+        path.chmod(0o755)
+    return bin_dir
+
+
+def test_action_session_mode_runs_session_judge(tmp_path: Path) -> None:
+    step = next(s for s in _action()["runs"]["steps"] if s.get("id") == "judge")
+    bin_dir = _fake_tools(tmp_path)
+    (tmp_path / "runner").mkdir()
+    verdict = tmp_path / "verdict.json"
+    write_json(make_verdict(Outcome.PASS), verdict)
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(tmp_path / "runner"),
+        "GITHUB_OUTPUT": str(tmp_path / "outputs"),
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
+        "PYTHONPATH": str(ROOT / "src"),
+        "EJ_ARGS": str(tmp_path / "args"),
+        "EJ_VERDICT": str(verdict),
+        "EJ_MODE": "session",
+        "EJ_SESSION_TRANSCRIPT": "rollout.jsonl",
+        "EJ_SESSION_FORMAT": "codex",
+        "EJ_SESSION_SPEC": "session.yaml",
+        "EJ_ANSWER_FILE": "answer.txt",
+        "EJ_OFFLINE": "true",
+        "EJ_FAIL_ON_REVIEW": "false",
+    }
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = (tmp_path / "args").read_text(encoding="utf-8").splitlines()
+    assert args[:2] == ["session", "judge"]
+    joined = " ".join(args)
+    assert "--codex rollout.jsonl" in joined and "--spec session.yaml" in joined
+    assert "--answer-file answer.txt" in joined and "--offline" in args
+    assert "--trace" not in args and "--html" in args
 
 
 def test_action_steps_use_the_checked_inputs() -> None:
@@ -244,6 +339,10 @@ def test_ci_exercises_the_action_failure_path() -> None:
     assert badflag["continue-on-error"] is True
     assert badflag["with"]["offline"] == "yes"
     assert 'test "$BADFLAG_STEP" = failure' in steps[-1]["run"]
+    session = next(s for s in steps if s.get("id") == "session")
+    assert "session-transcript" in session["with"]
+    assert 'test "$SESSION" = pass' in steps[-1]["run"]
+    assert 'test "$MIXED_STEP" = failure' in steps[-1]["run"]
 
 
 def test_project_urls_point_at_the_docs_changelog_and_issues() -> None:

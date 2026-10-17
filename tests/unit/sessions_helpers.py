@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from evidence_judge.config import Settings
 from evidence_judge.sessions.models import CallStatus, EvidenceKind, SessionRun, SessionSource
 from evidence_judge.sessions.normalize import ToolCall, build_events
 
+SETTINGS = Settings.model_validate({"anthropic_api_key": None, "cache_dir": None})
 CWD = "/work/toy"
 GREEN = "...\n3 passed in 0.01s"
 RED = "FF.\n== 2 failed, 1 passed in 0.02s =="

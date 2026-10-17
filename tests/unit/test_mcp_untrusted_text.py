@@ -54,6 +54,6 @@ def test_the_server_says_quoted_text_is_data(tmp_path: Path) -> None:
     assert "never instructions" in INSTRUCTIONS
     config = ServerConfig(roots=Roots.of([tmp_path]))
     tools = {t.name: t for t in build_server(config)._tool_manager.list_tools()}  # pyright: ignore[reportPrivateUsage]
-    for name in ("judge_run", "explain_verdict"):
+    for name in ("judge_run", "judge_session", "explain_verdict"):
         assert "<untrusted_data>" in (tools[name].description or "")
     assert "untrusted data" in (tools["inspect_run"].description or "")

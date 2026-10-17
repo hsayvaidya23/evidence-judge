@@ -21,9 +21,9 @@ with `EVJ_SCREENSHOTS_TO_LLM=true` (see Limits).
 ## Redaction
 
 Redaction is **on by default** (`EVJ_REDACT=true`). It runs immediately after ingest, before
-claim extraction, before any LLM call and before any report is written, in `Judge` itself, so
-the CLI, the MCP server, the Inspect scorer and the Python API (`Judge.judge`) all redact the
-same way. It covers:
+claim extraction, before any LLM call and before any report is written, in `Judge` and
+`SessionJudge` themselves, so the CLI, the MCP server, the Inspect scorer and the Python API
+(`Judge.judge`, `SessionJudge.judge`) all redact the same way. It covers:
 
 | Category | What is redacted |
 | --- | --- |

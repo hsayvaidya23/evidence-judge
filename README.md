@@ -236,7 +236,7 @@ verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yam
 print(verdict.outcome, verdict.summary)
 ```
 
-The names exported from `evidence_judge` are the supported Python API; SemVer also covers the CLI (flags and exit codes) and the verdict JSON (`schema_id` `evidence-judge/run-verdict@1`). Submodules are internal and may change in any 0.x release. See [Stability](docs/reference/python-api.md#stability).
+Coding-agent sessions work the same way: `SessionJudge(settings, llm).judge(load_session(claude_code=path), SessionJudgeOptions(...))`. The names exported from `evidence_judge` are the supported Python API; SemVer also covers the CLI (flags and exit codes) and the verdict JSON (`schema_id` `evidence-judge/run-verdict@1`). Submodules are internal and may change in any 0.x release. See [Stability](docs/reference/python-api.md#stability).
 
 ## ⚙️ Configuration
 
@@ -294,7 +294,7 @@ Send verdicts to the tools you already use (each is an optional extra; see [docs
 | Arize Phoenix | `evidence-judge[phoenix]` | `push_to_phoenix(verdict, span_id=...)`: span annotations |
 | Inspect AI | `evidence-judge[inspect]` | `scorer=evidence_judge_scorer()`: C / I / N per sample |
 
-MCP server: `evidence-judge mcp` (extra `evidence-judge[mcp]`) serves `judge_run`, `inspect_run`, `explain_verdict`, `validate_spec` and `find_recordings` as MCP tools for Claude Code, Codex CLI, Gemini CLI or any MCP client; see [docs/guides/mcp.md](docs/guides/mcp.md).
+MCP server: `evidence-judge mcp` (extra `evidence-judge[mcp]`) serves `judge_run`, `judge_session`, `inspect_run`, `explain_verdict`, `validate_spec` and `find_recordings` as MCP tools for Claude Code, Codex CLI, Gemini CLI or any MCP client; see [docs/guides/mcp.md](docs/guides/mcp.md).
 
 Coding agents: check the agent's answer against its own browser trace and, with a session spec, an independent re-run of the session's tests before it is allowed to stop.
 

@@ -25,7 +25,7 @@ from evidence_judge.sessions.predicates import (
 )
 from evidence_judge.sessions.redaction import redact_claims, redact_session, redact_spec
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
-from tests.unit.sessions_helpers import GREEN, RED, bash, edit, session
+from tests.unit.sessions_helpers import GREEN, RED, SETTINGS, bash, edit, session
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "sessions"
 CLAUDE = FIXTURES / "claude_code"
@@ -421,7 +421,7 @@ async def test_llm_extraction_is_grounded() -> None:
         },
     )
     run = session(edit("calc.py"), bash("pytest", GREEN), answer="Done. All 3 tests pass.")
-    verdict = await SessionJudge(llm).judge(run)
+    verdict = await SessionJudge(SETTINGS, llm).judge(run)
     assert [c.claim_text for c in verdict.claims] == ["suite passes"]
     assert verdict.outcome is Outcome.NEEDS_REVIEW
     assert any(
@@ -437,14 +437,14 @@ async def test_llm_failure_falls_back_to_heuristics() -> None:
     llm = FakeLLM()
     llm.queue(SessionClaimExtraction, LLMError("overloaded"))
     run = session(edit("calc.py"), bash("pytest", RED, 1), answer="All tests pass.")
-    verdict = await SessionJudge(llm).judge(run)
+    verdict = await SessionJudge(SETTINGS, llm).judge(run)
     assert verdict.outcome is Outcome.FAIL
     assert any("used heuristics" in w for w in verdict.warnings)
     broken = FakeLLM()
     broken.queue(SessionClaimExtraction, LLMConfigError("no key"))
     with pytest.raises(LLMConfigError):
-        await SessionJudge(broken).judge(run)
-    offline = await SessionJudge(FakeLLM()).judge(run, SessionJudgeOptions(offline=True))
+        await SessionJudge(SETTINGS, broken).judge(run)
+    offline = await SessionJudge(SETTINGS, FakeLLM()).judge(run, SessionJudgeOptions(offline=True))
     assert offline.usage.llm_calls == 0
 
 
@@ -478,14 +478,14 @@ async def test_llm_extracted_failure_claims_keep_their_contradiction() -> None:
         },
     )
     run = session(edit("calc.py"), bash("pytest", GREEN), answer="2 tests fail.")
-    verdict = await SessionJudge(llm).judge(run)
+    verdict = await SessionJudge(SETTINGS, llm).judge(run)
     assert verdict.outcome is Outcome.FAIL
     assert verdict.claims[0].status is Support.CONTRADICTED
 
 
 async def test_llm_without_answer_makes_no_call() -> None:
     llm = FakeLLM()
-    verdict = await SessionJudge(llm).judge(session(bash("ls")))
+    verdict = await SessionJudge(SETTINGS, llm).judge(session(bash("ls")))
     assert llm.calls == []
     assert verdict.outcome is Outcome.NEEDS_REVIEW
 
@@ -509,6 +509,53 @@ def test_redaction_keeps_matching() -> None:
     assert command.contains in redacted.events[0].command  # type: ignore[union-attr]
     spec = redact_spec(redactor, SessionSpec(task=f"use {secret}"))
     assert spec.task is not None and secret not in spec.task
+
+
+_SECRET = "sk-ant-api03-" + "B" * 40
+
+
+def _secret_session() -> SessionRun:
+    return session(
+        bash(f"export ANTHROPIC_API_KEY={_SECRET} && pytest", f"key {_SECRET}\n{GREEN}"),
+        edit("calc.py"),
+        bash("pytest", GREEN),
+        answer=f"Fixed it with ANTHROPIC_API_KEY={_SECRET}. All 3 tests pass.",
+    )
+
+
+async def test_the_api_path_redacts_before_the_extractor_sees_the_session() -> None:
+    llm = FakeLLM()
+    llm.queue(SessionClaimExtraction, {"claims": []})
+    spec = SessionSpec(task=f"use {_SECRET}")
+    claims = heuristic_claims(_secret_session().final_answer)
+    verdict = await SessionJudge(SETTINGS, llm).judge(
+        _secret_session(), SessionJudgeOptions(spec=spec)
+    )
+    assert llm.calls
+    sent = " ".join(c.request.system + c.request.prompt for c in llm.calls)
+    assert _SECRET not in sent
+    assert _SECRET not in verdict.model_dump_json()
+    given = await SessionJudge(SETTINGS).judge(
+        _secret_session(), SessionJudgeOptions(offline=True, claims=claims)
+    )
+    assert _SECRET not in given.model_dump_json()
+
+
+async def test_session_redact_is_applied_once_and_reported() -> None:
+    judge = SessionJudge(SETTINGS)
+    run, options, report = judge.redact(_secret_session(), SessionJudgeOptions(offline=True))
+    assert report is not None and report.total > 0
+    assert options.redact is False
+    assert _SECRET not in run.model_dump_json()
+    assert judge.redact(run, options) == (run, options, None)
+
+
+async def test_session_redaction_follows_settings() -> None:
+    llm = FakeLLM()
+    llm.queue(SessionClaimExtraction, {"claims": []})
+    off = SETTINGS.model_copy(update={"redact": False})
+    await SessionJudge(off, llm).judge(_secret_session())
+    assert any(_SECRET in c.request.prompt for c in llm.calls)
 
 
 @pytest.mark.parametrize("rerun", [None, RerunResult(status=RerunStatus.PASS, reason="3 passed")])

@@ -100,6 +100,27 @@ The first release.
 - `judge`, `inspect`, `bench`, `schema`, `version` (also `--version`), `mcp`, `hook ...` and
   `session judge|rerun|inspect`. Piping the output (`| head -1`) keeps the verdict's exit code.
 - A public Python API exported from `evidence_judge`, and a documentation site.
+- The session judge is part of the public Python API: `SessionJudge`, `SessionJudgeOptions`,
+  `SessionSpec` and `load_session` are exported from `evidence_judge` and documented beside
+  `Judge`.
+- `session judge --html PATH` writes the same self-contained HTML report as `judge --html`, for
+  a session: claims with the tool calls they cite (command and exit code), spec expectations,
+  the verification method (re-run or transcript), warnings, and every recorded tool call as the
+  timeline. It shows the redacted session and escapes all agent text.
+- `session judge --llm BACKEND` picks the backend for session claim extraction, as `judge --llm`
+  does; a chosen backend that cannot be used (such as `anthropic` without `ANTHROPIC_API_KEY`)
+  exits `4` instead of judging offline.
+- MCP tool `judge_session` judges a Claude Code transcript, a Codex stream or rollout, or an
+  evidence log (with its key and anchor) inside the server's roots, with the same parameters
+  as `session judge` (`answer`, `spec` or `spec_yaml`, `offline`, `require_tamper_evidence`,
+  `run_id`, JSON and HTML reports). It never runs commands: a spec's `rerun` block is ignored.
+- GitHub Action session mode: `session-transcript`, `session-format` (`claude-code`, `codex` or
+  `evidence-log`) and `session-spec` run `evidence-judge session judge` instead of `judge`, with
+  the same job summary, report upload and exit behaviour. Mixing it with browser inputs or an
+  unknown format fails the step before anything is installed.
+- The Codex CLI guide opens with its main limit: a `codex exec --json` stream records no diff,
+  so a session that changed code goes to NEEDS_REVIEW (code not checkable) whatever its tests
+  show, and the rollout file or the evidence log should be judged instead.
 
 ### Changed
 
@@ -584,6 +605,11 @@ The first release.
   extraction and any LLM call when `EVJ_REDACT` is on, as SECURITY.md says. The CLI, MCP server
   and Inspect scorer go through the same `Judge.redact`, so redaction happens once and the same
   way everywhere; `JudgeOptions(redact=False)` marks inputs that are already redacted.
+- `SessionJudge` redacts too: `SessionJudge.judge` redacts the session (commands, outputs,
+  task, answer), spec and claims before claim extraction when `EVJ_REDACT` is on, so a
+  transcript judged from Python no longer reaches an LLM extractor with its secrets. `session
+  judge` goes through the same `SessionJudge.redact`; `SessionJudgeOptions(redact=False)` marks
+  inputs that are already redacted, and `SessionJudge` now takes `Settings` first, like `Judge`.
 - Free-text redaction now covers a secret written after its name with no `:` or `=`
   (`password hunter2`, `the api key is AB12cd34ef`, also `passwd`, `pwd`, `passcode`,
   `passphrase`, `token`, `secret`) when the value has a digit, a symbol or mixed case, so prose

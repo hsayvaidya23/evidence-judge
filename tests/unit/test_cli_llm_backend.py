@@ -1,4 +1,5 @@
-"""`--llm` on `judge` and `bench`, and the CLI backends seen end to end through `judge`."""
+"""`--llm` on `judge`, `session judge` and `bench`, and the CLI backends seen end to end through
+`judge`."""
 
 from __future__ import annotations
 
@@ -9,13 +10,18 @@ import pytest
 from typer.testing import CliRunner
 
 import evidence_judge.llm.factory
-from evidence_judge.cli import ExitCode, LLMChoice, app
+from evidence_judge._cli_common import ExitCode, LLMChoice
+from evidence_judge.cli import app
 from evidence_judge.config import LLM_BACKENDS, Settings
 from evidence_judge.llm.base import LLMClient
+from evidence_judge.llm.fake import FakeLLM
+from evidence_judge.sessions.extract import SessionClaimExtraction
 from tests.unit.fake_cli import FakeCLI, jsonl
 
 runner = CliRunner()
 RUN = Path(__file__).resolve().parents[1] / "fixtures" / "runs" / "honest_success"
+SESSION = Path(__file__).resolve().parents[1] / "fixtures" / "sessions" / "codex"
+SESSION_ARGS = ["session", "judge", "--codex", str(SESSION / "honest_success.exec.jsonl")]
 EMAIL = "alice.secret@example.com"
 
 
@@ -101,6 +107,43 @@ def test_no_llm_option_without_a_key_still_judges_offline():
     result = runner.invoke(app, ["judge", "--har", str(RUN / "run.har")])
     assert result.exit_code in (0, 1, 2), result.output
     assert "judging offline" in result.output
+
+
+@pytest.mark.parametrize("backend", LLM_BACKENDS)
+def test_session_judge_llm_overrides_the_configured_backend(
+    monkeypatch: pytest.MonkeyPatch, backend: str
+):
+    monkeypatch.setenv("EVJ_LLM_BACKEND", "codex" if backend != "codex" else "gemini")
+    seen = _record_settings(monkeypatch)
+    result = runner.invoke(app, [*SESSION_ARGS, "--llm", backend, "-q"])
+    assert result.exit_code == ExitCode.INTERNAL, result.output
+    assert [s.llm_backend for s in seen] == [backend]
+
+
+def test_session_judge_llm_anthropic_without_a_key_exits_internal():
+    result = runner.invoke(app, [*SESSION_ARGS, "--llm", "anthropic"])
+    assert result.exit_code == ExitCode.INTERNAL, result.output
+    assert "ANTHROPIC_API_KEY" in _flat(result.output)
+    assert "judging offline" not in result.output
+    offline = runner.invoke(app, [*SESSION_ARGS, "--llm", "anthropic", "--offline", "-q"])
+    assert offline.exit_code in (0, 1, 2), offline.output
+    plain = runner.invoke(app, SESSION_ARGS)
+    assert plain.exit_code in (0, 1, 2) and "judging offline" in plain.output
+
+
+def test_session_judge_extracts_claims_with_the_chosen_backend(monkeypatch: pytest.MonkeyPatch):
+    llm = FakeLLM()
+    llm.queue(SessionClaimExtraction, {"claims": []})
+    chosen: list[str] = []
+
+    def build_llm(settings: Settings, **_: object) -> LLMClient | None:
+        chosen.append(settings.llm_backend)
+        return llm
+
+    monkeypatch.setattr(evidence_judge.llm.factory, "build_llm", build_llm)
+    result = runner.invoke(app, [*SESSION_ARGS, "--llm", "claude-code", "-q"])
+    assert result.exit_code in (0, 1, 2), result.output
+    assert chosen == ["claude-code"] and len(llm.calls) == 1
 
 
 def test_a_missing_cli_exits_internal_with_install_advice(

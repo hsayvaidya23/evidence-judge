@@ -25,7 +25,7 @@ from evidence_judge.sessions.predicates import (
     TestResultPredicate,
     claimed,
 )
-from tests.unit.sessions_helpers import GREEN, RED, bash, edit, session
+from tests.unit.sessions_helpers import GREEN, RED, SETTINGS, bash, edit, session
 
 FIXED = "Fixed the bug in `calc.py`; all tests pass."
 
@@ -43,7 +43,7 @@ async def _offline(run: SessionRun, **options: object) -> RunVerdict:
 async def _llm(run: SessionRun, *claims: dict[str, Any]) -> RunVerdict:
     llm = FakeLLM()
     llm.queue(SessionClaimExtraction, {"claims": list(claims)})
-    return await SessionJudge(llm).judge(run, SessionJudgeOptions())
+    return await SessionJudge(SETTINGS, llm).judge(run, SessionJudgeOptions())
 
 
 def _claim(quote: str, *predicates: dict[str, Any], kind: str = "action") -> dict[str, Any]:

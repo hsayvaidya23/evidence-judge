@@ -157,7 +157,8 @@ def test_skill_frontmatter() -> None:
     front = yaml.safe_load(match.group(1))
     assert front["name"] == "evidence-judge"
     assert 50 < len(front["description"]) <= 1536
-    for tool in ("judge_run", "inspect_run", "explain_verdict", "validate_spec", "find_recordings"):
+    tools = ("judge_run", "judge_session", "inspect_run", "explain_verdict", "validate_spec")
+    for tool in (*tools, "find_recordings"):
         assert f"`{tool}`" in text
     assert "--caps=devtools" in text
     assert "browser_start_tracing" in text
