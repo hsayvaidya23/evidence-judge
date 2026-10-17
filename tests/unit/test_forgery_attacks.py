@@ -216,7 +216,7 @@ def test_variants_rotate_with_the_seed(scenarios: dict[str, Scenario]) -> None:
     assert _variants(ForgeryKind.LISTED_PRICE, write) == set(LISTED_VARIANTS)
     assert _variants(ForgeryKind.REASONING_PRICE, write) == set(LISTED_VARIANTS)
     assert _variants(ForgeryKind.JSON_TOTAL, write) == set(JSON_VARIANTS)
-    assert _variants(ForgeryKind.PRICE_PART, write, seeds=7) == set(PART_VARIANTS)
+    assert _variants(ForgeryKind.PRICE_PART, write, seeds=len(PART_VARIANTS)) == set(PART_VARIANTS)
     assert _variants(ForgeryKind.UNWORDED_PURCHASE, write) == set(LISTED_VARIANTS)
     assert _variants(ForgeryKind.RESPONSE_ECHO, write) == set(RESPONSE_VARIANTS)
     assert _variants(ForgeryKind.RESPONSE_ECHO, read) == set(RESPONSE_VARIANTS[:2])
@@ -1064,6 +1064,39 @@ def test_controls_edit_the_run_the_honest_way(scenarios: dict[str, Scenario]) ->
     assert "$" not in answered.final_state.text
     assert all("$24" not in (n.response_body or "") for n in answered.network if n.ts > order.ts)
     assert apply_control(scenarios["read_stock"].run, ControlKind.JSON_CONFIRMATION) is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {
+            "order": {
+                "id": 1001,
+                "currency": "USD",
+                "total_price": "24.00",
+                "subtotal_price": "24.00",
+            }
+        },
+        {"id": 1001, "status": "processing", "currency": "USD", "total": "24.00"},
+        {"id": "5O1", "status": "COMPLETED", "amount": {"currency_code": "USD", "value": "24.00"}},
+    ],
+    ids=["shopify", "woocommerce", "paypal"],
+)
+async def test_an_order_answered_with_a_string_total_passes(
+    scenarios: dict[str, Scenario], answer: dict[str, object]
+) -> None:
+    base = scenarios["honest_success"]
+    answered = apply_control(base.run, ControlKind.JSON_CONFIRMATION)
+    assert answered is not None
+    network = [
+        n.model_copy(update={"response_body": json.dumps(answer)})
+        if n.is_mutation and "orders" in n.url
+        else n
+        for n in answered.network
+    ]
+    run = answered.model_copy(update={"network": network})
+    spec, generic, _ = await _verdicts(base, run)
+    assert (spec.outcome, generic.outcome) == (P, P), spec.summary
 
 
 def test_input_forgeries_record_what_the_ingesters_record(scenarios: dict[str, Scenario]) -> None:
