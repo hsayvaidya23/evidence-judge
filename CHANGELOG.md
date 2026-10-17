@@ -30,8 +30,9 @@ fixes made during development are in the [security history](docs/security-histor
   filling forwards) covers nothing.
 - A claimed price is matched in an order's JSON answer only as its one total, on the order's
   own path (the root, `order`, `checkout`, `payment`, `invoice`, `data`, ...), never in a
-  sub-object, a line item, a non-payment Stripe object or a body that reports a failure at
-  any depth (which also leaves the order unproven), and only in the currency every field names.
+  sub-object, a line item, a non-payment Stripe object or a body that reports a failure on
+  the order's path (which also leaves the order unproven; history, line items, notifications,
+  a coupon or an earlier failed attempt before a successful one do not count), and only in the currency every field names.
   Amounts read as minor units only in Stripe-shaped objects, never because a currency code is
   lowercase (Medusa). Plain decimal string totals (Shopify, WooCommerce,
   PayPal) count.

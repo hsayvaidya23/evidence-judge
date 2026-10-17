@@ -655,7 +655,7 @@ def response_doubt(event: NetworkEvent) -> str | None:
     (or form-encoded) response object whose top-level `errors` or `error` holds something,
     whose `ok`, `success` or `succeeded` is false, or whose `status`, `state`, `result` or
     `outcome` is a failure word ('failed', 'declined', 'error', ...), or that reports a failure
-    at any depth (matching.json_failure: `{"order": {"status": "payment_declined"}}`), does
+    on the order's path (matching.json_failure: `{"order": {"status": "payment_declined"}}`), does
     not prove the mutation took effect. Requests that are not mutations, redirects and unrecorded or
     unparseable bodies return None.
     """
