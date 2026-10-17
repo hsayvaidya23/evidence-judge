@@ -334,5 +334,35 @@
     "body": {"order_id": "A1", "total": 45.0, "currency": "USD", "deposit": {"paid": 29.5}},
     "shows": ["$45.00"],
     "hides": ["$29.50"]
+  },
+  {
+    "name": "medusa_order_major_units",
+    "body": {"order": {"id": "order_01J", "display_id": 12, "status": "pending", "currency_code": "usd", "total": 2400, "subtotal": 2400, "shipping_total": 0, "tax_total": 0, "payment_status": "captured", "items": [{"title": "Red Kettle", "quantity": 1, "unit_price": 2400}]}},
+    "shows": ["$2,400.00"],
+    "hides": ["$24.00"]
+  },
+  {
+    "name": "medusa_order_small_total",
+    "body": {"order": {"id": "order_01J", "currency_code": "usd", "total": 24, "subtotal": 20, "tax_total": 4}},
+    "shows": ["$24.00"],
+    "hides": ["$0.24", "$20.00"]
+  },
+  {
+    "name": "medusa_cart_complete",
+    "body": {"type": "order", "order": {"id": "order_01J", "currency_code": "usd", "total": 30.4, "item_total": 24, "shipping_total": 4, "tax_total": 2.4}},
+    "shows": ["$30.40"],
+    "hides": ["$0.30", "$24.00"]
+  },
+  {
+    "name": "lowercase_currency_total",
+    "body": {"total": 2950, "currency": "usd"},
+    "shows": ["$2,950.00"],
+    "hides": ["$29.50"]
+  },
+  {
+    "name": "stripe_amount_key_minor",
+    "body": {"amount_received": 2950, "currency": "usd"},
+    "shows": [],
+    "hides": ["$2,950.00"]
   }
 ]

@@ -14,6 +14,13 @@ version: all of it happened before v0.1.0. The threat model and its current limi
 
 ## Findings and fixes
 
+- **A lowercase currency code no longer turns a total into cents.** `{"order": {"total": 2400,
+  "currency_code": "usd"}}` supported "It cost $24.00." and passed, because any object naming
+  its currency in lowercase was read in minor units, while Medusa writes lowercase codes with
+  major-unit totals ($2,400 there). Minor units now apply only to Stripe-shaped objects: a
+  lowercase code plus an `object` type or a Stripe amount key (`amount`, `amount_total`,
+  `amount_subtotal`, `amount_received`, `amount_captured`). Medusa order and cart shapes are
+  fixtures in `tests/fixtures/prices/order_answers.json`.
 - **A failure nested in an order answer no longer proves the order or its price.** POST
   `/api/orders` answered 201 with `{"order": {"id": "A1", "status": "payment_declined",
   "total": 24.0}}`, the next page said "Order A1 is confirmed", and "It cost $24.00." passed:

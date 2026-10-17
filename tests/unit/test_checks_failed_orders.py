@@ -101,3 +101,16 @@ async def test_a_confirmation_page_does_not_pass_a_failed_order(answer: dict[str
     else:
         assert verdict.outcome is Outcome.PASS
         assert order.status is Support.SUPPORTED
+
+
+@pytest.mark.parametrize(
+    ("total", "passes"), [(2400, False), (24, True)], ids=["major_2400", "major_24"]
+)
+async def test_a_lowercase_currency_total_is_read_in_major_units(total: int, passes: bool) -> None:
+    body = {"order": {"id": "A1", "status": "pending", "total": total, "currency_code": "usd"}}
+    verdict = await Judge(Settings(anthropic_api_key=None, cache_dir=None)).judge(
+        _order_run(body), JudgeOptions(offline=True, spec=shop_spec())
+    )
+    price = next(c for c in verdict.claims if "price" in c.claim_text)
+    assert (verdict.outcome is Outcome.PASS) is passes
+    assert (price.status is Support.SUPPORTED) is passes

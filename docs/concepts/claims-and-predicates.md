@@ -361,9 +361,12 @@ that name the order or a wrapper of it (`order`, `orders`, `checkout`, `checkout
 `payment`, `charge`, `invoice`, `receipt`, `data`, `result`, `response`, `purchase`,
 `transaction`, `booking`, `reservation`): the total of any other object (`{"delivery":
 {"total": 4}}`, `vat`, `item`, `cart`, `quote`, `last_order`, `gift_card`, `refunded`) shows
-nothing. A bare `amount` counts only in minor units, in an object that names its currency in
-lowercase as Stripe does (`{"amount": 2950, "currency": "usd"}` shows `$29.50`, never
-`$2,950.00`) or as the `amount` of Square's `total_money`; a Stripe object counts only when its
+nothing. A bare `amount` counts only in minor units, in a Stripe-shaped object (one that
+names its currency in lowercase and has an `object` type or a Stripe amount key: `amount`,
+`amount_total`, `amount_subtotal`, `amount_received`, `amount_captured`; `{"amount": 2950,
+"currency": "usd"}` shows `$29.50`, never `$2,950.00`) or as the `amount` of Square's
+`total_money`. A lowercase currency code alone is no sign of minor units: Medusa's `{"order":
+{"total": 2400, "currency_code": "usd"}}` shows `$2,400.00`, not `$24.00`; a Stripe object counts only when its
 `object` is a `checkout.session`, a `charge`, a `payment_intent` whose `status` is `succeeded`
 or an `invoice` whose `status` is `paid`. PayPal's `"amount": {"value": "29.50",
 "currency_code": "USD"}` shows `$29.50`. A total written as a string counts only when it is a

@@ -197,6 +197,9 @@ _PAYPAL_AMOUNT: Final = frozenset({"value", "currency_code", "breakdown"})
 _PLAIN_DECIMAL = re.compile(r"\d+(?:\.\d{1,2})?")
 _MINOR_UNIT_KEYS: Final = frozenset({"cents", "minor", "pence", "paise"})
 _STRIPE_CURRENCY = re.compile(r"[a-z]{3}")
+_STRIPE_AMOUNT_KEYS: Final = frozenset(
+    {"amount", "amount_total", "amount_subtotal", "amount_received", "amount_captured"}
+)
 _KEY_CASE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _KEY_WORD = re.compile(r"[a-z]+")
 _INDEX_BRACKETS = re.compile(r"\[(-?\d+)\]")
@@ -257,9 +260,9 @@ def shows_amount(body: str | None, phrase: str) -> bool:
     (`order`, `checkout`, `payment`, `invoice`, `data`, `result`), outside any array (a line
     item). A total under any other object (`shipping`, `delivery`, `vat`, `item`, `cart`,
     `refund`, `gift_card`) never shows it. Minor units count only when the key says so
-    (`total_cents`: 2950 is 29.50), or in an object that names its currency in lowercase as
-    Stripe does (`{"amount": 2950, "currency": "usd"}`), whose `object` type, if any, is a
-    payment that went through, or in a `total_money` as Square writes it; a PayPal `amount` is
+    (`total_cents`: 2950 is 29.50), or in a Stripe-shaped object, one that names its currency
+    in lowercase and has an `object` type or a Stripe amount key (`{"amount": 2950,
+    "currency": "usd"}`), whose `object` type, if any, is a payment that went through, or in a `total_money` as Square writes it; a PayPal `amount` is
     `{"value": "29.50", "currency_code": "USD"}`; a bare `amount` shows nothing anywhere else.
     The document must state one total and no failure at any depth (json_failure), and every
     currency it names, as a code, a currency object or a formatted amount ('29,50 €'), must be
@@ -472,8 +475,12 @@ def _has_currency(fields: dict[str, object]) -> bool:
 
 
 def _stripe_minor(fields: dict[str, object]) -> bool:
-    """Whether this object names its currency in lowercase, as Stripe does for minor units."""
-    return any(
+    """Whether this object is Stripe-shaped and so states amounts in minor units: it names its
+    currency in lowercase, and it has an `object` type or a Stripe amount key (`amount`,
+    `amount_total`, ...). A lowercase code alone is no sign: Medusa writes
+    `{"total": 2400, "currency_code": "usd"}` for $2,400."""
+    stripe = isinstance(fields.get("object"), str) or not _STRIPE_AMOUNT_KEYS.isdisjoint(fields)
+    return stripe and any(
         isinstance(v, str) and _STRIPE_CURRENCY.fullmatch(v) and _currency_code(k, v)
         for k, v in fields.items()
     )
