@@ -48,6 +48,7 @@ jobs:
 | `answer-file` | | File with the agent's final answer |
 | `reasoning-file` | | File with the agent's reasoning, one step per paragraph (steps separated by a blank line) |
 | `spec` | | Task spec YAML (required for write tasks to PASS) |
+| `site` | | Site the browser run's task is on, passed as `--site`: an http(s) URL or host with an optional port and no path (`shop.example.com`, `https://shop.example.com:8443`). Overrides the spec's `site`; browser runs only |
 | `session-transcript` | | A coding-agent session to judge with `evidence-judge session judge` instead of a browser run (see [Judge a coding-agent session](#judge-a-coding-agent-session)) |
 | `session-format` | `"claude-code"` | What `session-transcript` is: `claude-code`, `codex` (`exec --json` output or a rollout) or `evidence-log`, in any case |
 | `session-spec` | | Session spec YAML for `session-transcript` |
@@ -62,7 +63,9 @@ jobs:
 At least one of `trace`, `har` or `browser-use` is needed, or `session-transcript`. `offline`, `fail-on-review` and
 `upload-report` take `true` or `false` in any case (`"True"`, `"FALSE"`); any other value
 (`"yes"`, `"1"`, an empty string) fails the step before anything is installed, instead of being
-read as `false`.
+read as `false`. A `site` with a path, query, user name or a scheme other than http(s) fails the
+step the same way; evidence-judge then checks the rest (a public suffix such as `co.uk` is not
+a site) and exits 3.
 
 ## Outputs
 
@@ -74,7 +77,7 @@ read as `false`.
 
 ## What the step does
 
-1. Checks the boolean and session inputs, then installs `uv` and evidence-judge with the `anthropic` extra.
+1. Checks the boolean, session and `site` inputs, then installs `uv` and evidence-judge with the `anthropic` extra.
 2. Runs `evidence-judge judge` (or `evidence-judge session judge` for `session-transcript`)
    with the inputs you gave, writing `verdict.json` and
    `report.html` to a fresh `$RUNNER_TEMP/evidence-judge.XXXXXX` directory, so a second
@@ -105,8 +108,8 @@ session spec.
           fail-on-review: "true"
 ```
 
-`session-transcript` cannot be combined with `trace`, `har`, `browser-use`, `reasoning-file` or
-`spec`, `session-spec` needs `session-transcript`, and `session-format` must be one of the three
+`session-transcript` cannot be combined with `trace`, `har`, `browser-use`, `reasoning-file`,
+`spec` or `site`, `session-spec` needs `session-transcript`, and `session-format` must be one of the three
 formats; each of these fails the step before anything is installed. The action never re-runs
 the session's tests (`session judge --rerun`): run that as its own step if you need it. A Codex
 `exec --json` stream records no diff, so a session that changed code goes to NEEDS_REVIEW (see

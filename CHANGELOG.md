@@ -88,8 +88,8 @@ fixes made during development are in the [security history](docs/security-histor
   hook that refuses writes switching the hooks off, the MCP server and a skill.
 - Codex CLI and Gemini CLI: the same hooks (`evidence-judge hook ...`) and a Gemini CLI
   extension.
-- GitHub Action for browser runs and sessions (`session-transcript`, `session-format`,
-  `session-spec`), with a job summary, strict boolean inputs and an optional HTML report
+- GitHub Action for browser runs (with a `site` input) and sessions (`session-transcript`,
+  `session-format`, `session-spec`), with a job summary, strict boolean inputs and an optional HTML report
   artifact; a Docker image.
 - Python API: `Judge`, `SessionJudge`, `load_run`, `load_session`, `TaskSpec`, `SessionSpec`,
   `RunVerdict`, `Redactor`, `build_llm` and `read_settings`, exported from `evidence_judge`.
