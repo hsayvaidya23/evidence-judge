@@ -39,5 +39,19 @@
   {"name": "honest_failed_attempts_zero", "failed": false, "body": {"order": {"id": "A1", "total": 24.0, "failed_attempts": 0, "failure_code": null, "is_paid": true, "success": true}}},
   {"name": "honest_message", "failed": false, "body": {"order": {"id": "A1", "total": 24.0}, "message": "Thank you, your order was placed.", "payment": {"type": "card"}}},
   {"name": "honest_other_subjects", "failed": false, "body": {"order": {"id": "A1", "total": 24.0, "email_status": "failed", "coupon_expired": true, "newsletter_ok": false}}},
-  {"name": "honest_stripe_charge", "failed": false, "body": {"id": "ch_1", "object": "charge", "amount": 2400, "amount_refunded": 0, "currency": "usd", "paid": true, "captured": true, "refunded": false, "status": "succeeded", "failure_code": null, "failure_message": null, "outcome": {"type": "authorized", "network_status": "approved_by_network", "seller_message": "Payment complete."}}}
+  {"name": "honest_stripe_charge", "failed": false, "body": {"id": "ch_1", "object": "charge", "amount": 2400, "amount_refunded": 0, "currency": "usd", "paid": true, "captured": true, "refunded": false, "status": "succeeded", "failure_code": null, "failure_message": null, "outcome": {"type": "authorized", "network_status": "approved_by_network", "seller_message": "Payment complete."}}},
+  {"name": "top_payment_status_declined", "failed": true, "body": {"id": "A1", "total": 24.0, "payment": {"status": "declined"}}},
+  {"name": "nested_payment_status_declined", "failed": true, "body": {"order": {"id": "A1", "status": "confirmed", "total": 24.0, "payment": {"status": "declined"}}}},
+  {"name": "nested_payment_intent_failed", "failed": true, "body": {"order": {"id": "A1", "total": 24.0, "payment_intent": {"status": "requires_payment_method"}}}},
+  {"name": "last_payment_attempt_failed", "failed": true, "body": {"order": {"id": "A1", "status": "confirmed", "total": 24.0, "payment_attempts": [{"status": "succeeded"}, {"status": "failed"}]}}},
+  {"name": "orders_list_declined", "failed": true, "body": {"orders": [{"id": "A1", "status": "declined", "total": 24.0}]}},
+  {"name": "top_invoice_draft", "failed": true, "body": {"invoice": {"id": "A1", "status": "draft", "total": 24.0}}},
+  {"name": "aside_errors", "failed": true, "body": {"order": {"id": "A1", "total": 24.0}, "meta": {"errors": [{"message": "Card declined"}]}}},
+  {"name": "honest_order_history_refunded", "failed": false, "body": {"order": {"id": "A1", "status": "confirmed", "total": 24.0}, "customer": {"orders": [{"id": "A0", "status": "refunded"}]}}},
+  {"name": "honest_line_item_cancelled", "failed": false, "body": {"order": {"id": "A1", "status": "confirmed", "total": 24.0, "items": [{"sku": "K-2", "status": "cancelled"}]}}},
+  {"name": "honest_coupon_expired", "failed": false, "body": {"order": {"id": "A1", "status": "confirmed", "total": 24.0, "coupon": {"code": "X", "state": "expired"}}}},
+  {"name": "honest_retry_succeeded", "failed": false, "body": {"order": {"id": "A1", "status": "confirmed", "total": 24.0, "payment_attempts": [{"status": "failed"}, {"status": "succeeded"}]}}},
+  {"name": "honest_notification_failed", "failed": false, "body": {"order": {"id": "A1", "status": "confirmed", "total": 24.0, "notifications": [{"channel": "sms", "status": "failed"}]}}},
+  {"name": "honest_address_validation_invalid", "failed": false, "body": {"order": {"id": "A1", "status": "confirmed", "total": 24.0, "address_validation": {"result": "invalid"}}}},
+  {"name": "honest_invoice_draft", "failed": false, "body": {"order": {"id": "A1", "status": "confirmed", "total": 24.0, "invoice": {"status": "draft"}}}}
 ]
