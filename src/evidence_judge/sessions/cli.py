@@ -18,7 +18,10 @@ from evidence_judge._cli_common import (
     CliError,
     Debug,
     ExitCode,
+    LangfuseTraceId,
     LlmOption,
+    Otel,
+    check_exporters,
     chosen_llm,
     fail,
     internal,
@@ -38,6 +41,7 @@ from evidence_judge.core.verdict import (
     Verification,
     VerificationMethod,
 )
+from evidence_judge.integrations import exporters
 from evidence_judge.llm.base import LLMConfigError, LLMError
 from evidence_judge.report.console import StdoutConsole, print_verdict
 from evidence_judge.report.json_report import write_json
@@ -206,6 +210,7 @@ def judge_command(
             "container, another OS user); only then is a verified log full tamper evidence",
         ),
     ] = False,
+    task: Annotated[str | None, typer.Option(help="Task given to the agent")] = None,
     answer: Annotated[str | None, typer.Option(help="Use this as the agent's final answer")] = None,
     answer_file: Annotated[
         Path | None, typer.Option(help="File with the agent's final answer", **IN_FILE)
@@ -254,14 +259,19 @@ def judge_command(
     run_id: Annotated[str | None, typer.Option(help="Override the run id")] = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only set the exit code")] = False,
     debug: Debug = False,
+    otel: Otel = False,
+    langfuse_trace_id: LangfuseTraceId = None,
 ) -> None:
     """Judge a coding-agent session.
 
     Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
     err = stderr()
     try:
+        check_exporters(otel, langfuse_trace_id)
         settings = load_settings(llm_backend)
         session_spec = _spec(spec)
+        if task is not None and session_spec is not None:
+            session_spec = session_spec.model_copy(update={"task": task})
         claim_set = load_claims(claims, SessionClaimSet) if claims else None
         run = _load(
             claude_code,
@@ -272,6 +282,8 @@ def judge_command(
             log_key=log_key,
             log_anchor=log_anchor,
         )
+        if task is not None:
+            run = run.model_copy(update={"task": task})
         rerun_result = (
             _rerun(_rerun_spec(session_spec), project, rerun_base, run.cwd, quiet, rerun_baseline)
             if rerun
@@ -307,6 +319,7 @@ def judge_command(
             write_output(out, lambda p: write_json(verdict, p))
         if html:
             write_output(html, lambda p: write_session_html(verdict, run, p))
+        export_warnings = exporters.export(verdict, otel=otel, langfuse_trace_id=langfuse_trace_id)
     except CliError as e:
         raise fail(e) from None
     except Exception as e:
@@ -318,6 +331,8 @@ def judge_command(
         for label, path in (("json", out), ("html", html)):
             if path:
                 err.print(Text.assemble((f"wrote {label} ", "dim"), str(path)))
+        for warning in export_warnings:
+            err.print(Text(warning, style="yellow"))
     raise typer.Exit(int(OUTCOME_EXIT[verdict.outcome]))
 
 

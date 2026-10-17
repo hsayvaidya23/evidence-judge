@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,11 +13,15 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from typer.testing import CliRunner
 
 from evidence_judge.cli import ExitCode, app
-from evidence_judge.integrations import MissingExtraError, otel
+from evidence_judge.core.verdict import RunVerdict
+from evidence_judge.integrations import MissingExtraError, exporters, otel
 from evidence_judge.integrations import langfuse as lf
 from tests.unit.test_integrations_langfuse import FakeLangfuse
 
 RUN = Path(__file__).parents[1] / "fixtures" / "runs" / "forged_success"
+SESSION = (
+    Path(__file__).parents[1] / "fixtures" / "sessions" / "claude_code" / "honest_failure.jsonl"
+)
 TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
 runner = CliRunner()
 
@@ -40,6 +45,22 @@ def judge(*extra: str) -> Any:
             str(RUN / "trace.zip"),
             "--answer-file",
             str(RUN / "answer.txt"),
+            "--offline",
+            *extra,
+        ],
+    )
+
+
+def session_judge(*extra: str) -> Any:
+    return runner.invoke(
+        app,
+        [
+            "session",
+            "judge",
+            "--claude-code",
+            str(SESSION),
+            "--answer",
+            "All tests pass.",
             "--offline",
             *extra,
         ],
@@ -128,3 +149,85 @@ def test_export_failure_is_a_warning_not_a_new_exit_code(monkeypatch: pytest.Mon
 
     assert result.exit_code == ExitCode.FAIL
     assert "Langfuse export failed: ConnectionError: langfuse unreachable" in result.output
+
+
+def test_session_otel_flag_emits_the_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(trace, "get_tracer_provider", lambda: provider)
+
+    result = session_judge("--otel", "--run-id", "session-1", "-q")
+
+    assert result.exit_code == ExitCode.FAIL, result.output
+    [span] = exporter.get_finished_spans()
+    events = [dict(e.attributes or {}) for e in span.events]
+    assert events[0]["gen_ai.evaluation.name"] == "evidence_judge.outcome"
+    assert events[0]["gen_ai.evaluation.score.label"] == "fail"
+    assert events[0]["evidence_judge.run_id"] == "session-1"
+    assert any(e["gen_ai.evaluation.name"] == "evidence_judge.claim" for e in events)
+
+
+def test_session_langfuse_flag_pushes_scores(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeLangfuse()
+    monkeypatch.setattr(lf, "_client_class", lambda: lambda: client)
+
+    result = session_judge("--langfuse-trace-id", TRACE_ID, "-q")
+
+    assert result.exit_code == ExitCode.FAIL, result.output
+    assert client.flushed == 1
+    by_name = {c["name"]: c for c in client.calls}
+    assert by_name["evidence_judge.outcome"]["value"] == "fail"
+    assert all(c["trace_id"] == TRACE_ID for c in client.calls)
+
+
+def test_session_missing_extras_and_credentials_fail_before_judging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "langfuse", None)
+    result = session_judge("--langfuse-trace-id", TRACE_ID)
+    assert result.exit_code == ExitCode.USAGE
+    assert "evidence-judge[anthropic,mcp,langfuse]" in " ".join(result.output.split())
+    assert "score" not in result.output
+
+    def missing() -> None:
+        raise MissingExtraError("OpenTelemetry", "otel", ImportError("No module 'opentelemetry'"))
+
+    monkeypatch.setattr(otel, "ensure_available", missing)
+    result = session_judge("--otel")
+    assert result.exit_code == ExitCode.USAGE
+    assert "evidence-judge[otel]" in result.output
+
+
+def test_session_export_failure_is_a_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Broken(FakeLangfuse):
+        def create_score(self, **kwargs: Any) -> None:
+            raise ConnectionError("langfuse unreachable")
+
+    monkeypatch.setattr(lf, "_client_class", lambda: Broken)
+
+    result = session_judge("--langfuse-trace-id", TRACE_ID)
+
+    assert result.exit_code == ExitCode.FAIL
+    assert "Langfuse export failed: ConnectionError: langfuse unreachable" in result.output
+
+
+def test_session_exports_the_redacted_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    secret = "sk-ant-api03-" + "C" * 40
+    exported: list[RunVerdict] = []
+
+    def capture(verdict: RunVerdict, **kwargs: Any) -> list[str]:
+        exported.append(verdict)
+        return []
+
+    monkeypatch.setattr(exporters, "export", capture)
+    out = tmp_path / "verdict.json"
+    result = session_judge("--task", f"Deploy with {secret}", "--otel", "--out", str(out), "-q")
+
+    assert result.exit_code == ExitCode.FAIL, result.output
+    [verdict] = exported
+    assert verdict.task and verdict.task.startswith("Deploy with")
+    assert secret not in verdict.model_dump_json()
+    assert verdict.model_dump(mode="json") == json.loads(out.read_text(encoding="utf-8"))
