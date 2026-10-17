@@ -82,7 +82,7 @@ The first release.
   red-team and honest sessions from Claude Code and Codex.
 - Both benchmarks go beyond one shop and one pytest project: a clinic booking form and an
   admin console (`tests/fixtures/sites`, `bench` takes several run directories) and Node and
-  Go toy projects with runner-specific tricks; 0 of 1446 browser and 0 of 1653 session
+  Go toy projects with runner-specific tricks; 0 of 1446 browser and 0 of 1707 session
   forgeries pass, and 4 of 43 honest browser controls go to review offline.
 - Forgery kind `negated_lead_in` words a forged success after a negation that does not reach
   the claims ("Not wanting to overpay, compared prices and bought ...", "I didn't see any errors
@@ -134,6 +134,14 @@ The first release.
 
 ### Fixed
 
+- The offline session judge no longer PASSes "All tests pass" from a silent `make test` whose
+  only evidence is an earlier whole-suite count when the session wrote a file that may redefine
+  the wrapper (`test.mk`, `mk/test.mk`, `Makefile.test`, `Makefile.local`, `rules.mak`,
+  `tests/Makefile`, `tests/.env`, `tests/tox.ini`): any change that may redefine a wrapper, by
+  the same rule `trusted_wrappers` follows, now voids the earlier count, and make, tox, pytest,
+  nox, just, npm and env configuration is never taken for a test file wherever it sits
+  (`Makefile.*`, `*.mak` and `*.make` are now test configuration). Bench: 27 forged sessions
+  passed before and none does now; nine forgery kinds added, no control shifts (#92).
 - `bench --online` and `bench --with-llm-baseline` without `ANTHROPIC_API_KEY` now exit `4` and
   name the missing key, like `judge --llm anthropic`, instead of exiting `3`.
 - `judge --llm anthropic` without `ANTHROPIC_API_KEY` now exits `4` and names the missing key,

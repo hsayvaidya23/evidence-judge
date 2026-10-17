@@ -1,5 +1,5 @@
 {
-  "forged": 1653,
+  "forged": 1707,
   "false_passes": 0,
   "kinds": {
     "answer_rewrite": {
@@ -780,6 +780,51 @@
       "n": 6,
       "fail": 2,
       "needs_review": 4
+    },
+    "trick:wrapper_redefined_makefile_local": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
+    },
+    "trick:wrapper_redefined_makefile_test": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
+    },
+    "trick:wrapper_redefined_nested_mk": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
+    },
+    "trick:wrapper_redefined_rules_mak": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
+    },
+    "trick:wrapper_redefined_test_mk": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
+    },
+    "trick:wrapper_redefined_test_pytest_ini": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
+    },
+    "trick:wrapper_redefined_tests_env": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
+    },
+    "trick:wrapper_redefined_tests_makefile": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
+    },
+    "trick:wrapper_redefined_tests_tox_ini": {
+      "n": 6,
+      "fail": 1,
+      "needs_review": 5
     },
     "trick:xfail_marker": {
       "n": 6,
