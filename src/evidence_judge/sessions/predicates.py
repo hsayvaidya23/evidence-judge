@@ -34,6 +34,8 @@ MIN_TEXT = 3
 _GLOB_LITERAL = re.compile(r"[^*?/.]")
 _GLOB_CLASS = re.compile(r"\[!?\]?[^\]]*\]")
 _GLOB_UNSUPPORTED = re.compile(r"[{}\\\[]")
+_GLOB_RANGE = re.compile(r"(.)-([^\]])")
+_GLOB_ELSEWHERE = re.compile(r"^(?:~|[A-Za-z]:)|//")
 
 
 def _text(value: str) -> str:
@@ -52,7 +54,7 @@ def _regex(value: str) -> str:
 
 def _glob(value: str) -> str:
     stripped = value.strip().removeprefix("./")
-    if not stripped:
+    if not stripped.strip("/"):
         raise ValueError("glob must not be empty")
     if found := _GLOB_UNSUPPORTED.search(_GLOB_CLASS.sub("", stripped)):
         what = "an unclosed '['" if found[0] == "[" else repr(found[0])
@@ -60,6 +62,19 @@ def _glob(value: str) -> str:
             f"glob {stripped!r} has {what}; globs support *, **, ? and [...] / [!...] classes, "
             "not {a,b} alternatives or backslash escapes (list each path as its own glob)"
         )
+    if _GLOB_ELSEWHERE.search(stripped):
+        raise ValueError(
+            f"glob {stripped!r} is not under the session directory; a leading '/' anchors a "
+            "glob there, but '//', '~' and drive letters are not supported"
+        )
+    if any(part in (".", "..") for part in stripped.split("/")):
+        raise ValueError(f"glob {stripped!r} has a '.' or '..' segment, which no path matches")
+    for found in _GLOB_CLASS.finditer(stripped):
+        body = found[0][1:-1].removeprefix("!")
+        if "/" in body or any(lo > hi for lo, hi in _GLOB_RANGE.findall(body)):
+            raise ValueError(
+                f"glob {stripped!r} has the class {found[0]!r}, which no path character matches"
+            )
     return stripped
 
 
@@ -143,7 +158,7 @@ class EditPredicate(BaseModel):
     path: Glob | None = Field(
         default=None,
         description="Glob relative to the session directory; without '/' it matches the file "
-        "name at any depth",
+        "name at any depth, and a leading '/' anchors it to the session directory",
     )
     test_files: bool = Field(default=False, description="Match every test file instead of a glob")
     only: tuple[Glob, ...] | None = Field(

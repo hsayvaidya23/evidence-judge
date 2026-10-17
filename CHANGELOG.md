@@ -147,6 +147,9 @@ For anyone upgrading from a pre-release snapshot:
 - `judge --llm anthropic`, `bench --online` and `bench --with-llm-baseline` without
   `ANTHROPIC_API_KEY` exit `4` instead of judging offline or exiting `3`. The GitHub Action
   rejects boolean inputs other than `true` or `false`.
+- Session globs with a leading `/` (`/tests/**`) are anchored to the session directory, as in
+  gitignore, instead of matching nothing; globs with `//`, `~`, a drive letter, a `.` or `..`
+  segment or an unmatchable class are rejected.
 
 ### Security
 

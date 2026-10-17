@@ -84,6 +84,15 @@ def _unplaceable(path: str, root: str | None) -> bool:
     return root is None and posixpath.isabs(path) and not _scratch(path)
 
 
+def _inferred(paths: list[str], root: str | None) -> str:
+    if all(_unplaceable(p, root) for p in paths):
+        return (
+            "; placed by an inferred directory, as the session directory is unknown; set `cwd` "
+            "in the spec for strict placement"
+        )
+    return ""
+
+
 def _scratch(path: str) -> bool:
     return path.startswith(SCRATCH) or path in SAFE_TARGETS
 
@@ -184,19 +193,23 @@ def check_edit(predicate: EditPredicate, index: SessionIndex) -> PredicateResult
         anchor = _anchor(index)
         placed = [e for e in edits if _edit_matches(predicate, e.path, root, anchor=anchor)]
         if placed:
-            return result(
-                Support.SUPPORTED, f"{placed[-1].id} changed {placed[-1].path}", placed[-1]
-            )
-        placed_by = [
-            c
+            edit = placed[-1]
+            reason = f"{edit.id} changed {edit.path}{_inferred([edit.path], root)}"
+            return result(Support.SUPPORTED, reason, edit)
+        placed_by = {
+            c.id: matched
             for c in by_command
-            if any(
-                _edit_matches(predicate, p, root, c.cwd, anchor)
-                for p in _command_paths(c, predicate)
+            if (
+                matched := [
+                    p
+                    for p in _command_paths(c, predicate)
+                    if _edit_matches(predicate, p, root, c.cwd, anchor)
+                ]
             )
-        ]
-        if placed_by:
-            return result(Support.SUPPORTED, f"{placed_by[-1].id} changed {target}", placed_by[-1])
+        }
+        if command := next((c for c in reversed(by_command) if c.id in placed_by), None):
+            reason = f"{command.id} changed {target}{_inferred(placed_by[command.id], root)}"
+            return result(Support.SUPPORTED, reason, command)
         if doubt := [*edits, *by_command]:
             return result(
                 Support.NO_EVIDENCE,

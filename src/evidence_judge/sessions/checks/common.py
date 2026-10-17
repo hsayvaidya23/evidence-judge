@@ -195,14 +195,17 @@ def project_path(path: str, root: str | None, here: str | None = None) -> str | 
 
 def path_matches(pattern: str, path: str, root: str | None = None, here: str | None = None) -> bool:
     """Gitignore-like: a pattern without '/' matches a file or directory name at any depth; a
-    pattern with '/' matches from the session directory, and a directory pattern matches
-    everything under it. A path outside the project matches no pattern."""
+    pattern with '/' (a leading one included) matches from the session directory, and a
+    directory pattern matches everything under it. A path outside the project matches no
+    pattern."""
     rel = project_path(path, root, here)
     if rel is None:
         return False
     pat = pattern.rstrip("/")
+    anchored = pat.startswith("/")
+    pat = pat.removeprefix("/")
     tokens = _glob_tokens(pat)
-    if "/" not in pat:
+    if not anchored and "/" not in pat:
         return any(_glob_fullmatch(tokens, part) for part in rel.split("/") if part)
     return _glob_fullmatch(tokens, rel) or _glob_fullmatch(_glob_tokens(pat + "/**"), rel)
 
