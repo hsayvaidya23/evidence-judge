@@ -10,7 +10,7 @@ from typing import Final
 
 from evidence_judge.core.verdict import Citation, PredicateResult, Support
 from evidence_judge.sessions.edits import NO_DIFF
-from evidence_judge.sessions.models import CommandEvent, SessionEvent
+from evidence_judge.sessions.models import CallStatus, CommandEvent, SessionEvent, SessionRun
 from evidence_judge.sessions.normalize import relative
 
 CHECKER: Final = "session"
@@ -38,6 +38,45 @@ class RunOutcome:
 
 def blocker(finding: str) -> str:
     return "the code could not be checked" if NO_DIFF in finding else "the suite was weakened"
+
+
+_ROOT_PRINTERS: Final = ("pwd", "git rev-parse --show-toplevel")
+
+
+def _single(values: list[str]) -> str | None:
+    distinct = {posixpath.normpath(v) for v in values}
+    return next(iter(distinct)) if len(distinct) == 1 else None
+
+
+def _shown_root(run: SessionRun) -> tuple[str, str] | None:
+    """The session directory as the session shows it, and where: the one directory its commands
+    were recorded running in, else what every bare `pwd` (then `git rev-parse --show-toplevel`)
+    printed. Two different answers from one source give none."""
+    commands = [e for e in run.events if isinstance(e, CommandEvent) and e.status is CallStatus.OK]
+    if found := _single([c.cwd for c in commands if c.cwd and posixpath.isabs(c.cwd)]):
+        return found, "the directory its commands ran in"
+    for printer in _ROOT_PRINTERS:
+        printed = [
+            c.output.strip()
+            for c in commands
+            if c.cwd is None and c.command.strip() == printer and not c.output_truncated
+        ]
+        if (found := _single(printed)) and posixpath.isabs(found) and "\n" not in found:
+            return found, f"the output of `{printer}`"
+    return None
+
+
+def place(run: SessionRun, cwd: str | None) -> SessionRun:
+    """`run` with a session directory when its record names none: `cwd` (the spec's), else the
+    one the session shows."""
+    if run.cwd is not None:
+        return run
+    if cwd is not None:
+        return run.model_copy(update={"cwd": cwd})
+    if (shown := _shown_root(run)) is None:
+        return run
+    note = f"the session directory {shown[0]} is taken from {shown[1]}"
+    return run.model_copy(update={"cwd": shown[0], "notes": [*run.notes, note]})
 
 
 _ONE: Final = "?"

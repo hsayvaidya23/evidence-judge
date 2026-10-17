@@ -23,25 +23,59 @@ from evidence_judge.sessions.shell.lexer import SAFE_TARGETS
 from evidence_judge.sessions.shell.writes import SCRATCH
 
 
-def _placements(path: str, root: str | None, here: str | None = None) -> list[str]:
-    """Where `path` may lie in the project: its one project-relative form, every suffix of an
-    absolute path when the session directory is unknown, or nothing when it lies outside."""
+def _placements(
+    path: str, root: str | None, here: str | None = None, anchor: str | None = None
+) -> list[str]:
+    """Where `path` may lie in the project: its one project-relative form, or nothing when it
+    lies outside. When the session directory is unknown, an absolute path may lie at every
+    suffix; with `anchor`, only at those whose dropped prefix is `anchor` or one of its
+    ancestors (other than `/`)."""
     if (rel := project_path(path, root, here)) is not None:
         return [rel]
     if not _unplaceable(path, root):
         return []
     parts = [part for part in posixpath.normpath(path).split("/") if part]
-    return ["/".join(parts[i:]) for i in range(len(parts))]
+    if anchor is None:
+        return ["/".join(parts[i:]) for i in range(len(parts))]
+    above = [part for part in anchor.split("/") if part]
+    return ["/".join(parts[i:]) for i in range(1, len(above) + 1)]
 
 
 def _edit_matches(
-    predicate: EditPredicate, path: str, root: str | None, here: str | None = None
+    predicate: EditPredicate,
+    path: str,
+    root: str | None,
+    here: str | None = None,
+    anchor: str | None = None,
 ) -> bool:
+    places = _placements(path, root, here, anchor)
     if predicate.test_files:
-        return any(is_test_path(p) for p in _placements(path, root, here))
+        return any(is_test_path(p) for p in places)
     assert predicate.path is not None
     glob = predicate.path
-    return any(path_matches(glob, p) for p in _placements(path, root, here))
+    return any(path_matches(glob, p) for p in places)
+
+
+def _anchor(index: SessionIndex) -> str:
+    """The deepest directory holding every absolute path the session changed that cannot be
+    placed, or `/` when they lie in unrelated trees. The session directory is this directory
+    or one of its ancestors only if every change is in the project, so a path is placed only
+    below a root that holds all of them."""
+    root = index.run.cwd
+    paths = {
+        posixpath.normpath(p)
+        for p in (
+            *(e.path for e in index.edits),
+            *(
+                p
+                for c in index.commands
+                if c.status is not CallStatus.DENIED
+                for p in (*c.analysis.touched_paths, *c.analysis.deleted_paths)
+            ),
+        )
+        if _unplaceable(p, root)
+    }
+    return posixpath.commonpath([posixpath.dirname(p) for p in paths]) if paths else "/"
 
 
 def _unplaceable(path: str, root: str | None) -> bool:
@@ -120,6 +154,11 @@ def check_only(globs: tuple[str, ...], index: SessionIndex) -> PredicateResult:
     return result(Support.SUPPORTED, f"every recorded change is to {named}")
 
 
+def _command_paths(command: CommandEvent, predicate: EditPredicate) -> list[str]:
+    analysis = command.analysis
+    return analysis.deleted_paths if predicate.change == "delete" else analysis.touched_paths
+
+
 def check_edit(predicate: EditPredicate, index: SessionIndex) -> PredicateResult:
     if predicate.only is not None:
         return check_only(predicate.only, index)
@@ -133,14 +172,7 @@ def check_edit(predicate: EditPredicate, index: SessionIndex) -> PredicateResult
         c
         for c in index.commands
         if c.status is not CallStatus.DENIED
-        and any(
-            _edit_matches(predicate, p, root, c.cwd)
-            for p in (
-                c.analysis.deleted_paths
-                if predicate.change == "delete"
-                else c.analysis.touched_paths
-            )
-        )
+        and any(_edit_matches(predicate, p, root, c.cwd) for p in _command_paths(c, predicate))
     ]
     unseen = [
         e
@@ -149,11 +181,28 @@ def check_edit(predicate: EditPredicate, index: SessionIndex) -> PredicateResult
         or (isinstance(e, CommandEvent) and not _names_its_paths(e))
     ]
     if predicate.touched:
-        if edits:
-            return result(Support.SUPPORTED, f"{edits[-1].id} changed {edits[-1].path}", edits[-1])
-        if by_command:
+        anchor = _anchor(index)
+        placed = [e for e in edits if _edit_matches(predicate, e.path, root, anchor=anchor)]
+        if placed:
             return result(
-                Support.SUPPORTED, f"{by_command[-1].id} changed {target}", by_command[-1]
+                Support.SUPPORTED, f"{placed[-1].id} changed {placed[-1].path}", placed[-1]
+            )
+        placed_by = [
+            c
+            for c in by_command
+            if any(
+                _edit_matches(predicate, p, root, c.cwd, anchor)
+                for p in _command_paths(c, predicate)
+            )
+        ]
+        if placed_by:
+            return result(Support.SUPPORTED, f"{placed_by[-1].id} changed {target}", placed_by[-1])
+        if doubt := [*edits, *by_command]:
+            return result(
+                Support.NO_EVIDENCE,
+                f"{doubt[-1].id} changed a file named like {target}, but the session directory "
+                "is unknown and other changes place it outside the project",
+                doubt[-1],
             )
         if unseen:
             return result(
