@@ -638,7 +638,10 @@ piece of text three ways:
   as opaque) that covers the whole viewport or its containing block (`inset: 0`, or `top` and
   `left` 0 with 100% or `100vw`/`100vh` sizes) and is painted above it (a higher `z-index`,
   or a later place in the page for the same one), unless the box's own styles put it out of
-  sight (slid off by its own size, scaled to nothing, clipped away, collapsed); SVG presentation attributes
+  sight (slid off by its own size, scaled to nothing, clipped away, collapsed) or its only
+  animation certainly comes to rest within five seconds filling forwards onto a keyframe that
+  does (a preloader that fades out); a `transition` is read at the values the recorded classes
+  give, since the snapshot holds the page's classes and not the moment of a change; SVG presentation attributes
   (`font-size`, `transform`, `clip-path`, `mask`, `filter`, `fill`, `opacity`, ...) count like
   the properties they name; a hiding utility class (`hidden`, `d-none`, `sr-only`, `visually-hidden`,
   `invisible`) that no recorded stylesheet defines; and all text of a page whose stylesheets
