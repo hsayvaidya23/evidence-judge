@@ -51,7 +51,8 @@ Each value becomes `[REDACTED:<category>:<fingerprint>]`, where the fingerprint 
 case-folded and card and phone numbers reduced to their digits, because evidence matching ignores case and
 card formatting; credentials are fingerprinted exactly. Equal values get equal tokens, so a claim
 that quotes an email still matches the request that sent it, without the email ever being shown,
-and redaction never changes a verdict (this is tested). Set `EVJ_REDACTION_KEY` to keep
+and redaction never changes a verdict (this is tested). A fingerprint is never compared as
+text the agent typed; the text around a token in a typed value still counts as its echo. Set `EVJ_REDACTION_KEY` to keep
 fingerprints stable everywhere; otherwise, when a run uses the LLM cache, a random key is kept in
 `<EVJ_CACHE_DIR>/redaction.key` (mode 0600), and in every other case a random key is used per
 process. Treat the key and the key file as secrets: with the key, a fingerprint can be confirmed
@@ -90,9 +91,9 @@ by guessing.
   next, and a quote left open (`curl -u "alice:s3cr3t`) runs to the end of its line, which is
   redacted with the secret. After a secret-named flag, a path, file name, test id, call or
   number of at most three digits is kept, so a command predicate written against an honest
-  command still matches. Only the first 1,024 words of one command are read against its tool's
-  flags; the rest are left to the free-text rules, which still catch `--token X` there but not
-  a tool-specific form such as `-u user:X`.
+  command still matches. A command of any length is read against its tool's flags, in
+  windows of 1,024 words that overlap by two, so a flag and its value on either side of a cut
+  (`-u` as word 1,024, `user:X` as word 1,025) are read together and the cost stays linear.
 - `--no-redact` (or `EVJ_REDACT=false`) disables all of the above. Use it only on synthetic data.
 
 ## Trust assumptions

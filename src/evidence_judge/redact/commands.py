@@ -3,8 +3,9 @@
 A command is split into shell words with their offsets, each word unquoted with ``shlex`` (or
 kept as written when its quoting is unbalanced), then matched against per-tool flag tables. A
 backslash before a line break joins the lines as a shell does, and a quote left open runs to the
-end of its line. A command is read for at most ``MAX_COMMAND_WORDS`` words; the rest of a longer
-one is left to the free-text detectors.
+end of its line. A long command is read against its tool's flag tables in windows of
+``MAX_COMMAND_WORDS`` words that overlap by ``WINDOW_OVERLAP``, so a flag and its value on either
+side of a cut are read together and the cost stays linear.
 """
 
 from __future__ import annotations
@@ -48,16 +49,16 @@ _SECRET_LONG_FLAG_SUFFIXES = (
 _BOOLEAN_FLAG_PREFIXES = ("no_", "with_", "without_", "use_", "skip_", "ask_", "prompt_", "show_")
 """``--no-password`` or ``--with-token`` switch a behaviour on or off and take no value."""
 MAX_COMMAND_WORDS = 1024
-"""Words of one command read against its tool's flag tables, so its cost stays linear."""
+"""Words of one command read against its tool's flag tables in one window."""
+WINDOW_OVERLAP = 2
+"""Words a window shares with the one before it, so no flag is cut from its value."""
 _COUNT_MAX_DIGITS = 3
 """A number this short after a secret-named flag is a count (``--password 2 failed``)."""
 _SPACE = r"(?:[ \t]|\\\r?\n)+"
 _WORD = r"""(?:'[^'\r\n]*'?|"(?:[^"\\\r\n]|\\[^\r\n])*"?|\\[^\r\n]|[^\s'"\\|;&<>`()])+"""
 _WORD_RE = re.compile(_WORD)
 _TOOL_NAMES = "|".join(sorted(map(re.escape, _TOOLS), key=len, reverse=True))
-COMMAND_RE = re.compile(
-    rf"(?<![\w.\\=:@-])({_TOOL_NAMES})(?![\w./-])((?:{_SPACE}{_WORD}){{1,{MAX_COMMAND_WORDS}}})"
-)
+COMMAND_RE = re.compile(rf"(?<![\w.\\=:@-])({_TOOL_NAMES})(?![\w./-])((?:{_SPACE}{_WORD})++)")
 """A known tool's name and the words after it, up to the end of its shell command."""
 LONG_FLAG_RE = re.compile(rf"(?<![\w-])(--[A-Za-z][\w-]{{0,63}})({_SPACE})({_WORD})")
 """``--name value`` on any command line, for flags named like a credential."""
@@ -156,8 +157,7 @@ def _long_flag_value(words: list[Secret], i: int) -> Secret | None:
     return found if found is not None and _is_flag_secret(found.value) else None
 
 
-def _flag_secrets(tool: str, words: list[Secret]) -> Iterator[Secret]:
-    login = tool in _LOGIN_TOOLS and any(w.value == "login" for w in words)
+def _flag_secrets(tool: str, words: list[Secret], *, login: bool) -> Iterator[Secret]:
     for i in range(len(words)):
         if tool in _MYSQL_TOOLS:
             found = _flag_value(words, i, "-p", separate=False)
@@ -207,7 +207,12 @@ def _config_secret(words: list[Secret]) -> Secret | None:
 def command_secrets(tool: str, args: str) -> list[Secret]:
     """The secrets in ``args``, the words after ``tool`` on its command line, by their spans."""
     words = _split_words(args)
-    found: list[Secret | None] = list(_flag_secrets(tool, words))
+    login = tool in _LOGIN_TOOLS and any(w.value == "login" for w in words)
+    found: list[Secret | None] = []
+    step = MAX_COMMAND_WORDS - WINDOW_OVERLAP
+    for start in range(0, max(len(words) - WINDOW_OVERLAP, 1), step):
+        window = words[start : start + MAX_COMMAND_WORDS]
+        found.extend(_flag_secrets(tool, window, login=login))
     if tool == "htpasswd":
         found.append(_htpasswd_password(words))
     if tool in _CONFIG_TOOLS:

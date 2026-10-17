@@ -32,6 +32,28 @@ def test_a_redaction_fingerprint_is_not_near_the_text(fingerprint: str) -> None:
     assert mask_covered("Total $24.00", ("$24.00",), (normalize(token),)) is None
 
 
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "Order confirmed [REDACTED:email:ab12cd34]",
+        "[REDACTED:email:ab12cd34] Order confirmed",
+        "Your Order confirmed [REDACTED:email:ab12cd34]",
+        "Order [REDACTED:email:ab12cd34] confirmed",
+        "Order confirmd [REDACTED:email:ab12cd34]",
+        "[REDACTED:secret_input:f1140042] Ordre confirmed",
+    ],
+)
+def test_the_text_around_a_redaction_token_still_echoes(typed: str) -> None:
+    masked = mask_covered("Gift note: Order confirmed", ("order confirmed",), (typed,))
+    assert masked == f"gift note: {MASK}"
+
+
+@pytest.mark.parametrize("fingerprint", ["f1140042", "52009f32", "5c900ba5", "a0504125"])
+def test_a_fingerprint_beside_typed_text_is_not_near_the_text(fingerprint: str) -> None:
+    typed = f"Paid [REDACTED:secret_input:{fingerprint}]"
+    assert mask_covered("Total $24.00", ("$24.00",), (typed,)) is None
+
+
 def test_a_folded_echo_maps_back_to_the_text_it_came_from() -> None:
     assert mask("Résultats: Ïn ştöck, merci", ("1n 5t0ck",)) == f"résultats: {MASK}, merci"
 
