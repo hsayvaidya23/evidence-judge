@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import posixpath
 from typing import Final
 
 from evidence_judge.core.verdict import PredicateResult, Support
-from evidence_judge.sessions.checks.common import path_matches, result
+from evidence_judge.sessions.checks.common import path_matches, project_path, result
 from evidence_judge.sessions.checks.index import SessionIndex
 from evidence_judge.sessions.edits import is_test_path
 from evidence_judge.sessions.models import (
@@ -16,18 +17,41 @@ from evidence_judge.sessions.models import (
     SessionEvent,
     SubagentEvent,
 )
-from evidence_judge.sessions.normalize import relative
 from evidence_judge.sessions.predicates import EditPredicate
 from evidence_judge.sessions.shell import READ_ONLY_PROGRAMS
 from evidence_judge.sessions.shell.lexer import SAFE_TARGETS
 from evidence_judge.sessions.shell.writes import SCRATCH
 
 
-def _edit_matches(predicate: EditPredicate, path: str) -> bool:
+def _placements(path: str, root: str | None, here: str | None = None) -> list[str]:
+    """Where `path` may lie in the project: its one project-relative form, every suffix of an
+    absolute path when the session directory is unknown, or nothing when it lies outside."""
+    if (rel := project_path(path, root, here)) is not None:
+        return [rel]
+    if not _unplaceable(path, root):
+        return []
+    parts = [part for part in posixpath.normpath(path).split("/") if part]
+    return ["/".join(parts[i:]) for i in range(len(parts))]
+
+
+def _edit_matches(
+    predicate: EditPredicate, path: str, root: str | None, here: str | None = None
+) -> bool:
     if predicate.test_files:
-        return is_test_path(path)
+        return any(is_test_path(p) for p in _placements(path, root, here))
     assert predicate.path is not None
-    return path_matches(predicate.path, path)
+    glob = predicate.path
+    return any(path_matches(glob, p) for p in _placements(path, root, here))
+
+
+def _unplaceable(path: str, root: str | None) -> bool:
+    """An absolute path in a session whose directory is unknown: it may or may not lie in the
+    project."""
+    return root is None and posixpath.isabs(path) and not _scratch(path)
+
+
+def _scratch(path: str) -> bool:
+    return path.startswith(SCRATCH) or path in SAFE_TARGETS
 
 
 _PATH_EXPLICIT: Final = frozenset(
@@ -50,25 +74,24 @@ def _names_its_paths(event: CommandEvent) -> bool:
     )
 
 
-def _project_path(path: str, cwd: str | None) -> str | None:
-    """`path` relative to the session directory, or None for scratch space (`/tmp`, `/dev`)."""
-    if path.startswith(SCRATCH) or path in SAFE_TARGETS:
-        return None
-    return relative(path, cwd)
-
-
 def check_only(globs: tuple[str, ...], index: SessionIndex) -> PredicateResult:
-    """Every file the session changed matches one of `globs`."""
+    """Every file the session changed matches one of `globs`; a change outside the project
+    matches none of them."""
     named = ", ".join(globs)
+    root = index.run.cwd
 
-    def inside(path: str) -> bool:
-        return any(path_matches(glob, path) for glob in globs)
+    def inside(path: str, here: str | None = None) -> bool:
+        return _scratch(path) or any(path_matches(glob, path, root, here) for glob in globs)
 
-    if edit := next((e for e in index.edits if not inside(e.path)), None):
+    def may_be_inside(path: str, here: str | None = None) -> bool:
+        return any(path_matches(glob, p) for glob in globs for p in _placements(path, root, here))
+
+    outside = [e for e in index.edits if not inside(e.path)]
+    if edit := next((e for e in outside if not may_be_inside(e.path)), None):
         return result(
             Support.CONTRADICTED, f"{edit.id} changed {edit.path}, not only {named}", edit
         )
-    unseen: list[SessionEvent] = []
+    unseen: list[SessionEvent] = list(outside)
     for _, event, _ in index.changes:
         if isinstance(event, SubagentEvent | OtherToolEvent):
             unseen.append(event)
@@ -77,10 +100,10 @@ def check_only(globs: tuple[str, ...], index: SessionIndex) -> PredicateResult:
         analysis = event.analysis
         paths = [
             p
-            for raw in (*analysis.touched_paths, *analysis.deleted_paths)
-            if (p := _project_path(raw, index.run.cwd)) is not None and not inside(p)
+            for p in (*analysis.touched_paths, *analysis.deleted_paths)
+            if not inside(p, event.cwd)
         ]
-        if paths and _names_its_paths(event):
+        if any(not may_be_inside(p, event.cwd) for p in paths) and _names_its_paths(event):
             return result(
                 Support.CONTRADICTED, f"{event.id} changed {paths[0]}, not only {named}", event
             )
@@ -104,13 +127,14 @@ def check_edit(predicate: EditPredicate, index: SessionIndex) -> PredicateResult
     kinds = {"add": ("add",), "modify": ("modify", "unknown"), "delete": ("delete",)}.get(
         predicate.change, ("add", "modify", "delete", "unknown")
     )
-    edits = [e for e in index.edits if _edit_matches(predicate, e.path) and e.change in kinds]
+    root = index.run.cwd
+    edits = [e for e in index.edits if _edit_matches(predicate, e.path, root) and e.change in kinds]
     by_command = [
         c
         for c in index.commands
         if c.status is not CallStatus.DENIED
         and any(
-            _edit_matches(predicate, p)
+            _edit_matches(predicate, p, root, c.cwd)
             for p in (
                 c.analysis.deleted_paths
                 if predicate.change == "delete"

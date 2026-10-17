@@ -513,6 +513,21 @@ it the predicate is *no evidence* naming the command, so the session needs revie
 matched by stepping every pattern position at once, in time linear in the path, so no glob can
 backtrack.
 
+Globs (`path`, `only`, `ignore_edits`) are gitignore-like and relative to the session directory:
+a glob without `/` matches a file or directory name at any depth, a glob with `/` matches from
+the session directory, and a directory glob matches everything under it. `*` and `?` match within
+one path segment, `**` across segments, and `[abc]`, `[a-z]` and `[!_]` match one character of a
+segment as in `fnmatch` (never `/`). `{a,b}` alternatives, backslash escapes and an unclosed `[`
+are rejected when the spec is loaded; list each path as its own glob. A path is placed relative to
+the session directory (a command's relative path from the directory it ran in) before it is
+matched, and a path outside the project (an absolute path elsewhere, or one that climbs out with
+`..`) matches no glob: with `only` it is a change outside the allowed files, and `ignore_edits`
+never ignores it. Scratch space (`/tmp`, `/dev/null`) is not a project change. When the session
+directory is unknown (a Codex `exec --json` stream), an absolute path may lie anywhere in the
+project, so it is placed at every suffix: `path` predicates match it if any suffix matches, an
+`only` glob that only a suffix matches is *no evidence* rather than *supported*, and
+`ignore_edits` never ignores it.
+
 ### Soundness rules
 
 These rules decide every `test_result` and `build` predicate. Each "cannot prove" is *no

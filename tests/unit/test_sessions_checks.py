@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import time
+from fnmatch import fnmatchcase
 
 import pytest
 from pydantic import ValidationError
@@ -8,7 +10,7 @@ from pydantic import ValidationError
 from evidence_judge.core.verdict import Support
 from evidence_judge.sessions.checks import SessionIndex, check, path_matches
 from evidence_judge.sessions.models import CallStatus, SessionRun
-from evidence_judge.sessions.normalize import ToolCall
+from evidence_judge.sessions.normalize import ToolCall, build_events
 from evidence_judge.sessions.predicates import (
     BuildPredicate,
     CommandPredicate,
@@ -666,7 +668,7 @@ def test_build_predicates() -> None:
     [
         ("calc.py", "calc.py", True),
         ("calc.py", "src/calc.py", True),
-        ("calc.py", "/work/toy/calc.py", True),
+        ("calc.py", "/work/toy/calc.py", False),
         ("*.py", "src/calc.py", True),
         ("tests", "tests/test_calc.py", True),
         ("tests/**", "tests/unit/test_calc.py", True),
@@ -675,7 +677,7 @@ def test_build_predicates() -> None:
         ("src/*.py", "src/sub/calc.py", False),
         ("src/**/*.py", "src/sub/calc.py", True),
         ("src/**/*.py", "src/calc.py", True),
-        ("src/calc.py", "/elsewhere/src/calc.py", True),
+        ("src/calc.py", "/elsewhere/src/calc.py", False),
         ("src/calc.py", "lib/src/calc.py", False),
         ("calc?.py", "calc1.py", True),
         ("tests/**", "src/tests_util.py", False),
@@ -684,12 +686,50 @@ def test_build_predicates() -> None:
         ("src/**/", "src/x/y.py", True),
         ("a*b?c", "aXXbYc", True),
         ("a*b?c", "aX/bYc", False),
-        ("[ab].py", "[ab].py", True),
-        ("[ab].py", "a.py", False),
+        ("[ab].py", "a.py", True),
+        ("[ab].py", "[ab].py", False),
+        ("[!_]*.py", "_x.py", False),
+        ("[a-c]x", "bx", True),
+        ("src/[!/]x", "src//x", False),
+        ("src/**", "../other/src/x.py", False),
+        ("*.py", "../x.py", False),
+        ("src/x.py", "./src/../src/x.py", True),
+        ("tests/**", "tests/../src/app.py", False),
     ],
 )
 def test_path_matches(pattern: str, path: str, expected: bool) -> None:
     assert path_matches(pattern, path) is expected
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path", "here", "expected"),
+    [
+        ("src/**", f"{CWD}/src/x.py", None, True),
+        ("calc.py", f"{CWD}/calc.py", None, True),
+        ("src/**", "/home/u/src/evil.sh", None, False),
+        ("*.sh", "/home/u/src/evil.sh", None, False),
+        ("src/**", f"{CWD}/../other/src/x.py", None, False),
+        ("src/**", f"{CWD}2/src/x.py", None, False),
+        ("src/**", "x.py", f"{CWD}/src", True),
+        ("src/**", "../x.py", f"{CWD}/src", False),
+        ("src/**", "../../src/x.py", f"{CWD}/src", False),
+    ],
+)
+def test_path_matches_within_the_session_directory(
+    pattern: str, path: str, here: str | None, expected: bool
+) -> None:
+    assert path_matches(pattern, path, CWD, here) is expected
+
+
+_FNMATCH_GLOBS = ("[ab].py", "[!_]*.py", "x[a-c-]?", "[]x]y", "[!]x]y", "[z-a]", "[a", "a]", "*")
+_FNMATCH_NAMES = ("a.py", "b.py", "_a.py", "ab.py", "xa1", "x-1", "xd1", "]y", "xy", "zy", "z",
+                  "[a", "a]", "-", "[ab].py")  # fmt: skip
+
+
+@pytest.mark.parametrize("pattern", _FNMATCH_GLOBS)
+def test_glob_classes_agree_with_fnmatch_within_a_name(pattern: str) -> None:
+    for name in _FNMATCH_NAMES:
+        assert path_matches(pattern, name) is fnmatchcase(name, pattern), name
 
 
 def _edit_with_original(name: str, original: str, **tool_input: object) -> ToolCall:
@@ -1149,3 +1189,71 @@ def test_only_holds_when_every_change_matches() -> None:
 def test_only_rejects_globs_that_name_nothing(fields: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         EditPredicate.model_validate(fields)
+
+
+@pytest.mark.parametrize(
+    ("glob", "named"),
+    [("src/{a,b}.py", "'{'"), ("src/a}.py", "'}'"), (r"tests/\*.py", "'\\\\'"),
+     ("src/[ab.py", "an unclosed '['")],
+)  # fmt: skip
+def test_globs_reject_unsupported_syntax(glob: str, named: str) -> None:
+    with pytest.raises(ValidationError, match=f"has {re.escape(named)}"):
+        EditPredicate(path=glob)
+
+
+def test_glob_classes_are_not_literal_names() -> None:
+    assert EditPredicate(path="tests/[!_]*.py", touched=False).path == "tests/[!_]*.py"
+    with pytest.raises(ValidationError, match="names nothing specific"):
+        EditPredicate(only=("[!_]*",))
+
+
+def test_only_fails_an_edit_outside_the_project() -> None:
+    only = EditPredicate(only=("src/**",))
+    outside = ToolCall(
+        name="Edit",
+        input={"file_path": "/home/u/src/evil.sh", "old_string": "a", "new_string": "b"},
+        status=CallStatus.OK,
+    )
+    status, reason = _check(only, session(edit("src/calc.py"), outside))
+    assert status is Support.CONTRADICTED and "/home/u/src/evil.sh" in reason
+    status, reason = _check(only, session(edit("src/calc.py"), bash("rm ../other/src/x.py")))
+    assert status is Support.CONTRADICTED and "../other/src/x.py" in reason
+    assert _check(only, session(edit("src/calc.py"), bash("touch /tmp/notes.txt")))[0] is (
+        Support.SUPPORTED
+    )
+    scratch = ToolCall(
+        name="Write", input={"file_path": "/tmp/plan.md", "content": "x"}, status=CallStatus.OK
+    )
+    assert _check(only, session(edit("src/calc.py"), scratch))[0] is Support.SUPPORTED
+
+
+def test_an_edit_outside_the_project_is_not_ignored() -> None:
+    outside = ToolCall(
+        name="Edit",
+        input={"file_path": "/home/u/notes.md", "old_string": "a", "new_string": "b"},
+        status=CallStatus.OK,
+    )
+    run = session(edit("calc.py"), bash("pytest -q", GREEN), outside)
+    assert _check(ALL_PASS, run, ignore_edits=["*.md"])[0] is Support.NO_EVIDENCE
+    inside = session(edit("calc.py"), bash("pytest -q", GREEN), edit("docs/notes.md"))
+    assert _check(ALL_PASS, inside, ignore_edits=["*.md"])[0] is Support.SUPPORTED
+
+
+def test_an_unplaceable_absolute_edit_is_placed_by_suffix() -> None:
+    events, _ = build_events([edit("src/calc.py")], None)
+    run = session().model_copy(update={"cwd": None, "events": events})
+    assert _check(EditPredicate(only=("src/**",)), run)[0] is Support.NO_EVIDENCE
+    assert _check(EditPredicate(only=("lib/**",)), run)[0] is Support.CONTRADICTED
+    assert _check(EditPredicate(path="src/**"), run)[0] is Support.SUPPORTED
+    assert _check(EditPredicate(path="src/**", touched=False), run)[0] is Support.CONTRADICTED
+    assert _check(EditPredicate(test_files=True, touched=False), run)[0] is Support.SUPPORTED
+    calls = [edit("calc.py"), bash("pytest -q", GREEN), edit("docs/notes.md")]
+    events, _ = build_events(calls, None)
+    stale = session().model_copy(update={"cwd": None, "events": events})
+    assert _check(ALL_PASS, stale, ignore_edits=["*.md"])[0] is Support.NO_EVIDENCE
+    events, _ = build_events([bash("rm /repo/tests/test_calc.py")], None)
+    removed = session().model_copy(update={"cwd": None, "events": events})
+    assert _check(EditPredicate(path="tests/**", touched=False), removed)[0] is (
+        Support.CONTRADICTED
+    )
+    assert _check(EditPredicate(only=("src/**",)), removed)[0] is Support.CONTRADICTED
