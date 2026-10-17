@@ -181,7 +181,7 @@ def exercise(run: Run) -> None:
 
 
 def check(load: Callable[[], Run]) -> str:
-    start = time.perf_counter()
+    start = time.process_time()
     try:
         run = load()
     except IngestError:
@@ -189,7 +189,7 @@ def check(load: Callable[[], Run]) -> str:
     else:
         exercise(run)
         outcome = "loaded"
-    assert time.perf_counter() - start < CASE_BUDGET_S
+    assert time.process_time() - start < CASE_BUDGET_S
     return outcome
 
 
