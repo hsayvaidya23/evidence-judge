@@ -132,6 +132,32 @@ def build_llm(settings: Settings) -> LLMClient | None:
         raise CliError(f"could not initialise the LLM client: {e}", ExitCode.INTERNAL) from e
 
 
+def chosen_llm(settings: Settings, choice: LLMChoice | None, *, offline: bool) -> LLMClient | None:
+    """The LLM to judge with, None offline. A backend named with ``--llm`` that has no
+    credentials is an internal error (exit 4), not a quiet offline run."""
+    llm = None if offline else build_llm(settings)
+    if llm is None and not offline and choice is not None:
+        raise CliError(
+            f"--llm {choice.value} needs ANTHROPIC_API_KEY, which is not set "
+            "(set it, or pass --offline to judge without a model)",
+            ExitCode.INTERNAL,
+        )
+    return llm
+
+
+LlmOption = Annotated[
+    LLMChoice | None,
+    typer.Option(
+        "--llm",
+        metavar="<backend>",
+        help=(
+            "LLM backend: anthropic (ANTHROPIC_API_KEY), or the claude-code, codex or gemini CLI "
+            "you are logged into. Default: EVJ_LLM_BACKEND"
+        ),
+    ),
+]
+
+
 def write_output(path: Path, write: Callable[[Path], object]) -> None:
     try:
         write(path)

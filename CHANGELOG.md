@@ -107,6 +107,9 @@ The first release.
   a session: claims with the tool calls they cite (command and exit code), spec expectations,
   the verification method (re-run or transcript), warnings, and every recorded tool call as the
   timeline. It shows the redacted session and escapes all agent text.
+- `session judge --llm BACKEND` picks the backend for session claim extraction, as `judge --llm`
+  does; a chosen backend that cannot be used (such as `anthropic` without `ANTHROPIC_API_KEY`)
+  exits `4` instead of judging offline.
 
 ### Changed
 

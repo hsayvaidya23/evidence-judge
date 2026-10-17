@@ -192,6 +192,7 @@ which format the file looks like.
 | `--out FILE` | Write the verdict JSON (schema `evidence-judge/run-verdict@1`) here |
 | `--html FILE` | Write the self-contained HTML report here: the claims with the tool calls they cite (command and exit code), spec expectations, how test results were verified (re-run or transcript), warnings and every recorded tool call. It shows the redacted session, and all agent text is escaped |
 | `--offline` | No LLM calls; heuristic claim extraction only |
+| `--llm BACKEND` | Where claim extraction's LLM calls go, as for `judge`: `anthropic`, `claude-code`, `codex` or `gemini`. Default: `EVJ_LLM_BACKEND`. A backend that cannot be used (a missing or logged-out CLI, `anthropic` without `ANTHROPIC_API_KEY`) exits `4`; without `--llm`, a missing key judges offline. `--offline` wins over it |
 | `--no-redact` | Keep secrets in commands, outputs and reports |
 | `--require-tamper-evidence` | Cap the run at needs review unless it comes from an evidence log or a harness stream |
 | `--rerun` | Run the spec's `rerun` command on a copy of `--project` in a clean environment and decide `test_result` predicates from the runner's own report instead of the recorded output; see [Independent re-run](design/coding-agent-sessions.md#independent-re-run) |

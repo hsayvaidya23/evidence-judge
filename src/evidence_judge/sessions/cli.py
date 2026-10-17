@@ -18,7 +18,8 @@ from evidence_judge._cli_common import (
     CliError,
     Debug,
     ExitCode,
-    build_llm,
+    LlmOption,
+    chosen_llm,
     fail,
     internal,
     load_claims,
@@ -222,6 +223,7 @@ def judge_command(
     offline: Annotated[
         bool, typer.Option("--offline", help="No LLM calls; heuristic claim extraction only")
     ] = False,
+    llm_backend: LlmOption = None,
     no_redact: Annotated[
         bool, typer.Option("--no-redact", help="Keep secrets in commands, outputs and reports")
     ] = False,
@@ -258,7 +260,7 @@ def judge_command(
     Exit code: 0 pass, 1 fail, 2 needs review, 3 bad input, 4 internal."""
     err = stderr()
     try:
-        settings = load_settings()
+        settings = load_settings(llm_backend)
         session_spec = _spec(spec)
         claim_set = load_claims(claims, SessionClaimSet) if claims else None
         run = _load(
@@ -275,7 +277,7 @@ def judge_command(
             if rerun
             else None
         )
-        llm = None if offline else build_llm(settings)
+        llm = chosen_llm(settings, llm_backend, offline=offline)
         if no_redact:
             settings = settings.model_copy(update={"redact": False})
         redactor = load_redactor(settings, persistent=llm is not None) if settings.redact else None
