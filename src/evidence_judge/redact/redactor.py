@@ -24,6 +24,12 @@ from evidence_judge.core.evidence import (
     PageState,
     Run,
 )
+from evidence_judge.redact.commands import (
+    COMMAND_RE,
+    LONG_FLAG_RE,
+    command_secrets,
+    long_flag_secret,
+)
 from evidence_judge.redact.detectors import (
     API_KEY_RE,
     ATTR_RE,
@@ -52,10 +58,12 @@ from evidence_judge.redact.detectors import (
     URL_TRAILING,
     field_category,
     is_basic_credential,
+    is_labelled_secret,
     is_secret_header,
     is_secret_input,
     is_secret_param,
     looks_like_card,
+    looks_like_code_reference,
     looks_like_labelled_secret,
     looks_like_secret,
     luhn_ok,
@@ -267,6 +275,8 @@ class Redactor:
         """The free-text substitutions in the order they run, each counting into ``counts``."""
         handlers: tuple[tuple[re.Pattern[str], _TextRepl], ...] = (
             (INPUT_TAG_RE, self._sub_input_tag),
+            (COMMAND_RE, self._sub_command),
+            (LONG_FLAG_RE, self._sub_long_flag),
             (ESCAPED_URL_RE, self._sub_escaped_url),
             (URL_IN_TEXT_RE, self._sub_url),
             (JWT_RE, self._sub_jwt),
@@ -352,17 +362,45 @@ class Redactor:
         return m.group(1) + self._cookie_pairs(m.group(3), counts, attributes=set_cookie)
 
     def _sub_labelled_secret(self, counts: Counter[str], m: re.Match[str]) -> str:
-        prefix, value = m.group(1, 2)
+        prefix, label, value = m.group(1, 2, 3)
         kept = value.rstrip(URL_TRAILING)
-        if not looks_like_labelled_secret(kept):
+        if not is_labelled_secret(label, kept):
             return m.group(0)
         return prefix + self._token("secret_param", kept, counts) + value[len(kept) :]
+
+    def _flag_token(self, value: str, counts: Counter[str]) -> str:
+        """A command-line credential's token, in the category its format has anywhere else."""
+        if API_KEY_RE.fullmatch(value):
+            return self._token("api_key", value, counts)
+        if JWT_RE.fullmatch(value):
+            return self._token("jwt", value, counts)
+        return self._token("secret_param", value, counts)
+
+    def _sub_command(self, counts: Counter[str], m: re.Match[str]) -> str:
+        args = m.group(2)
+        parts: list[str] = [m.group(1)]
+        pos = 0
+        for secret in command_secrets(m.group(1), args):
+            parts.append(args[pos : secret.start])
+            parts.append(secret.prefix + self._flag_token(secret.value, counts))
+            pos = secret.end
+        parts.append(args[pos:])
+        return "".join(parts)
+
+    def _sub_long_flag(self, counts: Counter[str], m: re.Match[str]) -> str:
+        name, space, raw = m.group(1, 2, 3)
+        value = long_flag_secret(m.string, m.start(), name, raw)
+        if value is None:
+            return m.group(0)
+        return name + space + self._flag_token(value, counts)
 
     def _sub_text_pair(self, counts: Counter[str], m: re.Match[str]) -> str:
         prefix, name, quote_char, value = m.group(1, 2, 3, 4)
         kept = value if quote_char else value.rstrip(URL_TRAILING)
         if (
             not kept
+            or kept.startswith(":")
+            or looks_like_code_reference(name)
             or norm_param(name) in PAIR_EXCLUDED_NAMES
             or not is_secret_param(name, in_url=False)
             or not looks_like_secret(kept)
