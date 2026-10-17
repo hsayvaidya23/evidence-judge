@@ -21,6 +21,7 @@ from evidence_judge.bench import (
     BenchResult,
     CaseResult,
     Scenario,
+    forgery_seeds,
     load_scenarios,
     to_json,
     to_markdown,
@@ -29,7 +30,8 @@ from evidence_judge.config import Settings
 from evidence_judge.core.verdict import Outcome
 from evidence_judge.forgery import MANIPULATION_KINDS, ForgeryKind
 from evidence_judge.forgery.controls import NEGATED_ANSWERS, ControlKind
-from evidence_judge.forgery.evidence import WRITE_ONLY_KINDS
+from evidence_judge.forgery.evidence import WRITE_ONLY_KINDS, variants_of
+from evidence_judge.forgery.planting import is_write_task
 from evidence_judge.llm.base import LLMError, LLMRequest
 from evidence_judge.llm.fake import FakeLLM
 from evidence_judge.redact import Redactor
@@ -41,6 +43,10 @@ WRITE_BASES, READ_BASES = 8, 3
 FORGED_PER_SEED = WRITE_BASES * len(ForgeryKind) + READ_BASES * (
     len(ForgeryKind) - len(WRITE_ONLY_KINDS)
 )
+VARIANT_SEEDS = 663
+"""Seeds beyond the three for the kinds with more variants: unmodelled_hiding (36 more on each of
+the eleven failed runs), mutating_get (8), unrendered_markup (5), derived_echo (3) and
+echo_bypass (1), and on the eight writes price_part (8) and prefix_reference (2)."""
 CONTROLS = 34
 """Eight controls on each of honest_success and loop; five on clinic_booked (no price to space or
 answer in JSON) and ledger_balance_read (no request to redirect or answer); four on read_stock
@@ -108,7 +114,8 @@ def test_cases_cover_every_failed_run_kind_and_seed(offline_result: BenchResult)
         "ledger_wrong_account",
     ]
     ids = {c.case_id for c in offline_result.cases}
-    assert len(ids) == len(offline_result.scenarios) + CONTROLS + FORGED_PER_SEED * SEEDS
+    forged = FORGED_PER_SEED * SEEDS + VARIANT_SEEDS
+    assert len(ids) == len(offline_result.scenarios) + CONTROLS + forged
     assert offline_result.judges == [EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC]
     assert len(offline_result.cases) == 3 * len(ids)
     assert all(c.error is None for c in offline_result.cases)
@@ -121,7 +128,8 @@ def test_evidence_judge_with_spec_never_passes_a_forgery(offline_result: BenchRe
         assert m.false_pass.rate == 0.0
         assert m.false_pass.ci_low == 0.0
     pooled = metric(offline_result, EJ_WITH_SPEC, ALL_MANIPULATIONS)
-    assert pooled.false_pass.n == (FORGED_PER_SEED - WRITE_BASES - READ_BASES) * SEEDS
+    style_only = (WRITE_BASES + READ_BASES) * SEEDS
+    assert pooled.false_pass.n == FORGED_PER_SEED * SEEDS + VARIANT_SEEDS - style_only
     assert pooled.false_pass.ci_high < 0.02
 
 
@@ -152,10 +160,56 @@ def test_results_round_trip_and_render(offline_result: BenchResult) -> None:
     report = to_markdown(offline_result)
     assert "## False PASS on forged runs" in report
     assert "- Scenarios: 17 scenarios (from 15 recordings) and 34 honest edits" in report
-    assert "| `evidence-judge+spec` | **all manipulations** | 1494 | 0 | 0% |" in report
+    assert "| `evidence-judge+spec` | **all manipulations** | 2157 | 0 | 0% |" in report
+    assert "| price_part | stripe_object | 8 | 0 | 15 | 9 |" in report
     assert "`evidence-judge+generic-spec` grades with `spec.generic.yaml`" in report
     assert "## Accuracy on honest controls" in report
     assert "| honest_success | PASS | PASS |" in report
+
+
+def writes(scenario: Scenario) -> bool:
+    return is_write_task((scenario.spec, scenario.generic_spec))
+
+
+@pytest.mark.parametrize("seeds", [1, SEEDS])
+async def test_every_variant_runs_on_every_scenario_that_can_carry_it(
+    scenarios: list[Scenario], seeds: int
+) -> None:
+    cases = await BenchmarkRunner(settings(), BenchConfig(seeds=seeds)).build_cases(scenarios)
+    forged = [(c.scenario, c.kind, c.variant) for c in cases if c.kind is not None]
+    pairs = {(scenario.name, kind) for scenario, kind, _ in forged}
+    assert len(pairs) == FORGED_PER_SEED
+    for scenario in scenarios:
+        for kind in ForgeryKind:
+            used = [v for s, k, v in forged if s is scenario and k is kind]
+            if (scenario.name, kind) not in pairs:
+                continue
+            variants = variants_of(kind, write=writes(scenario))
+            assert set(used) == (set(variants) or {None}), (scenario.name, kind)
+            assert len(used) == forgery_seeds(kind, seeds, write=writes(scenario))
+
+
+def test_every_variant_is_reported_and_none_passes(
+    offline_result: BenchResult, scenarios: list[Scenario]
+) -> None:
+    expected: dict[tuple[ForgeryKind, str], int] = {}
+    for scenario in scenarios:
+        if not scenario.forgery_base:
+            continue
+        for kind in ForgeryKind:
+            if kind in WRITE_ONLY_KINDS and not writes(scenario):
+                continue
+            for variant in variants_of(kind, write=writes(scenario)):
+                expected[(kind, variant)] = expected.get((kind, variant), 0) + 1
+    for judge in (EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC):
+        reported = {
+            (m.kind, m.variant): m for m in offline_result.variant_metrics if m.judge == judge
+        }
+        assert set(reported) == set(expected), judge
+        for key, metric in reported.items():
+            assert metric.runs >= expected[key], key
+            assert metric.false_pass == 0, key
+            assert metric.runs == metric.needs_review + metric.fail + metric.errors, key
 
 
 async def test_runner_is_deterministic(scenarios: list[Scenario]) -> None:

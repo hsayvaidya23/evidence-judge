@@ -125,7 +125,7 @@ evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3 \
 | Option | Description |
 | --- | --- |
 | `RUNS_DIR...` | One or more directories of labelled runs, one sub-directory per scenario (`trace.zip`, optional `run.har`, `answer.txt`, `reasoning.txt`, `spec.yaml`, `expected.json`); a scenario name may appear in only one of them |
-| `--seeds N` | Forgeries per failed run and forgery kind (default 3) |
+| `--seeds N` | Forgeries per failed run and forgery kind (default 3); a kind with more variants than `N` gets one per variant, so every variant runs on every failed run that can carry it |
 | `--out FILE` | Write the results JSON here |
 | `--markdown FILE` | Write the Markdown report here |
 | `--with-llm-baseline` | Also judge every case with a transcript LLM judge (needs an LLM: `ANTHROPIC_API_KEY` or `--llm`) |

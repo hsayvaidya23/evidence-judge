@@ -1,7 +1,8 @@
 """Forged-run benchmark: how often does each judge PASS a failed run whose story was rewritten?
 
-For every failed scenario the runner forges each `ForgeryKind` with N seeds (only the answer and
-reasoning change), keeps every original run as an honest control and adds honest edits of the
+For every failed scenario the runner forges each `ForgeryKind` with N seeds, or with one seed per
+variant when the kind has more variants than seeds, so every variant runs on every scenario that
+can carry it (only the answer and reasoning change), keeps every original run as an honest control and adds honest edits of the
 passing ones (`forgery.controls`), judges all of them with Evidence Judge (with the scenario's
 task spec, with a coarser generic spec when the scenario has one, and with no spec) and
 optionally a transcript LLM judge, and reports false-PASS rates on forgeries and accuracy on
@@ -43,6 +44,7 @@ from evidence_judge.forgery.evidence import (
     WRITE_ONLY_KINDS,
     plant_evidence,
     unanchored,
+    variants_of,
 )
 from evidence_judge.forgery.injection import injected_claims
 from evidence_judge.forgery.planting import is_write_task
@@ -83,6 +85,8 @@ class Case:
     expected: Outcome
     kind: ForgeryKind | None = None
     seed: int | None = None
+    variant: str | None = None
+    """The variant of the evidence the forgery planted; None for kinds with no variants."""
     claims: ClaimSet | None = None
     """Pre-extracted claims (injected_predicates forgeries); None means extract as usual."""
     control: ControlKind | None = None
@@ -102,6 +106,7 @@ class CaseResult(BaseModel):
     forged: bool
     kind: ForgeryKind | None = None
     seed: int | None = None
+    variant: str | None = None
     control: ControlKind | None = None
     expected: Outcome
     outcome: Outcome | None = Field(description="None when the judge errored")
@@ -144,6 +149,19 @@ class ControlMetric(BaseModel):
     errors: int
 
 
+class VariantMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    judge: str
+    kind: ForgeryKind
+    variant: str
+    runs: int
+    false_pass: int
+    needs_review: int
+    fail: int
+    errors: int
+
+
 class ScenarioInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -168,6 +186,7 @@ class BenchResult(BaseModel):
     scenarios: list[ScenarioInfo]
     forgery_metrics: list[ForgeryMetric]
     control_metrics: list[ControlMetric]
+    variant_metrics: list[VariantMetric]
     cases: list[CaseResult]
 
 
@@ -202,9 +221,10 @@ class BenchmarkRunner:
         cases = await self.build_cases(scenarios)
         judges = self.judge_names()
         evidence_judge = Judge(self.settings, self.llm)
+        prepared = [(case, self._prepare(case)) for case in cases]
         jobs = [
-            self._evaluate(evidence_judge, judge, case, self._prepare(case))
-            for case in cases
+            self._evaluate(evidence_judge, judge, case, ready)
+            for case, ready in prepared
             for judge in judges
         ]
         results = [r for r in await asyncio.gather(*jobs) if r is not None]
@@ -227,6 +247,7 @@ class BenchmarkRunner:
             ],
             forgery_metrics=forgery_metrics(results, judges, self.config.kinds),
             control_metrics=control_metrics(results, judges),
+            variant_metrics=variant_metrics(results, judges, self.config.kinds),
             cases=results,
         )
 
@@ -258,8 +279,9 @@ class BenchmarkRunner:
                     )
         for scenario in scenarios:
             specs = (scenario.spec, scenario.generic_spec)
+            write = is_write_task(specs)
             for kind in forgery_kinds(scenario, self.config.kinds):
-                for seed in range(self.config.seeds):
+                for seed in range(forgery_seeds(kind, self.config.seeds, write=write)):
                     forged = await self.forger.forge(scenario.run, kind, seed=seed)
                     forged = plant_evidence(forged, kind, seed=seed, specs=specs)
                     injected = (
@@ -275,6 +297,7 @@ class BenchmarkRunner:
                             expected=Outcome.FAIL,
                             kind=kind,
                             seed=seed,
+                            variant=forged.metadata.get("forgery", {}).get("variant"),
                             claims=injected,
                         )
                     )
@@ -306,6 +329,7 @@ class BenchmarkRunner:
             "forged": case.forged,
             "kind": case.kind,
             "seed": case.seed,
+            "variant": case.variant,
             "control": case.control,
             "expected": case.expected,
         }
@@ -368,8 +392,6 @@ def control_metrics(results: Sequence[CaseResult], judges: Sequence[str]) -> lis
         controls = [r for r in results if r.judge == judge and not r.forged]
         if not controls:
             continue
-        if not controls:
-            continue
         judged = [r for r in controls if r.outcome is not None]
         correct = sum(r.outcome is r.expected for r in judged)
         metrics.append(
@@ -381,6 +403,40 @@ def control_metrics(results: Sequence[CaseResult], judges: Sequence[str]) -> lis
             )
         )
     return metrics
+
+
+def variant_metrics(
+    results: Sequence[CaseResult], judges: Sequence[str], kinds: Sequence[ForgeryKind]
+) -> list[VariantMetric]:
+    """Verdicts on the forged runs of each variant of each kind, per judge."""
+    metrics: list[VariantMetric] = []
+    for judge in judges:
+        for kind in kinds:
+            group = [r for r in results if r.judge == judge and r.kind is kind]
+            listed = [*variants_of(kind, write=True), *variants_of(kind, write=False)]
+            for variant in dict.fromkeys(listed):
+                runs = [r for r in group if r.variant == variant]
+                if not runs:
+                    continue
+                metrics.append(
+                    VariantMetric(
+                        judge=judge,
+                        kind=kind,
+                        variant=variant,
+                        runs=len(runs),
+                        false_pass=sum(r.outcome is Outcome.PASS for r in runs),
+                        needs_review=sum(r.outcome is Outcome.NEEDS_REVIEW for r in runs),
+                        fail=sum(r.outcome is Outcome.FAIL for r in runs),
+                        errors=sum(r.outcome is None for r in runs),
+                    )
+                )
+    return metrics
+
+
+def forgery_seeds(kind: ForgeryKind, seeds: int, *, write: bool) -> int:
+    """The seeds `kind` is forged with on a write or read-only task: `seeds`, or one per variant
+    when it has more, since consecutive seeds rotate through every variant."""
+    return max(seeds, len(variants_of(kind, write=write)))
 
 
 def forgery_kinds(scenario: Scenario, kinds: Sequence[ForgeryKind]) -> list[ForgeryKind]:
@@ -396,7 +452,11 @@ def llm_calls_upper_bound(
     scenarios: Sequence[Scenario], config: BenchConfig, *, baseline: bool
 ) -> int:
     """Judgements that may call an LLM; used to size the benchmark's overall budget."""
-    forged = sum(len(forgery_kinds(s, config.kinds)) for s in scenarios) * config.seeds
+    forged = sum(
+        forgery_seeds(k, config.seeds, write=is_write_task((s.spec, s.generic_spec)))
+        for s in scenarios
+        for k in forgery_kinds(s, config.kinds)
+    )
     controls = sum(s.expected is Outcome.PASS for s in scenarios) * len(config.controls)
     cases = len(scenarios) + controls + forged
     evidence_judges = len((EJ_WITH_SPEC, EJ_GENERIC_SPEC, EJ_NO_SPEC))

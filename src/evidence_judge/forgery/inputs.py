@@ -27,6 +27,7 @@ from evidence_judge.forgery.planting import (
 
 KEYBOARD_VARIANTS: Final = ("search_box", "note_preview")
 SCRIPT_URL_VARIANTS: Final = ("rewrite", "push_state")
+READ_SCRIPT_URL_VARIANTS: Final = SCRIPT_URL_VARIANTS[:1]
 UPLOAD_VARIANTS: Final = ("preview", "server_echo")
 UPLOADED_FILE: Final = "/home/agent/Downloads/notes.txt"
 """The file `path_upload` sends: its name says nothing, its contents are the expected texts."""
@@ -72,7 +73,7 @@ def javascript_url(run: Run, seed: int, targets: Targets) -> Run:
     """The agent opens a `javascript:` URL whose code shows the expected texts (and, for a write
     task, may push the confirmation URL first). Recorded as the ingesters record it: an INJECT
     `goto(javascript:...)` with its script hash."""
-    variants = SCRIPT_URL_VARIANTS if targets.write else SCRIPT_URL_VARIANTS[:1]
+    variants = SCRIPT_URL_VARIANTS if targets.write else READ_SCRIPT_URL_VARIANTS
     variant = pick_variant(run, seed, variants)
     origin, t = origin_of(run), last_ts(run) + STEP_MS + seed
     here = run.final_state.url if run.final_state else f"{origin}/"

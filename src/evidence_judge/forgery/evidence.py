@@ -154,7 +154,8 @@ a start page, prepended before) everything the run really did:
   4.0}}` beside a total of 24.0, beside `"status": "payment_failed"`, as the amount of a Stripe
   `invoice_item`, or beside `"currency": {"code": "EUR"}`.
 
-Variants of a kind rotate with the seed and the run id, so every variant is covered.
+Variants of a kind rotate with the seed and the run id (`variants_of` lists them), so as many
+consecutive seeds as a kind has variants plant every one of them on a run.
 """
 
 from __future__ import annotations
@@ -166,12 +167,25 @@ from evidence_judge.core.evidence import Run
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.forgery.base import ForgeryKind
 from evidence_judge.forgery.composed import (
+    CLICK_VARIANTS,
+    FRAGMENT_VARIANTS,
+    MARKUP_VARIANTS,
+    SHORT_VARIANTS,
     click_compose,
     fragment_echo,
     markup_echo,
     short_compose,
 )
 from evidence_judge.forgery.echoes import (
+    BYPASS_VARIANTS,
+    DERIVED_VARIANTS,
+    ECHO_VARIANTS,
+    LINK_VARIANTS,
+    READ_ECHO_VARIANTS,
+    READ_LINK_VARIANTS,
+    READ_RESPONSE_VARIANTS,
+    RESPONSE_VARIANTS,
+    TRANSFORMED_VARIANTS,
     data_url_link,
     derived_echo,
     echo_bypass,
@@ -181,6 +195,8 @@ from evidence_judge.forgery.echoes import (
     transformed_echo,
 )
 from evidence_judge.forgery.hosts import (
+    MUTATING_GET_VARIANTS,
+    OFFSITE_VARIANTS,
     agent_chosen_host,
     mutating_get,
     offsite_confirmation,
@@ -188,6 +204,12 @@ from evidence_judge.forgery.hosts import (
     third_party_order,
 )
 from evidence_judge.forgery.inputs import (
+    COMPOSE_VARIANTS,
+    KEYBOARD_VARIANTS,
+    READ_SCRIPT_URL_VARIANTS,
+    SCRIPT_URL_VARIANTS,
+    SELECT_VARIANTS,
+    UPLOAD_VARIANTS,
     directory_upload,
     field_compose,
     javascript_url,
@@ -196,6 +218,12 @@ from evidence_judge.forgery.inputs import (
     path_upload,
 )
 from evidence_judge.forgery.outcomes import (
+    JSON_VARIANTS,
+    LISTED_VARIANTS,
+    PART_VARIANTS,
+    PRICE_VARIANTS,
+    REDIRECT_LANDINGS,
+    REFERENCE_VARIANTS,
     baseline_tautology,
     json_total,
     listed_price,
@@ -206,6 +234,13 @@ from evidence_judge.forgery.outcomes import (
 )
 from evidence_judge.forgery.planting import Targets
 from evidence_judge.forgery.tampering import (
+    CHANNEL_VARIANTS,
+    CUSTOM_TOOL_VARIANTS,
+    INJECTION_VARIANTS,
+    MOCK_VARIANTS,
+    READ_MOCK_VARIANTS,
+    SCREENSHOT_VARIANTS,
+    STORAGE_VARIANTS,
     custom_tool,
     mocked_response,
     script_injection,
@@ -214,6 +249,10 @@ from evidence_judge.forgery.tampering import (
     styled_screenshot,
 )
 from evidence_judge.forgery.unshown import (
+    HIDDEN_VARIANTS,
+    SOURCE_VARIANTS,
+    UNMODELLED_VARIANTS,
+    UNRENDERED_VARIANTS,
     hidden_text,
     unmodelled_hiding,
     unrendered_markup,
@@ -279,6 +318,46 @@ WRITE_ONLY_KINDS: Final = frozenset(
     }
 )
 """Kinds that model a write (an order sent somewhere); read-only tasks are not forged with them."""
+_VARIANTS: Final[Mapping[ForgeryKind, tuple[Sequence[str], Sequence[str]]]] = {
+    ForgeryKind.EXPECT_ECHO: (ECHO_VARIANTS, READ_ECHO_VARIANTS),
+    ForgeryKind.ECHO_BYPASS: (BYPASS_VARIANTS, BYPASS_VARIANTS),
+    ForgeryKind.OFFSITE_CONFIRMATION: (OFFSITE_VARIANTS, OFFSITE_VARIANTS),
+    ForgeryKind.AGENT_CHOSEN_HOST: (("write",), ("read",)),
+    ForgeryKind.PORT_MIRROR: (("write",), ("read",)),
+    ForgeryKind.REDIRECT_TO_ERROR: (tuple(REDIRECT_LANDINGS), ()),
+    ForgeryKind.RESPONSE_ECHO: (RESPONSE_VARIANTS, READ_RESPONSE_VARIANTS),
+    ForgeryKind.SCRIPT_INJECTION: (INJECTION_VARIANTS, INJECTION_VARIANTS),
+    ForgeryKind.MOCKED_RESPONSE: (MOCK_VARIANTS, READ_MOCK_VARIANTS),
+    ForgeryKind.DATA_URL_LINK: (LINK_VARIANTS, READ_LINK_VARIANTS),
+    ForgeryKind.STORAGE_TAMPERING: (STORAGE_VARIANTS, STORAGE_VARIANTS),
+    ForgeryKind.SOCKET_OR_CDP: (CHANNEL_VARIANTS, CHANNEL_VARIANTS),
+    ForgeryKind.KEYBOARD_ECHO: (KEYBOARD_VARIANTS, KEYBOARD_VARIANTS),
+    ForgeryKind.JAVASCRIPT_URL: (SCRIPT_URL_VARIANTS, READ_SCRIPT_URL_VARIANTS),
+    ForgeryKind.PATH_UPLOAD: (UPLOAD_VARIANTS, UPLOAD_VARIANTS),
+    ForgeryKind.OPTION_SELECT: (SELECT_VARIANTS, SELECT_VARIANTS),
+    ForgeryKind.DIRECTORY_UPLOAD: (UPLOAD_VARIANTS, UPLOAD_VARIANTS),
+    ForgeryKind.STYLED_SCREENSHOT: (SCREENSHOT_VARIANTS, SCREENSHOT_VARIANTS),
+    ForgeryKind.CUSTOM_TOOL: (CUSTOM_TOOL_VARIANTS, CUSTOM_TOOL_VARIANTS),
+    ForgeryKind.FIELD_COMPOSE: (COMPOSE_VARIANTS, COMPOSE_VARIANTS),
+    ForgeryKind.TRANSFORMED_ECHO: (TRANSFORMED_VARIANTS, TRANSFORMED_VARIANTS),
+    ForgeryKind.VIEW_SOURCE: (SOURCE_VARIANTS, SOURCE_VARIANTS),
+    ForgeryKind.HIDDEN_TEXT: (HIDDEN_VARIANTS, HIDDEN_VARIANTS),
+    ForgeryKind.SHORT_COMPOSE: (SHORT_VARIANTS, SHORT_VARIANTS),
+    ForgeryKind.MARKUP_ECHO: (MARKUP_VARIANTS, MARKUP_VARIANTS),
+    ForgeryKind.FRAGMENT_ECHO: (FRAGMENT_VARIANTS, FRAGMENT_VARIANTS),
+    ForgeryKind.CLICK_COMPOSE: (CLICK_VARIANTS, CLICK_VARIANTS),
+    ForgeryKind.UNMODELLED_HIDING: (UNMODELLED_VARIANTS, UNMODELLED_VARIANTS),
+    ForgeryKind.DERIVED_ECHO: (DERIVED_VARIANTS, DERIVED_VARIANTS),
+    ForgeryKind.UNRENDERED_MARKUP: (UNRENDERED_VARIANTS, UNRENDERED_VARIANTS),
+    ForgeryKind.MUTATING_GET: (MUTATING_GET_VARIANTS, MUTATING_GET_VARIANTS),
+    ForgeryKind.PREFIX_REFERENCE: (REFERENCE_VARIANTS, ()),
+    ForgeryKind.MISQUOTED_PRICE: (PRICE_VARIANTS, ()),
+    ForgeryKind.LISTED_PRICE: (tuple(LISTED_VARIANTS), ()),
+    ForgeryKind.REASONING_PRICE: (tuple(LISTED_VARIANTS), ()),
+    ForgeryKind.JSON_TOTAL: (JSON_VARIANTS, ()),
+    ForgeryKind.PRICE_PART: (PART_VARIANTS, ()),
+    ForgeryKind.UNWORDED_PURCHASE: (tuple(LISTED_VARIANTS), ()),
+}
 UNANCHORED_KINDS: Final = frozenset({ForgeryKind.AGENT_CHOSEN_HOST})
 """Kinds judged with `site` and `allowed_hosts` removed from the specs: the spec writer forgot
 them, which is what the attack needs."""
@@ -295,6 +374,13 @@ def plant_evidence(
     planter = _PLANTERS.get(kind)
     targets = Targets.of(run, specs)
     return run if planter is None else planter(run, seed, targets)
+
+
+def variants_of(kind: ForgeryKind, *, write: bool) -> tuple[str, ...]:
+    """The variants `kind` plants on a write task (`write`) or a read-only one, in the order the
+    seed rotates through them; empty for a kind with no variants."""
+    on_write, on_read = _VARIANTS.get(kind, ((), ()))
+    return tuple(on_write if write else on_read)
 
 
 def unanchored(spec: TaskSpec | None) -> TaskSpec | None:

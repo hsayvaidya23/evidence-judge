@@ -62,7 +62,8 @@ def _expected(data: dict[str, Any]) -> dict[str, list[str]]:
         f"{honest[spec]['k']} / {honest[spec]['n']}</span>",
         f"the other {honest[spec]['n'] - honest[spec]['k']} sent to review",
         f"{runs + control_n}</span>",
-        f"{forged_runs} failed runs {TIMES} up to {len(kinds)} forgery kinds {TIMES} {data['seeds']} seeds",
+        f"{forged_runs} failed runs {TIMES} up to {len(kinds)} forgery kinds {TIMES} {data['seeds']} "
+        "seeds or every variant",
     ]
     return {"README.md": readme, "docs/index.md": index}
 

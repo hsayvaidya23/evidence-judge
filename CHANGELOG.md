@@ -78,6 +78,9 @@ fixes made during development are in the [security history](docs/security-histor
   accuracy on honest controls and an optional transcript LLM-judge baseline. The forgery lab
   covers the four manipulation kinds from "Gaming the Judge" plus evidence attacks on the
   recording, on local demo sites (a shop, a clinic booking form, an admin console).
+- Every variant of every forgery kind runs on every failed run that can carry it (one seed per
+  variant when a kind has more variants than seeds), with a per-variant table in
+  `bench/results`.
 - A session forgery benchmark (`python -m evidence_judge.sessions.bench`) over recorded
   red-team and honest sessions from Claude Code and Codex, with Python, Node and Go projects.
   Current results are in [the benchmark page](docs/benchmark.md) and `bench/results`.
