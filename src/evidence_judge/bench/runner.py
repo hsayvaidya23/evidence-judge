@@ -48,7 +48,7 @@ from evidence_judge.forgery.injection import injected_claims
 from evidence_judge.forgery.planting import is_write_task
 from evidence_judge.forgery.templates import TemplateForger
 from evidence_judge.llm.base import LLMClient, LLMError
-from evidence_judge.redact import Redactor
+from evidence_judge.redact import Redactor, redactor_for
 
 SCHEMA_ID: Final = "evidence-judge/bench-result@1"
 EJ_WITH_SPEC: Final = "evidence-judge+spec"
@@ -181,7 +181,11 @@ class _Prepared:
 
 @dataclass(slots=True)
 class BenchmarkRunner:
-    """Builds the cases, judges each one with every configured judge and aggregates metrics."""
+    """Builds the cases, judges each one with every configured judge and aggregates metrics.
+
+    Without a ``redactor``, runs, specs and claims are redacted with ``redactor_for(settings)``
+    whenever ``settings.redact`` is on, as ``Judge`` does.
+    """
 
     settings: Settings
     config: BenchConfig = field(default_factory=BenchConfig)
@@ -189,6 +193,10 @@ class BenchmarkRunner:
     baseline: TranscriptLLMJudge | None = None
     forger: Forger = field(default_factory=TemplateForger)
     redactor: Redactor | None = None
+
+    def __post_init__(self) -> None:
+        if self.redactor is None and self.settings.redact:
+            self.redactor = redactor_for(self.settings, persistent=self.llm is not None)
 
     async def run(self, scenarios: Sequence[Scenario]) -> BenchResult:
         cases = await self.build_cases(scenarios)

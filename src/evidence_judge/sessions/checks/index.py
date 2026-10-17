@@ -37,6 +37,7 @@ from evidence_judge.sessions.models import (
 from evidence_judge.sessions.normalize import relative
 from evidence_judge.sessions.rerun import RerunResult, RerunStatus
 from evidence_judge.sessions.shell import regenerates_env
+from evidence_judge.sessions.shell.wrappers import may_redefine
 
 _SHELL_STATE: Final = re.compile(
     r"\A(?:defines a shell function|(?:un)?alias |hash -p|(?:export|declare|typeset|readonly|set"
@@ -328,6 +329,11 @@ class SessionIndex:
                 f"{unseen}, so it may have run only part of the suite, and no earlier "
                 "whole-suite run the session showed counted the tests to compare it with"
             )
+        if redefined := self._redefined_before(event):
+            return (
+                f"{unseen}, and {redefined.id} may have changed what it runs, so no earlier "
+                "count is a floor for it"
+            )
         ran, baseline = earlier
         added = self._tests_added(baseline.seq)
         if added is None:
@@ -343,6 +349,11 @@ class SessionIndex:
             f"{unseen}, and it passed {event.summary.passed} tests, fewer than the {ran} the "
             f"earlier whole-suite run {baseline.id} ran{since}"
         )
+
+    def _redefined_before(self, event: CommandEvent) -> SessionEvent | None:
+        """The first event before `event` that may have changed what a wrapper runs: the rule
+        `trusted_wrappers` follows."""
+        return next((e for e in self.run.events if e.seq < event.seq and may_redefine(e)), None)
 
     def _counted(self, event: CommandEvent, minimum: int | None = None) -> RunOutcome:
         judged = self._scoped(event)

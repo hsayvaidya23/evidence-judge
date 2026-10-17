@@ -557,25 +557,102 @@ def test_backfaces_and_perspective(css: str, state: int) -> None:
     ("css", "state"),
     [
         (".in{animation:gone 1ms forwards}@keyframes gone{to{opacity:0}}", UNSURE),
-        (".in{animation-name:gone}@keyframes gone{from,to{visibility:hidden}}", UNSURE),
-        (".in{animation:1s gone}@-webkit-keyframes gone{50%{transform:scale(0)}}", UNSURE),
+        (
+            ".in{animation-name:gone;animation-fill-mode:forwards}"
+            "@keyframes gone{from,to{visibility:hidden}}",
+            UNSURE,
+        ),
+        (".in{animation:1s gone infinite}@-webkit-keyframes gone{50%{transform:scale(0)}}", UNSURE),
         (
             ".in{animation:1s a,2s gone}@keyframes a{to{color:red}}@keyframes gone{to{color:#fff}}",
             UNSURE,
         ),
-        ('.in{animation-name:"gone"}@keyframes "gone"{to{display:none}}', UNSURE),
-        (".in{--a:gone 1s;animation:var(--a)}@keyframes gone{to{opacity:0}}", UNSURE),
-        (".in{animation:Gone 1s}@keyframes Gone{to{opacity:0}}", UNSURE),
-        (".in:hover{animation:gone 1s}@keyframes gone{to{opacity:0}}", UNSURE),
-        (".wrap{animation:gone 1s}@keyframes gone{to{opacity:0}}", UNSURE),
+        ('.in{animation:"gone" 1s infinite}@keyframes "gone"{to{display:none}}', UNSURE),
+        (".in{--a:gone 1s forwards;animation:var(--a)}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".in{animation:Gone 1s forwards}@keyframes Gone{to{opacity:0}}", UNSURE),
+        (".in:hover{animation:gone 1s infinite}@keyframes gone{to{opacity:0}}", UNSURE),
+        (".wrap{animation:gone 1s both}@keyframes gone{to{opacity:0}}", UNSURE),
         (".in{animation:spin 1s infinite}@keyframes spin{to{transform:rotate(360deg)}}", SHOWN),
         (".in{animation:pulse 1s}@keyframes pulse{50%{opacity:.5}}", SHOWN),
         (".in{animation:gone 1s}@keyframes other{to{opacity:0}}", SHOWN),
         (".in{animation:none}@keyframes gone{to{opacity:0}}", SHOWN),
         (".in{transition:opacity 1s}", SHOWN),
+        (".in{-webkit-animation:gone 1ms forwards}@keyframes gone{to{opacity:0}}", UNSURE),
+        (
+            ".in{-webkit-animation-name:gone;animation-duration:9s}@keyframes gone{to{opacity:0}}",
+            UNSURE,
+        ),
     ],
 )
 def test_animations_whose_keyframes_may_hide_text(css: str, state: int) -> None:
+    assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+_FADE = "@keyframes in{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}"
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{animation:in .6s ease-out both}", SHOWN),
+        (".in{animation:in .6s .3s cubic-bezier(.2,0,0,1) forwards}", SHOWN),
+        (".in{animation:in 1s}", SHOWN),
+        (".in{animation:in 1s 2 alternate-reverse backwards}", SHOWN),
+        (".in{opacity:0;animation:in 1s forwards}", UNSURE),
+        (".in{animation:in 1s 1 alternate forwards}", SHOWN),
+        (".in{animation:in 1s 2 alternate forwards}", UNSURE),
+        (".in{animation:in 1s reverse forwards}", UNSURE),
+        (".in{animation:in 1s reverse}", SHOWN),
+        (".in{animation:in 1s alternate-reverse both}", UNSURE),
+        (".in{animation:in 1s paused}", UNSURE),
+        (".in{animation:in 1s}.wrap:hover .in{animation-play-state:paused}", UNSURE),
+        (".in{animation:in 1s infinite}", UNSURE),
+        (".in{animation:in 1s 1.5 forwards}", UNSURE),
+        (".in{animation:in 1s 1.5}", SHOWN),
+        (".in{animation:in 1s 9999s backwards}", UNSURE),
+        (".in{animation:in 9999s forwards}", UNSURE),
+        (".in{animation:in 1s -9999s}", SHOWN),
+        (".in{animation:in 1s steps(2) forwards}", UNSURE),
+        (".in{animation:in 1s step-end}", UNSURE),
+        (".in{animation:in 1s,in 2s}", UNSURE),
+        (".in{animation:in 1s;animation-timeline:view()}", UNSURE),
+        (".in{animation:in 1s;animation-trigger:view() play-once}", UNSURE),
+        (".in{animation:in 1s forwards;animation-composition:add}", UNSURE),
+        (".in{animation:in 1s;animation-duration:inherit}", UNSURE),
+        (".in{--t:1s;animation:in var(--t) forwards}", SHOWN),
+        (".in{animation:in var(--u,1s) forwards}.wrap:hover .in{--u:9999s}", UNSURE),
+        (".in{animation:in var(--u) forwards}", SHOWN),
+        (".in{animation:in 1s calc(1s) forwards}", UNSURE),
+    ],
+)
+def test_fade_ins_that_come_to_rest_shown(css: str, state: int) -> None:
+    assert _state(css + _FADE, ("DIV", {"class": "wrap"}), BADGE) == state
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (".in{animation:k 1s forwards}@keyframes k{from{opacity:0}to{opacity:var(--o)}}", UNSURE),
+        (".in{animation:k 1s forwards}@keyframes k{from{--o:0}to{opacity:1}}", UNSURE),
+        (".in{opacity:var(--o,1);animation:k 1s infinite}@keyframes k{from{--o:0}}", UNSURE),
+        (
+            ".in{animation:k 1s}@keyframes k{0%{opacity:0;animation-timing-function:steps(1)}}",
+            UNSURE,
+        ),
+        (".in{animation:k 1s forwards}@keyframes k{from{opacity:0}entry 100%{opacity:1}}", UNSURE),
+        (".in{animation:k 1s forwards}@keyframes k{from{opacity:0}}", SHOWN),
+        (".in{animation:k 1s forwards}@keyframes k{0%,100%{opacity:0}50%{opacity:1}}", UNSURE),
+        (
+            ".in{animation:k 1s forwards}@keyframes k{to{opacity:1}}@keyframes k{to{opacity:0}}",
+            UNSURE,
+        ),
+        (
+            ".in{animation:k 1s forwards}@keyframes k{from{opacity:0}to{opacity:1}100%{opacity:0}}",
+            UNSURE,
+        ),
+    ],
+)
+def test_keyframes_the_reader_cannot_follow_to_their_end(css: str, state: int) -> None:
     assert _state(css, ("DIV", {"class": "wrap"}), BADGE) == state
 
 
@@ -614,6 +691,33 @@ def test_animations_whose_keyframes_may_hide_text(css: str, state: int) -> None:
 def test_backgrounds_rules_that_may_apply_set(css: str, state: int) -> None:
     attrs = {"class": "in hover:bg-white hover:text-black"}
     assert _state(css, ("DIV", {"class": "wrap"}), ("SPAN", attrs)) == state
+
+
+_SWAP = ".wrap{background:#000;color:#fff}.wrap:hover{background:#fff;color:#000}"
+
+
+@pytest.mark.parametrize(
+    ("css", "state"),
+    [
+        (_SWAP, SHOWN),
+        (_SWAP + ".in{color:#fff}", UNSURE),
+        (_SWAP + ".in{color:#fefefe}", UNSURE),
+        (_SWAP + ".mid{font-size:20px}.in{color:#fff}", UNSURE),
+        (_SWAP + ".in{color:#fff}.wrap:hover .in{color:#333}", SHOWN),
+        (_SWAP + ".in{color:#fff}.wrap:hover>.mid>.in{color:#333}", SHOWN),
+        (_SWAP + ".in{color:#fff}.x:hover .in{color:#333}", UNSURE),
+        (_SWAP + ".in{color:#fff}.wrap:hover .in{color:#fff}", UNSURE),
+        (_SWAP + ".in{color:#fff;background:#000}", SHOWN),
+        (_SWAP + ".mid{background:#000}.in{color:#fff}", SHOWN),
+        (_SWAP + ".mid{background:rgb(255 255 255/50%)}.in{color:#fff}", UNSURE),
+        (_SWAP + ".in{color:#777}", SHOWN),
+    ],
+)
+def test_own_text_colours_against_backgrounds_an_ancestor_paints_in_a_state(
+    css: str, state: int
+) -> None:
+    chain = (("DIV", {"class": "wrap"}), ("DIV", {"class": "mid"}), ("SPAN", {"class": "in"}))
+    assert _state(css, *chain) == state
 
 
 @pytest.mark.parametrize(

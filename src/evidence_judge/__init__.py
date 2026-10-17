@@ -6,7 +6,7 @@ internal and may change between 0.x releases.
 """
 
 from evidence_judge._version import __version__
-from evidence_judge.config import Settings
+from evidence_judge.config import Settings, read_settings
 from evidence_judge.core.taskspec import TaskSpec
 from evidence_judge.core.verdict import Outcome, RunVerdict
 from evidence_judge.engine import Judge, JudgeOptions
@@ -32,4 +32,5 @@ __all__ = [
     "build_llm",
     "load_run",
     "load_session",
+    "read_settings",
 ]

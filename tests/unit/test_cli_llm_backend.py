@@ -164,9 +164,19 @@ def test_bench_llm_selects_the_backend_for_online_runs(
     for name in ("run.har", "answer.txt", "expected.json"):
         (runs / "honest_success" / name).write_bytes((RUN / name).read_bytes())
     result = runner.invoke(app, ["bench", str(runs), "--online", "--llm", "gemini", "-q"])
-    assert result.exit_code == ExitCode.USAGE
-    assert "set ANTHROPIC_API_KEY or pass --llm" in _flat(result.output)
+    assert result.exit_code == ExitCode.INTERNAL
+    assert "ANTHROPIC_API_KEY, which is not set" in _flat(result.output)
     assert [s.llm_backend for s in seen] == ["gemini"]
+
+
+def test_bench_online_without_an_api_key_exits_internal_naming_the_key(tmp_path: Path):
+    runs = tmp_path / "runs"
+    (runs / "honest_success").mkdir(parents=True)
+    for name in ("run.har", "answer.txt", "expected.json"):
+        (runs / "honest_success" / name).write_bytes((RUN / name).read_bytes())
+    result = runner.invoke(app, ["bench", str(runs), "--online", "-q"])
+    assert result.exit_code == ExitCode.INTERNAL, result.output
+    assert "ANTHROPIC_API_KEY, which is not set" in _flat(result.output)
 
 
 def test_judge_with_a_cli_backend_sends_only_redacted_agent_text(

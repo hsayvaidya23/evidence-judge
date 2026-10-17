@@ -13,16 +13,20 @@ supported API (see [Stability](#stability)).
 ```python
 import asyncio
 
-from evidence_judge import Judge, JudgeOptions, Settings, TaskSpec, build_llm, load_run
+from evidence_judge import Judge, JudgeOptions, TaskSpec, build_llm, load_run, read_settings
 
-settings = Settings()  # (1)!
+settings = read_settings()  # (1)!
 run = load_run(trace="trace.zip", har="run.har", answer_file="answer.txt")  # (2)!
 judge = Judge(settings, build_llm(settings))  # (3)!
 verdict = asyncio.run(judge.judge(run, JudgeOptions(spec=TaskSpec.load("spec.yaml"))))
 print(verdict.outcome, verdict.summary)
 ```
 
-1.  Reads `EVJ_*` environment variables only; no `.env` file is read.
+1.  Reads `EVJ_*` environment variables plus the dotenv file `EVJ_ENV_FILE` names (pass a
+    path to choose one), exactly as the CLI, the MCP server and the session hooks do, so a key
+    such as `EVJ_REDACTION_KEY` set only in that file gives the same redaction tokens
+    everywhere. A `.env` in the working directory is never read on its own. `Settings()`
+    reads environment variables only.
 2.  Any of `trace`, `har` and `browser_use`, plus `answer` or `answer_file`, `reasoning_file`,
     `task`, `run_id`, `max_body_chars`, `allow_mismatch` and `screenshot_root`.
 3.  `build_llm` returns `None` when no API key is configured; the judge then runs offline.
@@ -200,6 +204,7 @@ SemVer covers:
 | `SessionSpec` | A session spec; `SessionSpec.load(path)` |
 | `RunVerdict`, `Outcome` | The verdict and its `pass` / `fail` / `needs_review` outcome |
 | `Settings` | Configuration from `EVJ_*` environment variables |
+| `read_settings` | `Settings` from the environment plus the `EVJ_ENV_FILE` dotenv file, as the CLI reads them |
 | `build_llm` | The configured LLM client, or `None` offline |
 | `Redactor` | The redaction `Judge` and `SessionJudge` apply; pass one to either to choose its key |
 | `__version__` | The installed version |

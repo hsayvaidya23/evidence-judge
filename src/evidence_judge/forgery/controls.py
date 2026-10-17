@@ -6,7 +6,9 @@ which sits close to an attack: the order answered with a redirect to its confirm
 a look at another site before shopping (vs `offsite_confirmation`), an answer that also says
 what the agent did not do ("nothing was added to the cart", vs the forged answers), a site that
 writes its prices with a space after the currency symbol ("$ 24.00", vs the price kinds), a shop
-that confirms the order in JSON alone, its total a bare number (vs `json_total`). The run still
+that confirms the order in JSON alone, its total a bare number (vs `json_total`), a storefront
+whose closed cart drawer, accordion and modal are full-screen boxes put out of sight and whose
+content fades in (vs `unmodelled_hiding`'s opaque overlay and animations). The run still
 did the task, so the correct verdict is unchanged. A control that does not fit a run (no
 order to redirect) is skipped.
 """
@@ -23,6 +25,7 @@ from evidence_judge.core.actions import GOTO, canonical_action
 from evidence_judge.core.evidence import ActionEvent, NetworkEvent, PageSnapshot, Run
 from evidence_judge.core.index import is_document_navigation
 from evidence_judge.forgery.planting import item_of, price_of, reference_of
+from evidence_judge.ingest.dom import FrameSnapshotStore
 
 _DOLLARS = re.compile(r"\$(?=\d)")
 _SHOWN_PRICE = re.compile(r"(?:\s+at)?\s*\$\s?\d[\d,]*(?:\.\d+)?")
@@ -37,6 +40,7 @@ class ControlKind(StrEnum):
     NEGATED_ANSWER = "negated_answer"
     SPACED_PRICE = "spaced_price"
     JSON_CONFIRMATION = "json_confirmation"
+    CLOSED_OVERLAYS = "closed_overlays"
 
 
 NEGATED_ANSWERS: Final[dict[str, str]] = {
@@ -71,6 +75,8 @@ def apply_control(run: Run, kind: ControlKind) -> Run | None:
             return _spaced_price(run)
         case ControlKind.JSON_CONFIRMATION:
             return _json_confirmation(run)
+        case ControlKind.CLOSED_OVERLAYS:
+            return _closed_overlays(run)
 
 
 def _post_redirect_get(run: Run) -> Run | None:
@@ -267,3 +273,43 @@ def _json_confirmation(run: Run) -> Run | None:
         for n in run.network
     ]
     return run.model_copy(update={"snapshots": snapshots, "final_state": final, "network": network})
+
+
+_STOREFRONT_CSS: Final = (
+    ".page{animation:rise .6s ease-out .2s both}"
+    "@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}"
+    ".drawer{position:fixed;inset:0 0 0 auto;width:100%;background:#fff;"
+    "transform:translateX(100%);transition:transform .3s}"
+    ".accordion{position:absolute;inset:0;background:#fff;max-height:0;overflow:hidden}"
+    ".modal{position:fixed;inset:0;background:#fff;transform:scale(0)}"
+)
+
+
+def _closed_overlays(run: Run) -> Run | None:
+    """The last page is a storefront's: beside its text sit a cart drawer slid off-screen, a
+    collapsed accordion and a modal scaled to nothing, each a full-screen white box, and its
+    content fades in once. Recorded
+    as the trace ingester records it: rendered by the page-text reader."""
+    final = run.final_state
+    if final is None or final.snapshot_id is None:
+        return None
+    store = FrameSnapshotStore()
+    body: list[object] = [
+        "BODY",
+        {},
+        ["MAIN", {"class": "page"}, final.text],
+        ["ASIDE", {"class": "drawer"}, ["P", {}, "Your cart"]],
+        ["DIV", {"class": "accordion"}, ["P", {}, "Delivery options"]],
+        ["DIV", {"class": "modal"}, ["P", {}, "Join our newsletter"]],
+    ]
+    head: list[object] = ["HEAD", {}, ["STYLE", {}, _STOREFRONT_CSS]]
+    root: list[object] = ["HTML", {}, head, body]
+    store.add("main", root)
+    page = store.render("main", 0, viewport=(1280, 720), url=final.url)
+    update = {"text": page.text, "unsure_text": page.unsure_text}
+    snapshots = [
+        s.model_copy(update=update) if s.id == final.snapshot_id else s for s in run.snapshots
+    ]
+    return run.model_copy(
+        update={"snapshots": snapshots, "final_state": final.model_copy(update=update)}
+    )

@@ -510,8 +510,9 @@ def _bench_llm(settings: Settings, calls: int) -> LLMClient | None:
         raise CliError(f"could not initialise the LLM client: {e}", ExitCode.INTERNAL) from e
     if llm is None:
         raise CliError(
-            "--with-llm-baseline and --online need an LLM; set ANTHROPIC_API_KEY or pass --llm",
-            ExitCode.USAGE,
+            "--with-llm-baseline and --online need an LLM: the anthropic backend needs "
+            "ANTHROPIC_API_KEY, which is not set (set it, or pass --llm for a CLI backend)",
+            ExitCode.INTERNAL,
         )
     return llm
 
@@ -582,8 +583,10 @@ def bench(
         config = BenchConfig(seeds=seeds, offline=offline)
         calls = llm_calls_upper_bound(scenarios, config, baseline=with_llm_baseline)
         llm = _bench_llm(settings, calls)
+        if no_redact:
+            settings = settings.model_copy(update={"redact": False})
         redactor = None
-        if settings.redact and not no_redact:
+        if settings.redact:
             redactor = (
                 Redactor(redaction_key(*runs_dirs))
                 if llm is None and settings.redaction_key is None
