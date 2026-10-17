@@ -329,7 +329,7 @@ _NOTHING_CHANGED: Final = EditPredicate(path="**", touched=False)
 
 def _path_glob(token: str) -> str | None:
     token = token.strip().strip("`'\"").removeprefix("./")
-    if _PATHLIKE.match(token):
+    if _PATHLIKE.match(token) and not {".", ".."} & set(token.split("/")):
         return token
     return None
 
