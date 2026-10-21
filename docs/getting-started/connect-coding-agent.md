@@ -35,7 +35,7 @@ uv tool install --python 3.12 "evidence-judge[mcp]"
 evidence-judge version
 ```
 
-Add `==0.1.0` to pin the version. Add the `anthropic` extra too (`evidence-judge[anthropic,mcp]`) if you want LLM claim
+Add `==0.1.1` to pin the version. Add the `anthropic` extra too (`evidence-judge[anthropic,mcp]`) if you want LLM claim
 extraction with an API key; the CLI backends below need no extra.
 
 ## 2. Wire up the hooks and the MCP server

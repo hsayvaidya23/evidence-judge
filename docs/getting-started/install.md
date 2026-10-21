@@ -8,7 +8,7 @@ Evidence Judge needs **Python 3.12 or newer** (it is tested on 3.12 and 3.13).
 
 !!! info "Pinning"
 
-    To pin a version, add it to the requirement: `"evidence-judge[anthropic]==0.1.0"`. To run
+    To pin a version, add it to the requirement: `"evidence-judge[anthropic]==0.1.1"`. To run
     unreleased code from `main`, install from the repository instead:
     `"evidence-judge[anthropic] @ git+https://github.com/hsayvaidya23/evidence-judge"`.
 
@@ -51,7 +51,7 @@ Check it works:
 
 ```console
 $ evidence-judge version
-evidence-judge 0.1.0
+evidence-judge 0.1.1
 ```
 
 ## Extras

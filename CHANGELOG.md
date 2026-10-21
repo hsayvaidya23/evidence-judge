@@ -8,6 +8,8 @@ the names exported from `evidence_judge`) is defined under
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-21
+
 ### Fixed
 
 - A purchase price the order's confirmation contradicts now fails the run. What a purchase cost
@@ -181,5 +183,6 @@ every attack that worked became a recorded fixture or benchmark forgery kind and
 [docs/security-history.md](docs/security-history.md) keeps that record, including the
 pre-release fixes once listed here.
 
-[Unreleased]: https://github.com/hsayvaidya23/evidence-judge/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/hsayvaidya23/evidence-judge/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/hsayvaidya23/evidence-judge/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/hsayvaidya23/evidence-judge/releases/tag/v0.1.0

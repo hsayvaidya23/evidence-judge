@@ -1,6 +1,6 @@
 {
   "name": "evidence-judge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Check Gemini's final answer against the Playwright trace it recorded and, with a session spec, an independent re-run of the session's tests, and record every tool call to an evidence log.",
   "mcpServers": {
     "evidence-judge": {

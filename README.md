@@ -116,7 +116,7 @@ See [docs/architecture.md](docs/architecture.md).
 uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"
 ```
 
-To pin a version, add it to the requirement: `"evidence-judge[anthropic,mcp]==0.1.0"`.
+To pin a version, add it to the requirement: `"evidence-judge[anthropic,mcp]==0.1.1"`.
 
 Requires Python 3.12+. The `anthropic` extra enables LLM claim extraction and (opt-in) screenshot checks; without it (or with `--offline`) everything runs deterministically. The `mcp` extra adds the MCP server (`evidence-judge mcp`), which the Claude Code plugin starts.
 
@@ -395,7 +395,7 @@ Coding-agent sessions: `evidence-judge session judge` checks "all tests pass", "
 GitHub Actions: gate a pull request on a recorded run.
 
 ```yaml
-- uses: hsayvaidya23/evidence-judge@v0.1.0 # or pin the full commit SHA with a `# v0.1.0` comment
+- uses: hsayvaidya23/evidence-judge@v0.1.1 # or pin the full commit SHA with a `# v0.1.1` comment
   with:
     trace: runs/checkout/trace.zip
     har: runs/checkout/run.har

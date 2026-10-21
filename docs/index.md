@@ -175,7 +175,7 @@ Evidence Judge needs Python 3.12 or newer. Install it from PyPI:
 === "GitHub Action"
 
     ```yaml
-    - uses: hsayvaidya23/evidence-judge@v0.1.0 # or its full commit SHA with a `# v0.1.0` comment
+    - uses: hsayvaidya23/evidence-judge@v0.1.1 # or its full commit SHA with a `# v0.1.1` comment
       with:
         trace: runs/checkout/trace.zip
         har: runs/checkout/run.har

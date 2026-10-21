@@ -19,7 +19,7 @@ jobs:
       # ... run your agent here and record runs/checkout/{trace.zip,run.har,answer.txt}
       - name: Judge the checkout run
         id: judge
-        uses: hsayvaidya23/evidence-judge@v0.1.0 # (1)!
+        uses: hsayvaidya23/evidence-judge@v0.1.1 # (1)!
         with:
           trace: runs/checkout/trace.zip
           har: runs/checkout/run.har
@@ -29,13 +29,13 @@ jobs:
           # fail-on-review: "true"
 ```
 
-1.  Or pin the full commit SHA with a `# v0.1.0` comment, which Dependabot keeps up to date.
+1.  Or pin the full commit SHA with a `# v0.1.1` comment, which Dependabot keeps up to date.
 
 !!! warning "Pin a release, not a branch"
 
     The action installs evidence-judge from the ref you pin, so `@main` would change your
-    verdicts whenever `main` moves. Pin a version tag (`@v0.1.0`) or, stricter, its full commit
-    SHA (`@<sha> # v0.1.0`).
+    verdicts whenever `main` moves. Pin a version tag (`@v0.1.1`) or, stricter, its full commit
+    SHA (`@<sha> # v0.1.1`).
 
 ## Inputs
 
@@ -99,7 +99,7 @@ session spec.
 
 ```yaml
       - name: Judge the agent's session
-        uses: hsayvaidya23/evidence-judge@v0.1.0
+        uses: hsayvaidya23/evidence-judge@v0.1.1
         with:
           session-transcript: codex-run.jsonl # saved with `codex exec --json > codex-run.jsonl`
           session-format: codex
@@ -121,7 +121,7 @@ with the `anthropic-api-key` input (or as `ANTHROPIC_API_KEY` in the job or step
 and turn offline off:
 
 ```yaml
-      - uses: hsayvaidya23/evidence-judge@v0.1.0
+      - uses: hsayvaidya23/evidence-judge@v0.1.1
         env:
           EVJ_MAX_COST_USD: "0.10"
         with:
