@@ -17,7 +17,7 @@ evidence-judge [OPTIONS] COMMAND [ARGS]...
 | `schema` | Print the JSON Schema of the verdict format |
 | `version` | Print the evidence-judge version (also `evidence-judge --version`) |
 
-Install from PyPI: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"`. Add `==0.1.0` to pin the version.
+Install from PyPI: `uv tool install --python 3.12 "evidence-judge[anthropic,mcp]"`. Add `==0.1.1` to pin the version.
 
 Settings (models, budget, redaction, cache) come from environment variables, plus a dotenv file
 only when you name one with the global `--env-file PATH` option (before the command) or

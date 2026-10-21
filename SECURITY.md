@@ -8,7 +8,7 @@ not as public issues. Include the version (`evidence-judge version`), a descript
 minimal reproduction **with all real data removed**. You can expect an acknowledgement within
 five working days.
 
-Supported versions: the latest release (v0.1.0). Fixes land on `main` and ship in the next release.
+Supported versions: the latest release (v0.1.1). Fixes land on `main` and ship in the next release.
 
 ## What Evidence Judge handles
 

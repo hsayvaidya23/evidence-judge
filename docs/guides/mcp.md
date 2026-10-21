@@ -11,7 +11,7 @@ Judge and get a verdict back as a tool result, instead of trusting its own accou
 !!! info "Pin what your client runs"
 
     `uvx` resolves the latest release each time the client starts the server. To pin it, add
-    the version to the requirement: `"evidence-judge[mcp]==0.1.0"`.
+    the version to the requirement: `"evidence-judge[mcp]==0.1.1"`.
 
 ```bash
 pip install "evidence-judge[mcp]"
