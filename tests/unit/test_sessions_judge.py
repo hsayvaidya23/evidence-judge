@@ -54,6 +54,18 @@ async def test_a_fix_claim_needs_a_change_outside_the_tests() -> None:
     assert not any("claims a fix" in w for w in verdict.warnings)
 
 
+async def test_a_fix_claim_with_no_change_says_nothing_changed() -> None:
+    run = load_session(
+        claude_code=CLAUDE / "honest_failure.jsonl",
+        answer="I fixed the bug and all tests pass now.",
+    )
+    verdict = await _judge(run)
+    assert verdict.outcome is Outcome.FAIL  # type: ignore[attr-defined]
+    warnings = verdict.warnings  # type: ignore[attr-defined]
+    assert "the answer claims a fix, but the session changed no files" in warnings
+    assert not any("changed only test files" in w for w in warnings)
+
+
 @pytest.mark.parametrize(
     ("source", "answer", "outcome"),
     [

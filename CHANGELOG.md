@@ -15,6 +15,8 @@ the names exported from `evidence_judge`) is defined under
   one other price, when no page of the run ever showed the claimed one, refutes it outright
   instead of sending the run to review. A confirmation that shows no price, or a price the
   site listed elsewhere, still refutes it only as far as review (#143).
+- A session judge warning no longer says a session that changed no files "changed only test
+  files" when the answer claims a fix; it now says the session changed no files (#144).
 
 ## [0.1.0] - 2026-10-18
 

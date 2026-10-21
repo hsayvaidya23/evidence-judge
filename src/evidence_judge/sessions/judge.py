@@ -601,6 +601,8 @@ class SessionJudge:
             state.review.append(
                 "the answer claims a fix, but the session changed only test files, so the "
                 "passing run cannot show the code was fixed"
+                if index.changes
+                else "the answer claims a fix, but the session changed no files"
             )
         if not run.complete:
             state.review.append("the session record could not be read completely")
