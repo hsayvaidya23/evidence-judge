@@ -8,6 +8,11 @@ the names exported from `evidence_judge`) is defined under
 
 ## [Unreleased]
 
+### Fixed
+
+- A session judge warning no longer says a session that changed no files "changed only test
+  files" when the answer claims a fix; it now says the session changed no files (#144).
+
 ## [0.1.0] - 2026-10-18
 
 The first release. Nothing was released before it, so this entry lists what the tool does;
