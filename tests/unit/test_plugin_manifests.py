@@ -207,8 +207,10 @@ def test_the_shims_are_identical() -> None:
     assert SHIMS[0].read_bytes() == SHIMS[1].read_bytes()
 
 
-def _shim(args: list[str], path: str, stdin: str = "{}") -> subprocess.CompletedProcess[str]:
-    sh = shutil.which("sh")
+def _shim(
+    args: list[str], path: str, stdin: str = "{}", shell: str = "sh"
+) -> subprocess.CompletedProcess[str]:
+    sh = shutil.which(shell)
     assert sh is not None
     return subprocess.run(
         [sh, str(SHIMS[0]), *args],
@@ -280,6 +282,85 @@ def test_the_shim_pins_the_cli_and_fails_closed_when_it_goes(tmp_path: Path) -> 
     assert again.returncode == 0 and json.loads(again.stdout)["continue"] is False
     record = _shim(["claude-code-record", "--state-dir", str(state)], path)
     assert (record.returncode, record.stdout) == (0, "")
+
+
+def _session(session_id: str, **fields: object) -> str:
+    return json.dumps({"session_id": session_id, "hook_event_name": "Stop", **fields}) + "\n"
+
+
+@pytest.mark.parametrize("shell", ["sh", "dash", "bash", "zsh"])
+def test_a_session_pins_the_cli_and_fails_closed_when_it_changes_mid_session(
+    tmp_path: Path, shell: str
+) -> None:
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} is not installed")
+    fake = _fake_cli(tmp_path / "bin")
+    state = tmp_path / "state"
+    path = f"{fake.parent}:/usr/bin:/bin"
+    start = ["claude-code-turn-start", "--state-dir", str(state)]
+    stop = ["claude-code-stop", "--state-dir", str(state)]
+    first = _session("s-1/../x")
+    assert _shim(start, path, first, shell).stdout == f"hook|{'|'.join(start)}|{first}"
+    assert (state / "pins" / "s-1..x").read_text().splitlines()[0] == str(fake)
+    assert not (state / "evidence-judge-pin").exists()
+    fake.write_text("#!/bin/sh\ncat >/dev/null\n")
+    done = _shim(stop, path, first, shell)
+    assert done.returncode == 2
+    assert "changed since it was pinned" in done.stderr
+    assert "start a new session" in done.stderr
+    fake.unlink()
+    done = _shim(stop, f"{_fake_cli(tmp_path / 'other').parent}:/usr/bin:/bin", first, shell)
+    assert done.returncode == 2 and "is gone" in done.stderr
+    again = _shim(stop, path, _session("s-1/../x", stop_hook_active=True), shell)
+    assert again.returncode == 0 and json.loads(again.stdout)["continue"] is False
+    record = _shim(["claude-code-record", "--state-dir", str(state)], path, first, shell)
+    assert (record.returncode, record.stdout) == (0, "")
+
+
+def test_a_new_session_pins_a_reinstalled_cli(tmp_path: Path) -> None:
+    fake = _fake_cli(tmp_path / "bin")
+    state = tmp_path / "state"
+    path = f"{fake.parent}:/usr/bin:/bin"
+    stop = ["claude-code-stop", "--state-dir", str(state)]
+    assert _shim(stop, path, _session("old")).returncode == 0
+    fake.write_text('#!/bin/sh\nprintf "new|%s|" "$@"\ncat\n')
+    assert _shim(stop, path, _session("old")).returncode == 2
+    done = _shim(stop, path, _session("new"))
+    assert (done.returncode, done.stdout.split("|")[0]) == (0, "new")
+    assert _shim(stop, path, _session("new")).returncode == 0
+    lines = (state / "pins" / "new").read_text().splitlines()
+    assert lines[0] == str(fake)
+
+
+def test_a_session_ignores_and_removes_a_stale_global_pin(tmp_path: Path) -> None:
+    fake = _fake_cli(tmp_path / "bin")
+    state = tmp_path / "state"
+    (state / "pins").mkdir(parents=True)
+    (state / "evidence-judge-pin").write_text(f"{tmp_path}/gone\n1 2\n")
+    old = state / "pins" / "ancient"
+    old.write_text(f"{fake}\n1 2\n")
+    os.utime(old, (0, 0))
+    path = f"{fake.parent}:/usr/bin:/bin"
+    done = _shim(["codex-stop", "--state-dir", str(state)], path, _session("abc"))
+    assert done.returncode == 0 and done.stdout.startswith("hook|codex-stop|")
+    assert not (state / "evidence-judge-pin").exists()
+    assert not old.exists()
+    assert sorted(p.name for p in (state / "pins").iterdir()) == ["abc"]
+
+
+@pytest.mark.parametrize("stdin", ["{}", '{"session_id": ""}', '{"session_id": ".."}'])
+def test_without_a_session_id_the_global_pin_still_holds(tmp_path: Path, stdin: str) -> None:
+    fake = _fake_cli(tmp_path / "bin")
+    state = tmp_path / "state"
+    path = f"{fake.parent}:/usr/bin:/bin"
+    stop = ["gemini-after-agent", "--state-dir", str(state)]
+    assert _shim(stop, path, stdin).returncode == 0
+    assert (state / "evidence-judge-pin").read_text().splitlines()[0] == str(fake)
+    assert not (state / "pins").exists()
+    fake.write_text("#!/bin/sh\ncat >/dev/null\n")
+    done = _shim(stop, path, stdin)
+    assert done.returncode == 2
+    assert "evidence-judge-pin" in done.stderr
 
 
 def test_the_pin_can_be_waived_by_the_harness(tmp_path: Path) -> None:

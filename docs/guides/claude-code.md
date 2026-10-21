@@ -243,12 +243,13 @@ has the same effect. Three layers stand in the way:
   tool directory, `uv tool uninstall evidence-judge`) or the evidence logs. It reuses the
   session judge's shell analysis, takes about 0.3 s, and allows anything it cannot read. Set
   `EVJ_HOOK_GUARD=false` to turn it off.
-- **A pinned CLI.** The first hook run pins the CLI it found (path and checksum) in
-  `${CLAUDE_PLUGIN_DATA}/state/evidence-judge-pin`. If that file later disappears or changes,
-  the Stop hook fails closed: it sends the agent back once (exit 2) and then stops the session
-  instead of letting an unchecked answer through. After reinstalling the CLI somewhere else,
-  delete the pin file; `EVJ_HOOK_ALLOW_MISSING_JUDGE=1` in Claude Code's own environment brings
-  back the old notice.
+- **A pinned CLI.** Each session's first hook (the turn-start hook, before the agent acts) pins
+  the CLI it found (path and checksum) in `${CLAUDE_PLUGIN_DATA}/state/pins/<session id>`. If
+  that file disappears or changes during the session, the Stop hook fails closed: it sends the
+  agent back once (exit 2) and then stops the session instead of letting an unchecked answer
+  through. The next session pins whatever CLI is installed then, so upgrading or reinstalling
+  between sessions needs nothing; `EVJ_HOOK_ALLOW_MISSING_JUDGE=1` in Claude Code's own
+  environment brings back the old notice.
 - **The session judge.** A session that writes agent configuration or the judge's install
   anyway, say from a script the guard cannot see into, goes to review as harness tampering.
 

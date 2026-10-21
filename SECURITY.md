@@ -163,7 +163,7 @@ weakening the check of its own answer.
 | Write a `.env` in the project to change the judge's settings | The judge runs in a private temporary directory, with `EVJ_*` variables dropped unless the hook config passes them on |
 | Rewrite the evidence log and recompute its chain, or cut lines off its end | Lines are HMAC-chained under a per-installation key, mode `0600` in the hooks' state directory. A head anchor there records the line count and last MAC |
 | Switch the hooks off: `{"disableAllHooks": true}` in `.claude/settings.local.json`, an edited `hooks.json`, `hooksConfig.enabled: false` | The guard hook (`PreToolUse` / `BeforeTool`) denies writes to agent configuration, hook files and evidence logs; a session that gets one through anyway goes to review as harness tampering |
-| Delete, uninstall or shim the `evidence-judge` CLI so the hook shim finds nothing | The guard denies it; the shim pins the CLI's path and checksum on first use and the Stop hook fails closed when either changes; the session judge reports it as harness tampering |
+| Delete, uninstall or shim the `evidence-judge` CLI so the hook shim finds nothing | The guard denies it; the shim pins the CLI's path and checksum at each session's first hook and the Stop hook fails closed when either changes during the session; the session judge reports it as harness tampering |
 
 Three limits remain, and the verdicts say so:
 
