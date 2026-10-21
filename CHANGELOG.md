@@ -8,6 +8,14 @@ the names exported from `evidence_judge`) is defined under
 
 ## [Unreleased]
 
+### Fixed
+
+- A purchase price the order's confirmation contradicts now fails the run. What a purchase cost
+  is a key claim whatever the task says, and an order whose response or confirmation page shows
+  one other price, when no page of the run ever showed the claimed one, refutes it outright
+  instead of sending the run to review. A confirmation that shows no price, or a price the
+  site listed elsewhere, still refutes it only as far as review (#143).
+
 ## [0.1.0] - 2026-10-18
 
 The first release. Nothing was released before it, so this entry lists what the tool does;

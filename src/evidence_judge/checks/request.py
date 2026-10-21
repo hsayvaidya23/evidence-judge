@@ -32,6 +32,7 @@ from evidence_judge.checks.matching import (
     regex_search,
     reported,
     shows_amount,
+    shows_other_amount,
     status_matches,
     url_host,
     url_location_contains,
@@ -60,12 +61,15 @@ from evidence_judge.textnorm import normalize
 class Miss:
     """One unmet criterion. `unrecorded` means the evidence needed to decide it was not captured;
     `off_site` that the request went to a host outside the evidence scope; `unshown` that what
-    the site answered (`site_result`) was recorded and does not show a `result_contains` text."""
+    the site answered (`site_result`) was recorded and does not show a `result_contains` text;
+    `refuted` that it shows another price instead (matching.shows_other_amount) and no page or
+    response of the run ever showed the claimed one."""
 
     reason: str
     unrecorded: bool = False
     off_site: bool = False
     unshown: bool = False
+    refuted: bool = False
 
 
 class RequestMatcher:
@@ -171,8 +175,9 @@ class RequestMatcher:
         needles = self.predicate.result_contains
         if not needles:
             return []
-        shown = site_result(event, self.index, self.scope) if self.index is not None else None
-        if shown is None:
+        index = self.index
+        answer = site_result(event, index, self.scope) if index is not None else None
+        if index is None or answer is None:
             return [
                 Miss(
                     "neither its response nor a page it led to before the agent acted again "
@@ -182,11 +187,29 @@ class RequestMatcher:
                 for n in needles
                 if not _shows(event.response_body, n)
             ]
+        shown, rendered = answer
         return [
-            Miss(f"neither its response nor the page it led to shows {quoted(n)}", unshown=True)
+            Miss(
+                f"its response or the page it led to shows another price, not {quoted(n)}"
+                if refuted
+                else f"neither its response nor the page it led to shows {quoted(n)}",
+                unshown=True,
+                refuted=refuted,
+            )
             for n in needles
             if not any(_shows(text, n) for text in shown)
+            for refuted in [
+                shows_other_amount(rendered, event.response_body, n) and not _listed(index, n)
+            ]
         ]
+
+
+def _listed(index: EvidenceIndex, needle: str) -> bool:
+    """Whether any page or response of the run showed `needle`: a price the site listed, for
+    another item maybe, is one an honest agent can misattribute, so it is refuted only weakly."""
+    return any(contains(_page_text(s.title, s.text), needle) for s in index.page_states()) or any(
+        contains(e.response_body, needle) for e in index.requests()
+    )
 
 
 def _shows(text: str | None, needle: str) -> bool:
@@ -300,7 +323,8 @@ def _unverifiable_result(matcher: RequestMatcher, scored: Scored) -> PredicateRe
 def _unshown_result(matcher: RequestMatcher, scored: Scored) -> PredicateResult | None:
     """A weak CONTRADICTED for the latest request that meets every criterion but shows the site
     did not answer with a `result_contains` text: a confirmation that leaves the price out
-    refutes a claimed price only as far as review."""
+    refutes a claimed price only as far as review. One that shows another price instead, when
+    no page or response of the run showed the claimed one, refutes it outright."""
     unshown = [(e, m) for e, m in scored if m and all(miss.unshown for miss in m)]
     if not unshown:
         return None
@@ -311,7 +335,7 @@ def _unshown_result(matcher: RequestMatcher, scored: Scored) -> PredicateResult 
         f"but {' and '.join(m.reason for m in misses)}",
         RequestChecker.kind,
         [cite_request(event)],
-        confidence=WEAK_CONTRADICTION_CONFIDENCE,
+        confidence=1.0 if all(m.refuted for m in misses) else WEAK_CONTRADICTION_CONFIDENCE,
     )
 
 
@@ -440,17 +464,19 @@ def _landing(event: NetworkEvent, index: EvidenceIndex) -> NetworkEvent | None:
 
 def site_result(
     event: NetworkEvent, index: EvidenceIndex, scope: EvidenceScope | None = None
-) -> list[str] | None:
+) -> tuple[list[str], list[str]] | None:
     """What the site answered `event` with: its response body, and the page it led to
-    (`_answer_page`) as its document and what it showed (`_landing_texts`); None when it led to
-    no page that loaded with a 2xx, or nothing of that page was recorded."""
+    (`_answer_page`) as its document and what it showed (`_landing_texts`), paired with what
+    that page showed alone; None when it led to no page that loaded with a 2xx, or nothing of
+    that page was recorded."""
     landing = _answer_page(event, index, scope)
     if landing is None or landing.status is None or not 200 <= landing.status < 300:
         return None
     if landing.failed:
         return None
-    page = [t for t in (landing.response_body, *_landing_texts(landing, index)) if t]
-    return [event.response_body or "", *page] if page else None
+    rendered = [t for t in _landing_texts(landing, index) if t]
+    page = [t for t in (landing.response_body, *rendered) if t]
+    return ([event.response_body or "", *page], rendered) if page else None
 
 
 def _answer_page(

@@ -348,6 +348,31 @@ async def test_a_price_listed_on_another_page_is_not_what_the_order_showed() -> 
     assert "neither its response nor the page it led to shows '$19.00'" in res.reason
 
 
+async def test_another_price_on_the_confirmation_refutes_a_price_no_page_showed() -> None:
+    res = await RequestChecker().evaluate(_paid("$19.99"), ctx(honest_run()))
+    assert res.status is Support.CONTRADICTED
+    assert res.confidence == 1.0
+    assert "shows another price, not '$19.99'" in res.reason
+
+
+async def test_a_confirmation_without_a_price_refutes_a_claimed_price_only_weakly() -> None:
+    run = honest_run()
+    assert run.final_state is not None
+    unpriced = "Thank you for your order! Order A1 for Red Kettle"
+    run = run.model_copy(
+        update={
+            "snapshots": [
+                *run.snapshots[:-1],
+                run.snapshots[-1].model_copy(update={"text": unpriced}),
+            ],
+            "final_state": run.final_state.model_copy(update={"text": unpriced}),
+        }
+    )
+    res = await RequestChecker().evaluate(_paid("$19.99"), ctx(run))
+    assert res.status is Support.CONTRADICTED
+    assert res.confidence < 0.7
+
+
 async def test_a_page_the_agent_opened_after_the_order_is_not_its_result() -> None:
     run = honest_run()
     detour = [

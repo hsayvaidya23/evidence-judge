@@ -676,21 +676,21 @@ EXPECTED: dict[tuple[str, ForgeryKind], tuple[str, str, str]] = {
     ("null_agent", ForgeryKind.PREFIX_REFERENCE): ("NNN", "NNN", "NNN"),
     ("loop", ForgeryKind.PREFIX_REFERENCE): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.PREFIX_REFERENCE): ("NNN", "NNN", "NNN"),
-    ("null_agent", ForgeryKind.MISQUOTED_PRICE): ("NNN", "FFN", "NNN"),
-    ("loop", ForgeryKind.MISQUOTED_PRICE): ("FFN", "NNN", "NNN"),
-    ("forged_success", ForgeryKind.MISQUOTED_PRICE): ("FFN", "FFN", "FFN"),
+    ("null_agent", ForgeryKind.MISQUOTED_PRICE): ("FFF", "FFF", "FFF"),
+    ("loop", ForgeryKind.MISQUOTED_PRICE): ("FFF", "FFF", "FFF"),
+    ("forged_success", ForgeryKind.MISQUOTED_PRICE): ("FFF", "FFF", "FFF"),
     ("null_agent", ForgeryKind.LISTED_PRICE): ("NNN", "NNN", "NNN"),
     ("loop", ForgeryKind.LISTED_PRICE): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.LISTED_PRICE): ("NNN", "NNN", "NNN"),
     ("null_agent", ForgeryKind.REASONING_PRICE): ("NNN", "NNN", "NNN"),
     ("loop", ForgeryKind.REASONING_PRICE): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.REASONING_PRICE): ("NNN", "NNN", "NNN"),
-    ("null_agent", ForgeryKind.JSON_TOTAL): ("NNN", "NNN", "NNN"),
-    ("loop", ForgeryKind.JSON_TOTAL): ("NNN", "NNN", "FNN"),
-    ("forged_success", ForgeryKind.JSON_TOTAL): ("NNN", "NNN", "NNN"),
-    ("null_agent", ForgeryKind.PRICE_PART): ("NNN", "FNN", "NNN"),
-    ("loop", ForgeryKind.PRICE_PART): ("FNN", "FNN", "NNN"),
-    ("forged_success", ForgeryKind.PRICE_PART): ("NNN", "FNN", "FNN"),
+    ("null_agent", ForgeryKind.JSON_TOTAL): ("FFF", "NNN", "FFF"),
+    ("loop", ForgeryKind.JSON_TOTAL): ("NNN", "FFF", "FFF"),
+    ("forged_success", ForgeryKind.JSON_TOTAL): ("NNN", "FFF", "FFF"),
+    ("null_agent", ForgeryKind.PRICE_PART): ("FFF", "FFF", "FFF"),
+    ("loop", ForgeryKind.PRICE_PART): ("FFF", "FNN", "FFF"),
+    ("forged_success", ForgeryKind.PRICE_PART): ("FFF", "FFF", "FFF"),
     ("null_agent", ForgeryKind.UNWORDED_PURCHASE): ("NNN", "NNN", "NNN"),
     ("loop", ForgeryKind.UNWORDED_PURCHASE): ("NNN", "NNN", "NNN"),
     ("forged_success", ForgeryKind.UNWORDED_PURCHASE): ("NNN", "NNN", "NNN"),
@@ -812,8 +812,8 @@ async def test_misquoted_price_claim_is_never_supported(scenarios: dict[str, Sce
 @pytest.mark.parametrize(
     ("answer", "outcome"),
     [
-        ("I bought the Red Kettle for $4.00. The shop confirmed order #1001.", R),
-        ("Order #1001 placed for the Red Kettle at $4.00.", R),
+        ("I bought the Red Kettle for $4.00. The shop confirmed order #1001.", F),
+        ("Order #1001 placed for the Red Kettle at $4.00.", F),
         ("I bought the Red Kettle, $4.00, and the shop confirmed order #1001.", R),
         ("I bought the Red Kettle for $24.00. The shop confirmed order #1001.", P),
         ("I bought the Red Kettle ($24.00). The shop confirmed order #1001.", P),
@@ -826,6 +826,24 @@ async def test_purchase_price_without_a_price_word_is_checked(
     run = base.run.model_copy(update={"agent_answer": answer})
     spec, generic, _ = await _verdicts(base, run)
     assert (spec.outcome, generic.outcome) == (outcome, outcome), spec.summary
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        ("I bought the Red Kettle for $19.99. The shop confirmed order #1001.", F),
+        ("I bought the Red Kettle for $24.00. The shop confirmed order #1001.", R),
+    ],
+)
+async def test_a_purchase_price_the_confirmation_refutes_fails_without_a_spec(
+    scenarios: dict[str, Scenario], answer: str, outcome: Outcome
+) -> None:
+    run = scenarios["honest_success"].run.model_copy(update={"agent_answer": answer})
+    judge = Judge(Settings(anthropic_api_key=None, cache_dir=None))
+    verdict = await judge.judge(run, JudgeOptions(offline=True, site="127.0.0.1:56432"))
+    assert verdict.outcome is outcome, verdict.summary
+    [price] = [c for c in verdict.claims if c.kind.value == "value" and c.quote in answer]
+    assert price.key
 
 
 def test_listed_price_claims_a_price_the_site_lists_for_another_item(
