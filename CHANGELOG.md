@@ -15,6 +15,10 @@ the names exported from `evidence_judge`) is defined under
   one other price, when no page of the run ever showed the claimed one, refutes it outright
   instead of sending the run to review. A confirmation that shows no price, or a price the
   site listed elsewhere, still refutes it only as far as review (#143).
+- Reinstalling or upgrading the CLI no longer blocks every later agent session. The plugin and
+  extension hook shim now pins the CLI per session, at the session's first hook, instead of once
+  for good; a swap or removal during a session still fails its stop hook closed, and a stale
+  global pin left by an older shim is ignored and removed (#147).
 - A session judge warning no longer says a session that changed no files "changed only test
   files" when the answer claims a fix; it now says the session changed no files (#144).
 

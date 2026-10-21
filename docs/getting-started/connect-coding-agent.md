@@ -260,11 +260,11 @@ the stop with a one-line notice.
 
 ??? question "The hook says the pinned CLI is gone or changed"
 
-    The Claude Code plugin and the Gemini extension pin the CLI they first found (path and
-    checksum) in `<state dir>/evidence-judge-pin`: `${CLAUDE_PLUGIN_DATA}/state/` for Claude Code,
-    `~/.evidence-judge/state/` for Gemini. If the executable at that path is replaced or removed
-    (a reinstall can do that), the stop hook fails closed: it sends the agent back once, then stops the session.
-    If you reinstalled the CLI yourself, delete the pin file and the next hook run pins the new
+    The Claude Code plugin and the Gemini extension pin the CLI at each session's first hook (path
+    and checksum) in `<state dir>/pins/<session id>`: `${CLAUDE_PLUGIN_DATA}/state/` for Claude
+    Code, `~/.evidence-judge/state/` for Gemini. If the executable at that path is replaced or
+    removed during the session, the stop hook fails closed: it sends the agent back once, then
+    stops the session. If you reinstalled the CLI yourself, start a new session; it pins the new
     one. `EVJ_HOOK_ALLOW_MISSING_JUDGE=1` in the agent's own environment allows unchecked stops
     with a notice instead.
 

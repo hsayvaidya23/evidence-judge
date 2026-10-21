@@ -1,11 +1,15 @@
 #!/bin/sh
 # Runs `evidence-judge hook <adapter> [options]` with the hook JSON on stdin.
 #
-# With --state-dir, the first run pins the CLI it found (absolute path and checksum) in
-# <state-dir>/evidence-judge-pin. If that file later goes missing or changes, a stop hook fails
-# closed: it keeps the agent from finishing unchecked, once, then stops the session, saying why.
+# With --state-dir, the first hook of a session pins the CLI it found (absolute path and
+# checksum) in <state-dir>/pins/<session_id>, keyed by the hook input's session_id. If that CLI
+# later goes missing or changes during the session, a stop hook fails closed: it keeps the agent
+# from finishing unchecked, once, then stops the session, saying why. A new session pins the CLI
+# installed then, so reinstalling or upgrading between sessions blocks nothing. Creating a pin
+# prunes session pins older than 30 days and removes the old global <state-dir>/evidence-judge-pin,
+# which is used only when the hook input carries no session_id.
 # Set EVJ_HOOK_ALLOW_MISSING_JUDGE=1 (in the harness's environment, not the agent's) to allow
-# the stop with a notice instead; delete the pin file after reinstalling the CLI elsewhere.
+# the stop with a notice instead.
 # Without the CLI on PATH and no pin, a stop hook allows the stop with a one-line notice and
 # record and guard hooks do nothing.
 state=""
@@ -14,8 +18,29 @@ for arg in "$@"; do
   if [ "$prev" = "--state-dir" ]; then state=$arg; fi
   prev=$arg
 done
+sid=""
+if [ -n "$state" ]; then
+  input=$(mktemp "${TMPDIR:-/tmp}/evidence-judge-hook.XXXXXX" 2>/dev/null)
+  if [ -n "$input" ]; then
+    cat > "$input"
+    exec 0< "$input"
+    sid=$(sed -n 's/"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\
+\1/p' "$input" | sed -n 2p | tr -cd 'A-Za-z0-9._-' | cut -c 1-128)
+    rm -f "$input"
+    case "$sid" in
+      *[!.]*) ;;
+      *) sid="" ;;
+    esac
+  fi
+fi
 pin=""
-if [ -n "$state" ]; then pin="$state/evidence-judge-pin"; fi
+legacy=""
+if [ -n "$state" ] && [ -n "$sid" ]; then
+  pin="$state/pins/$sid"
+  legacy="$state/evidence-judge-pin"
+elif [ -n "$state" ]; then
+  pin="$state/evidence-judge-pin"
+fi
 bin=$(command -v evidence-judge 2>/dev/null)
 problem=""
 if [ -n "$pin" ] && [ -f "$pin" ]; then
@@ -29,7 +54,17 @@ if [ -n "$pin" ] && [ -f "$pin" ]; then
     bin=$pinned
   fi
 elif [ -n "$pin" ] && [ -n "$bin" ] && [ -x "$bin" ]; then
-  mkdir -p "$state" 2>/dev/null && printf '%s\n%s\n' "$bin" "$(cksum < "$bin")" > "$pin" 2>/dev/null
+  dir=${pin%/*}
+  if mkdir -p "$dir" 2>/dev/null; then
+    if [ -n "$sid" ]; then
+      find "$dir" -type f -mtime +30 -exec rm -f {} + 2>/dev/null
+    fi
+    if printf '%s\n%s\n' "$bin" "$(cksum < "$bin")" > "$pin.$$" 2>/dev/null \
+      && mv -f "$pin.$$" "$pin" 2>/dev/null && [ -n "$legacy" ]; then
+      rm -f "$legacy" 2>/dev/null
+    fi
+    rm -f "$pin.$$" 2>/dev/null
+  fi
 fi
 if [ -z "$problem" ] && [ -n "$bin" ]; then
   exec "$bin" hook "$@"
@@ -43,7 +78,12 @@ if [ -n "$problem" ] && [ "${EVJ_HOOK_ALLOW_MISSING_JUDGE:-}" != "1" ]; then
     printf '%s\n' '{"continue":false,"stopReason":"evidence-judge hook: the pinned evidence-judge CLI is missing or changed, so the answer was not checked."}'
     exit 0
   fi
-  printf 'evidence-judge hook: %s, so this answer cannot be checked. Restore or reinstall the CLI (then delete %s), or set EVJ_HOOK_ALLOW_MISSING_JUDGE=1 to allow unchecked stops.\n' "$problem" "$pin" >&2
+  if [ -n "$sid" ]; then
+    fix="restore the CLI, or start a new session to pin the one installed now"
+  else
+    fix="restore or reinstall the CLI (then delete $pin)"
+  fi
+  printf 'evidence-judge hook: %s, so this answer cannot be checked. To fix it, %s, or set EVJ_HOOK_ALLOW_MISSING_JUDGE=1 to allow unchecked stops.\n' "$problem" "$fix" >&2
   exit 2
 fi
 if [ -n "$problem" ]; then
