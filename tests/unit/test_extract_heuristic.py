@@ -184,6 +184,15 @@ def test_a_price_a_reasoning_step_lists_is_page_text_once_the_answer_states_the_
     assert listed == predicates
 
 
+def test_what_a_purchase_cost_is_key_whatever_the_task():
+    claims = _extract(
+        "I bought the Red Kettle for $19.99. Order #1001.", task="Buy a kettle"
+    ).claims
+    [value] = [c for c in claims if c.kind is ClaimKind.VALUE]
+    assert value.key is True
+    assert value.predicates == [_paid("$19.99")]
+
+
 def test_a_listed_price_is_checked_against_the_order_when_the_answer_states_none():
     claims = _extract("I bought the red kettle.", ["The Blue Kettle costs $19.00."]).claims
     [value] = [c for c in claims if c.kind is ClaimKind.VALUE]

@@ -329,6 +329,32 @@ def shows_amount(body: str | None, phrase: str) -> bool:
     return _json_totals(tree) == {amount}
 
 
+def shows_other_amount(texts: list[str], body: str | None, phrase: str) -> bool:
+    """Whether the site's answer states one price and it is not the amount `phrase` states: the
+    rendered `texts` (as formatted amounts) and JSON `body` (as an order total, shows_amount)
+    name exactly one amount of money, in `phrase`'s currency, and another one ('$24.00' on a
+    confirmation refutes a claimed '$19.99'). No amount, an amount it cannot read, two amounts
+    or another currency refute nothing."""
+    wanted = _money(normalize(phrase))
+    if wanted is None:
+        return False
+    stated = {_money(m.group(0)) for t in texts for m in MONEY.finditer(normalize(t))}
+    try:
+        tree = json.loads(body) if body else None
+    except (json.JSONDecodeError, RecursionError):
+        tree = None
+    if tree is not None and json_failure(tree) is None:
+        named = _json_currencies(tree) or {wanted[0]}
+        currency = next(iter(named)) if len(named) == 1 else None
+        stated |= {(currency, total) if currency else None for total in _json_totals(tree)}
+    return (
+        len(stated) == 1
+        and (only := stated.pop()) is not None
+        and only[0] == wanted[0]
+        and only[1] != wanted[1]
+    )
+
+
 def _json_nodes(tree: object) -> list[dict[str, object]]:
     found: list[dict[str, object]] = []
     stack: list[object] = [tree]

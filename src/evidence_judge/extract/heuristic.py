@@ -463,6 +463,7 @@ def _price_claims(
     any page of the run could list the same amount for another item. Otherwise a value stated
     without a price word is read from the answer only. A price a reasoning step read off a
     listing (`listed_amount`) once the answer states the price paid (`priced`) is page text.
+    What a purchase cost is part of the purchase, so it is key whatever the task says.
     """
     field_match = _PRICE_FIELD.search(sentence.text)
     name = "total" if field_match and field_match.group(1).lower() in _TOTAL_WORDS else "price"
@@ -475,7 +476,7 @@ def _price_claims(
             sentence,
             f"The {name if paid else 'amount'} was {amount_text(match)}",
             ClaimKind.VALUE,
-            key,
+            key or ordered,
             order_results([amount]) if ordered else _page_texts([amount]),
             tally,
         )
