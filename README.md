@@ -371,9 +371,9 @@ The [forgery lab](docs/benchmark.md) takes recorded runs that **failed** and rew
 
 | Judge | Forged runs | False PASS | 95% CI |
 | --- | ---: | ---: | --- |
-| Evidence Judge + exact task spec (offline) | 2157 | **0** (220 sent to review) | 0–0.2% |
-| Evidence Judge + generic task spec (offline) | 2157 | **0** (1051 sent to review) | 0–0.2% |
-| Evidence Judge, no spec (offline) | 2157 | **0** (1644 sent to review) | 0–0.2% |
+| Evidence Judge + exact task spec (offline) | 2157 | **0** (191 sent to review) | 0–0.2% |
+| Evidence Judge + generic task spec (offline) | 2157 | **0** (993 sent to review) | 0–0.2% |
+| Evidence Judge, no spec (offline) | 2157 | **0** (1567 sent to review) | 0–0.2% |
 
 These are three small demo sites with five tasks (a purchase, a booking and a user change; a stock check and a balance lookup) and template forgeries, so they show these attacks are refused, not that every site and task is covered. Honest controls: 46/51 correct with the exact spec and 38/51 with the generic one, and none wrongly failed. The 51 are the seventeen scenarios (from fifteen recordings: two shop recordings are judged again against the stock check) plus thirty-four honest edits of the passing ones (an order answered with a redirect to its confirmation, a search typed first, a detour to another site, an answer that also says what the agent left alone, such as "nothing was added to the cart", a site that writes `$ 24.00`, an order confirmed only by a JSON answer with a bare-number total, a reasoning step that compares the item's price with another listed one, a storefront page with a closed cart drawer, accordion and modal). The five the exact spec misses are the honest disable-a-user run and its edits: offline extraction finds no checkable claim in "I disabled Priya Shah's account", so they go to review with every expectation met. The generic spec also sends to review the side-effect run (no `forbid` rule), the clinic booking and its edits (the start page already lists "Dental check-up") and an unanswered balance lookup. Without a spec all 40 runs that should pass go to review by design: no site is named, and a spec-less run that changes state or makes no checkable claim is review-only anyway. Reproduce with `make bench` (`evidence-judge bench tests/fixtures/runs tests/fixtures/sites --seeds 3`); add `--with-llm-baseline` to compare a typical transcript LLM judge on the same runs. Full tables: [bench/results](bench/results/offline-fixtures.md).
 
